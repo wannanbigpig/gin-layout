@@ -1,4 +1,4 @@
-module l-admin.com
+module github.com/wannanbigpig/gin-layout
 
 go 1.16
 

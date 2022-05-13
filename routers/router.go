@@ -2,11 +2,11 @@ package routers
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
+	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"io/ioutil"
-	"l-admin.com/config"
-	"l-admin.com/internal/middleware"
-	"l-admin.com/internal/pkg/error_code"
-	response2 "l-admin.com/internal/pkg/response"
 	"net/http"
 )
 

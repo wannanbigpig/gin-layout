@@ -1,7 +1,7 @@
 package controller
 
 import (
-	response2 "l-admin.com/internal/pkg/response"
+	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 )
 
 func resp() *response2.Response {

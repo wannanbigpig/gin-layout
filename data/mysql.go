@@ -6,7 +6,7 @@ import (
 	"os"
 	"sync"
 
-	"l-admin.com/config"
+	"github.com/wannanbigpig/gin-layout/config"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"

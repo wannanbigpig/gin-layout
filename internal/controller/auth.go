@@ -2,10 +2,10 @@ package controller
 
 import (
 	"github.com/gin-gonic/gin"
-	"l-admin.com/internal/pkg/error_code"
-	"l-admin.com/internal/service"
-	"l-admin.com/internal/validator"
-	"l-admin.com/internal/validator/form"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
+	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/validator"
+	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
 func Login(c *gin.Context) {

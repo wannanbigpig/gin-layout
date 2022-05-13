@@ -1,8 +1,8 @@
 package model
 
 import (
+	"github.com/wannanbigpig/gin-layout/data"
 	"gorm.io/gorm"
-	"l-admin.com/data"
 )
 
 type BaseModel struct {

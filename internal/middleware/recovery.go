@@ -3,10 +3,10 @@ package middleware
 import (
 	"errors"
 	"github.com/gin-gonic/gin"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
+	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	"github.com/wannanbigpig/gin-layout/pkg/logger"
 	"go.uber.org/zap"
-	"l-admin.com/internal/pkg/error_code"
-	response2 "l-admin.com/internal/pkg/response"
-	"l-admin.com/pkg/logger"
 	"net/http"
 )
 

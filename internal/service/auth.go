@@ -2,7 +2,7 @@ package service
 
 import (
 	"errors"
-	"l-admin.com/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 )
 
 func Login(username, password string) (*model.AdminUsers, error) {

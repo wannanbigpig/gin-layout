@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	_ "l-admin.com/boot"
-	c "l-admin.com/config"
-	"l-admin.com/routers"
+	_ "github.com/wannanbigpig/gin-layout/boot"
+	c "github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/routers"
 )
 
 func main() {

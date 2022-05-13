@@ -10,8 +10,8 @@ import (
 	"github.com/go-playground/validator/v10"
 	enTranslations "github.com/go-playground/validator/v10/translations/en"
 	zhTranslations "github.com/go-playground/validator/v10/translations/zh"
-	"l-admin.com/internal/pkg/error_code"
-	response2 "l-admin.com/internal/pkg/response"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
+	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"reflect"
 	"strings"
 )

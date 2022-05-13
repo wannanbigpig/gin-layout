@@ -1,9 +1,9 @@
 package boot
 
 import (
-	_ "l-admin.com/data"
-	"l-admin.com/internal/validator"
-	"l-admin.com/pkg/logger"
+	_ "github.com/wannanbigpig/gin-layout/data"
+	"github.com/wannanbigpig/gin-layout/internal/validator"
+	"github.com/wannanbigpig/gin-layout/pkg/logger"
 )
 
 func init() {

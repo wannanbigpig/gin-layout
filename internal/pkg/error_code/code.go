@@ -1,7 +1,7 @@
 package error_code
 
 import (
-	"l-admin.com/config"
+	"github.com/wannanbigpig/gin-layout/config"
 )
 
 const (

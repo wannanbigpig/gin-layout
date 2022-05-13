@@ -1,9 +1,9 @@
 package config
 
 import (
+	. "github.com/wannanbigpig/gin-layout/config/autoload"
 	"gopkg.in/ini.v1"
 	"io"
-	. "l-admin.com/config/autoload"
 	"os"
 	"path/filepath"
 	"sync"
@@ -91,7 +91,7 @@ func copyIniConf() {
 			panic("关闭示例资源失败: " + err.Error())
 		}
 	}(source)
-	
+
 	// 创建空文件
 	dst, err := os.Create(iniConfig)
 	if err != nil {
