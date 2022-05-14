@@ -11,7 +11,7 @@ import (
 	enTranslations "github.com/go-playground/validator/v10/translations/en"
 	zhTranslations "github.com/go-playground/validator/v10/translations/zh"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
-	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	response2 "github.com/wannanbigpig/gin-layout/pkg/response"
 	"reflect"
 	"strings"
 )

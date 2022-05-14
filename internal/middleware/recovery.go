@@ -4,8 +4,8 @@ import (
 	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
-	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"github.com/wannanbigpig/gin-layout/pkg/logger"
+	response2 "github.com/wannanbigpig/gin-layout/pkg/response"
 	"go.uber.org/zap"
 	"net/http"
 )

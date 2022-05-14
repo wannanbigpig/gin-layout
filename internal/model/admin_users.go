@@ -2,7 +2,6 @@ package model
 
 import (
 	"golang.org/x/crypto/bcrypt"
-	"log"
 )
 
 type AdminUsers struct {
@@ -25,7 +24,6 @@ func AdminUsersModel() *AdminUsers {
 
 // GetUserById 根据uid获取用户信息
 func (u *AdminUsers) GetUserById(id uint) *AdminUsers {
-
 	if err := u.DB().First(u, id).Error; err != nil {
 		return nil
 	}
@@ -40,17 +38,14 @@ func (u *AdminUsers) Register() error {
 }
 
 // HashAndSalt 密码hash并自动加盐
-// DefaultCost=10, 大约耗时40-50ms
 func (u *AdminUsers) HashAndSalt(pwd string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 	return string(hash), err
 }
 
 // ComparePasswords 比对用户密码是否正确
-// DefaultCost=10, 大约耗时40-50ms
 func (u *AdminUsers) ComparePasswords(password string) bool {
 	if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)); err != nil {
-		log.Println(err)
 		return false
 	}
 	return true
@@ -62,6 +57,7 @@ func (u *AdminUsers) ChangePassword() error {
 	return u.DB().Model(u).Update("password", u.Password).Error
 }
 
+// GetUserInfo 根据名称获取用户信息
 func (u *AdminUsers) GetUserInfo(username string) *AdminUsers {
 	if err := u.DB().Where("username", username).First(u).Error; err != nil {
 		return nil

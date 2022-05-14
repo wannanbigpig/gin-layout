@@ -5,7 +5,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
-	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	response2 "github.com/wannanbigpig/gin-layout/pkg/response"
 	"io/ioutil"
 	"net/http"
 )

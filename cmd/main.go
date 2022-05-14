@@ -4,7 +4,7 @@ import (
 	"fmt"
 	_ "github.com/wannanbigpig/gin-layout/boot"
 	c "github.com/wannanbigpig/gin-layout/config"
-	"github.com/wannanbigpig/gin-layout/routers"
+	"github.com/wannanbigpig/gin-layout/internal/routers"
 )
 
 func main() {
