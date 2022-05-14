@@ -66,3 +66,6 @@ go run cmd/main.go
 |  └──response    // 响应处理
 |     └──response.go
 ```
+
+### 生产环境注意事项
+> 在构建生产环境时，请配置好 `.ini` 文件中基础路径 `base_path`，所有的日志记录文件会保存在该目录下的 `/gin-layout/logs/` 里面，该基础路径默认为执行命令的目录

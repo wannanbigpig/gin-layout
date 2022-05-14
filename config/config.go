@@ -13,7 +13,7 @@ import (
 type Conf struct {
 	AppEnv         string        `ini:"app_env"`
 	Language       string        `ini:"language"`
-	StaticBasePath string        `ini:"upload_root_path"`
+	StaticBasePath string        `ini:"base_path"`
 	Server         *ServerConfig `ini:"server"`
 	Mysql          *MysqlConfig  `ini:"mysql"`
 	Logger         *LoggerConfig `ini:"logger"`
@@ -57,7 +57,7 @@ func getDefaultBasePath() string {
 	if err != nil {
 		panic("获取运行目录失败：" + err.Error())
 	}
-	return filepath.Join(currentPath, "/storage")
+	return filepath.Join(currentPath, "/gin-layout")
 }
 
 // copyIniConf 复制config.ini文件
