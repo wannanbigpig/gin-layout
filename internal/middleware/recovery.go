@@ -14,7 +14,7 @@ import (
 func CustomRecovery() gin.HandlerFunc {
 	DefaultErrorWriter := &PanicExceptionRecord{}
 	return gin.RecoveryWithWriter(DefaultErrorWriter, func(c *gin.Context, err interface{}) {
-		// 这里针对发生的panic等异常进行统一响应即可
+		// 这里针对发生的panic等异常进行统一响应即
 		response2.NewResponse().SetHttpCode(http.StatusInternalServerError).FailCode(c, error_code.ServerError)
 	})
 }

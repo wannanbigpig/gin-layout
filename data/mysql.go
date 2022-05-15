@@ -24,7 +24,6 @@ func (w WriterLog) Printf(format string, args ...interface{}) {
 
 func initMysql() {
 	logConfig := logger.New(
-		//log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer（日志输出的目标，前缀和日志包含的内容——译者注）
 		WriterLog{},
 		logger.Config{
 			SlowThreshold:             0,                                        // 慢 SQL 阈值
