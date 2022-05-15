@@ -13,8 +13,9 @@ require (
 	go.uber.org/zap v1.21.0
 	golang.org/x/crypto v0.0.0-20220315160706-3147a52a75dd
 	gopkg.in/ini.v1 v1.66.2
-	gorm.io/driver/mysql v1.2.1
-	gorm.io/gorm v1.22.4
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+	gorm.io/driver/mysql v1.3.3
+	gorm.io/gorm v1.23.5
 )
 
 require (
@@ -23,7 +24,7 @@ require (
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/golang/protobuf v1.3.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
-	github.com/jinzhu/now v1.1.4 // indirect
+	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.9 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect

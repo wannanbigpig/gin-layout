@@ -13,6 +13,7 @@ go run cmd/main.go
 .
 |——.gitignore
 |——go.mod
+|——go.sum
 |——LICENSE
 |——README.md
 |——boot    // 项目初始化目录
@@ -21,14 +22,16 @@ go run cmd/main.go
 |  └──main.go    // 项目入库 main 包
 |——config    // 这里通常维护一些本地调试用的样例配置文件
 |  └──autoload    // 配置文件的结构体定义包
+|     └──app.go
 |     └──logger.go
 |     └──mysql.go
 |     └──server.go
 |  └──config.go    // 配置初始化文件
 |  └──config.example.ini    // .ini 配置示例文件
-|  └──config.ini    // .ini 配置文件
+|  └──config.example.yaml    // .yaml 配置示例文件
 |——data    // 数据初始化目录
 |  └──mysql.go    // mysql数据库初始化文件
+|  └──data.go    // mysql数据库初始化文件
 |——internal    // 该服务所有不对外暴露的代码，通常的业务逻辑都在这下面，使用internal避免错误引用
 |  └──controller    // 控制器代码
 |     └──v1
@@ -65,6 +68,8 @@ go run cmd/main.go
 |     └──logger.go
 |  └──response    // 响应处理
 |     └──response.go
+|  └──utils    // 帮助函数
+|     └──utils.go
 ```
 
 ### 生产环境注意事项

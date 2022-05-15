@@ -15,7 +15,6 @@ type AdminUsers struct {
 	Email      string `json:"email"`
 	Avatar     string `json:"avatar"`
 	Status     string `json:"status"`
-	DeletedAt  string `json:"deleted_at"`
 }
 
 func AdminUsersModel() *AdminUsers {

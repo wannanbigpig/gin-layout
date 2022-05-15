@@ -17,3 +17,6 @@
 .idea
 *.DS_Store
 storage
+config.yaml
+config.ini
+gin-layout

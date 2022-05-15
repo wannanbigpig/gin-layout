@@ -1,0 +1,30 @@
+# 该文件为配置示例文件，请复制该文件改名为 config.yaml, 不要直接修改该文件，修改无意义
+app:
+  app_env: local
+  language: zh_CN
+#  base_path: ""
+server:
+  host: 127.0.0.1
+  port: 9999
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  database: test
+  username: root
+  password: root1234
+  charset: utf8mb4
+  table_prefix: ""
+  max_idle_conns: 10
+  max_open_conns: 100
+  max_lifetime: 3600s
+logger:
+  default_division: time
+  file_name: gin-layout.sys.log
+  division_time:
+    max_age: 15
+    rotation_time: 24
+  division_size:
+    max_size: 20
+    max_backups: 15
+    max_age: 15
+    compress: false

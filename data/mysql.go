@@ -2,12 +2,8 @@ package data
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"sync"
-
-	"github.com/wannanbigpig/gin-layout/config"
-
+	c "github.com/wannanbigpig/gin-layout/config"
+	log "github.com/wannanbigpig/gin-layout/pkg/logger"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -15,45 +11,57 @@ import (
 )
 
 var DB *gorm.DB
-var once sync.Once
 
-func init() {
-	once.Do(func() { initMysql() })
+type Writer interface {
+	Printf(string, ...interface{})
+}
+
+type WriterLog struct{}
+
+func (w WriterLog) Printf(format string, args ...interface{}) {
+	log.Logger.Sugar().Infof(format, args...)
 }
 
 func initMysql() {
 	logConfig := logger.New(
-		log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer（日志输出的目标，前缀和日志包含的内容——译者注）
+		//log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer（日志输出的目标，前缀和日志包含的内容——译者注）
+		WriterLog{},
 		logger.Config{
-			SlowThreshold:             0,           // 慢 SQL 阈值
-			LogLevel:                  logger.Info, // 日志级别
-			IgnoreRecordNotFoundError: false,       // 忽略ErrRecordNotFound（记录未找到）错误
-			Colorful:                  true,        // 是否启用彩色打印
+			SlowThreshold:             0,                                        // 慢 SQL 阈值
+			LogLevel:                  logger.LogLevel(c.Config.Mysql.LogLevel), // 日志级别
+			IgnoreRecordNotFoundError: false,                                    // 忽略ErrRecordNotFound（记录未找到）错误
+			Colorful:                  false,                                    // 是否启用彩色打印
 		},
 	)
 
 	configs := &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
-			TablePrefix: config.Config.Mysql.TablePrefix, // 表名前缀
+			TablePrefix: c.Config.Mysql.TablePrefix, // 表名前缀
 			// SingularTable: true,  // 使用单数表名
 		},
 		Logger: logConfig,
 	}
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-		config.Config.Mysql.Username,
-		config.Config.Mysql.Password,
-		config.Config.Mysql.Host,
-		config.Config.Mysql.Port,
-		config.Config.Mysql.Database,
-		config.Config.Mysql.Charset,
+		c.Config.Mysql.Username,
+		c.Config.Mysql.Password,
+		c.Config.Mysql.Host,
+		c.Config.Mysql.Port,
+		c.Config.Mysql.Database,
+		c.Config.Mysql.Charset,
 	)
-	db, err := gorm.Open(mysql.Open(dsn), configs)
+	var err error
+	DB, err = gorm.Open(mysql.Open(dsn), configs)
 
 	if err != nil {
-		fmt.Println("连接数据库失败")
-		panic(err)
+		panic("连接数据库失败：" + err.Error())
 	}
 
-	DB = db
+	sqlDB, _ := DB.DB()
+	// SetMaxIdleConns 用于设置连接池中空闲连接的最大数量。
+	sqlDB.SetMaxIdleConns(c.Config.Mysql.MaxIdleConns)
+	// SetMaxOpenConns 设置打开数据库连接的最大数量。
+	sqlDB.SetMaxOpenConns(c.Config.Mysql.MaxOpenConns)
+	// SetConnMaxLifetime 设置了连接可复用的最大时间。
+	sqlDB.SetConnMaxLifetime(c.Config.Mysql.MaxLifetime)
 }

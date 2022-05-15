@@ -1,6 +1,7 @@
 package boot
 
 import (
+	// 如果不要连接数据库，请注释下面一方初始化数据的代码
 	_ "github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/pkg/logger"

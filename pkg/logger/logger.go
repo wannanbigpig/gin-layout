@@ -38,44 +38,46 @@ func createZapLog() *zap.Logger {
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	encoder := zapcore.NewConsoleEncoder(encoderConfig)
 	filename := filepath.Join(config.Config.StaticBasePath, "/logs/", config.Config.Logger.Filename)
-	// 按天切割日志
-	// writer := zapcore.AddSync(getRotateWriter(filename))
+	var writer zapcore.WriteSyncer
+	if config.Config.Logger.DefaultDivision == "size" {
+		// 按文件大小切割日志
+		writer = zapcore.AddSync(getLumberJackWriter(filename))
+	} else {
+		// 按天切割日志
+		writer = zapcore.AddSync(getRotateWriter(filename))
+	}
 
-	// 按文件大小切割日志
-	writer := zapcore.AddSync(getLumberJackWriter(filename))
 	zapCore := zapcore.NewCore(encoder, writer, zap.InfoLevel)
-	// zap.AddStacktrace(zap.WarnLevel)
+	//zap.AddStacktrace(zap.WarnLevel)
 	return zap.New(zapCore, zap.AddCaller())
 }
 
 // getRotateWriter 按日期切割日志
-func getRotateWriter(filename string) (hook io.Writer) {
-	// 生成 rotateLogs 的 Logger 实际生成的文件名
-	// demo.log是指向最新日志的链接
-	// 保存15天内的日志，每分割一次日志
+func getRotateWriter(filename string) io.Writer {
+	maxAge := time.Duration(config.Config.Logger.DivisionTime.MaxAge)
+	rotationTime := time.Duration(config.Config.Logger.DivisionTime.RotationTime)
 	hook, err := rotatelogs.New(
-		filename+".%Y%m%d", // 没有使用 go 风格反人类的format格式
+		filename+".%Y%m%d",
 		rotatelogs.WithLinkName(filename),
-		rotatelogs.WithMaxAge(time.Hour*24*15),
-		//rotatelogs.WithRotationTime(time.Hour), // 默认一天
+		rotatelogs.WithMaxAge(time.Hour*24*maxAge),
+		rotatelogs.WithRotationTime(time.Hour*rotationTime), // 默认一天
 	)
 
 	if err != nil {
 		panic(err)
 	}
-	return hook
 
+	return hook
 }
 
 // getLumberJackWriter 按文件切割日志
-func getLumberJackWriter(filename string) (hook io.Writer) {
+func getLumberJackWriter(filename string) io.Writer {
 	// 日志切割配置
-	hook = &lumberjack.Logger{
-		Filename:   filename,                        //日志文件的位置
-		MaxSize:    config.Config.Logger.MaxSize,    //在进行切割之前，日志文件的最大大小（以MB为单位）
-		MaxBackups: config.Config.Logger.MaxBackups, //保留旧文件的最大个数
-		MaxAge:     config.Config.Logger.MaxAge,     //保留旧文件的最大天数
-		Compress:   config.Config.Logger.Compress,   //是否压缩/归档旧文件
+	return &lumberjack.Logger{
+		Filename:   filename,                                     // 日志文件的位置
+		MaxSize:    config.Config.Logger.DivisionSize.MaxSize,    // 在进行切割之前，日志文件的最大大小（以MB为单位）
+		MaxBackups: config.Config.Logger.DivisionSize.MaxBackups, // 保留旧文件的最大个数
+		MaxAge:     config.Config.Logger.DivisionSize.MaxAge,     // 保留旧文件的最大天数
+		Compress:   config.Config.Logger.DivisionSize.Compress,   // 是否压缩/归档旧文件
 	}
-	return
 }

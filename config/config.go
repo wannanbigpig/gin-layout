@@ -3,45 +3,63 @@ package config
 import (
 	. "github.com/wannanbigpig/gin-layout/config/autoload"
 	"gopkg.in/ini.v1"
+	"gopkg.in/yaml.v3"
 	"io"
+	"io/ioutil"
 	"os"
-	"path/filepath"
 	"sync"
 )
 
 // Conf 配置项主结构体
 type Conf struct {
-	AppEnv         string        `ini:"app_env"`
-	Language       string        `ini:"language"`
-	StaticBasePath string        `ini:"base_path"`
-	Server         *ServerConfig `ini:"server"`
-	Mysql          *MysqlConfig  `ini:"mysql"`
-	Logger         *LoggerConfig `ini:"logger"`
+	AppConfig `ini:"app" yaml:"app"`
+	Server    ServerConfig `ini:"server" yaml:"server"`
+	Mysql     MysqlConfig  `ini:"mysql" yaml:"mysql"`
+	Logger    LoggerConfig `ini:"logger" yaml:"logger"`
 }
 
 var (
 	Once   sync.Once
-	Config = Conf{
-		AppEnv:         "local",
-		Language:       "zh_CN",
-		StaticBasePath: getDefaultBasePath(),
-		Server:         Server,
-		Mysql:          Mysql,
-		Logger:         Logger,
+	Config = &Conf{
+		AppConfig: App,
+		Server:    Server,
+		Mysql:     Mysql,
+		Logger:    Logger,
 	}
 )
 
 func init() {
 	Once.Do(func() {
-		load()
+		// 加载 .yaml 配置
+		loadYaml()
+
+		// 加载 .ini 配置
+		// loadIni()
 	})
 }
 
+func loadYaml() {
+	// 生成 config.yaml 文件
+	yamlConfig := "./config.yaml"
+	yamlExampleConfig := "config/config.example.yaml"
+	copyConf(yamlExampleConfig, yamlConfig)
+	cfg, err := ioutil.ReadFile(yamlConfig)
+	if err != nil {
+		panic("读取配置文件失败: " + err.Error())
+	}
+	err = yaml.Unmarshal(cfg, &Config)
+	if err != nil {
+		panic("加载配置失败：" + err.Error())
+	}
+}
+
 // load 加载配置项
-func load() {
+func loadIni() {
 	// 生成 config.ini 文件
-	copyIniConf()
-	cfg, err := ini.Load("config/config.ini")
+	iniConfig := "./config.ini"
+	iniExampleConfig := "config/config.example.ini"
+	copyConf(iniExampleConfig, iniConfig)
+	cfg, err := ini.Load(iniConfig)
 	if err != nil {
 		panic("读取配置文件失败: " + err.Error())
 	}
@@ -51,21 +69,9 @@ func load() {
 	}
 }
 
-// getDefaultUploadPath 获取静态文件存放路径
-func getDefaultBasePath() string {
-	currentPath, err := os.Getwd()
-	if err != nil {
-		panic("获取运行目录失败：" + err.Error())
-	}
-	return filepath.Join(currentPath, "/gin-layout")
-}
-
-// copyIniConf 复制config.ini文件
-func copyIniConf() {
-	iniConfig := "config/config.ini"
-	iniExampleConfig := "config/config.example.ini"
-
-	fileInfo, err := os.Stat(iniConfig)
+// copyConf 复制配置示例文件
+func copyConf(exampleConfig, config string) {
+	fileInfo, err := os.Stat(config)
 
 	if err == nil {
 		// config.ini 路径存在， 判断 config.ini 文件是否目录，存在则直接 return
@@ -81,9 +87,9 @@ func copyIniConf() {
 	}
 
 	// 自动复制一份config.ini
-	source, err := os.Open(iniExampleConfig)
+	source, err := os.Open(exampleConfig)
 	if err != nil {
-		panic("创建配置文件失败，config.example.ini文件不存在: " + err.Error())
+		panic("创建配置文件失败，配置示例文件不存在: " + err.Error())
 	}
 	defer func(source *os.File) {
 		err := source.Close()
@@ -93,9 +99,9 @@ func copyIniConf() {
 	}(source)
 
 	// 创建空文件
-	dst, err := os.Create(iniConfig)
+	dst, err := os.Create(config)
 	if err != nil {
-		panic("生成config.ini失败: " + err.Error())
+		panic("生成配置文件失败: " + err.Error())
 	}
 	defer func(dst *os.File) {
 		err := dst.Close()
@@ -107,6 +113,8 @@ func copyIniConf() {
 	// 复制内容
 	_, err = io.Copy(dst, source)
 	if err != nil {
-		panic("写入config.ini失败: " + err.Error())
+		panic("写入配置文件失败: " + err.Error())
 	}
+
+	panic("第一次生成配置文件: " + err.Error())
 }
