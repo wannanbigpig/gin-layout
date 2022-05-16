@@ -9,13 +9,15 @@ import (
 	"io"
 	"log"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
 var Logger *zap.Logger
+var once = sync.Once{}
 
 func InitLogger() {
-	Logger = createZapLog()
+	once.Do(func() { Logger = createZapLog() })
 }
 
 // initZapLog 初始化 zap 日志

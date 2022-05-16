@@ -29,13 +29,11 @@ var (
 )
 
 func init() {
-	Once.Do(func() {
-		// 加载 .yaml 配置
-		loadYaml()
+	// 加载 .yaml 配置
+	loadYaml()
 
-		// 加载 .ini 配置
-		// loadIni()
-	})
+	// 加载 .ini 配置
+	// loadIni()
 }
 
 func loadYaml() {
@@ -116,5 +114,5 @@ func copyConf(exampleConfig, config string) {
 		panic("写入配置文件失败: " + err.Error())
 	}
 
-	panic("第一次生成配置文件: " + err.Error())
+	panic("第一次生成配置文件，请编辑完必要的配置，例如【数据库信息】后再次运行程序，如您想无需连接数据直接运行，请注释掉 boot/boot.go 文件中 init 方法内的数据库初始化代码")
 }

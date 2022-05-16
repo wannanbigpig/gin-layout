@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-var DB *gorm.DB
+var MysqlDB *gorm.DB
 
 type Writer interface {
 	Printf(string, ...interface{})
@@ -50,13 +50,13 @@ func initMysql() {
 		c.Config.Mysql.Charset,
 	)
 	var err error
-	DB, err = gorm.Open(mysql.Open(dsn), configs)
+	MysqlDB, err = gorm.Open(mysql.Open(dsn), configs)
 
 	if err != nil {
 		panic("连接数据库失败：" + err.Error())
 	}
 
-	sqlDB, _ := DB.DB()
+	sqlDB, _ := MysqlDB.DB()
 	// SetMaxIdleConns 用于设置连接池中空闲连接的最大数量。
 	sqlDB.SetMaxIdleConns(c.Config.Mysql.MaxIdleConns)
 	// SetMaxOpenConns 设置打开数据库连接的最大数量。

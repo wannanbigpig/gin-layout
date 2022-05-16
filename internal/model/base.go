@@ -20,7 +20,7 @@ func (model BaseModel) DB() *gorm.DB {
 }
 
 func DB() *gorm.DB {
-	return data.DB
+	return data.MysqlDB
 }
 
 type formatDate struct {

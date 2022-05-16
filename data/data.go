@@ -4,6 +4,6 @@ import "sync"
 
 var once sync.Once
 
-func init() {
+func InitData() {
 	once.Do(func() { initMysql() })
 }
