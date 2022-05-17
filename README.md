@@ -81,9 +81,10 @@ go run cmd/main.go
 ### Precautions for production environment
 > When building the production environment, set the `base_path` in the `.yaml` file. All log files are saved in the `{base_path}/gin-layout/logs/` directory. By default, the base path is the directory where the command is executed
 
-### contributions
+### Contributions
 Any imperfections are welcome to Fork and submit PR!
 
-### LICENSE
+### License
 ##### MIT
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fwannanbigpig%2Fgin-layout.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fwannanbigpig%2Fgin-layout?ref=badge_large)
+
