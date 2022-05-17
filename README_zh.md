@@ -6,7 +6,7 @@
 
 Translations: [English](README.md) | [简体中文](README_zh.md)
 ### Gin Project Template
-> 本项目使用 gin 框架为核心搭建的一个模板，可以基于本项目快速完成业务开发
+> 本项目使用 gin 框架为核心搭建的一个脚手架，可以基于本项目快速完成业务开发，开箱📦 即用
 
 ### 运行
 拉取代码后在项目根目录执行如下命令：
@@ -80,6 +80,10 @@ go run cmd/main.go
 
 ### 生产环境注意事项
 > 在构建生产环境时，请配置好 `.yaml` 文件中基础路径 `base_path`，所有的日志记录文件会保存在该目录下的 `{base_path}/gin-layout/logs/` 里面，该基础路径默认为执行命令的目录
+
+### 代码贡献
+不完善的地方，欢迎大家 Fork 并提交 PR！
+
 ### LICENSE
 ##### MIT
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fwannanbigpig%2Fgin-layout.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fwannanbigpig%2Fgin-layout?ref=badge_large)

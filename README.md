@@ -6,7 +6,7 @@
 
 Translations: [English](README.md) | [简体中文](README_zh.md)
 ### Gin Project Template
-> Gin framework is used as the core of this project to build a template, based on this project can quickly complete business development
+> Gin framework is used as the core of this project to build a scaffold, based on the project can be quickly completed business development, out of the box 📦
 
 ### RUN
 Pull the code and execute the following command in the project root directory:
@@ -80,6 +80,10 @@ go run cmd/main.go
 
 ### Precautions for production environment
 > When building the production environment, set the `base_path` in the `.yaml` file. All log files are saved in the `{base_path}/gin-layout/logs/` directory. By default, the base path is the directory where the command is executed
+
+### contributions
+Any imperfections are welcome to Fork and submit PR!
+
 ### LICENSE
 ##### MIT
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fwannanbigpig%2Fgin-layout.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fwannanbigpig%2Fgin-layout?ref=badge_large)
