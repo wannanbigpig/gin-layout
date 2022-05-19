@@ -11,6 +11,13 @@ Translations: [English](README.md) | [简体中文](README_zh.md)
 ### RUN
 Pull the code and execute the following command in the project root directory:
 ```shell
+# You are advised to enable GO111MODULE
+# go env -w GO111MODULE=on
+
+# Download the dependent
+go mod download
+
+# run
 go run cmd/main.go
 ```
 
@@ -80,6 +87,15 @@ go run cmd/main.go
 
 ### Precautions for production environment
 > When building the production environment, set the `base_path` in the `.yaml` file. All log files are saved in the `{base_path}/gin-layout/logs/` directory. By default, the base path is the directory where the command is executed
+
+### Other instructions
+##### Packages used in the project
+- core：[gin](https://github.com/gin-gonic/gin)
+- configure：[gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)、[gopkg.in/ini.v1](https://github.com/go-ini/ini) （默认使用yaml）
+- parameter validation：[github.com/go-playground/validator/v10](https://github.com/go-playground/validator)、[github.com/natefinch/lumberjack](http://github.com/natefinch/lumberjack)、[github.com/lestrrat-go/file-rotatelogs](https://github.com/lestrrat-go/file-rotatelogs)
+- logger：[go.uber.org/zap](https://github.com/uber-go/zap)
+- database：[gorm.io/gorm](https://github.com/go-gorm/gorm)
+- There are many others, see the 'go.mod' file for more
 
 ### contributions
 Any imperfections are welcome to Fork and submit PR!

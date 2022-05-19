@@ -11,6 +11,13 @@ Translations: [English](README.md) | [简体中文](README_zh.md)
 ### 运行
 拉取代码后在项目根目录执行如下命令：
 ```shell
+# 建议开启GO111MODULE
+# go env -w GO111MODULE=on
+
+# 下载依赖
+go mod download
+
+# 运行
 go run cmd/main.go
 ```
 
@@ -80,6 +87,15 @@ go run cmd/main.go
 
 ### 生产环境注意事项
 > 在构建生产环境时，请配置好 `.yaml` 文件中基础路径 `base_path`，所有的日志记录文件会保存在该目录下的 `{base_path}/gin-layout/logs/` 里面，该基础路径默认为执行命令的目录
+
+### 其他说明
+##### 项目中使用到的包
+- 核心：[gin](https://github.com/gin-gonic/gin)
+- 配置：[gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)、[gopkg.in/ini.v1](https://github.com/go-ini/ini) （默认使用yaml）
+- 参数验证：[github.com/go-playground/validator/v10](https://github.com/go-playground/validator)、[github.com/natefinch/lumberjack](http://github.com/natefinch/lumberjack)、[github.com/lestrrat-go/file-rotatelogs](https://github.com/lestrrat-go/file-rotatelogs)
+- 日志：[go.uber.org/zap](https://github.com/uber-go/zap)
+- 数据库：[gorm.io/gorm](https://github.com/go-gorm/gorm)
+- 还有其他不一一列举，更多请查看`go.mod`文件
 
 ### 代码贡献
 不完善的地方，欢迎大家 Fork 并提交 PR！
