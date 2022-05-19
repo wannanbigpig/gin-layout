@@ -91,7 +91,7 @@ go run cmd/main.go
 ### Other instructions
 ##### Packages used in the project
 - core：[gin](https://github.com/gin-gonic/gin)
-- configure：[gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)、[gopkg.in/ini.v1](https://github.com/go-ini/ini) （默认使用yaml）
+- configure：[gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)、[gopkg.in/ini.v1](https://github.com/go-ini/ini)
 - parameter validation：[github.com/go-playground/validator/v10](https://github.com/go-playground/validator)、[github.com/natefinch/lumberjack](http://github.com/natefinch/lumberjack)、[github.com/lestrrat-go/file-rotatelogs](https://github.com/lestrrat-go/file-rotatelogs)
 - logger：[go.uber.org/zap](https://github.com/uber-go/zap)
 - database：[gorm.io/gorm](https://github.com/go-gorm/gorm)

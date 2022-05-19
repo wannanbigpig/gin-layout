@@ -91,7 +91,7 @@ go run cmd/main.go
 ### 其他说明
 ##### 项目中使用到的包
 - 核心：[gin](https://github.com/gin-gonic/gin)
-- 配置：[gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)、[gopkg.in/ini.v1](https://github.com/go-ini/ini) （默认使用yaml）
+- 配置：[gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)、[gopkg.in/ini.v1](https://github.com/go-ini/ini) 
 - 参数验证：[github.com/go-playground/validator/v10](https://github.com/go-playground/validator)、[github.com/natefinch/lumberjack](http://github.com/natefinch/lumberjack)、[github.com/lestrrat-go/file-rotatelogs](https://github.com/lestrrat-go/file-rotatelogs)
 - 日志：[go.uber.org/zap](https://github.com/uber-go/zap)
 - 数据库：[gorm.io/gorm](https://github.com/go-gorm/gorm)
