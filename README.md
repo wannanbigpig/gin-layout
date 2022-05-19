@@ -97,9 +97,10 @@ go run cmd/main.go
 - database：[gorm.io/gorm](https://github.com/go-gorm/gorm)
 - There are many others, see the 'go.mod' file for more
 
-### contributions
+### Contributions
 Any imperfections are welcome to Fork and submit PR!
 
-### LICENSE
+### License
 ##### MIT
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fwannanbigpig%2Fgin-layout.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fwannanbigpig%2Fgin-layout?ref=badge_large)
+
