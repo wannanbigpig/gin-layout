@@ -19,6 +19,12 @@ go mod download
 
 # 运行
 go run cmd/main.go
+
+# 项目起来后执行下面命令访问示例路由
+curl "http://127.0.0.1:9999/api/v1/hello-world"
+# {"code":0,"message":"OK","data":{"result":"hello gin-layout"},"cost":"6.151µs"}
+curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
+# {"code":0,"message":"OK","data":{"result":"hello world"},"cost":"6.87µs"}
 ```
 
 ### 目录结构

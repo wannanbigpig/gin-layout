@@ -19,6 +19,12 @@ go mod download
 
 # run
 go run cmd/main.go
+
+# When the project gets up, execute the following command to access the sample route
+curl "http://127.0.0.1:9999/api/v1/hello-world"
+# {"code":0,"message":"OK","data":{"result":"hello gin-layout"},"cost":"6.151µs"}
+curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
+# {"code":0,"message":"OK","data":{"result":"hello world"},"cost":"6.87µs"}
 ```
 
 ### The directory structure
