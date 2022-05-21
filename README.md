@@ -100,7 +100,7 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 - configure：[gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)、[gopkg.in/ini.v1](https://github.com/go-ini/ini)
 - parameter validation：[github.com/go-playground/validator/v10](https://github.com/go-playground/validator)、[github.com/natefinch/lumberjack](http://github.com/natefinch/lumberjack)、[github.com/lestrrat-go/file-rotatelogs](https://github.com/lestrrat-go/file-rotatelogs)
 - logger：[go.uber.org/zap](https://github.com/uber-go/zap)
-- database：[gorm.io/gorm](https://github.com/go-gorm/gorm)
+- database：[gorm.io/gorm](https://github.com/go-gorm/gorm)、[go-redis/v8](https://github.com/go-redis/redis)
 - There are many others, see the 'go.mod' file for more
 
 ### Contributions
