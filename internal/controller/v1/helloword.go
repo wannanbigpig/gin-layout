@@ -12,5 +12,6 @@ func HelloWorld(c *gin.Context) {
 	if !ok {
 		str = "gin-layout"
 	}
+
 	r.Success(c, fmt.Sprintf("hello %s", str))
 }

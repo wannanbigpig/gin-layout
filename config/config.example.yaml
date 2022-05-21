@@ -17,6 +17,12 @@ mysql:
   max_idle_conns: 10
   max_open_conns: 100
   max_lifetime: 3600s
+redis:
+  enable: false
+  host: 127.0.0.1
+  port: 6379
+  password:
+  database: 0
 logger:
   default_division: time
   file_name: gin-layout.sys.log

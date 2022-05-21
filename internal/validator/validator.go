@@ -11,7 +11,7 @@ import (
 	enTranslations "github.com/go-playground/validator/v10/translations/en"
 	zhTranslations "github.com/go-playground/validator/v10/translations/zh"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
-	response2 "github.com/wannanbigpig/gin-layout/pkg/response"
+	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"reflect"
 	"strings"
 )
@@ -64,16 +64,16 @@ func ResponseError(c *gin.Context, err error) {
 	if errs, ok := err.(validator.ValidationErrors); ok {
 		fields := errs.Translate(Trans)
 		for _, err := range fields {
-			response2.NewResponse().FailCode(c, error_code.ParamBindError, err)
+			r.Resp().FailCode(c, error_code.ParamBindError, err)
 			break
 		}
 	} else {
 		errStr := err.Error()
 		// multipart:nextpart:eof 错误表示验证器需要一些参数，但是调用者没有提交任何参数
 		if strings.ReplaceAll(strings.ToLower(errStr), " ", "") == "multipart:nextpart:eof" {
-			response2.NewResponse().FailCode(c, error_code.ParamBindError, "请根据要求填写必填项参数")
+			r.Resp().FailCode(c, error_code.ParamBindError, "请根据要求填写必填项参数")
 		} else {
-			response2.NewResponse().FailCode(c, error_code.ParamBindError, errStr)
+			r.Resp().FailCode(c, error_code.ParamBindError, errStr)
 		}
 	}
 }

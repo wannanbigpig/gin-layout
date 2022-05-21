@@ -5,7 +5,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
-	response2 "github.com/wannanbigpig/gin-layout/pkg/response"
+	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"io/ioutil"
 	"net/http"
 )
@@ -16,12 +16,22 @@ func SetRouters() *gin.Engine {
 	if config.Config.AppEnv == "prod" {
 		// 生产模式
 		r = ReleaseRouter()
+		r.Use(
+			middleware.RequestCostHandler(),
+			middleware.CustomLogger(),
+			middleware.CustomRecovery(),
+			middleware.CorsHandler(),
+		)
 	} else {
-		// 调试模式
+		// 开发调试模式
 		r = gin.New()
+		r.Use(
+			middleware.RequestCostHandler(),
+			gin.Logger(),
+			gin.Recovery(),
+			middleware.CorsHandler(),
+		)
 	}
-
-	r.Use(middleware.RequestCostHandler(), gin.Logger(), gin.Recovery(), middleware.CorsHandler())
 
 	// ping
 	r.GET("/ping", func(c *gin.Context) {
@@ -34,7 +44,7 @@ func SetRouters() *gin.Engine {
 	setApiRoute(r)
 
 	r.NoRoute(func(c *gin.Context) {
-		response2.NewResponse().SetHttpCode(http.StatusNotFound).FailCode(c, error_code.ServerError, "资源不存在")
+		response2.Resp().SetHttpCode(http.StatusNotFound).FailCode(c, error_code.ServerError, "资源不存在")
 	})
 
 	return r
@@ -48,7 +58,6 @@ func ReleaseRouter() *gin.Engine {
 	gin.DefaultWriter = ioutil.Discard
 
 	engine := gin.New()
-	// 载入gin的中间件
-	engine.Use(gin.Logger(), middleware.CustomRecovery())
+
 	return engine
 }

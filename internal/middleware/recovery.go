@@ -4,8 +4,8 @@ import (
 	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
+	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"github.com/wannanbigpig/gin-layout/pkg/logger"
-	response2 "github.com/wannanbigpig/gin-layout/pkg/response"
 	"go.uber.org/zap"
 	"net/http"
 )
@@ -15,11 +15,11 @@ func CustomRecovery() gin.HandlerFunc {
 	DefaultErrorWriter := &PanicExceptionRecord{}
 	return gin.RecoveryWithWriter(DefaultErrorWriter, func(c *gin.Context, err interface{}) {
 		// 这里针对发生的panic等异常进行统一响应即
-		response2.NewResponse().SetHttpCode(http.StatusInternalServerError).FailCode(c, error_code.ServerError)
+		response2.Resp().SetHttpCode(http.StatusInternalServerError).FailCode(c, error_code.ServerError)
 	})
 }
 
-//PanicExceptionRecord  panic等异常记录
+// PanicExceptionRecord  panic等异常记录
 type PanicExceptionRecord struct{}
 
 func (p *PanicExceptionRecord) Write(b []byte) (n int, err error) {

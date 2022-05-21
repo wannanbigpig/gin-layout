@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"sync"
 )
 
 // Conf 配置项主结构体
@@ -15,18 +14,17 @@ type Conf struct {
 	AppConfig `ini:"app" yaml:"app"`
 	Server    ServerConfig `ini:"server" yaml:"server"`
 	Mysql     MysqlConfig  `ini:"mysql" yaml:"mysql"`
+	Redis     RedisConfig  `ini:"redis" yaml:"redis"`
 	Logger    LoggerConfig `ini:"logger" yaml:"logger"`
 }
 
-var (
-	Once   sync.Once
-	Config = &Conf{
-		AppConfig: App,
-		Server:    Server,
-		Mysql:     Mysql,
-		Logger:    Logger,
-	}
-)
+var Config = &Conf{
+	AppConfig: App,
+	Server:    Server,
+	Mysql:     Mysql,
+	Redis:     Redis,
+	Logger:    Logger,
+}
 
 func init() {
 	// 加载 .yaml 配置
