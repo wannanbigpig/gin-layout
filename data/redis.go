@@ -19,7 +19,7 @@ func initRedis() {
 		_, err := Rdb.Ping(ctx).Result()
 
 		if err != nil {
-			panic("redis 链接错误：" + err.Error())
+			panic("Redis connection failed：" + err.Error())
 		}
 	}
 	return

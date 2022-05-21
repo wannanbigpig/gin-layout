@@ -53,7 +53,7 @@ func initMysql() {
 	MysqlDB, err = gorm.Open(mysql.Open(dsn), configs)
 
 	if err != nil {
-		panic("连接数据库失败：" + err.Error())
+		panic("Mysql connection failed：" + err.Error())
 	}
 
 	sqlDB, _ := MysqlDB.DB()
