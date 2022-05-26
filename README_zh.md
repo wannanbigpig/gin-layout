@@ -72,6 +72,8 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |        └──code.go
 |        └──en-us.go
 |        └──zh-cn.go
+|     └──logger    // 日志处理
+|        └──logger.go
 |     └──response    // 统一响应输出
 |        └──response.go
 |  └──routers    // 路由定义
@@ -86,8 +88,6 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |——pkg    // 可以被外部使用的包
 |  └──convert    // 数据类型转换
 |     └──convert.go
-|  └──logger    // 日志处理
-|     └──logger.go
 |  └──utils    // 帮助函数
 |     └──utils.go
 ```

@@ -15,9 +15,10 @@ const (
 	RBACError          = 10104
 )
 
-func Text(code int) (str string, ok bool) {
+func Text(code int) (str string) {
 	lang := config.Config.Language
 
+	var ok bool
 	switch lang {
 	case "zh_CN":
 		str, ok = zhCNText[code]
@@ -25,6 +26,9 @@ func Text(code int) (str string, ok bool) {
 	case "en":
 		str, ok = enUSText[code]
 		break
+	}
+	if !ok {
+		return "unknown error"
 	}
 	return
 }

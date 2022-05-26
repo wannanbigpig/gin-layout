@@ -114,12 +114,9 @@ func (r *Response) WithMessage(message string) *Response {
 // json 返回 gin 框架的 HandlerFunc
 func (r *Response) json(c *gin.Context) {
 	if r.result.Message == "" {
-		r.result.Message = "unknown error"
-		if msg, ok := error_code.Text(r.result.Code); ok == true {
-			r.result.Message = msg
-		}
+		r.result.Message = error_code.Text(r.result.Code)
 	}
-	
+
 	// if r.Data == nil {
 	// 	r.Data = struct{}{}
 	// }

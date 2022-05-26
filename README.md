@@ -72,6 +72,8 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |        └──code.go
 |        └──en-us.go
 |        └──zh-cn.go
+|     └──logger    // Log processing
+|        └──logger.go
 |     └──response    // Unified response output
 |        └──response.go
 |  └──routers    // Route definition
@@ -86,8 +88,6 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |——pkg    // A package that can be used externally
 |  └──convert    // Data type conversion
 |     └──convert.go
-|  └──logger    // Log processing
-|     └──logger.go
 |  └──utils    // Help function
 |     └──utils.go
 ```

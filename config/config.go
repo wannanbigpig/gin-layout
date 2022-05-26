@@ -2,11 +2,13 @@ package config
 
 import (
 	. "github.com/wannanbigpig/gin-layout/config/autoload"
+	"github.com/wannanbigpig/gin-layout/pkg/utils"
 	"gopkg.in/ini.v1"
 	"gopkg.in/yaml.v3"
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 )
 
 // Conf 配置项主结构体
@@ -35,9 +37,15 @@ func init() {
 }
 
 func loadYaml() {
+
+	currentDirectory, ok := utils.GetFileDirectoryToCaller()
+	if !ok {
+		panic("加载配置失败：获取当前文件目录失败")
+	}
+
 	// 生成 config.yaml 文件
-	yamlConfig := "./config.yaml"
-	yamlExampleConfig := "config/config.example.yaml"
+	yamlConfig := filepath.Dir(currentDirectory) + "/config.yaml"
+	yamlExampleConfig := currentDirectory + "/config.example.yaml"
 	copyConf(yamlExampleConfig, yamlConfig)
 	cfg, err := ioutil.ReadFile(yamlConfig)
 	if err != nil {

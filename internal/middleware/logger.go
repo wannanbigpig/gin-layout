@@ -3,7 +3,7 @@ package middleware
 import (
 	"bytes"
 	"github.com/gin-gonic/gin"
-	log "github.com/wannanbigpig/gin-layout/pkg/logger"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"go.uber.org/zap"
 	"time"
 )

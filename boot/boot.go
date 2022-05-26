@@ -2,8 +2,8 @@ package boot
 
 import (
 	"github.com/wannanbigpig/gin-layout/data"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
-	"github.com/wannanbigpig/gin-layout/pkg/logger"
 )
 
 func init() {
