@@ -44,13 +44,15 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |     └──app.go
 |     └──logger.go
 |     └──mysql.go
+|     └──redis.go
 |     └──server.go
-|  └──config.go    // 配置初始化文件
 |  └──config.example.ini    // .ini 配置示例文件
 |  └──config.example.yaml    // .yaml 配置示例文件
+|  └──config.go    // 配置初始化文件
 |——data    // 数据初始化目录
-|  └──mysql.go
 |  └──data.go
+|  └──mysql.go
+|  └──redis.go
 |——internal    // 该服务所有不对外暴露的代码，通常的业务逻辑都在这下面，使用internal避免错误引用
 |  └──controller    // 控制器代码
 |     └──v1
@@ -59,6 +61,7 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |     └──base.go
 |  └──middleware    // 中间件目录
 |     └──cors.go
+|     └──logger.go
 |     └──recovery.go
 |     └──requestCost.go
 |  └──model    // 业务数据访问
@@ -85,8 +88,6 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |     └──convert.go
 |  └──logger    // 日志处理
 |     └──logger.go
-|  └──response    // 响应处理
-|     └──response.go
 |  └──utils    // 帮助函数
 |     └──utils.go
 ```

@@ -44,13 +44,15 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |     └──app.go
 |     └──logger.go
 |     └──mysql.go
+|     └──redis.go
 |     └──server.go
-|  └──config.go    // Configure the initialization file
 |  └──config.example.ini    // Configuration sample file
 |  └──config.example.yaml    // Configuration sample file
+|  └──config.go    // Configure the initialization file
 |——data    // Data initialization directory
-|  └──mysql.go
 |  └──data.go
+|  └──mysql.go
+|  └──redis.go
 |——internal    // All the code for the service that is not exposed to the public, the usual business logic is below this, use internal to avoid misreferences
 |  └──controller    // Controller code
 |     └──v1
@@ -59,6 +61,7 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |     └──base.go
 |  └──middleware    // Middleware directory
 |     └──cors.go
+|     └──logger.go
 |     └──recovery.go
 |     └──requestCost.go
 |  └──model    // Business data access
@@ -85,8 +88,6 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 |     └──convert.go
 |  └──logger    // Log processing
 |     └──logger.go
-|  └──response    // Response processing
-|     └──response.go
 |  └──utils    // Help function
 |     └──utils.go
 ```
