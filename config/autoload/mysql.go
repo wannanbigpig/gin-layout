@@ -3,6 +3,7 @@ package autoload
 import "time"
 
 type MysqlConfig struct {
+	Enable       bool          `ini:"enable" yaml:"enable"`
 	Host         string        `ini:"host" yaml:"host"`
 	Username     string        `ini:"username" yaml:"username"`
 	Password     string        `ini:"password" yaml:"password"`
@@ -17,6 +18,7 @@ type MysqlConfig struct {
 }
 
 var Mysql = MysqlConfig{
+	Enable:       false,
 	Host:         "127.0.0.1",
 	Username:     "root",
 	Password:     "root1234",

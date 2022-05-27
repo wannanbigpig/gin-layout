@@ -31,16 +31,15 @@ var Config = &Conf{
 func init() {
 	// 加载 .yaml 配置
 	loadYaml()
-
+	//fmt.Println(Config)
 	// 加载 .ini 配置
 	// loadIni()
 }
 
 func loadYaml() {
-
 	currentDirectory, ok := utils.GetFileDirectoryToCaller()
 	if !ok {
-		panic("加载配置失败：获取当前文件目录失败")
+		panic("Failed to load configuration: Failed to obtain the current file directory")
 	}
 
 	// 生成 config.yaml 文件
@@ -49,27 +48,32 @@ func loadYaml() {
 	copyConf(yamlExampleConfig, yamlConfig)
 	cfg, err := ioutil.ReadFile(yamlConfig)
 	if err != nil {
-		panic("读取配置文件失败: " + err.Error())
+		panic("Failed to read configuration file:" + err.Error())
 	}
 	err = yaml.Unmarshal(cfg, &Config)
 	if err != nil {
-		panic("加载配置失败：" + err.Error())
+		panic("Failed to load configuration:" + err.Error())
 	}
 }
 
 // load 加载配置项
 func loadIni() {
+	currentDirectory, ok := utils.GetFileDirectoryToCaller()
+	if !ok {
+		panic("Failed to load configuration: Failed to obtain the current file directory")
+	}
+
 	// 生成 config.ini 文件
-	iniConfig := "./config.ini"
-	iniExampleConfig := "config/config.example.ini"
+	iniConfig := filepath.Dir(currentDirectory) + "/config.ini"
+	iniExampleConfig := currentDirectory + "/config.example.ini"
 	copyConf(iniExampleConfig, iniConfig)
 	cfg, err := ini.Load(iniConfig)
 	if err != nil {
-		panic("读取配置文件失败: " + err.Error())
+		panic("Failed to read configuration file:" + err.Error())
 	}
 	err = cfg.Section("app").MapTo(&Config)
 	if err != nil {
-		panic("加载配置失败: " + err.Error())
+		panic("Failed to load configuration:" + err.Error())
 	}
 }
 
@@ -78,7 +82,7 @@ func copyConf(exampleConfig, config string) {
 	fileInfo, err := os.Stat(config)
 
 	if err == nil {
-		// config.ini 路径存在， 判断 config.ini 文件是否目录，存在则直接 return
+		// config.ini 路径存在， 判断 config.ini 文件是否目录，不是目录则代表文件存在直接 return
 		if !fileInfo.IsDir() {
 			return
 		}
@@ -119,6 +123,4 @@ func copyConf(exampleConfig, config string) {
 	if err != nil {
 		panic("写入配置文件失败: " + err.Error())
 	}
-
-	panic("第一次生成配置文件，请编辑完必要的配置，例如【数据库信息】后再次运行程序，如您想无需连接数据直接运行，请注释掉 boot/boot.go 文件中 init 方法内的数据库初始化代码")
 }
