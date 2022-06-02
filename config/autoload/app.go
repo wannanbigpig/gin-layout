@@ -7,12 +7,14 @@ import (
 
 type AppConfig struct {
 	AppEnv         string `ini:"app_env" yaml:"app_env"`
+	Debug          bool   `ini:"debug" yaml:"debug"`
 	Language       string `ini:"language" yaml:"language"`
 	StaticBasePath string `ini:"base_path" yaml:"base_path"`
 }
 
 var App = AppConfig{
-	AppEnv:         "local11",
+	AppEnv:         "local",
+	Debug:          true,
 	Language:       "zh_CN",
 	StaticBasePath: getDefaultPath(),
 }

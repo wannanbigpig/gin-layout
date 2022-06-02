@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"io"
-	"log"
 	"path/filepath"
 	"sync"
 	"time"
@@ -22,12 +21,12 @@ func InitLogger() {
 
 // initZapLog 初始化 zap 日志
 func createZapLog() *zap.Logger {
-	// 非生产环境下生成日志实例
-	if config.Config.AppEnv != "prod" {
+	// 开启 debug
+	if config.Config.Debug == true {
 		if Logger, err := zap.NewDevelopment(); err == nil {
 			return Logger
 		} else {
-			log.Fatal("创建zap日志包失败，详情：" + err.Error())
+			panic("创建zap日志包失败，详情：" + err.Error())
 		}
 	}
 

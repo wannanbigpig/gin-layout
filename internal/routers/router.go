@@ -13,7 +13,7 @@ import (
 func SetRouters() *gin.Engine {
 	var r *gin.Engine
 
-	if config.Config.AppEnv == "prod" {
+	if config.Config.Debug == false {
 		// 生产模式
 		r = ReleaseRouter()
 		r.Use(
@@ -28,7 +28,7 @@ func SetRouters() *gin.Engine {
 		r.Use(
 			middleware.RequestCostHandler(),
 			gin.Logger(),
-			gin.Recovery(),
+			middleware.CustomRecovery(),
 			middleware.CorsHandler(),
 		)
 	}

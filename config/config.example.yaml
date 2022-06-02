@@ -1,6 +1,7 @@
 # 该文件为配置示例文件，请复制该文件改名为 config.yaml, 不要直接修改该文件，修改无意义
 app:
   app_env: local
+  debug: true
   language: zh_CN
 #  base_path: ""
 server:
