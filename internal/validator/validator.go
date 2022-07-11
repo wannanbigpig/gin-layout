@@ -13,6 +13,7 @@ import (
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 type Page struct {
@@ -22,8 +23,10 @@ type Page struct {
 
 var trans ut.Translator // 全局验证器
 
+var once sync.Once
+
 func InitValidatorTrans(locale string) {
-	validatorTrans(locale)
+	once.Do(func() { validatorTrans(locale) })
 }
 
 func validatorTrans(locale string) {
