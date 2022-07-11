@@ -1,7 +1,6 @@
 package config
 
 import (
-	"flag"
 	. "github.com/wannanbigpig/gin-layout/config/autoload"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 	"gopkg.in/ini.v1"
@@ -10,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // Conf 配置项主结构体
@@ -28,20 +28,19 @@ var Config = &Conf{
 	Redis:     Redis,
 	Logger:    Logger,
 }
+var once sync.Once
 
-var configPath string
-
-func init() {
-	flag.StringVar(&configPath, "c", "", "请输入配置文件绝对路径")
-	flag.Parse()
-	// 加载 .yaml 配置
-	loadYaml()
-	//fmt.Println(Config)
-	// 加载 .ini 配置
-	// loadIni()
+func InitConfig(configPath string) {
+	once.Do(func() {
+		// 加载 .yaml 配置
+		loadYaml(configPath)
+		//fmt.Println(Config)
+		// 加载 .ini 配置
+		// loadIni(configPath)
+	})
 }
 
-func loadYaml() {
+func loadYaml(configPath string) {
 	var yamlConfig string
 	if configPath == "" {
 		runDirectory := utils.GetCurrentPath()
@@ -64,7 +63,7 @@ func loadYaml() {
 }
 
 // load 加载配置项
-func loadIni() {
+func loadIni(configPath string) {
 	var iniConfig string
 	if configPath == "" {
 		runDirectory := utils.GetCurrentPath()

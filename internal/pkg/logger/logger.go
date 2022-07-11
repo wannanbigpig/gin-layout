@@ -13,7 +13,7 @@ import (
 )
 
 var Logger *zap.Logger
-var once = sync.Once{}
+var once sync.Once
 
 func InitLogger() {
 	once.Do(func() { Logger = createZapLog() })
