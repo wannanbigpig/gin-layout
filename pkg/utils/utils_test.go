@@ -12,9 +12,16 @@ func TestGetRunPath(t *testing.T) {
 }
 
 func TestGetCurrentPath(t *testing.T) {
-	path := GetCurrentPath()
-	if path == "" {
+	_, err := GetCurrentPath()
+	if err != nil {
 		t.Error("获取运行路径失败")
+	}
+}
+
+func TestGetCurrentAbPathByExecutable(t *testing.T) {
+	_, err := GetCurrentAbPathByExecutable()
+	if err != nil {
+		t.Error("获取路径失败")
 	}
 }
 

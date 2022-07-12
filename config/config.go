@@ -43,7 +43,7 @@ func InitConfig(configPath string) {
 func loadYaml(configPath string) {
 	var yamlConfig string
 	if configPath == "" {
-		runDirectory := utils.GetCurrentPath()
+		runDirectory, _ := utils.GetCurrentPath()
 		// 生成 config.yaml 文件
 		yamlConfig = filepath.Join(runDirectory, "/config.yaml")
 		yamlExampleConfig := filepath.Join(runDirectory, "/config.yaml.example")
@@ -66,7 +66,7 @@ func loadYaml(configPath string) {
 func loadIni(configPath string) {
 	var iniConfig string
 	if configPath == "" {
-		runDirectory := utils.GetCurrentPath()
+		runDirectory, _ := utils.GetCurrentPath()
 		// 生成 config.ini 文件
 		iniConfig = filepath.Join(runDirectory, "/config.ini")
 		iniExampleConfig := filepath.Join(runDirectory, "/config.ini.example")

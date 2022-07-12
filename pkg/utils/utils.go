@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"log"
+	"errors"
 	"os"
 	"path"
 	"path/filepath"
@@ -41,21 +41,32 @@ func GetFileDirectoryToCaller(opts ...int) (directory string, ok bool) {
 }
 
 // GetCurrentAbPathByExecutable 获取当前执行文件绝对路径
-func GetCurrentAbPathByExecutable() string {
+func GetCurrentAbPathByExecutable() (string, error) {
 	exePath, err := os.Executable()
 	if err != nil {
-		log.Fatal(err)
+		return "", err
 	}
-	res, _ := filepath.EvalSymlinks(filepath.Dir(exePath))
-	return res
+	res, _ := filepath.EvalSymlinks(exePath)
+	return filepath.Dir(res), nil
 }
 
 // GetCurrentPath 获取当前执行文件路径
-func GetCurrentPath() string {
-	dir := GetCurrentAbPathByExecutable()
-	tmpDir, _ := filepath.EvalSymlinks(os.TempDir())
-	if strings.Contains(dir, tmpDir) {
-		dir, _ = GetFileDirectoryToCaller(2)
+func GetCurrentPath() (dir string, err error) {
+	dir, err = GetCurrentAbPathByExecutable()
+	if err != nil {
+		return "", err
 	}
-	return dir
+
+	tmpDir, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return "", err
+	}
+
+	if strings.Contains(dir, tmpDir) {
+		var ok bool
+		if dir, ok = GetFileDirectoryToCaller(2); !ok {
+			return "", errors.New("failed to get path")
+		}
+	}
+	return dir, nil
 }
