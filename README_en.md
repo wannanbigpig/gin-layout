@@ -21,7 +21,6 @@ go mod download
 # run
 go run cmd/main.go
 
-# Please run in the project root directory (you need to bring the -config Path="" parameter if you are not running in the project root directory, otherwise there may be an error that the configuration file cannot be found)
 # The first run will automatically copy an example configuration (config/config.example.yaml) file to the project root directory (config.yaml)
 go run cmd/main.go
 

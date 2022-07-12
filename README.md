@@ -18,7 +18,6 @@ Translations: [简体中文](README.md) | [English](README_en.md)
 # 下载依赖
 go mod download
 
-# 请在项目根目录运行（不在项目根目录运行则需要带上-configPath=""参数，否则可能会出现找不到配置文件的错误） 
 # 首次运行会自动复制一份示例配置（config/config.example.yaml）文件到项目根目录(config.yaml)
 go run cmd/main.go
 
