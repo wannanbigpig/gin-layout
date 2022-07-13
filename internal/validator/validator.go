@@ -26,10 +26,10 @@ var trans ut.Translator // 全局验证器
 var once sync.Once
 
 func InitValidatorTrans(locale string) {
-	once.Do(func() { validatorTrans(locale) })
+	once.Do(func() { ValidatorTrans(locale) })
 }
 
-func validatorTrans(locale string) {
+func ValidatorTrans(locale string) {
 	var v *validator.Validate
 	var ok bool
 	if v, ok = binding.Validator.Engine().(*validator.Validate); !ok {
