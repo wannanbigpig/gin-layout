@@ -9,9 +9,6 @@ import (
 var Rdb *redis.Client
 
 func initRedis() {
-	if c.Config.Redis.Enable != true {
-		return
-	}
 	Rdb = redis.NewClient(&redis.Options{
 		Addr:     c.Config.Redis.Host + ":" + c.Config.Redis.Port,
 		Password: c.Config.Redis.Password,

@@ -19,7 +19,7 @@ type Writer interface {
 type WriterLog struct{}
 
 func (w WriterLog) Printf(format string, args ...interface{}) {
-	if c.Config.Mysql.PrintSql == true {
+	if c.Config.Mysql.PrintSql {
 		log.Logger.Sugar().Infof(format, args...)
 	}
 }
