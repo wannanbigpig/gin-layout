@@ -18,8 +18,8 @@ Translations: [简体中文](README.md) | [English](README_en.md)
 # 下载依赖
 go mod download
 
-# 首次运行会自动复制一份示例配置（config/config.example.yaml）文件到项目根目录(config.yaml)
-go run cmd/main.go
+# 首次运行会自动复制一份示例配置（config/config.example.yaml）文件到config目录(config/config.yaml)
+go run main.go
 
 # 项目起来后执行下面命令访问示例路由
 curl "http://127.0.0.1:9999/api/v1/hello-world"
@@ -31,7 +31,7 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 ### 部署
 ```shell
 # 打包项目（如何打包其他os平台的包自行 google）
-go build -o cmd/go_layout_liunx cmd/main.go
+go build -o cmd/go_layout_liunx main.go
 
 # 运行时请配置指定config文件的位置，否则可能会出现找不到配置的情况，修改完配置请重启
 cmd/go-layout -c="指定配置文件位置（/home/go-layout-config.yaml）"

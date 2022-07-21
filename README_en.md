@@ -18,11 +18,8 @@ Pull the code and execute the following command in the project root directory:
 # Download the dependent
 go mod download
 
-# run
-go run cmd/main.go
-
-# The first run will automatically copy an example configuration (config/config.example.yaml) file to the project root directory (config.yaml)
-go run cmd/main.go
+# The first run will automatically copy an example configuration (config/config.example.yaml) file to the config directory (config/config.yaml)
+go run main.go
 
 # After the project is up, execute the following command to access the sample route
 curl "http://127.0.0.1:9999/api/v1/hello-world"
@@ -34,7 +31,7 @@ curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
 ### deploy
 ```shell
 # Package the project (how to package the packages of other os platforms and google it by yourself)
-go build -o cmd/go_layout_liunx cmd/main.go
+go build -o cmd/go_layout_liunx main.go
 
 # Please configure the location of the specified config file when running, otherwise the configuration may not be found, please restart after modifying the configuration
 cmd/go-layout -c="Specify the configuration file location(/home/go-layout-config.yaml)"
