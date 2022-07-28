@@ -30,13 +30,22 @@ func Success(c *gin.Context, data ...any) {
 	Resp().Success(c)
 }
 
-// Fail 业务失败响应
-func Fail(c *gin.Context, code int, data ...any) {
+// FailCode 业务失败响应
+func FailCode(c *gin.Context, code int, data ...any) {
 	if data != nil {
 		Resp().WithData(data[0]).FailCode(c, code)
 		return
 	}
 	Resp().FailCode(c, code)
+}
+
+// Fail 业务失败响应
+func Fail(c *gin.Context, code int, message string, data ...any) {
+	if data != nil {
+		Resp().WithData(data[0]).FailCode(c, code, message)
+		return
+	}
+	Resp().FailCode(c, code, message)
 }
 
 type result struct {

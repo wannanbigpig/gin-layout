@@ -20,7 +20,7 @@ func Login(c *gin.Context) {
 	result, err := service.Login(loginForm.UserName, loginForm.PassWord)
 	// 根据业务返回值判断业务成功 OR 失败
 	if err != nil {
-		r.Resp().FailCode(c, 1, err.Error())
+		r.Fail(c, 1, err.Error())
 		return
 	}
 
