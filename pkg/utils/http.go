@@ -57,3 +57,12 @@ func (hr *HttpRequest) ParseBytes() ([]byte, error) {
 
 	return ioutil.ReadAll(hr.Response.Body)
 }
+
+// Raw Return the raw response data as a string
+func (hr *HttpRequest) Raw() (string, error) {
+	str, err := hr.ParseBytes()
+	if err != nil {
+		return "", err
+	}
+	return string(str), nil
+}
