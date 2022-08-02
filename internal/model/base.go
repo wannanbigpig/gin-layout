@@ -9,8 +9,8 @@ import (
 
 type BaseModel struct {
 	ID        uint             `gorm:"column:id;type:int(11) unsigned AUTO_INCREMENT;not null;primarykey" json:"id"`
-	CreatedAt utils.FormatDate `gorm:"column:created_at;type:timestamp;default:null" json:"created_at"`
-	UpdatedAt utils.FormatDate `gorm:"column:updated_at;type:timestamp;default:null" json:"updated_at"`
+	CreatedAt utils.FormatDate `gorm:"column:created_at;type:timestamp;<-:create" json:"created_at"`
+	UpdatedAt utils.FormatDate `gorm:"column:updated_at;type:timestamp" json:"updated_at"`
 }
 
 func (model *BaseModel) DB() *gorm.DB {

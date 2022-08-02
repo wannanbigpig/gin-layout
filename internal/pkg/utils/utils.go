@@ -11,11 +11,15 @@ type FormatDate struct {
 	time.Time
 }
 
+const (
+	timeFormat = "2006-01-02 15:04:05"
+)
+
 func (t FormatDate) MarshalJSON() ([]byte, error) {
 	if &t == nil || t.IsZero() {
 		return []byte("null"), nil
 	}
-	return []byte(fmt.Sprintf("\"%s\"", t.Format("2006-01-02 15:04:05"))), nil
+	return []byte(fmt.Sprintf("\"%s\"", t.Format(timeFormat))), nil
 }
 
 func (t FormatDate) Value() (driver.Value, error) {
@@ -38,7 +42,7 @@ func (t *FormatDate) String() string {
 	if t == nil || t.IsZero() {
 		return ""
 	}
-	return fmt.Sprintf("%s", t.Time.Format("2006-01-02 15:04:05"))
+	return fmt.Sprintf("%s", t.Time.Format(timeFormat))
 }
 
 func (t *FormatDate) UnmarshalJSON(data []byte) error {
@@ -46,7 +50,7 @@ func (t *FormatDate) UnmarshalJSON(data []byte) error {
 	if str == "null" {
 		return nil
 	}
-	t1, err := time.ParseInLocation("2006-01-02 15:04:05", strings.Trim(str, "\""), time.Local)
+	t1, err := time.ParseInLocation(timeFormat, strings.Trim(str, "\""), time.Local)
 	*t = FormatDate{t1}
 	return err
 }
