@@ -128,8 +128,8 @@ server {
 ##### 项目中使用到的包
 - 核心：[gin](https://github.com/gin-gonic/gin)
 - 配置：[gopkg.in/yaml.v3](https://github.com/go-yaml/yaml)、[gopkg.in/ini.v1](https://github.com/go-ini/ini) 
-- 参数验证：[github.com/go-playground/validator/v10](https://github.com/go-playground/validator)、[github.com/natefinch/lumberjack](http://github.com/natefinch/lumberjack)、[github.com/lestrrat-go/file-rotatelogs](https://github.com/lestrrat-go/file-rotatelogs)
-- 日志：[go.uber.org/zap](https://github.com/uber-go/zap)
+- 参数验证：[github.com/go-playground/validator/v10](https://github.com/go-playground/validator)
+- 日志：[go.uber.org/zap](https://github.com/uber-go/zap)、[github.com/natefinch/lumberjack](http://github.com/natefinch/lumberjack)、[github.com/lestrrat-go/file-rotatelogs](https://github.com/lestrrat-go/file-rotatelogs)
 - 数据库：[gorm.io/gorm](https://github.com/go-gorm/gorm)、[go-redis/v8](https://github.com/go-redis/redis)
 - 还有其他不一一列举，更多请查看`go.mod`文件
 
