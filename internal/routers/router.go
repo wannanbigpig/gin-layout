@@ -34,7 +34,7 @@ func SetRouters() *gin.Engine {
 	}
 
 	// ping
-	r.GET("/ping", func(c *gin.Context) {
+	r.Any("/ping", func(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			"message": "pong!",
 		})
