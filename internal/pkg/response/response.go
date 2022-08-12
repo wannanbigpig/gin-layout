@@ -8,6 +8,18 @@ import (
 	"time"
 )
 
+type result struct {
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data"`
+	Cost    string      `json:"cost"`
+}
+
+type Response struct {
+	httpCode int
+	result   *result
+}
+
 func Resp() *Response {
 	// 初始化response
 	return &Response{
@@ -19,45 +31,6 @@ func Resp() *Response {
 			Cost:    "",
 		},
 	}
-}
-
-// Success 业务成功响应
-func Success(c *gin.Context, data ...any) {
-	if data != nil {
-		Resp().WithDataSuccess(c, data[0])
-		return
-	}
-	Resp().Success(c)
-}
-
-// FailCode 业务失败响应
-func FailCode(c *gin.Context, code int, data ...any) {
-	if data != nil {
-		Resp().WithData(data[0]).FailCode(c, code)
-		return
-	}
-	Resp().FailCode(c, code)
-}
-
-// Fail 业务失败响应
-func Fail(c *gin.Context, code int, message string, data ...any) {
-	if data != nil {
-		Resp().WithData(data[0]).FailCode(c, code, message)
-		return
-	}
-	Resp().FailCode(c, code, message)
-}
-
-type result struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
-	Cost    string      `json:"cost"`
-}
-
-type Response struct {
-	httpCode int
-	result   *result
 }
 
 // Fail 错误返回
@@ -137,4 +110,31 @@ func (r *Response) json(c *gin.Context) {
 
 	r.result.Cost = time.Since(c.GetTime("requestStartTime")).String()
 	c.AbortWithStatusJSON(r.httpCode, r.result)
+}
+
+// Success 业务成功响应
+func Success(c *gin.Context, data ...any) {
+	if data != nil {
+		Resp().WithDataSuccess(c, data[0])
+		return
+	}
+	Resp().Success(c)
+}
+
+// FailCode 业务失败响应
+func FailCode(c *gin.Context, code int, data ...any) {
+	if data != nil {
+		Resp().WithData(data[0]).FailCode(c, code)
+		return
+	}
+	Resp().FailCode(c, code)
+}
+
+// Fail 业务失败响应
+func Fail(c *gin.Context, code int, message string, data ...any) {
+	if data != nil {
+		Resp().WithData(data[0]).FailCode(c, code, message)
+		return
+	}
+	Resp().FailCode(c, code, message)
 }
