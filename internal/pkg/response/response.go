@@ -3,7 +3,7 @@ package response
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/wannanbigpig/gin-layout/config"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"net/http"
 	"time"
 )
@@ -34,8 +34,12 @@ func Resp() *Response {
 }
 
 // Fail 错误返回
-func (r *Response) Fail(c *gin.Context) {
-	r.SetCode(error_code.FAILURE)
+func (r *Response) Fail(c *gin.Context, code int, msg string, data ...any) {
+	r.SetCode(code)
+	r.SetMessage(msg)
+	if data != nil {
+		r.WithData(data[0])
+	}
 	r.json(c)
 }
 
@@ -43,20 +47,20 @@ func (r *Response) Fail(c *gin.Context) {
 func (r *Response) FailCode(c *gin.Context, code int, msg ...string) {
 	r.SetCode(code)
 	if msg != nil {
-		r.WithMessage(msg[0])
+		r.SetMessage(msg[0])
 	}
 	r.json(c)
 }
 
 // Success 正确返回
 func (r *Response) Success(c *gin.Context) {
-	r.SetCode(error_code.SUCCESS)
+	r.SetCode(errors.SUCCESS)
 	r.json(c)
 }
 
 // WithDataSuccess 成功后需要返回值
 func (r *Response) WithDataSuccess(c *gin.Context, data interface{}) {
-	r.SetCode(error_code.SUCCESS)
+	r.SetCode(errors.SUCCESS)
 	r.WithData(data)
 	r.json(c)
 }
@@ -78,7 +82,7 @@ type defaultRes struct {
 }
 
 // WithData 设置返回data数据
-func (r *Response) WithData(data interface{}) *Response {
+func (r *Response) WithData(data any) *Response {
 	switch data.(type) {
 	case string, int, bool:
 		r.result.Data = &defaultRes{Result: data}
@@ -88,20 +92,18 @@ func (r *Response) WithData(data interface{}) *Response {
 	return r
 }
 
-// WithMessage 设置返回自定义错误消息
-func (r *Response) WithMessage(message string) *Response {
+// SetMessage 设置返回自定义错误消息
+func (r *Response) SetMessage(message string) *Response {
 	r.result.Message = message
 	return r
 }
 
-var errorText = &error_code.ErrorText{
-	Language: config.Config.Language,
-}
+var ErrorText = errors.NewErrorText(config.Config.Language)
 
 // json 返回 gin 框架的 HandlerFunc
 func (r *Response) json(c *gin.Context) {
 	if r.result.Message == "" {
-		r.result.Message = errorText.Text(r.result.Code)
+		r.result.Message = ErrorText.Text(r.result.Code)
 	}
 
 	// if r.Data == nil {

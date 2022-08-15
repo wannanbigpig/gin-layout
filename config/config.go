@@ -28,13 +28,14 @@ var Config = &Conf{
 	Redis:     Redis,
 	Logger:    Logger,
 }
+
 var once sync.Once
 
 func InitConfig(configPath string) {
 	once.Do(func() {
 		// 加载 .yaml 配置
 		loadYaml(configPath)
-		//fmt.Println(Config)
+
 		// 加载 .ini 配置
 		// loadIni(configPath)
 	})

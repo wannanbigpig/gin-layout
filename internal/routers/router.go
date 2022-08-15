@@ -4,7 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"io/ioutil"
 	"net/http"
@@ -44,7 +44,7 @@ func SetRouters() *gin.Engine {
 	setApiRoute(r)
 
 	r.NoRoute(func(c *gin.Context) {
-		response2.Resp().SetHttpCode(http.StatusNotFound).FailCode(c, error_code.NotFound)
+		response2.Resp().SetHttpCode(http.StatusNotFound).FailCode(c, errors.NotFound)
 	})
 
 	return r

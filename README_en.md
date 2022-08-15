@@ -97,7 +97,7 @@ server {
 |     └──admin_users.go
 |     └──base.go
 |  └──pkg    // Internal use package
-|     └──error_code    // Error code definition
+|     └──errors    // Error definition
 |        └──code.go
 |        └──en-us.go
 |        └──zh-cn.go

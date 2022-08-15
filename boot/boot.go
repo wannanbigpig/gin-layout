@@ -8,13 +8,24 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
+	"os"
 )
 
 func init() {
-	var configPath string
+	var (
+		configPath   string
+		printVersion bool
+	)
 
 	flag.StringVar(&configPath, "c", "", "请输入配置文件绝对路径")
+	flag.BoolVar(&printVersion, "v", false, "查看版本")
 	flag.Parse()
+
+	if printVersion {
+		// 打印版本号
+		println(version)
+		os.Exit(0)
+	}
 
 	// 1、初始化配置
 	config.InitConfig(configPath)

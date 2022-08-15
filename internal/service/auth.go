@@ -1,22 +1,30 @@
 package service
 
 import (
-	"errors"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	err "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
-func Login(username, password string) (*model.AdminUsers, error) {
+type AuthService struct {
+}
+
+func NewAuthService() *AuthService {
+	return &AuthService{}
+}
+
+func (auth *AuthService) Login(username, password string) (*model.AdminUsers, error) {
 	// 查询用户是否存在
 	adminUsersModel := model.NewAdminUsers()
 	user := adminUsersModel.GetUserInfo(username)
 
 	if user == nil {
-		return nil, errors.New("用户不存在")
+		berr := err.NewBusinessError(err.UserDoesNotExist)
+		return nil, berr
 	}
 
 	// 校验密码
 	if !adminUsersModel.ComparePasswords(password) {
-		return nil, errors.New("用户密码错误")
+		return nil, err.NewBusinessError(err.FAILURE, "用户密码错误")
 	}
 
 	/* TODO 生成 token 等业务逻辑，此处不再演示，直接返回用户信息 */

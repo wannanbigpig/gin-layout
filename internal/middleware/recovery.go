@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/wannanbigpig/gin-layout/config"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/error_code"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"net/http"
@@ -22,7 +22,7 @@ func CustomRecovery() gin.HandlerFunc {
 		if config.Config.Debug == true {
 			errStr = fmt.Sprintf("%v", err)
 		}
-		response2.Resp().SetHttpCode(http.StatusInternalServerError).FailCode(c, error_code.ServerError, errStr)
+		response2.Resp().SetHttpCode(http.StatusInternalServerError).FailCode(c, e.ServerError, errStr)
 	})
 }
 

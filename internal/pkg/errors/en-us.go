@@ -1,4 +1,4 @@
-package error_code
+package errors
 
 var enUSText = map[int]string{
 	SUCCESS:            "OK",
@@ -6,7 +6,8 @@ var enUSText = map[int]string{
 	NotFound:           "resources not found",
 	ServerError:        "Internal server error",
 	TooManyRequests:    "Too many requests",
-	ParamBindError:     "Parameter error",
+	InvalidParameter:   "Parameter error",
+	UserDoesNotExist:   "user does not exist",
 	AuthorizationError: "Authorization error",
 	RBACError:          "No access",
 }

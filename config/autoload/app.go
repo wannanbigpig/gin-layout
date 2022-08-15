@@ -20,7 +20,7 @@ var App = AppConfig{
 }
 
 func getDefaultPath() (path string) {
-	path, _ = utils.GetCurrentPath()
+	path, _ = utils.GetDefaultPath()
 	path = convert.GetString(utils.If(path != "", path, "/tmp"))
 	return
 }

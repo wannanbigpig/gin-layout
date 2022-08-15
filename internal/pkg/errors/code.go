@@ -1,10 +1,11 @@
-package error_code
+package errors
 
 const (
 	SUCCESS            = 0
 	FAILURE            = 1
 	NotFound           = 404
-	ParamBindError     = 10000
+	InvalidParameter   = 10000
+	UserDoesNotExist   = 10001
 	ServerError        = 10101
 	TooManyRequests    = 10102
 	AuthorizationError = 10103
@@ -13,6 +14,12 @@ const (
 
 type ErrorText struct {
 	Language string
+}
+
+func NewErrorText(language string) *ErrorText {
+	return &ErrorText{
+		Language: language,
+	}
 }
 
 func (et *ErrorText) Text(code int) (str string) {

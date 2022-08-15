@@ -50,7 +50,7 @@ func GetCurrentAbPathByExecutable() (string, error) {
 	return filepath.Dir(res), nil
 }
 
-// GetCurrentPath 获取当前执行文件路径
+// GetCurrentPath 获取当前执行文件路径，如果是临时目录则获取当前文件的的执行路径
 func GetCurrentPath() (dir string, err error) {
 	dir, err = GetCurrentAbPathByExecutable()
 	if err != nil {
@@ -67,6 +67,24 @@ func GetCurrentPath() (dir string, err error) {
 		if dir, ok = GetFileDirectoryToCaller(2); !ok {
 			return "", errors.New("failed to get path")
 		}
+	}
+	return dir, nil
+}
+
+// GetDefaultPath 获取当前执行文件路径，如果是临时目录则获取运行命令的工作目录
+func GetDefaultPath() (dir string, err error) {
+	dir, err = GetCurrentAbPathByExecutable()
+	if err != nil {
+		return "", err
+	}
+
+	tmpDir, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return "", err
+	}
+
+	if strings.Contains(dir, tmpDir) {
+		return GetRunPath(), nil
 	}
 	return dir, nil
 }

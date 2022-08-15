@@ -29,18 +29,19 @@ func CustomLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		blw := &responseWriter{body: bytes.NewBufferString(""), ResponseWriter: c.Writer}
 		c.Writer = blw
-		path := c.Request.URL.Path
-		query := c.Request.URL.RawQuery
-
+		// 读取body数据
+		//body := request.GetBody(c)
 		c.Next()
 
 		cost := time.Since(c.GetTime("requestStartTime"))
 		if config.Config.AppEnv != "production" {
+			path := c.Request.URL.Path
 			log.Logger.Info(path,
 				zap.Int("status", c.Writer.Status()),
 				zap.String("method", c.Request.Method),
 				zap.String("path", path),
-				zap.String("query", query),
+				zap.String("query", c.Request.URL.RawQuery),
+				//zap.Any("body", string(body)),
 				zap.String("ip", c.ClientIP()),
 				zap.String("user-agent", c.Request.UserAgent()),
 				zap.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
