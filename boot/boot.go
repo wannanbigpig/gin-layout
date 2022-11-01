@@ -5,18 +5,22 @@ import (
 	"fmt"
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
+	"github.com/wannanbigpig/gin-layout/internal/command"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"os"
+	"strings"
+)
+
+var (
+	configPath   string
+	printVersion bool
+	run          string
 )
 
 func init() {
-	var (
-		configPath   string
-		printVersion bool
-	)
-
+	flag.StringVar(&run, "r", "http", "执行命令默认运行http服务")
 	flag.StringVar(&configPath, "c", "", "请输入配置文件绝对路径")
 	flag.BoolVar(&printVersion, "v", false, "查看版本")
 	flag.Parse()
@@ -41,9 +45,20 @@ func init() {
 }
 
 func Run() {
-	r := routers.SetRouters()
-	err := r.Run(fmt.Sprintf("%s:%d", config.Config.Server.Host, config.Config.Server.Port))
-	if err != nil {
-		panic(err)
+	script := strings.Split(run, ":")
+	switch script[0] {
+	case "http":
+		r := routers.SetRouters()
+		err := r.Run(fmt.Sprintf("%s:%d", config.Config.Server.Host, config.Config.Server.Port))
+		if err != nil {
+			panic(err)
+		}
+	case "command":
+		if len(script) != 2 {
+			panic("命令错误，缺少重要参数")
+		}
+		command.Run(script[1])
+	default:
+		panic("执行脚本错误")
 	}
 }

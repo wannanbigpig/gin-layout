@@ -9,6 +9,13 @@ Translations: [简体中文](README.md) | [English](README_en.md)
 ### Gin Project Template
 > Gin framework is used as the core of this project to build a scaffold, based on the project can be quickly completed business development, out of the box 📦
 
+### UPDATE
+add command line mode to run：
+```shell 
+# test
+go run main.go -r command:demo
+```
+
 ### RUN
 Pull the code and execute the following command in the project root directory:
 ```shell

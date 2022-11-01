@@ -9,7 +9,16 @@ Translations: [简体中文](README.md) | [English](README_en.md)
 ### Gin Project Template
 > 本项目使用 gin 框架为核心搭建的一个脚手架，可以基于本项目快速完成业务开发，开箱📦 即用
 
-### 运行
+### 更新
+新增命令行模式运行：
+
+```shell 
+# 测试
+go run main.go -r command:demo
+```
+
+
+### HTTP 运行
 拉取代码后在项目根目录执行如下命令：
 ```shell
 # 建议开启GO111MODULE
