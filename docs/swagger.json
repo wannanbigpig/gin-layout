@@ -1,0 +1,173 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "dbsgw-api 接口在线地址",
+        "title": "Swagger dbsgw-api 接口在线地址",
+        "contact": {},
+        "license": {
+            "name": "个人技术博客",
+            "url": "https://blog.dbsgw.com/"
+        },
+        "version": "1.0"
+    },
+    "host": "127.0.0.1:9999",
+    "paths": {
+        "/api/v1/login": {
+            "post": {
+                "description": "一个跑通全流程的示例，业务代码未补充完整",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户"
+                ],
+                "summary": "一个跑通全流程的示例，业务代码未补充完整",
+                "parameters": [
+                    {
+                        "description": "入参",
+                        "name": "userinput",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/form.Login"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.AdminUsers"
+                        }
+                    }
+                }
+            }
+        },
+        "/user": {
+            "get": {
+                "description": "简单测试的hello world",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ops 标签 比如同类功能使用同一个标签"
+                ],
+                "summary": "测试 的 hello world",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Id",
+                        "name": "Id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.AdminUsers"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "form.Login": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "description": "验证规则：必填，最小长度为1",
+                    "type": "string",
+                    "minLength": 6
+                },
+                "username": {
+                    "description": "验证规则：必填，最小长度为1",
+                    "type": "string",
+                    "minLength": 5
+                }
+            }
+        },
+        "model.AdminUsers": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "description": "头像",
+                    "type": "string"
+                },
+                "created_at": {
+                    "$ref": "#/definitions/utils.FormatDate"
+                },
+                "email": {
+                    "description": "邮箱",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_admin": {
+                    "description": "是否是总管理员",
+                    "type": "integer"
+                },
+                "last_login_at": {
+                    "description": "上一次登录时间",
+                    "$ref": "#/definitions/utils.FormatDate"
+                },
+                "last_login_ip": {
+                    "description": "上一次登录ip",
+                    "type": "string"
+                },
+                "login_at": {
+                    "description": "登录时间",
+                    "$ref": "#/definitions/utils.FormatDate"
+                },
+                "login_ip": {
+                    "description": "最后一次登录ip",
+                    "type": "string"
+                },
+                "mobile": {
+                    "description": "手机号",
+                    "type": "string"
+                },
+                "nickname": {
+                    "description": "用户昵称",
+                    "type": "string"
+                },
+                "password": {
+                    "description": "密码",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "状态,0正常，1禁用",
+                    "type": "boolean"
+                },
+                "updated_at": {
+                    "$ref": "#/definitions/utils.FormatDate"
+                },
+                "username": {
+                    "description": "用户名",
+                    "type": "string"
+                }
+            }
+        },
+        "utils.FormatDate": {
+            "type": "object",
+            "properties": {
+                "time.Time": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}
