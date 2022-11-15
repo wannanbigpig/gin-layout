@@ -32,7 +32,11 @@ func SetRouters() *gin.Engine {
 			middleware.CorsHandler(),
 		)
 	}
-
+	// set up trusted agents
+	err := r.SetTrustedProxies([]string{"127.0.0.1"})
+	if err != nil {
+		panic(err)
+	}
 	// ping
 	r.Any("/ping", func(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{

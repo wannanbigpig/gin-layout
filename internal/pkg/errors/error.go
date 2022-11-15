@@ -13,7 +13,7 @@ type BusinessError struct {
 }
 
 func (e *BusinessError) Error() string {
-	return fmt.Sprintf("[Code]:%d [Message]:%s, [context error] %s", e.code, e.message, e.contextErr)
+	return fmt.Sprintf("[Code]:%d [Msg]:%s, [context error] %s", e.code, e.message, e.contextErr)
 }
 
 func (e *BusinessError) GetCode() int {

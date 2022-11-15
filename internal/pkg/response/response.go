@@ -9,10 +9,10 @@ import (
 )
 
 type result struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
-	Cost    string      `json:"cost"`
+	Code int         `json:"code"`
+	Msg  string      `json:"msg"`
+	Data interface{} `json:"data"`
+	Cost string      `json:"cost"`
 }
 
 type Response struct {
@@ -25,10 +25,10 @@ func Resp() *Response {
 	return &Response{
 		httpCode: http.StatusOK,
 		result: &result{
-			Code:    0,
-			Message: "",
-			Data:    nil,
-			Cost:    "",
+			Code: 0,
+			Msg:  "",
+			Data: nil,
+			Cost: "",
 		},
 	}
 }
@@ -94,7 +94,7 @@ func (r *Response) WithData(data any) *Response {
 
 // SetMessage 设置返回自定义错误消息
 func (r *Response) SetMessage(message string) *Response {
-	r.result.Message = message
+	r.result.Msg = message
 	return r
 }
 
@@ -102,8 +102,8 @@ var ErrorText = errors.NewErrorText(config.Config.Language)
 
 // json 返回 gin 框架的 HandlerFunc
 func (r *Response) json(c *gin.Context) {
-	if r.result.Message == "" {
-		r.result.Message = ErrorText.Text(r.result.Code)
+	if r.result.Msg == "" {
+		r.result.Msg = ErrorText.Text(r.result.Code)
 	}
 
 	// if r.Data == nil {

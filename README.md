@@ -66,8 +66,6 @@ server {
 }
 ```
 
-更新swag 文档 `swag init`
-
 ### 目录结构
 ```
 .

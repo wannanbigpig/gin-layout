@@ -16,16 +16,6 @@ func NewAuthController() *AuthController {
 	return &AuthController{}
 }
 
-// Login 测试登录
-// @Summary 一个跑通全流程的示例，业务代码未补充完整
-// @Schemes
-// @Description 一个跑通全流程的示例，业务代码未补充完整
-// @Tags 用户
-// @Param userinput body form.Login true "入参"
-// @Accept json
-// @Produce json
-// @Success 200 {object} model.AdminUsers
-// @Router /api/v1/login [post]
 func (api *AuthController) Login(c *gin.Context) {
 	// 初始化参数结构体
 	loginForm := form.LoginForm()
