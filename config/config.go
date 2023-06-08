@@ -1,12 +1,12 @@
 package config
 
 import (
+	"github.com/fsnotify/fsnotify"
+	"github.com/spf13/viper"
 	. "github.com/wannanbigpig/gin-layout/config/autoload"
+	utils2 "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
-	"gopkg.in/ini.v1"
-	"gopkg.in/yaml.v3"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -14,74 +14,88 @@ import (
 
 // Conf 配置项主结构体
 type Conf struct {
-	AppConfig `ini:"app" yaml:"app"`
-	Server    ServerConfig `ini:"server" yaml:"server"`
-	Mysql     MysqlConfig  `ini:"mysql" yaml:"mysql"`
-	Redis     RedisConfig  `ini:"redis" yaml:"redis"`
-	Logger    LoggerConfig `ini:"logger" yaml:"logger"`
+	AppConfig `mapstructure:"app"`
+	Mysql     MysqlConfig  `mapstructure:"mysql"`
+	Redis     RedisConfig  `mapstructure:"redis"`
+	Logger    LoggerConfig `mapstructure:"logger"`
+	Jwt       JwtConfig    `mapstructure:"jwt"`
 }
 
-var Config = &Conf{
-	AppConfig: App,
-	Server:    Server,
-	Mysql:     Mysql,
-	Redis:     Redis,
-	Logger:    Logger,
-}
-
-var once sync.Once
+var (
+	Config = &Conf{
+		AppConfig: App,
+		Mysql:     Mysql,
+		Redis:     Redis,
+		Logger:    Logger,
+		Jwt:       Jwt,
+	}
+	once sync.Once
+	V    *viper.Viper
+)
 
 func InitConfig(configPath string) {
 	once.Do(func() {
 		// 加载 .yaml 配置
-		loadYaml(configPath)
+		load(configPath)
 
-		// 加载 .ini 配置
-		// loadIni(configPath)
+		// 检查jwtSecretKey
+		checkJwtSecretKey()
 	})
 }
 
-func loadYaml(configPath string) {
-	var yamlConfig string
-	if configPath == "" {
-		runDirectory, _ := utils.GetCurrentPath()
-		// 生成 config.yaml 文件
-		yamlConfig = filepath.Join(runDirectory, "/config.yaml")
-		yamlExampleConfig := filepath.Join(runDirectory, "/config.yaml.example")
-		copyConf(yamlExampleConfig, yamlConfig)
-	} else {
-		yamlConfig = configPath
-	}
-
-	cfg, err := ioutil.ReadFile(yamlConfig)
-	if err != nil {
-		panic("Failed to read configuration file:" + err.Error())
-	}
-	err = yaml.Unmarshal(cfg, &Config)
-	if err != nil {
-		panic("Failed to load configuration:" + err.Error())
+// checkJwtSecretKey 检查jwtSecretKey
+func checkJwtSecretKey() {
+	// 自动生成JWT secretKey
+	if Config.Jwt.SecretKey == "" {
+		Config.Jwt.SecretKey = utils2.RandString(64)
+		V.Set("jwt.secret_key", Config.Jwt.SecretKey)
+		err := V.WriteConfig()
+		if err != nil {
+			panic("自动生成JWT secretKey失败: " + err.Error())
+		}
 	}
 }
 
-// load 加载配置项
-func loadIni(configPath string) {
-	var iniConfig string
+func load(configPath string) {
+	var filePath string
 	if configPath == "" {
 		runDirectory, _ := utils.GetCurrentPath()
-		// 生成 config.ini 文件
-		iniConfig = filepath.Join(runDirectory, "/config.ini")
-		iniExampleConfig := filepath.Join(runDirectory, "/config.ini.example")
-		copyConf(iniExampleConfig, iniConfig)
+		// 生成 config.yaml 文件
+		filePath = filepath.Join(runDirectory, "/config.yaml")
+		exampleConfig := filepath.Join(runDirectory, "/config.yaml.example")
+		copyConf(exampleConfig, filePath)
 	} else {
-		iniConfig = configPath
+		filePath = configPath
 	}
-	cfg, err := ini.Load(iniConfig)
-	if err != nil {
-		panic("Failed to read configuration file:" + err.Error())
+	V = viper.New()
+	// 路径必须要写相对路径,相对于项目的路径
+	V.SetConfigFile(filePath)
+
+	if err := V.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			panic("未找到配置: " + err.Error())
+		} else {
+			panic("读取配置出错：" + err.Error())
+		}
 	}
-	err = cfg.Section("app").MapTo(&Config)
-	if err != nil {
-		panic("Failed to load configuration:" + err.Error())
+
+	// 映射到结构体
+	if err := V.Unmarshal(&Config); err != nil {
+		panic(err)
+	}
+
+	// 默认不监听配置变化，有些配置例如端口，数据库连接等即时配置变化不重启也不会变更。会导致配置文件与实际监听端口不一致混淆
+	if Config.WatchConfig {
+		// 监听配置文件变化
+		V.WatchConfig()
+		V.OnConfigChange(func(in fsnotify.Event) {
+			if err := V.ReadInConfig(); err != nil {
+				panic(err)
+			}
+			if err := V.Unmarshal(&Config); err != nil {
+				panic(err)
+			}
+		})
 	}
 }
 
@@ -90,7 +104,7 @@ func copyConf(exampleConfig, config string) {
 	fileInfo, err := os.Stat(config)
 
 	if err == nil {
-		// config.ini 路径存在， 判断 config.ini 文件是否目录，不是目录则代表文件存在直接 return
+		// 路径存在， 判断 config 文件是否目录，不是目录则代表文件存在直接 return
 		if !fileInfo.IsDir() {
 			return
 		}
@@ -102,7 +116,7 @@ func copyConf(exampleConfig, config string) {
 		panic("初始化失败: " + err.Error())
 	}
 
-	// 自动复制一份config.ini
+	// 自动复制一份示例文件
 	source, err := os.Open(exampleConfig)
 	if err != nil {
 		panic("创建配置文件失败，配置示例文件不存在: " + err.Error())

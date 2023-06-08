@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-type result struct {
+type Result struct {
 	Code int         `json:"code"`
 	Msg  string      `json:"msg"`
 	Data interface{} `json:"data"`
@@ -17,14 +17,14 @@ type result struct {
 
 type Response struct {
 	httpCode int
-	result   *result
+	result   *Result
 }
 
 func Resp() *Response {
 	// 初始化response
 	return &Response{
 		httpCode: http.StatusOK,
-		result: &result{
+		result: &Result{
 			Code: 0,
 			Msg:  "",
 			Data: nil,

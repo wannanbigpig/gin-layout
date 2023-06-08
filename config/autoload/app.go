@@ -6,16 +6,18 @@ import (
 )
 
 type AppConfig struct {
-	AppEnv         string `ini:"app_env" yaml:"app_env"`
-	Debug          bool   `ini:"debug" yaml:"debug"`
-	Language       string `ini:"language" yaml:"language"`
-	StaticBasePath string `ini:"base_path" yaml:"base_path"`
+	AppEnv         string `mapstructure:"app_env"`
+	Debug          bool   `mapstructure:"debug"`
+	Language       string `mapstructure:"language"`
+	WatchConfig    bool   `mapstructure:"watch_config"`
+	StaticBasePath string `mapstructure:"base_path"`
 }
 
 var App = AppConfig{
 	AppEnv:         "local",
 	Debug:          true,
 	Language:       "zh_CN",
+	WatchConfig:    false,
 	StaticBasePath: getDefaultPath(),
 }
 

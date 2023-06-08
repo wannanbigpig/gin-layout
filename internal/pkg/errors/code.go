@@ -3,13 +3,13 @@ package errors
 const (
 	SUCCESS            = 0
 	FAILURE            = 1
+	AuthorizationError = 403
 	NotFound           = 404
+	NotLogin           = 401
 	InvalidParameter   = 10000
 	UserDoesNotExist   = 10001
 	ServerError        = 10101
 	TooManyRequests    = 10102
-	AuthorizationError = 10103
-	RBACError          = 10104
 )
 
 type ErrorText struct {

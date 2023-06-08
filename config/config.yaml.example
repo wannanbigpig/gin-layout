@@ -3,6 +3,7 @@ app:
   app_env: local
   debug: true
   language: zh_CN
+#  watch_config: false
 #  base_path: ""
 server:
   host: 127.0.0.1
