@@ -1,11 +1,11 @@
 package autoload
 
 type RedisConfig struct {
-	Enable   bool   `ini:"enable" yaml:"enable"`
-	Host     string `ini:"host" yaml:"host"`
-	Port     string `ini:"port" yaml:"port"`
-	Password string `ini:"password" yaml:"password"`
-	Database int    `ini:"database" yaml:"database"`
+	Enable   bool   `mapstructure:"enable"`
+	Host     string `mapstructure:"host"`
+	Port     string `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	Database int    `mapstructure:"database"`
 }
 
 var Redis = RedisConfig{

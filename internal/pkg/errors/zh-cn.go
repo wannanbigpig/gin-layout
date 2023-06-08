@@ -8,6 +8,6 @@ var zhCNText = map[int]string{
 	TooManyRequests:    "请求过多",
 	InvalidParameter:   "参数错误",
 	UserDoesNotExist:   "用户不存在",
-	AuthorizationError: "权限错误",
-	RBACError:          "暂无访问权限",
+	AuthorizationError: "暂无访问权限",
+	NotLogin:           "请先登录",
 }

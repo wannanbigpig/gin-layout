@@ -8,6 +8,6 @@ var enUSText = map[int]string{
 	TooManyRequests:    "Too many requests",
 	InvalidParameter:   "Parameter error",
 	UserDoesNotExist:   "user does not exist",
-	AuthorizationError: "Authorization error",
-	RBACError:          "No access",
+	AuthorizationError: "You have no permission",
+	NotLogin:           "Please login first",
 }

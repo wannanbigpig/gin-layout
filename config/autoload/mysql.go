@@ -3,19 +3,19 @@ package autoload
 import "time"
 
 type MysqlConfig struct {
-	Enable       bool          `ini:"enable" yaml:"enable"`
-	Host         string        `ini:"host" yaml:"host"`
-	Username     string        `ini:"username" yaml:"username"`
-	Password     string        `ini:"password" yaml:"password"`
-	Port         uint16        `ini:"port" yaml:"port"`
-	Database     string        `ini:"database" yaml:"database"`
-	Charset      string        `ini:"charset" yaml:"charset"`
-	TablePrefix  string        `ini:"table_prefix" yaml:"table_prefix"`
-	MaxIdleConns int           `ini:"max_idle_conns" yaml:"max_idle_conns"`
-	MaxOpenConns int           `ini:"max_open_conns" yaml:"max_open_conns"`
-	MaxLifetime  time.Duration `ini:"max_lifetime" yaml:"max_lifetime"`
-	LogLevel     int           `ini:"log_level" yaml:"log_level"`
-	PrintSql     bool          `ini:"print_sql" yaml:"print_sql"`
+	Enable       bool          `mapstructure:"enable"`
+	Host         string        `mapstructure:"host"`
+	Username     string        `mapstructure:"username"`
+	Password     string        `mapstructure:"password"`
+	Port         uint16        `mapstructure:"port"`
+	Database     string        `mapstructure:"database"`
+	Charset      string        `mapstructure:"charset"`
+	TablePrefix  string        `mapstructure:"table_prefix"`
+	MaxIdleConns int           `mapstructure:"max_idle_conns"`
+	MaxOpenConns int           `mapstructure:"max_open_conns"`
+	MaxLifetime  time.Duration `mapstructure:"max_lifetime"`
+	LogLevel     int           `mapstructure:"log_level"`
+	PrintSql     bool          `mapstructure:"print_sql"`
 }
 
 var Mysql = MysqlConfig{

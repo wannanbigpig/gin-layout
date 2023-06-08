@@ -6,7 +6,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -45,7 +45,7 @@ func SetRouters() *gin.Engine {
 	})
 
 	// 设置 API 路由
-	setApiRoute(r)
+	SetAdminApiRoute(r)
 
 	r.NoRoute(func(c *gin.Context) {
 		response2.Resp().SetHttpCode(http.StatusNotFound).FailCode(c, errors.NotFound)
@@ -59,7 +59,7 @@ func ReleaseRouter() *gin.Engine {
 	// 切换到生产模式
 	gin.SetMode(gin.ReleaseMode)
 	// 禁用 gin 输出接口访问日志
-	gin.DefaultWriter = ioutil.Discard
+	gin.DefaultWriter = io.Discard
 
 	engine := gin.New()
 

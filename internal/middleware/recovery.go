@@ -7,7 +7,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/config"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
-	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"net/http"
 	"strings"
 )
@@ -22,7 +22,7 @@ func CustomRecovery() gin.HandlerFunc {
 		if config.Config.Debug == true {
 			errStr = fmt.Sprintf("%v", err)
 		}
-		response2.Resp().SetHttpCode(http.StatusInternalServerError).FailCode(c, e.ServerError, errStr)
+		response.Resp().SetHttpCode(http.StatusInternalServerError).FailCode(c, e.ServerError, errStr)
 	})
 }
 

@@ -1,56 +1,31 @@
 package utils
 
 import (
-	"database/sql/driver"
-	"fmt"
-	"strings"
+	"math/rand"
 	"time"
 )
 
-type FormatDate struct {
-	time.Time
-}
+// RandString 生成随机字符串
+func RandString(n int) string {
+	letterBytes := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	var src = rand.NewSource(time.Now().UnixNano())
 
-const (
-	timeFormat = "2006-01-02 15:04:05"
-)
-
-func (t FormatDate) MarshalJSON() ([]byte, error) {
-	if &t == nil || t.IsZero() {
-		return []byte("null"), nil
+	const (
+		letterIdxBits = 6
+		letterIdxMask = 1<<letterIdxBits - 1
+		letterIdxMax  = 63 / letterIdxBits
+	)
+	b := make([]byte, n)
+	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
+		if remain == 0 {
+			cache, remain = src.Int63(), letterIdxMax
+		}
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			b[i] = letterBytes[idx]
+			i--
+		}
+		cache >>= letterIdxBits
+		remain--
 	}
-	return []byte(fmt.Sprintf("\"%s\"", t.Format(timeFormat))), nil
-}
-
-func (t FormatDate) Value() (driver.Value, error) {
-	var zeroTime time.Time
-	if t.Time.UnixNano() == zeroTime.UnixNano() {
-		return nil, nil
-	}
-	return t.Time, nil
-}
-
-func (t *FormatDate) Scan(v interface{}) error {
-	if value, ok := v.(time.Time); ok {
-		*t = FormatDate{value}
-		return nil
-	}
-	return fmt.Errorf("can not convert %v to timestamp", v)
-}
-
-func (t *FormatDate) String() string {
-	if t == nil || t.IsZero() {
-		return ""
-	}
-	return fmt.Sprintf("%s", t.Time.Format(timeFormat))
-}
-
-func (t *FormatDate) UnmarshalJSON(data []byte) error {
-	str := string(data)
-	if str == "null" {
-		return nil
-	}
-	t1, err := time.ParseInLocation(timeFormat, strings.Trim(str, "\""), time.Local)
-	*t = FormatDate{t1}
-	return err
+	return string(b)
 }

@@ -1,13 +1,12 @@
-package v1
+package controller
 
 import (
 	"fmt"
 	"github.com/gin-gonic/gin"
-	"github.com/wannanbigpig/gin-layout/internal/controller"
 )
 
 type DemoController struct {
-	controller.Api
+	Api
 }
 
 func NewDemoController() *DemoController {
