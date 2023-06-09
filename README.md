@@ -36,14 +36,14 @@ go run main.go -h
 ### 部署
 ```shell
 # 打包项目（如何打包其他os平台的包自行 google）
-go build -o cmd/go_layout_liunx main.go
+go build -o cmd/go_layout main.go
 
 # 运行时请配置指定config文件的位置，否则可能会出现找不到配置的情况，修改完配置请重启
 cmd/go-layout server -c="指定配置文件位置（/home/go-layout-config.yaml）"
 
 # 使用 supervisord 管理进程配置示例如下
 [program:go-layout]
-command=/home/go-layout/go_layout_liunx -c=/home/go/go-layout/config.yaml
+command=/home/go-layout/go_layout -c=/home/go/go-layout/config.yaml
 directory=/home/go/go-layout
 autostart=true
 startsecs=5
