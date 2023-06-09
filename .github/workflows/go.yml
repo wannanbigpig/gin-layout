@@ -24,11 +24,8 @@ jobs:
     - name: Display Go version
       run: go version
 
-    - name: Display Go ENV
-      run: go env
-
-    - name: Display Directory
-      run: pwd && ls -la
+    - name: export GO111MODULE=on
+      run: export GO111MODULE=on
 
     - name: Build
       run: go build -v ./...
