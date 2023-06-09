@@ -24,11 +24,8 @@ jobs:
     - name: Display Go version
       run: go version
 
-    - name: export GO111MODULE=on
-      run: export GO111MODULE=on
-
     - name: Build
-      run: go build -v ./...
+      run: export GO111MODULE=on && go build -v ./...
 
     - name: Test
       run: go test -v ./...
