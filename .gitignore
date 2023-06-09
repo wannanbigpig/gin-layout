@@ -21,3 +21,4 @@ storage
 *.ini
 gin-layout/
 logs/
+.vscode
