@@ -28,10 +28,9 @@ jobs:
       run: go env
 
     - name: Display Directory
-      run: pwd
+      run: pwd && ls -la
 
     - name: Build
-      working-directory: ./go-layout
       run: go build -v ./...
 
     - name: Test
