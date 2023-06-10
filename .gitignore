@@ -22,3 +22,4 @@ storage
 gin-layout/
 logs/
 .vscode
+migrate

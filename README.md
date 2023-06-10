@@ -8,8 +8,24 @@
 ### Gin Project Template
 > 本项目使用 gin 框架为核心搭建的一个脚手架，可以基于本项目快速完成业务开发，开箱📦 即用
 
+### 以实现接口文档
+接口文档：[点击跳转至接口文档](https://apifox.com/apidoc/shared-721e0594-dea4-4d86-bad3-851b51c16e03/api-87990142)
+
 ### 运行
-拉取代码后在项目根目录执行如下命令：
+拉取代码：
+```shell
+git clone https://github.com/wannanbigpig/gin-layout.git
+```
+执行迁移文件：
+
+安装migrate [查看安装文档](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate)
+
+使用migrate [更多用法](https://github.com/golang-migrate/migrate)
+```shell
+# 执行迁移文件创建数据表
+migrate -database 'mysql://root:root@tcp(127.0.0.1:3306)/go_layout?charset=utf8mb4&parseTime=True&loc=Local' -path data/migrations up
+```
+启动脚手架服务：
 ```shell
 # 建议开启GO111MODULE
 # go env -w GO111MODULE=on
@@ -22,9 +38,11 @@ go mod download
 go run main.go server
 
 # 项目起来后执行下面命令访问示例路由
-curl "http://127.0.0.1:9999/api/v1/hello-world"
+curl "http://127.0.0.1:9001/ping"
+# {"message":"pong"}
+curl "http://127.0.0.1:9001/api/v1/hello-world"
 # {"code":0,"message":"OK","data":{"result":"hello gin-layout"},"cost":"6.151µs"}
-curl "http://127.0.0.1:9999/api/v1/hello-world?name=world"
+curl "http://127.0.0.1:9001/api/v1/hello-world?name=world"
 # {"code":0,"message":"OK","data":{"result":"hello world"},"cost":"6.87µs"}
 ```
 更多用法使用以下命令查看:
@@ -56,7 +74,7 @@ server {
     server_name api.xxx.com;
     location / {
         proxy_set_header Host $host;
-        proxy_pass http://172.0.0.1:9999;
+        proxy_pass http://172.0.0.1:9001;
     }
 }
 ```
