@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS `a_admin_user`;
