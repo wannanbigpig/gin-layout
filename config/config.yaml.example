@@ -5,9 +5,10 @@ app:
   language: zh_CN
 #  watch_config: false
 #  base_path: ""
-server:
-  host: 127.0.0.1
-  port: 9999
+jwt:
+  ttl: 7200
+  refresh_ttl: 3600
+  secret_key: Wj7rctFCgio1UxDXQEQbr64S5Q4JNQQthee9PcAKxFnZXFcnUlMlj8uBTfSi9xGq
 mysql:
   enable: false
   host: 127.0.0.1

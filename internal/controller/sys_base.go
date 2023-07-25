@@ -13,7 +13,7 @@ type Api struct {
 }
 
 // Success 业务成功响应
-func (api *Api) Success(c *gin.Context, data ...any) {
+func (api Api) Success(c *gin.Context, data ...any) {
 	response := r.Resp()
 	if data != nil {
 		response.WithDataSuccess(c, data[0])
@@ -23,7 +23,7 @@ func (api *Api) Success(c *gin.Context, data ...any) {
 }
 
 // FailCode 业务失败响应
-func (api *Api) FailCode(c *gin.Context, code int, data ...any) {
+func (api Api) FailCode(c *gin.Context, code int, data ...any) {
 	response := r.Resp()
 	if data != nil {
 		response.WithData(data[0]).FailCode(c, code)
@@ -33,7 +33,7 @@ func (api *Api) FailCode(c *gin.Context, code int, data ...any) {
 }
 
 // Fail 业务失败响应
-func (api *Api) Fail(c *gin.Context, code int, message string, data ...any) {
+func (api Api) Fail(c *gin.Context, code int, message string, data ...any) {
 	response := r.Resp()
 	if data != nil {
 		response.WithData(data[0]).FailCode(c, code, message)
@@ -43,7 +43,7 @@ func (api *Api) Fail(c *gin.Context, code int, message string, data ...any) {
 }
 
 // Err 判断错误类型是自定义类型则自动返回错误中携带的code和message，否则返回服务器错误
-func (api *Api) Err(c *gin.Context, e error) {
+func (api Api) Err(c *gin.Context, e error) {
 	businessError, err := api.AsBusinessError(e)
 	if err != nil {
 		log.Logger.Warn("Unknown error:", zap.Any("Error reason:", err))

@@ -11,12 +11,12 @@ import (
 )
 
 func SetRouters() *gin.Engine {
-	var r *gin.Engine
+	var engine *gin.Engine
 
 	if config.Config.Debug == false {
 		// 生产模式
-		r = ReleaseRouter()
-		r.Use(
+		engine = ReleaseRouter()
+		engine.Use(
 			middleware.RequestCostHandler(),
 			middleware.CustomLogger(),
 			middleware.CustomRecovery(),
@@ -24,8 +24,8 @@ func SetRouters() *gin.Engine {
 		)
 	} else {
 		// 开发调试模式
-		r = gin.New()
-		r.Use(
+		engine = gin.New()
+		engine.Use(
 			middleware.RequestCostHandler(),
 			gin.Logger(),
 			middleware.CustomRecovery(),
@@ -33,25 +33,26 @@ func SetRouters() *gin.Engine {
 		)
 	}
 	// set up trusted agents
-	err := r.SetTrustedProxies([]string{"127.0.0.1"})
+	err := engine.SetTrustedProxies([]string{"127.0.0.1"})
 	if err != nil {
 		panic(err)
 	}
 	// ping
-	r.Any("/ping", func(c *gin.Context) {
+	engine.GET("/ping", func(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{
 			"message": "pong!",
 		})
 	})
 
 	// 设置 API 路由
-	SetAdminApiRoute(r)
+	SetAdminApiRoute(engine)
 
-	r.NoRoute(func(c *gin.Context) {
+	// 统一处理 404
+	engine.NoRoute(func(c *gin.Context) {
 		response2.Resp().SetHttpCode(http.StatusNotFound).FailCode(c, errors.NotFound)
 	})
 
-	return r
+	return engine
 }
 
 // ReleaseRouter 生产模式使用官方建议设置为 release 模式

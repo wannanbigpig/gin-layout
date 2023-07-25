@@ -16,8 +16,7 @@ import (
 func CustomRecovery() gin.HandlerFunc {
 	DefaultErrorWriter := &PanicExceptionRecord{}
 	return gin.RecoveryWithWriter(DefaultErrorWriter, func(c *gin.Context, err interface{}) {
-		// 这里针对发生的panic等异常进行统一响应即
-		// 这里针对发生的panic等异常进行统一响应即
+		// 这里针对发生的panic等异常进行统一响应即可
 		errStr := ""
 		if config.Config.Debug == true {
 			errStr = fmt.Sprintf("%v", err)

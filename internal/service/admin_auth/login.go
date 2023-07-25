@@ -1,10 +1,11 @@
-package service
+package admin_auth
 
 import (
 	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
+	"github.com/wannanbigpig/gin-layout/internal/service"
 	"time"
 )
 
@@ -17,7 +18,7 @@ type TokenResponse struct {
 
 // LoginService 登录授权服务
 type LoginService struct {
-	base
+	service.Base
 }
 
 func NewLoginService() *LoginService {

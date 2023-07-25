@@ -7,9 +7,9 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 )
 
-func SetAdminApiRoute(r *gin.Engine) {
+func SetAdminApiRoute(e *gin.Engine) {
 	// version 1
-	v1 := r.Group("api/v1")
+	v1 := e.Group("api/v1")
 	{
 		demo := controller.NewDemoController()
 		v1.GET("hello-world", demo.HelloWorld)
@@ -23,10 +23,39 @@ func SetAdminApiRoute(r *gin.Engine) {
 			// 管理员用户
 			adminUser := reqAuth.Group("admin-user")
 			{
-				adminUserC := admin_v1.NewAdminUserController()
-				adminUser.GET("get", adminUserC.GetUserInfo)
+				r := admin_v1.NewAdminUserController()
+				// 获取用户信息
+				adminUser.GET("get", r.GetUserInfo)
 			}
 
+			// api权限管理
+			permissions := reqAuth.Group("permission")
+			{
+				r := admin_v1.NewPermissionController()
+				permissions.POST("edit", r.Edit)
+				permissions.POST("list", r.List)
+			}
+
+			// 菜单管理
+			menu := reqAuth.Group("menu")
+			{
+				r := admin_v1.NewAdminUserController()
+				menu.GET("get", r.GetUserInfo)
+			}
+
+			// 角色管理
+			role := reqAuth.Group("role")
+			{
+				r := admin_v1.NewAdminUserController()
+				role.GET("get", r.GetUserInfo)
+			}
+
+			// 用户组管理
+			group := reqAuth.Group("group")
+			{
+				r := admin_v1.NewAdminUserController()
+				group.GET("get", r.GetUserInfo)
+			}
 		}
 	}
 }

@@ -26,9 +26,10 @@ func SetupRouter() *gin.Engine {
 
 	gin.SetMode(gin.ReleaseMode)
 	gin.DefaultWriter = io.Discard
-	r := gin.Default()
-	routers.SetAdminApiRoute(r)
-	return r
+	engine := gin.Default()
+
+	routers.SetAdminApiRoute(engine)
+	return engine
 }
 
 func Request(method, route string, body *string, args ...any) *utils.HttpRequest {

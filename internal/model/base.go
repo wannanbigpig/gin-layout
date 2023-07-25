@@ -19,7 +19,7 @@ func (model *BaseModel) DB() *gorm.DB {
 
 type ContainsDeleteBaseModel struct {
 	BaseModel
-	DeletedAt soft_delete.DeletedAt `gorm:"column:deleted_at;type:int(11) unsigned;not null;default:0;index" json:"-"`
+	DeletedAt soft_delete.DeletedAt `gorm:"column:deleted_at;type:int(11) unsigned;not null;default:0;index;" json:"-"`
 }
 
 func DB() *gorm.DB {

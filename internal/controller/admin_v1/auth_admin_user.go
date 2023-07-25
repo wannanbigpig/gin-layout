@@ -3,7 +3,7 @@ package admin_v1
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/service/admin_auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -17,7 +17,7 @@ func NewAdminUserController() *AdminUserController {
 }
 
 func (api AdminUserController) GetUserInfo(c *gin.Context) {
-	result, err := service.NewAdminUserService().GetUserInfo(c.GetUint("a_uid"))
+	result, err := admin_auth.NewAdminUserService().GetUserInfo(c.GetUint("a_uid"))
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -33,7 +33,7 @@ func (api AdminUserController) Add(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &IDForm); err != nil {
 		return
 	}
-	result, err := service.NewAdminUserService().GetUserInfo(IDForm.ID)
+	result, err := admin_auth.NewAdminUserService().GetUserInfo(IDForm.ID)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -49,7 +49,7 @@ func (api AdminUserController) Delete(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &IDForm); err != nil {
 		return
 	}
-	result, err := service.NewAdminUserService().GetUserInfo(IDForm.ID)
+	result, err := admin_auth.NewAdminUserService().GetUserInfo(IDForm.ID)
 	if err != nil {
 		api.Err(c, err)
 		return

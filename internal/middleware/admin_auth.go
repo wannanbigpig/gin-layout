@@ -9,7 +9,7 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
-	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/service/admin_auth"
 	"strconv"
 	"time"
 )
@@ -44,7 +44,7 @@ func AdminAuthHandler() gin.HandlerFunc {
 			refreshTTL := config.Config.Jwt.RefreshTTL * time.Second
 			fmt.Println(diff.Seconds(), refreshTTL)
 			if diff < refreshTTL {
-				tokenResponse, _ := service.NewLoginService().Refresh(adminCustomClaims.UserID)
+				tokenResponse, _ := admin_auth.NewLoginService().Refresh(adminCustomClaims.UserID)
 				c.Writer.Header().Set("refresh-access-token", tokenResponse.AccessToken)
 				c.Writer.Header().Set("refresh-exp", strconv.FormatInt(tokenResponse.ExpiresAt, 10))
 			}
