@@ -121,7 +121,7 @@ func CheckPostParams(c *gin.Context, obj interface{}) error {
 
 func registerValidation() {
 	// 注册手机号验证规则
-	err := validate.RegisterValidation("phone", func(fl validator.FieldLevel) bool {
+	err := validate.RegisterValidation("mobile", func(fl validator.FieldLevel) bool {
 		return regexp.MustCompile(`^1[3456789]\d{9}$`).MatchString(fl.Field().String())
 	})
 	if err != nil {
@@ -140,7 +140,7 @@ type translation struct {
 func customRegisTranslation() error {
 	translations := []translation{
 		{
-			tag:         "phone",
+			tag:         "mobile",
 			translation: "{0}格式不正确",
 			override:    false,
 		},
