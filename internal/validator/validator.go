@@ -10,7 +10,9 @@ import (
 	enTranslations "github.com/go-playground/validator/v10/translations/en"
 	zhTranslations "github.com/go-playground/validator/v10/translations/zh"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	"go.uber.org/zap"
 	"reflect"
 	"regexp"
 	"strings"
@@ -74,6 +76,11 @@ func validatorTrans(locale string) {
 	if err != nil {
 		panic("Failed to register translator when initializing validator")
 	}
+	// 注册自定义语言翻译
+	err = customRegisTranslation()
+	if err != nil {
+		panic("Failed to register translator when initializing validator")
+	}
 }
 
 func ResponseError(c *gin.Context, err error) {
@@ -114,10 +121,68 @@ func CheckPostParams(c *gin.Context, obj interface{}) error {
 
 func registerValidation() {
 	// 注册手机号验证规则
-	err := validate.RegisterValidation("username", func(fl validator.FieldLevel) bool {
+	err := validate.RegisterValidation("mobile", func(fl validator.FieldLevel) bool {
 		return regexp.MustCompile(`^1[3456789]\d{9}$`).MatchString(fl.Field().String())
 	})
 	if err != nil {
 		panic("Failed to register the mobile phone number verification rule")
 	}
+}
+
+type translation struct {
+	tag             string
+	translation     string
+	override        bool
+	customRegisFunc validator.RegisterTranslationsFunc
+	customTransFunc validator.TranslationFunc
+}
+
+func customRegisTranslation() error {
+	translations := []translation{
+		{
+			tag:         "mobile",
+			translation: "{0}格式不正确",
+			override:    false,
+		},
+	}
+
+	return registerTranslation(translations)
+}
+
+func registerTranslation(translations []translation) (err error) {
+	for _, t := range translations {
+		if t.customTransFunc != nil && t.customRegisFunc != nil {
+			err = validate.RegisterTranslation(t.tag, trans, t.customRegisFunc, t.customTransFunc)
+		} else if t.customTransFunc != nil && t.customRegisFunc == nil {
+			err = validate.RegisterTranslation(t.tag, trans, registrationFunc(t.tag, t.translation, t.override), t.customTransFunc)
+		} else if t.customTransFunc == nil && t.customRegisFunc != nil {
+			err = validate.RegisterTranslation(t.tag, trans, t.customRegisFunc, translateFunc)
+		} else {
+			err = validate.RegisterTranslation(t.tag, trans, registrationFunc(t.tag, t.translation, t.override), translateFunc)
+		}
+
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func registrationFunc(tag string, translation string, override bool) validator.RegisterTranslationsFunc {
+	return func(ut ut.Translator) (err error) {
+		if err = ut.Add(tag, translation, override); err != nil {
+			return
+		}
+		return
+	}
+}
+
+func translateFunc(ut ut.Translator, fe validator.FieldError) string {
+	t, err := ut.T(fe.Tag(), fe.Field())
+	if err != nil {
+		log.Logger.Warn("警告: 翻译字段错误: %#v", zap.Any("Error reason:", fe))
+		return fe.(error).Error()
+	}
+
+	return t
 }
