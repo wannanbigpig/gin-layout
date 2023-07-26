@@ -5,6 +5,6 @@ type LoginAuth struct {
 	PassWord string `form:"password" json:"password"  binding:"required,min=6"` //  验证规则：必填，最小长度为6
 }
 
-func LoginForm() *LoginAuth {
+func NewLoginForm() *LoginAuth {
 	return &LoginAuth{}
 }

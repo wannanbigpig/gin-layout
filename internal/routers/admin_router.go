@@ -33,7 +33,7 @@ func SetAdminApiRoute(e *gin.Engine) {
 			{
 				r := admin_v1.NewPermissionController()
 				permissions.POST("edit", r.Edit)
-				permissions.POST("list", r.List)
+				permissions.GET("list", r.List)
 			}
 
 			// 菜单管理

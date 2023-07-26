@@ -19,7 +19,7 @@ func NewLoginController() *LoginController {
 // Login 管理员用户登录
 func (api LoginController) Login(c *gin.Context) {
 	// 初始化参数结构体
-	loginForm := form.LoginForm()
+	loginForm := form.NewLoginForm()
 	// 绑定参数并使用验证器验证参数
 	if err := validator.CheckPostParams(c, &loginForm); err != nil {
 		return

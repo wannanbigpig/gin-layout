@@ -18,7 +18,7 @@ func NewPermissionController() *PermissionController {
 
 func (api PermissionController) Edit(c *gin.Context) {
 	// 初始化参数结构体
-	permissionForm := form.EditPermissionForm()
+	permissionForm := form.NewEditPermissionForm()
 	// 绑定参数并使用验证器验证参数
 	if err := validator.CheckPostParams(c, &permissionForm); err != nil {
 		return
@@ -33,6 +33,12 @@ func (api PermissionController) Edit(c *gin.Context) {
 }
 
 func (api PermissionController) List(c *gin.Context) {
-	admin_auth.NewPermissionService().ListPage()
-	api.Success(c, nil)
+	// 初始化参数结构体
+	permissionQuery := form.NewListPermissionQuery()
+	// 绑定参数并使用验证器验证参数
+	if err := validator.CheckQueryParams(c, &permissionQuery); err != nil {
+		return
+	}
+	res := admin_auth.NewPermissionService().ListPage(permissionQuery)
+	api.Success(c, res)
 }

@@ -28,7 +28,7 @@ func (api AdminUserController) GetUserInfo(c *gin.Context) {
 
 func (api AdminUserController) Add(c *gin.Context) {
 	// 初始化参数结构体
-	IDForm := form.IDForm()
+	IDForm := form.NewIDForm()
 	//// 绑定参数并使用验证器验证参数
 	if err := validator.CheckQueryParams(c, &IDForm); err != nil {
 		return
@@ -44,7 +44,7 @@ func (api AdminUserController) Add(c *gin.Context) {
 
 func (api AdminUserController) Delete(c *gin.Context) {
 	// 初始化参数结构体
-	IDForm := form.IDForm()
+	IDForm := form.NewIDForm()
 	//// 绑定参数并使用验证器验证参数
 	if err := validator.CheckQueryParams(c, &IDForm); err != nil {
 		return

@@ -1,6 +1,8 @@
 package resources
 
-import "github.com/wannanbigpig/gin-layout/internal/model"
+import (
+	"github.com/jinzhu/copier"
+)
 
 type AdminUserResources struct {
 	ID       uint   `json:"id"`
@@ -12,14 +14,11 @@ type AdminUserResources struct {
 	Avatar   string `json:"avatar"`
 }
 
-func NewAdminUserResources(user *model.AdminUsers) *AdminUserResources {
-	return &AdminUserResources{
-		ID:       user.ID,
-		Nickname: user.Nickname,
-		Username: user.Username,
-		Mobile:   user.Mobile,
-		IsAdmin:  user.IsAdmin,
-		Email:    user.Email,
-		Avatar:   user.Avatar,
+func NewAdminUserResources(data any) *AdminUserResources {
+	var adminUser AdminUserResources
+	err := copier.Copy(&adminUser, data)
+	if err != nil {
+		return nil
 	}
+	return &adminUser
 }
