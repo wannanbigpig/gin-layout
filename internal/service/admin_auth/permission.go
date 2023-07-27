@@ -18,6 +18,7 @@ func NewPermissionService() *PermissionService {
 	return &PermissionService{}
 }
 
+// Edit 权限编辑
 func (s *PermissionService) Edit(params *form.EditPermission) error {
 	permissionModel := model.NewPermission()
 	data := map[string]any{
