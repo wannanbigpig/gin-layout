@@ -12,14 +12,14 @@ import (
 // PermissionService 登录授权服务
 type PermissionService struct {
 	service.Base
-	permissionModel *model.Permission
 }
 
 func NewPermissionService() *PermissionService {
 	return &PermissionService{}
 }
 
-func (p *PermissionService) Edit(params *form.EditPermission) error {
+func (s *PermissionService) Edit(params *form.EditPermission) error {
+	permissionModel := model.NewPermission()
 	data := map[string]any{
 		"name":    params.Name,
 		"desc":    params.Desc,
@@ -27,49 +27,47 @@ func (p *PermissionService) Edit(params *form.EditPermission) error {
 		"sort":    params.Sort,
 	}
 	if params.Id > 0 {
-		return p.permissionModel.Update(params.Id, data)
+		return permissionModel.Update(params.Id, data)
 	}
 	data["func"] = params.Func
 	data["func_path"] = params.FuncPath
 	data["method"] = params.Method
 	data["route"] = params.Route
-	count, err := p.permissionModel.HasRoute(params.Route)
+	count, err := permissionModel.HasRoute(params.Route)
 	if err != nil {
 		return err
 	}
 	if count > 0 {
 		return e.NewBusinessError(1, "权限路由已存在")
 	}
-	return p.permissionModel.Create(data)
+	return permissionModel.Create(data)
 }
 
 // ListPage 权限列表
-func (p *PermissionService) ListPage(permission *form.ListPermission) *resources.Collection {
-	permissionModel := model.NewPermission()
-	var condition string
+func (s *PermissionService) ListPage(permission *form.ListPermission) *resources.Collection {
+	var condition strings.Builder
 	var args []any
-
 	if permission.Name != "" {
-		condition = "name like ? AND"
+		condition.WriteString("name like ? AND ")
 		args = append(args, "%"+permission.Name+"%")
 	}
 	if permission.Method != "" {
-		condition = "method = ? AND "
+		condition.WriteString("method = ? AND ")
 		args = append(args, permission.Method)
 	}
 	if permission.Route != "" {
-		condition = "route like ? AND "
+		condition.WriteString("route like ? AND ")
 		args = append(args, "%"+permission.Route+"%")
 	}
 	if permission.IsAuth > 0 {
-		condition = "is_auth = ? AND "
+		condition.WriteString("is_auth = ? AND ")
 		args = append(args, permission.IsAuth)
 	}
-
-	if condition != "" {
-		condition = strings.TrimSuffix(condition, "AND ")
+	conditionStr := condition.String()
+	if conditionStr != "" {
+		conditionStr = strings.TrimSuffix(condition.String(), "AND ")
 	}
 
-	collection := permissionModel.ListPage(permission.Page, permission.PerPage, condition, args)
+	collection := model.NewPermission().ListPage(permission.Page, permission.PerPage, conditionStr, args)
 	return collection.ToCollection()
 }

@@ -45,7 +45,7 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func request(route string, body *string) *utils.HttpRequest {
+func postRequest(route string, body *string) *utils.HttpRequest {
 	options := map[string]string{
 		"Authorization": authorization,
 	}

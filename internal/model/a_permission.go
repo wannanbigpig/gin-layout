@@ -23,42 +23,42 @@ func NewPermission() *Permission {
 }
 
 // TableName 获取表名
-func (a *Permission) TableName() string {
+func (m *Permission) TableName() string {
 	return "a_permission"
 }
 
 // Registers 注册接口，写入到DB
-func (a *Permission) Registers(data []map[string]any) error {
-	return a.DB().Clauses(clause.OnConflict{
+func (m *Permission) Registers(data []map[string]any) error {
+	return m.DB().Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "route"}, {Name: "deleted_at"}},
 		DoUpdates: clause.AssignmentColumns([]string{"name", "route", "method", "func", "func_path", "updated_at"}),
-	}).Model(a).Create(data).Error
+	}).Model(m).Create(data).Error
 }
 
 // Update 更新权限
-func (a *Permission) Update(id uint, data map[string]any) error {
-	return a.DB().Model(a).Where("id = ?", id).UpdateColumns(data).Error
+func (m *Permission) Update(id uint, data map[string]any) error {
+	return m.DB().Model(m).Where("id = ?", id).UpdateColumns(data).Error
 }
 
 // Create 更新权限
-func (a *Permission) Create(data map[string]any) error {
-	return a.DB().Model(a).Create(data).Error
+func (m *Permission) Create(data map[string]any) error {
+	return m.DB().Model(m).Create(data).Error
 }
 
 // HasRoute 判断路由是否存在
-func (a *Permission) HasRoute(route string) (count int64, err error) {
-	err = a.DB().Model(a).Where("route = ?", route).Count(&count).Error
+func (m *Permission) HasRoute(route string) (count int64, err error) {
+	count, err = m.Count(m, "route = ?", []any{route})
 	return
 }
 
 // ListPage 分页
-func (a *Permission) ListPage(page, perPage int, condition string, args []any) *resources.PermissionCollection {
+func (m *Permission) ListPage(page, perPage int, condition string, args []any) *resources.PermissionCollection {
 	res := resources.NewPermissionCollection()
-	res.Total = a.Count(a, condition, args)
+	res.Total, _ = m.Count(m, condition, args)
 	if res.Total == 0 {
 		return res
 	}
-	query := a.DB().Model(a).Scopes(a.Paginate(page, perPage))
+	query := m.DB().Model(m).Scopes(m.Paginate(page, perPage))
 	if condition != "" {
 		query = query.Where(condition, args...)
 	}

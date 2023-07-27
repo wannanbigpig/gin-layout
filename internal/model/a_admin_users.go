@@ -4,8 +4,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// AdminUsers 总管理员表
-type AdminUsers struct {
+// AdminUser 总管理员表
+type AdminUser struct {
 	ContainsDeleteBaseModel
 	IsAdmin  int8   `json:"is_admin"` // 是否是总管理员
 	Nickname string `json:"nickname"` // 用户昵称
@@ -17,54 +17,54 @@ type AdminUsers struct {
 	Status   int8   `json:"status"`   // 上一次登录ip
 }
 
-func NewAdminUsers() *AdminUsers {
-	return &AdminUsers{}
+func NewAdminUsers() *AdminUser {
+	return &AdminUser{}
 }
 
 // TableName 获取表名
-func (u *AdminUsers) TableName() string {
+func (m *AdminUser) TableName() string {
 	return "a_admin_user"
 }
 
 // GetUserById 根据uid获取用户信息
-func (u *AdminUsers) GetUserById(id uint) *AdminUsers {
-	if err := u.DB().First(u, id).Error; err != nil {
+func (m *AdminUser) GetUserById(id uint) *AdminUser {
+	if err := m.DB().First(m, id).Error; err != nil {
 		return nil
 	}
-	return u
+	return m
 }
 
 // Register 用户注册，写入到DB
-func (u *AdminUsers) Register() error {
-	u.Password, _ = u.PasswordHash(u.Password)
-	result := u.DB().Create(u)
+func (m *AdminUser) Register() error {
+	m.Password, _ = m.PasswordHash(m.Password)
+	result := m.DB().Create(m)
 	return result.Error
 }
 
 // PasswordHash 密码hash并自动加盐
-func (u *AdminUsers) PasswordHash(pwd string) (string, error) {
+func (m *AdminUser) PasswordHash(pwd string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 	return string(hash), err
 }
 
 // ComparePasswords 比对用户密码是否正确
-func (u *AdminUsers) ComparePasswords(password string) bool {
-	if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)); err != nil {
+func (m *AdminUser) ComparePasswords(password string) bool {
+	if err := bcrypt.CompareHashAndPassword([]byte(m.Password), []byte(password)); err != nil {
 		return false
 	}
 	return true
 }
 
 // ChangePassword 修改密码
-func (u *AdminUsers) ChangePassword() error {
-	u.Password, _ = u.PasswordHash(u.Password)
-	return u.DB().Model(u).Update("password", u.Password).Error
+func (m *AdminUser) ChangePassword() error {
+	m.Password, _ = m.PasswordHash(m.Password)
+	return m.DB(m).Update("password", m.Password).Error
 }
 
 // GetUserInfo 根据名称获取用户信息
-func (u *AdminUsers) GetUserInfo(username string) *AdminUsers {
-	if err := u.DB().Where("username", username).First(u).Error; err != nil {
+func (m *AdminUser) GetUserInfo(username string) *AdminUser {
+	if err := m.DB().Where("username", username).First(m).Error; err != nil {
 		return nil
 	}
-	return u
+	return m
 }

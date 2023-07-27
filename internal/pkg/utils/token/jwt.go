@@ -81,7 +81,7 @@ type AdminCustomClaims struct {
 }
 
 // NewAdminCustomClaims 初始化AdminCustomClaims
-func NewAdminCustomClaims(user *model.AdminUsers, expiresAt time.Time) AdminCustomClaims {
+func NewAdminCustomClaims(user *model.AdminUser, expiresAt time.Time) AdminCustomClaims {
 	//now := time.Now()
 	return AdminCustomClaims{
 		AdminUserInfo: AdminUserInfo{

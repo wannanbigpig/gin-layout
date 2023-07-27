@@ -5,19 +5,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
-	"github.com/wannanbigpig/gin-layout/pkg/utils"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 )
 
-func TestLogin(t *testing.T) {
-	route := fmt.Sprintf("%s/api/v1/admin/login", ts.URL)
-	h := utils.HttpRequest{}
+func TestPermissionEdit(t *testing.T) {
+	route := fmt.Sprintf("%s/api/v1/permission/edit", ts.URL)
 
-	body := `{"username": "super_admin","password": "123456"}`
-	resp := h.JsonRequest("POST", route, strings.NewReader(body))
+	body := `{"id":6,"name":"ping","desc":"","method":"GET","route":"/ping","func":"func1","func_path":"github.com/wannanbigpig/gin-layout/internal/routers.SetRouters.func1","is_auth":2,"sort":100}`
+	resp := postRequest(route, &body)
 
 	assert.Nil(t, resp.Error)
 	assert.Equal(t, http.StatusOK, resp.Response.StatusCode)
@@ -27,16 +24,22 @@ func TestLogin(t *testing.T) {
 	assert.Equal(t, e.SUCCESS, result.Code)
 }
 
-func TestGetAdminUser(t *testing.T) {
-	route := fmt.Sprintf("%s/api/v1/admin-user/get", ts.URL)
+func TestPermissionList(t *testing.T) {
+	route := fmt.Sprintf("%s/api/v1/permission/list", ts.URL)
 	queryParams := &url.Values{}
-	queryParams.Set("id", "1")
+	queryParams.Set("page", "1")
+	queryParams.Set("per_page", "1")
+	queryParams.Set("name", "ping")
+	queryParams.Set("method", "GET")
+	queryParams.Set("route", "/ping")
+	queryParams.Set("is_auth", "2")
 	resp := getRequest(route, queryParams)
 
 	assert.Nil(t, resp.Error)
 	assert.Equal(t, http.StatusOK, resp.Response.StatusCode)
 	result := new(response.Result)
 	err := resp.ParseJson(result)
+	fmt.Println(result, err)
 	assert.Nil(t, err)
 	assert.Equal(t, e.SUCCESS, result.Code)
 }

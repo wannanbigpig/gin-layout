@@ -14,11 +14,11 @@ type BaseModel struct {
 	UpdatedAt utils.FormatDate `gorm:"column:updated_at;type:timestamp" json:"updated_at"`
 }
 
-func (b *BaseModel) DB() *gorm.DB {
-	return DB()
+func (m *BaseModel) DB(model ...any) *gorm.DB {
+	return DB(model...)
 }
 
-func (b *BaseModel) Paginate(page, pageSize int) func(db *gorm.DB) *gorm.DB {
+func (m *BaseModel) Paginate(page, pageSize int) func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		offset := 0
 		limit := global.PerPage
@@ -33,14 +33,14 @@ func (b *BaseModel) Paginate(page, pageSize int) func(db *gorm.DB) *gorm.DB {
 	}
 }
 
-func (b *BaseModel) Count(model any, condition string, args []any) (count int64) {
-	query := b.DB().Model(model)
+func (m *BaseModel) Count(model any, condition string, args []any) (count int64, err error) {
+	query := m.DB(model)
 	if condition != "" {
 		query = query.Where(condition, args...)
 	}
-	err := query.Count(&count).Error
+	err = query.Count(&count).Error
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	return
 }
@@ -50,6 +50,9 @@ type ContainsDeleteBaseModel struct {
 	DeletedAt soft_delete.DeletedAt `gorm:"column:deleted_at;type:int(11) unsigned;not null;default:0;index;" json:"-"`
 }
 
-func DB() *gorm.DB {
+func DB(model ...any) *gorm.DB {
+	if model != nil {
+		return data.MysqlDB.Model(model[0])
+	}
 	return data.MysqlDB
 }

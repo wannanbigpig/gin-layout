@@ -25,10 +25,10 @@ func NewLoginService() *LoginService {
 	return &LoginService{}
 }
 
-func (auth *LoginService) Login(username, password string) (*TokenResponse, error) {
+func (s *LoginService) Login(username, password string) (*TokenResponse, error) {
+	adminUserModel := model.NewAdminUsers()
 	// 查询用户是否存在
-	adminUsersModel := model.NewAdminUsers()
-	user := adminUsersModel.GetUserInfo(username)
+	user := adminUserModel.GetUserInfo(username)
 
 	if user == nil {
 		err := e.NewBusinessError(e.UserDoesNotExist)
@@ -42,10 +42,10 @@ func (auth *LoginService) Login(username, password string) (*TokenResponse, erro
 	}
 
 	// 校验密码
-	if !adminUsersModel.ComparePasswords(password) {
+	if !adminUserModel.ComparePasswords(password) {
 		return nil, e.NewBusinessError(e.FAILURE, "用户密码错误")
 	}
-	claims := auth.newAdminCustomClaims(user)
+	claims := s.newAdminCustomClaims(user)
 	accessToken, err := token.Generate(claims)
 	if err != nil {
 		return nil, e.NewBusinessError(e.FAILURE, "生成Token失败")
@@ -59,15 +59,15 @@ func (auth *LoginService) Login(username, password string) (*TokenResponse, erro
 }
 
 // Refresh 刷新Token
-func (auth *LoginService) Refresh(id uint) (*TokenResponse, error) {
+func (s *LoginService) Refresh(id uint) (*TokenResponse, error) {
 	// 查询用户是否存在
-	adminUsersModel := model.NewAdminUsers()
-	user := adminUsersModel.GetUserById(id)
+	adminUserModel := model.NewAdminUsers()
+	user := adminUserModel.GetUserById(id)
 	if user == nil {
 		return nil, e.NewBusinessError(e.FAILURE, "更新用户异常")
 	}
 
-	claims := auth.newAdminCustomClaims(user)
+	claims := s.newAdminCustomClaims(user)
 	accessToken, err := token.Refresh(claims)
 	if err != nil {
 		return nil, e.NewBusinessError(e.FAILURE, "生成Token失败")
@@ -81,7 +81,7 @@ func (auth *LoginService) Refresh(id uint) (*TokenResponse, error) {
 }
 
 // newAdminCustomClaims 初始化AdminCustomClaims
-func (auth *LoginService) newAdminCustomClaims(user *model.AdminUsers) token.AdminCustomClaims {
+func (s *LoginService) newAdminCustomClaims(user *model.AdminUser) token.AdminCustomClaims {
 	now := time.Now()
 	expiresAt := now.Add(time.Second * c.Config.Jwt.TTL)
 	return token.NewAdminCustomClaims(user, expiresAt)
