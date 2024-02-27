@@ -1,12 +1,13 @@
 package admin_auth
 
 import (
+	"strings"
+
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
-	"strings"
 )
 
 // PermissionService 登录授权服务
@@ -21,18 +22,19 @@ func NewPermissionService() *PermissionService {
 func (s *PermissionService) Edit(params *form.EditPermission) error {
 	permissionModel := model.NewPermission()
 	data := map[string]any{
-		"name":    params.Name,
-		"desc":    params.Desc,
-		"is_auth": params.IsAuth,
-		"sort":    params.Sort,
+		"name":      params.Name,
+		"desc":      params.Desc,
+		"is_auth":   params.IsAuth,
+		"sort":      params.Sort,
+		"method":    params.Method,
+		"route":     params.Route,
+		"func":      params.Func,
+		"func_path": params.FuncPath,
 	}
 	if params.Id > 0 {
 		return permissionModel.Update(params.Id, data)
 	}
-	data["func"] = params.Func
-	data["func_path"] = params.FuncPath
-	data["method"] = params.Method
-	data["route"] = params.Route
+
 	count, err := permissionModel.HasRoute(params.Route)
 	if err != nil {
 		return err

@@ -1,8 +1,9 @@
 package resources
 
 import (
-	"github.com/wannanbigpig/gin-layout/internal/global"
 	"math"
+
+	"github.com/wannanbigpig/gin-layout/internal/global"
 )
 
 type Paginate struct {
@@ -25,7 +26,7 @@ func (p *Paginate) calculateLastPage() {
 
 type Collection struct {
 	Paginate
-	Data []any
+	Data []any `json:"data"`
 }
 
 func newResponseCollection(paginate Paginate, data []any) *Collection {

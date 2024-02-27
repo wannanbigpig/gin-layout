@@ -2,14 +2,16 @@ package server
 
 import (
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
+
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
-	"strings"
-	"time"
 )
 
 var (
@@ -58,13 +60,23 @@ func RegisterRoutes(engine *gin.Engine) {
 	var apiData []map[string]any
 	date := time.Now()
 	for _, v := range r {
+		name := v.Path
+		desc := ""
+		isAuth := 1
+		routerMap, ok := routers.AdminRouteMap[v.Path]
+		if ok {
+			name = routerMap.Name
+			desc = routerMap.Desc
+			isAuth = routerMap.IsAuth
+		}
 		apiData = append(apiData, map[string]any{
-			"name":       v.Path,
+			"name":       name,
+			"desc":       desc,
 			"route":      v.Path,
 			"method":     v.Method,
 			"func":       extractHandler(v.Handler),
 			"func_path":  v.Handler,
-			"is_auth":    1,
+			"is_auth":    isAuth,
 			"sort":       100,
 			"created_at": date,
 			"updated_at": date,

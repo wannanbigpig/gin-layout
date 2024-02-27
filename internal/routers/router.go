@@ -1,13 +1,15 @@
 package routers
 
 import (
+	"io"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
+
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
-	"io"
-	"net/http"
 )
 
 func SetRouters() *gin.Engine {
