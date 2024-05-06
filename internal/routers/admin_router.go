@@ -2,8 +2,9 @@ package routers
 
 import (
 	"github.com/gin-gonic/gin"
-	controller "github.com/wannanbigpig/gin-layout/internal/controller"
-	admin_v1 "github.com/wannanbigpig/gin-layout/internal/controller/admin_v1"
+
+	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/controller/admin_v1"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 )
 
@@ -12,7 +13,7 @@ func SetAdminApiRoute(e *gin.Engine) {
 	v1 := e.Group("api/v1")
 	{
 		demo := controller.NewDemoController()
-		v1.GET("hello-world", demo.HelloWorld)
+		v1.GET("demo", demo.HelloWorld)
 		// 无需校验权限
 		loginC := admin_v1.NewLoginController()
 		v1.POST("admin/login", loginC.Login)

@@ -2,6 +2,7 @@ package admin_v1
 
 import (
 	"github.com/gin-gonic/gin"
+
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/service/admin_auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator"

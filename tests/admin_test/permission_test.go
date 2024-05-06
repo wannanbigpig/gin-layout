@@ -39,7 +39,7 @@ func TestPermissionList(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.Response.StatusCode)
 	result := new(response.Result)
 	err := resp.ParseJson(result)
-	fmt.Println(result, err)
+	//fmt.Println(result, err)
 	assert.Nil(t, err)
 	assert.Equal(t, e.SUCCESS, result.Code)
 }

@@ -2,13 +2,11 @@ package cmd
 
 import (
 	"fmt"
-<<<<<<< Updated upstream
-=======
 	"os"
 	"time"
 
->>>>>>> Stashed changes
 	"github.com/spf13/cobra"
+
 	"github.com/wannanbigpig/gin-layout/cmd/command"
 	"github.com/wannanbigpig/gin-layout/cmd/cron"
 	"github.com/wannanbigpig/gin-layout/cmd/server"
@@ -16,7 +14,6 @@ import (
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
-	"os"
 )
 
 var (
@@ -24,7 +21,7 @@ var (
 		Use:          "go-layout",
 		Short:        "go-layout",
 		SilenceUsage: true,
-		Long: `Gin framework is used as the core of this project to build a scaffold, 
+		Long: `Gin framework is used as the core of this project to build a scaffold,
 based on the project can be quickly completed business development, out of the box 📦`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// 1、初始化配置
