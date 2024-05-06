@@ -2,6 +2,12 @@ package cmd
 
 import (
 	"fmt"
+<<<<<<< Updated upstream
+=======
+	"os"
+	"time"
+
+>>>>>>> Stashed changes
 	"github.com/spf13/cobra"
 	"github.com/wannanbigpig/gin-layout/cmd/command"
 	"github.com/wannanbigpig/gin-layout/cmd/cron"
@@ -23,7 +29,16 @@ based on the project can be quickly completed business development, out of the b
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// 1、初始化配置
 			config.InitConfig(configPath)
-			// 2、初始化zap日志
+			// 2、时区配置
+			if config.Config.Timezone != nil {
+				location, err := time.LoadLocation(*config.Config.Timezone)
+				if err != nil {
+					fmt.Println("Error loading location:", err)
+					return
+				}
+				time.Local = location
+			}
+			// 3、初始化zap日志
 			logger.InitLogger()
 		},
 		Run: func(cmd *cobra.Command, args []string) {
