@@ -6,11 +6,12 @@ import (
 )
 
 type AppConfig struct {
-	AppEnv         string `mapstructure:"app_env"`
-	Debug          bool   `mapstructure:"debug"`
-	Language       string `mapstructure:"language"`
-	WatchConfig    bool   `mapstructure:"watch_config"`
-	StaticBasePath string `mapstructure:"base_path"`
+	AppEnv         string  `mapstructure:"app_env"`
+	Debug          bool    `mapstructure:"debug"`
+	Language       string  `mapstructure:"language"`
+	WatchConfig    bool    `mapstructure:"watch_config"`
+	StaticBasePath string  `mapstructure:"base_path"`
+	Timezone       *string `mapstructure:"timezone"`
 }
 
 var App = AppConfig{
@@ -19,6 +20,7 @@ var App = AppConfig{
 	Language:       "zh_CN",
 	WatchConfig:    false,
 	StaticBasePath: getDefaultPath(),
+	Timezone:       nil,
 }
 
 func getDefaultPath() (path string) {
