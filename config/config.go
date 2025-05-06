@@ -1,15 +1,17 @@
 package config
 
 import (
-	"github.com/fsnotify/fsnotify"
-	"github.com/spf13/viper"
-	. "github.com/wannanbigpig/gin-layout/config/autoload"
-	utils2 "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
-	"github.com/wannanbigpig/gin-layout/pkg/utils"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/spf13/viper"
+
+	. "github.com/wannanbigpig/gin-layout/config/autoload"
+	utils2 "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
 // Conf 配置项主结构体

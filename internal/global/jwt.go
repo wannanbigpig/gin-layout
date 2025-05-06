@@ -1,6 +1,6 @@
 package global
 
 const (
-	Issuer  = "go-layout"
-	Subject = "pc-admin"
+	Issuer         = "go-layout"
+	PcAdminSubject = "pc-admin-token"
 )

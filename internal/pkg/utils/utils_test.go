@@ -17,3 +17,17 @@ func BenchmarkRandString(b *testing.B) {
 		RandString(12)
 	}
 }
+
+func TestDesensitizeRule(b *testing.T) {
+	// 手机号脱敏
+	phoneRule := &DesensitizeRule{KeepPrefixLen: 3, KeepSuffixLen: 4, MaskChar: '*'}
+	if phoneRule.Apply("13812345678") != "138****5678" {
+		b.Error("手机号码脱敏失败")
+	}
+
+	// 邮箱脱敏
+	emailRule := &DesensitizeRule{KeepPrefixLen: 2, KeepSuffixLen: 0, MaskChar: '*', Separator: '@', FixedMaskLength: 3}
+	if emailRule.Apply("test@example.com") != "te***@example.com" {
+		b.Error("邮箱脱敏失败")
+	}
+}

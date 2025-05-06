@@ -9,6 +9,6 @@ type ID struct {
 	ID uint `form:"id" json:"id" binding:"required"`
 }
 
-func NewIDForm() *ID {
+func NewIdForm() *ID {
 	return &ID{}
 }

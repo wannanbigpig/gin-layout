@@ -28,6 +28,8 @@ redis:
   password:
   database: 0
 logger:
+  # 日志输出默认为文件，stderr 可选
+  output: file
   default_division: time
   file_name: gin-layout.sys.log
   division_time:

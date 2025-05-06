@@ -1,6 +1,10 @@
 package utils
 
-import "strings"
+import (
+	"strings"
+
+	"golang.org/x/crypto/bcrypt"
+)
 
 // MaskSensitiveInfo 对于字符串脱敏
 // s 需要脱敏的字符串
@@ -23,4 +27,27 @@ func MaskSensitiveInfo(s string, start int, maskNumber int, maskChars ...string)
 		end = len(s)
 	}
 	return s[:start] + strings.Repeat(maskChar, end-start) + s[end:]
+}
+
+// PasswordHash 密码hash并自动加盐
+func PasswordHash(pwd string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
+	return string(hash), err
+}
+
+// ComparePasswords 比对用户密码是否正确
+func ComparePasswords(oldPassword, password string) bool {
+	if err := bcrypt.CompareHashAndPassword([]byte(oldPassword), []byte(password)); err != nil {
+		return false
+	}
+	return true
+}
+
+// SliceToAny 将切片转换为any类型切片
+func SliceToAny[T any](data []T) []any {
+	anyData := make([]any, len(data))
+	for i, v := range data {
+		anyData[i] = v
+	}
+	return anyData
 }

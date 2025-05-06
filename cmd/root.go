@@ -58,7 +58,7 @@ func init() {
 	rootCmd.AddCommand(version.Cmd)
 	// 启动服务 go-layout server
 	rootCmd.AddCommand(server.Cmd)
-	// 启动单词运行脚本 go-layout command demo
+	// 启动单次运行脚本 go-layout command demo
 	rootCmd.AddCommand(command.Cmd)
 	// 启动计划任务
 	rootCmd.AddCommand(cron.Cmd)

@@ -1,8 +1,9 @@
 package data
 
 import (
-	c "github.com/wannanbigpig/gin-layout/config"
 	"sync"
+
+	c "github.com/wannanbigpig/gin-layout/config"
 )
 
 var once sync.Once

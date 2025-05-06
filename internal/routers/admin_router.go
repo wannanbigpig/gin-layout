@@ -1,61 +1,85 @@
 package routers
 
 import (
-	"github.com/gin-gonic/gin"
-	controller "github.com/wannanbigpig/gin-layout/internal/controller"
-	admin_v1 "github.com/wannanbigpig/gin-layout/internal/controller/admin_v1"
+	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/controller/admin_v1"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 )
 
-func SetAdminApiRoute(e *gin.Engine) {
+// SetAdminApiRoute 设置管理员API路由并保存权限信息
+func SetAdminApiRoute(r *RegisterRouter) {
 	// version 1
-	v1 := e.Group("api/v1")
+	v1 := r.group("admin/v1/")
 	{
-		demo := controller.NewDemoController()
-		v1.GET("hello-world", demo.HelloWorld)
-		// 无需校验权限
-		loginC := admin_v1.NewLoginController()
-		v1.POST("admin/login", loginC.Login)
-
-		// 需要校验权限
-		reqAuth := v1.Group("", middleware.AdminAuthHandler())
+		/******************************* 无需校验权限 start ************************************/
+		reqNotAuth := v1.group("").setGroupCode("other")
 		{
-			// 管理员用户
-			adminUser := reqAuth.Group("admin-user")
+			demo := controller.NewDemoController()
+			reqNotAuth.get("demo", demo.HelloWorld).setTitle("Demo 示例").setAuth(0)
+
+			loginC := admin_v1.NewLoginController()
+			lg := reqNotAuth.group("").setGroupCode("login")
 			{
-				r := admin_v1.NewAdminUserController()
-				// 获取用户信息
-				adminUser.GET("get", r.GetUserInfo)
+				lg.post("login", loginC.Login).setTitle("登录").setAuth(0)
+				lg.get("login-captcha", loginC.LoginCaptcha).setTitle("验证码").setAuth(0)
+			}
+		}
+		/******************************* 无需校验权限 end **************************************/
+
+		/******************************* 需校验权限 start **************************************/
+		reqAuth := v1.group("", middleware.AdminAuthHandler())
+		{
+			// 授权管理
+			auth := reqAuth.group("auth").setGroupCode("auth")
+			{
+				c := admin_v1.NewLoginController()
+				auth.post("logout", c.Logout).setTitle("退出登录").setAuth(0)
+			}
+
+			// 管理员用户
+			adminUser := reqAuth.group("admin-user").setGroupCode("adminUser")
+			{
+				c := admin_v1.NewAdminUserController()
+				adminUser.get("get", c.GetUserInfo).setTitle("获取管理员用户信息").setAuth(0)
+				adminUser.get("list", c.List).setTitle("获取管理员用户列表").setAuth(1)
+				adminUser.post("edit", c.Edit).setTitle("编辑管理员信息").setAuth(1)
+				adminUser.post("delete", c.Delete).setTitle("删除管理员").setAuth(1)
 			}
 
 			// api权限管理
-			permissions := reqAuth.Group("permission")
+			permissions := reqAuth.group("permission").setGroupCode("api")
 			{
-				r := admin_v1.NewPermissionController()
-				permissions.POST("edit", r.Edit)
-				permissions.GET("list", r.List)
+				c := admin_v1.NewApiController()
+				permissions.post("edit", c.Edit).setTitle("编辑权限").setAuth(1)
+				permissions.get("list", c.List).setTitle("权限列表").setAuth(1)
 			}
 
 			// 菜单管理
-			menu := reqAuth.Group("menu")
+			menu := reqAuth.group("menu").setGroupCode("menu")
 			{
-				r := admin_v1.NewAdminUserController()
-				menu.GET("get", r.GetUserInfo)
+				c := admin_v1.NewMenuController()
+				menu.get("list", c.List).setTitle("菜单列表").setAuth(1)
+				menu.post("delete", c.Delete).setTitle("删除菜单").setAuth(1)
+				menu.post("edit", c.Edit).setTitle("编辑菜单").setAuth(1)
+				menu.get("detail", c.Detail).setTitle("菜单详情").setAuth(1)
 			}
 
 			// 角色管理
-			role := reqAuth.Group("role")
+			role := reqAuth.group("role").setGroupCode("role")
 			{
-				r := admin_v1.NewAdminUserController()
-				role.GET("get", r.GetUserInfo)
+				c := admin_v1.NewRoleController()
+				role.get("list", c.List).setTitle("获取角色列表").setAuth(1)
+				role.post("edit", c.Edit).setTitle("编辑角色").setAuth(1)
+				role.post("delete", c.Delete).setTitle("删除角色").setAuth(1)
 			}
 
 			// 用户组管理
-			group := reqAuth.Group("group")
+			group := reqAuth.group("group").setGroupCode("department")
 			{
-				r := admin_v1.NewAdminUserController()
-				group.GET("get", r.GetUserInfo)
+				c := admin_v1.NewAdminUserController()
+				group.get("get", c.GetUserInfo).setTitle("获取用户组信息").setAuth(1)
 			}
 		}
+		/******************************* 需校验权限 end ****************************************/
 	}
 }

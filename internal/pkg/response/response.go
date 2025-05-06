@@ -1,18 +1,31 @@
 package response
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/wannanbigpig/gin-layout/config"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"net/http"
 	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
 type Result struct {
-	Code int         `json:"code"`
-	Msg  string      `json:"msg"`
-	Data interface{} `json:"data"`
-	Cost string      `json:"cost"`
+	Code      int    `json:"code"`
+	Msg       string `json:"msg"`
+	Data      any    `json:"data"`
+	Cost      string `json:"cost"`
+	RequestId string `json:"request_id"`
+}
+
+func NewResult() *Result {
+	return &Result{
+		Code:      0,
+		Msg:       "",
+		Data:      nil,
+		Cost:      "",
+		RequestId: "",
+	}
 }
 
 type Response struct {
@@ -25,10 +38,11 @@ func Resp() *Response {
 	return &Response{
 		httpCode: http.StatusOK,
 		result: &Result{
-			Code: 0,
-			Msg:  "",
-			Data: nil,
-			Cost: "",
+			Code:      0,
+			Msg:       "",
+			Data:      nil,
+			Cost:      "",
+			RequestId: "",
 		},
 	}
 }
@@ -111,6 +125,7 @@ func (r *Response) json(c *gin.Context) {
 	// }
 
 	r.result.Cost = time.Since(c.GetTime("requestStartTime")).String()
+	r.result.RequestId = c.GetString("requestId")
 	c.AbortWithStatusJSON(r.httpCode, r.result)
 }
 

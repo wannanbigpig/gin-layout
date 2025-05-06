@@ -1,17 +1,18 @@
 package admin_test
 
 import (
-	"fmt"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+	"time"
+
 	"github.com/golang-jwt/jwt/v5"
+
 	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/tests"
-	"net/http/httptest"
-	"net/url"
-	"testing"
-	"time"
 )
 
 var (
@@ -25,20 +26,20 @@ func TestMain(m *testing.M) {
 	expiresAt := now.Add(time.Second * c.Config.Jwt.TTL)
 	claims := token.AdminCustomClaims{
 		AdminUserInfo: token.AdminUserInfo{
-			UserID:   1,
-			Mobile:   "13200000000",
-			Nickname: "admin",
+			UserID:      1,
+			PhoneNumber: "13200000000",
+			Nickname:    "admin",
 		},
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			Issuer:    global.Issuer, // 签发人
-			//IssuedAt:  jwt.NewNumericDate(now),       // 签发时间
-			Subject: global.Subject, // 签发主体
-			//NotBefore: jwt.NewNumericDate(now),       // 生效时间
+			// IssuedAt:  jwt.NewNumericDate(now),       // 签发时间
+			Subject: global.PcAdminSubject, // 签发主体
+			// NotBefore: jwt.NewNumericDate(now),       // 生效时间
 		},
 	}
 	accessToken, err := token.Generate(claims)
-	authorization = fmt.Sprintf("%s%s", "Bearer ", accessToken)
+	authorization = "Bearer " + accessToken
 	if err != nil {
 		panic("创建管理员Token失败")
 	}

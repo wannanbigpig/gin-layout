@@ -2,7 +2,9 @@ package data
 
 import (
 	"context"
+
 	"github.com/go-redis/redis/v8"
+
 	c "github.com/wannanbigpig/gin-layout/config"
 )
 

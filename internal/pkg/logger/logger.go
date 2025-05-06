@@ -1,15 +1,17 @@
 package logger
 
 import (
-	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
-	"github.com/natefinch/lumberjack"
-	"github.com/wannanbigpig/gin-layout/config"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"io"
 	"path/filepath"
 	"sync"
 	"time"
+
+	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
+	"github.com/natefinch/lumberjack"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
+	"github.com/wannanbigpig/gin-layout/config"
 )
 
 var Logger *zap.Logger
@@ -19,10 +21,18 @@ func InitLogger() {
 	once.Do(func() { Logger = createZapLog() })
 }
 
+func Info(msg string, fields ...zap.Field) {
+	Logger.Info(msg, fields...)
+}
+
+func Error(msg string, fields ...zap.Field) {
+	Logger.Error(msg, fields...)
+}
+
 // initZapLog 初始化 zap 日志
 func createZapLog() *zap.Logger {
 	// 开启 debug
-	if config.Config.Debug == true {
+	if config.Config.Logger.Output == "stderr" {
 		if Logger, err := zap.NewDevelopment(); err == nil {
 			return Logger
 		} else {
@@ -49,7 +59,7 @@ func createZapLog() *zap.Logger {
 	}
 
 	zapCore := zapcore.NewCore(encoder, writer, zap.InfoLevel)
-	//zap.AddStacktrace(zap.WarnLevel)
+	// zap.AddStacktrace(zap.WarnLevel)
 	return zap.New(zapCore, zap.AddCaller())
 }
 

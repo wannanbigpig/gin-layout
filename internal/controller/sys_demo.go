@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,5 +21,5 @@ func (api DemoController) HelloWorld(c *gin.Context) {
 		str = "gin-layout"
 	}
 
-	api.Success(c, fmt.Sprintf("hello %s", str))
+	api.Success(c, fmt.Sprintf("hello %s %s", str, c.Param("id")))
 }

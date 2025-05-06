@@ -1,16 +1,16 @@
 package utils
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
-	"strings"
 )
 
 // If 模拟简单的三元操作
-func If(condition bool, trueVal, falseVal any) any {
+func If[T any](condition bool, trueVal, falseVal T) T {
 	if condition {
 		return trueVal
 	}
@@ -35,7 +35,7 @@ func GetFileDirectoryToCaller(opts ...int) (directory string, ok bool) {
 		skip = opts[0]
 	}
 	if _, filename, _, ok = runtime.Caller(skip); ok {
-		directory = path.Dir(filename)
+		directory = filepath.Dir(filename)
 	}
 	return
 }
@@ -50,41 +50,43 @@ func GetCurrentAbPathByExecutable() (string, error) {
 	return filepath.Dir(res), nil
 }
 
-// GetCurrentPath 获取当前执行文件路径，如果是临时目录则获取当前文件的的执行路径
+// GetCurrentPath 获取当前执行文件路径，如果是 development 环境则获取当前文件的的执行路径
 func GetCurrentPath() (dir string, err error) {
-	dir, err = GetCurrentAbPathByExecutable()
-	if err != nil {
-		return "", err
-	}
-
-	tmpDir, err := filepath.EvalSymlinks(os.TempDir())
-	if err != nil {
-		return "", err
-	}
-
-	if strings.Contains(dir, tmpDir) {
-		var ok bool
-		if dir, ok = GetFileDirectoryToCaller(2); !ok {
-			return "", errors.New("failed to get path")
+	if os.Getenv("GO_ENV") != "development" {
+		dir, err = GetCurrentAbPathByExecutable()
+		if err != nil {
+			return "", err
 		}
+		return dir, nil
 	}
+
+	var ok bool
+	if dir, ok = GetFileDirectoryToCaller(2); !ok {
+		return "", errors.New("failed to get path")
+	}
+
 	return dir, nil
 }
 
 // GetDefaultPath 获取当前执行文件路径，如果是临时目录则获取运行命令的工作目录
 func GetDefaultPath() (dir string, err error) {
-	dir, err = GetCurrentAbPathByExecutable()
-	if err != nil {
-		return "", err
+	if os.Getenv("GO_ENV") != "development" {
+		dir, err = GetCurrentAbPathByExecutable()
+		if err != nil {
+			return "", err
+		}
+	} else {
+		dir = GetRunPath()
 	}
 
-	tmpDir, err := filepath.EvalSymlinks(os.TempDir())
-	if err != nil {
-		return "", err
-	}
-
-	if strings.Contains(dir, tmpDir) {
-		return GetRunPath(), nil
-	}
 	return dir, nil
+}
+
+// MD5 计算字符串的 MD5 值
+func MD5(str string) string {
+	// 计算 MD5 哈希
+	hash := md5.Sum([]byte(str))
+
+	// 将哈希值转换为十六进制字符串
+	return hex.EncodeToString(hash[:])
 }

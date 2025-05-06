@@ -1,7 +1,6 @@
 package autoload
 
 import (
-	"github.com/wannanbigpig/gin-layout/pkg/convert"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
@@ -25,6 +24,6 @@ var App = AppConfig{
 
 func getDefaultPath() (path string) {
 	path, _ = utils.GetDefaultPath()
-	path = convert.GetString(utils.If(path != "", path, "/tmp"))
+	path = utils.If(path != "", path, "/tmp")
 	return
 }

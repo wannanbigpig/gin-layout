@@ -2,10 +2,11 @@ package controller
 
 import (
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
-	"go.uber.org/zap"
 )
 
 type Api struct {
@@ -46,8 +47,9 @@ func (api Api) Fail(c *gin.Context, code int, message string, data ...any) {
 func (api Api) Err(c *gin.Context, e error) {
 	businessError, err := api.AsBusinessError(e)
 	if err != nil {
-		log.Logger.Warn("Unknown error:", zap.Any("Error reason:", err))
-		api.FailCode(c, errors.ServerError)
+		requestId := c.GetString("requestId")
+		log.Logger.Warn("Unknown error:", zap.Any("requestId:", requestId), zap.Any("Error reason:", err))
+		api.FailCode(c, errors.ServerErr)
 		return
 	}
 

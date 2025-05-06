@@ -40,8 +40,8 @@ migrate -database 'mysql://root:root@tcp(127.0.0.1:3306)/go_layout?charset=utf8m
 go mod download
 
 # 首次运行会自动复制一份示例配置（config/config.example.yaml）文件到config目录(config/config.yaml)
-# 启动服务
-go run main.go server
+# 临时启动服务
+GO_ENV=development go run main.go server
 
 # 项目起来后执行下面命令访问示例路由
 curl "http://127.0.0.1:9001/ping"
@@ -58,7 +58,7 @@ go run main.go -h
 
 ### 部署
 ```shell
-# 打包项目（如何打包其他os平台的包自行 google）
+# 打包项目
 go build -o cmd/go_layout main.go
 
 # 运行时请配置指定config文件的位置，否则可能会出现找不到配置的情况，修改完配置请重启

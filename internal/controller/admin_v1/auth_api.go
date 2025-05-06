@@ -2,29 +2,30 @@ package admin_v1
 
 import (
 	"github.com/gin-gonic/gin"
+
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/service/admin_auth"
+	"github.com/wannanbigpig/gin-layout/internal/service/permission"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
-type PermissionController struct {
+type ApiController struct {
 	controller.Api
 }
 
-func NewPermissionController() *PermissionController {
-	return &PermissionController{}
+func NewApiController() *ApiController {
+	return &ApiController{}
 }
 
-func (api PermissionController) Edit(c *gin.Context) {
+func (api ApiController) Edit(c *gin.Context) {
 	// 初始化参数结构体
-	permissionForm := form.NewEditPermissionForm()
+	permissionForm := form.NewEditApiForm()
 	// 绑定参数并使用验证器验证参数
 	if err := validator.CheckPostParams(c, &permissionForm); err != nil {
 		return
 	}
 
-	err := admin_auth.NewPermissionService().Edit(permissionForm)
+	err := permission.NewApiService().Edit(permissionForm)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -32,13 +33,13 @@ func (api PermissionController) Edit(c *gin.Context) {
 	api.Success(c, nil)
 }
 
-func (api PermissionController) List(c *gin.Context) {
+func (api ApiController) List(c *gin.Context) {
 	// 初始化参数结构体
-	permissionQuery := form.NewListPermissionQuery()
+	permissionQuery := form.NewListApiQuery()
 	// 绑定参数并使用验证器验证参数
 	if err := validator.CheckQueryParams(c, &permissionQuery); err != nil {
 		return
 	}
-	res := admin_auth.NewPermissionService().ListPage(permissionQuery)
+	res := permission.NewApiService().ListPage(permissionQuery)
 	api.Success(c, res)
 }

@@ -2,7 +2,9 @@ package command
 
 import (
 	"fmt"
+
 	"github.com/spf13/cobra"
+
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/console/demo"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
@@ -30,7 +32,7 @@ func init() {
 }
 
 func run() error {
-	r := routers.SetRouters()
+	r, _ := routers.SetRouters(false)
 
 	err := r.Run(fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
