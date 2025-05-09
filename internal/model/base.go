@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -105,6 +107,9 @@ func (m *BaseModel) Delete(model any, conds ...any) error {
 
 // DeleteWithCondition 根据条件删除
 func (m *BaseModel) DeleteWithCondition(model any, condition string, args ...any) error {
+	if condition == "" {
+		return fmt.Errorf("delete condition is empty, operation refused to prevent full table deletion")
+	}
 	return m.DB().Where(condition, args...).Delete(model).Error
 }
 
@@ -171,12 +176,12 @@ func ListPage[T any, M AnyModelInterface[T]](model M, page, perPage int, conditi
 }
 
 // List 获取列表
-func List[T any, M AnyModelInterface[T]](model M, condition string, args []any, optional ...ListOptionalParams) []*Menu {
+func List[T any, M AnyModelInterface[T]](model M, condition string, args []any, optional ...ListOptionalParams) []*T {
 	query := model.DB(model)
 	if condition != "" {
 		query = query.Where(condition, args...)
 	}
-	var res []*Menu
+	var res []*T
 	if len(optional) > 0 {
 		if len(optional[0].SelectFields) > 0 {
 			query = query.Select(optional[0].SelectFields)

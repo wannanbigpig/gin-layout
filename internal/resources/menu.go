@@ -43,6 +43,7 @@ type MenuTransformer struct {
 	BaseResources[*model.Menu, *MenuResources]
 }
 
+// NewMenuTransformer 实例化菜单资源转换器
 func NewMenuTransformer() MenuTransformer {
 	return MenuTransformer{
 		BaseResources: BaseResources[*model.Menu, *MenuResources]{
@@ -53,27 +54,12 @@ func NewMenuTransformer() MenuTransformer {
 	}
 }
 
+// ToStruct 转换为单个资源
 func (m MenuTransformer) ToStruct(data *model.Menu) *MenuResources {
 	return buildMenuResource(data)
 }
 
-// BuildMenuTree 递归构建菜单层级结构
-func (m MenuTransformer) BuildMenuTree(menus []*model.Menu, pid uint) []*MenuCollectionResources {
-	var tree []*MenuCollectionResources
-
-	// 构建树
-	for _, v := range menus {
-		if v.Pid == pid {
-			// 只有 pid 匹配的菜单才添加到 tree
-			menu := buildListMenuResource(v)
-			menu.Children = m.BuildMenuTree(menus, v.ID)
-			tree = append(tree, menu)
-		}
-	}
-
-	return tree
-}
-
+// ToCollection 转换为集合资源
 func (m MenuTransformer) ToCollection(page, perPage int, total int64, data []*model.Menu) *Collection {
 	response := make([]any, 0, len(data))
 	for _, v := range data {
@@ -142,6 +128,34 @@ type MenuCollectionResources struct {
 	Children        []*MenuCollectionResources `json:"children,omitempty"`
 	CreatedAt       utils.FormatDate           `json:"created_at"`
 	UpdatedAt       utils.FormatDate           `json:"updated_at"`
+}
+
+func (r *MenuCollectionResources) SetChildren(children []*MenuCollectionResources) {
+	r.Children = children
+}
+func (r *MenuCollectionResources) GetID() uint {
+	return r.ID
+}
+func (r *MenuCollectionResources) GetPID() uint {
+	return r.Pid
+}
+
+type MenuTreeTransformer struct {
+	TreeResource[*model.Menu, *MenuCollectionResources]
+}
+
+func NewMenuTreeTransformer() MenuTreeTransformer {
+	return MenuTreeTransformer{
+		TreeResource: TreeResource[*model.Menu, *MenuCollectionResources]{
+			NewResource: func() *MenuCollectionResources {
+				return &MenuCollectionResources{}
+			},
+		},
+	}
+}
+
+func (r *MenuCollectionResources) SetCustomFields(data *model.Menu) {
+	r.TypeName = data.MenuTypeMap()
 }
 
 // buildListMenuResource 构造函数：将重复构建 MenuCollectionResources 的代码提取出来

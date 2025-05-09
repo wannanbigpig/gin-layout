@@ -4,9 +4,11 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // If 模拟简单的三元操作
@@ -15,6 +17,19 @@ func If[T any](condition bool, trueVal, falseVal T) T {
 		return trueVal
 	}
 	return falseVal
+}
+
+// WouldCauseCycle 检查新的父节点是否是当前节点的子节点，防止循环引用
+func WouldCauseCycle(pids string, id uint) bool {
+	// 检测循环引用
+	idStr := fmt.Sprintf("%d", id)
+	pidsSlice := strings.Split(pids, ",")
+	for _, pid := range pidsSlice {
+		if pid == idStr {
+			return true
+		}
+	}
+	return false
 }
 
 // GetRunPath 获取执行目录作为默认目录

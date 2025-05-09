@@ -2,9 +2,9 @@ package permission
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
+	"github.com/samber/lo"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -12,6 +12,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
 // MenuService 菜单服务
@@ -28,45 +29,22 @@ func (s *MenuService) Edit(params *form.EditMenu) error {
 	menu := model.NewMenu()
 	where := ""
 	originPids := "0"
-	superiorInfo := false
 	// 检查编辑模式，加载要编辑的菜单
 	if params.Id > 0 {
 		if err := menu.GetById(menu, params.Id); err != nil || menu.ID == 0 {
 			return e.NewBusinessError(1, "编辑的菜单不存在")
 		}
 		originPids = menu.Pids
-		if menu.Pid != params.Pid || menu.Path != params.Path {
-			superiorInfo = true
-		}
 		where = fmt.Sprintf(" AND id != %d", params.Id)
-	} else {
-		if params.Pid > 0 {
-			superiorInfo = true
-		}
 	}
-
-	if superiorInfo && params.Pid > 0 {
-		parentMenu := model.NewMenu()
-		if err := menu.GetById(parentMenu, params.Pid); err != nil || parentMenu.ID == 0 {
-			return e.NewBusinessError(1, "上级菜单不存在")
-		}
-		menu.Pids = parentMenu.Pids + "," + strconv.Itoa(int(parentMenu.ID))
-		menu.FullPath = s.assembleFullPath(params.Path, parentMenu.FullPath)
-		menu.Level = parentMenu.Level + 1
-	} else {
-		// 判断pid不为0，则需要获取上级pids,full_path,full_redirect
-		menu.Pids = "0"
-		menu.FullPath = s.assembleFullPath(params.Path, "/")
-		menu.Level = 1
-	}
-
-	// 赋值菜单信息
-	s.assignMenuFields(menu, params)
 
 	// 如果 pid 不为 0，检查是否改变了 pid 并更新相关信息
 	if err := s.handlePidChange(menu, params); err != nil {
 		return err
 	}
+
+	// 赋值菜单信息
+	s.assignMenuFields(menu, params)
 
 	// 校验 Code、FullPath、name 的唯一性
 	if err := s.validateUniqueFields(menu, params, where); err != nil {
@@ -133,21 +111,39 @@ func (s *MenuService) assembleFullPath(path, parentPath string) string {
 
 // updateMenuPermissions 更新菜单权限到关联中间表
 func (s *MenuService) updateMenuPermissions(menu *model.Menu, apiList []uint) error {
-	// 删除旧的关联
-	if err := model.NewMenuApiMap().DeleteByMenuId(menu.ID); err != nil {
-		return err
+	// 获取该角色现有的所有菜单关联（只查询 menu_id 字段）
+	existingMaps := model.List(model.NewMenuApiMap(), "menu_id = ?", []any{menu.ID}, model.ListOptionalParams{
+		SelectFields: []string{"menu_id"}, // 优化：只查询需要的字段
+	})
+
+	// 提取现有菜单ID切片
+	existingIds := lo.Map(existingMaps, func(m *model.MenuApiMap, _ int) uint {
+		return m.MenuId
+	})
+
+	// 2. 计算差集（一次性获取删除和新增列表）
+	toDelete, toAdd := lo.Difference(existingIds, lo.Uniq(apiList))
+
+	// 删除不再需要的关联
+	if len(toDelete) > 0 {
+		if err := model.NewMenuApiMap().DeleteWithCondition(
+			model.NewMenuApiMap(),
+			"role_id = ? AND menu_id IN (?)",
+			[]any{menu.ID, toDelete}...,
+		); err != nil {
+			return err
+		}
 	}
 
-	// 如果有新的API列表，批量添加新的关联
-	if len(apiList) > 0 {
-		var menuApiMaps []*model.MenuApiMap
-		for _, apiId := range apiList {
-			menuApiMaps = append(menuApiMaps, &model.MenuApiMap{
+	// 批量创建新关联
+	if len(toAdd) > 0 {
+		newMappings := lo.Map(toAdd, func(apiId uint, _ int) *model.MenuApiMap {
+			return &model.MenuApiMap{
 				MenuId: menu.ID,
 				ApiId:  apiId,
-			})
-		}
-		if err := model.NewMenuApiMap().BatchCreate(menuApiMaps); err != nil {
+			}
+		})
+		if err := model.NewMenuApiMap().BatchCreate(newMappings); err != nil {
 			return err
 		}
 	}
@@ -178,18 +174,26 @@ func (s *MenuService) assignMenuFields(menu *model.Menu, params *form.EditMenu) 
 	menu.IsExternalLinks = params.IsExternalLinks
 }
 
-// 处理 PID 变化，如果 PID 发生改变，更新菜单的层级和 Pids
+// 处理 PID 变化，如果 PID 发生改变，更新菜单的层级和 Pids,full_path，如果只有path变化则更新full_path
 func (s *MenuService) handlePidChange(menu *model.Menu, params *form.EditMenu) error {
-	if params.Pid > 0 && params.Pid != menu.Pid {
+	if (params.Pid > 0 && params.Pid != menu.Pid) || (params.Path != menu.Path && params.Pid > 0) {
 		var parentMenu model.Menu
 		if err := parentMenu.GetById(&parentMenu, params.Pid); err != nil || parentMenu.ID == 0 {
 			return e.NewBusinessError(1, "上级菜单不存在")
 		}
+
+		// 防止循环引用
+		if utils.WouldCauseCycle(parentMenu.Pids, menu.ID) {
+			return e.NewBusinessError(1, "不能将菜单父节点设置为其自身的子级")
+		}
+
 		menu.Level = parentMenu.Level + 1
+		menu.FullPath = s.assembleFullPath(params.Path, parentMenu.FullPath)
 		menu.Pids = strings.TrimPrefix(fmt.Sprintf("%s,%d", parentMenu.Pids, parentMenu.ID), ",")
-	} else if params.Pid == 0 {
+	} else if params.Pid == 0 || menu.Pid == 0 {
 		menu.Level = 1
 		menu.Pids = "0"
+		menu.FullPath = s.assembleFullPath(params.Path, "/")
 	}
 	menu.Pid = params.Pid
 	return nil
@@ -293,7 +297,8 @@ func (s *MenuService) List(params *form.ListMenu) any {
 	menus := model.List[model.Menu](menuModel, conditionStr, args, model.ListOptionalParams{
 		OrderBy: "sort desc, id desc",
 	})
-	return resources.NewMenuTransformer().BuildMenuTree(menus, 0)
+
+	return resources.NewMenuTreeTransformer().BuildTreeByNode(menus, 0)
 }
 
 func (s *MenuService) Detail(id uint) (any, error) {

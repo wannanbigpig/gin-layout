@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS `a_menu`
     `animate_leave`     varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '离开动画，动画类参考https://animate.style/',
     `animate_duration`  float(2, 2)                                            NOT NULL DEFAULT '0.00' COMMENT '动画持续时间',
     `is_show`           tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否显示，1是 0否',
-    `status`            tinyint                                                NOT NULL DEFAULT '0' COMMENT '状态，0正常 1禁用',
+    `status`            tinyint                                                NOT NULL DEFAULT '0' COMMENT '状态，1正常 0禁用',
     `is_auth`           tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否需要授权，1是 0否 ',
     `is_external_links` tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否外链，1是 0否 ',
     `is_new_window`     tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否新窗口打开, 1是 0否',
@@ -183,11 +183,12 @@ CREATE TABLE IF NOT EXISTS `a_role`
 (
     `id`          int unsigned                                           NOT NULL AUTO_INCREMENT,
     `pid`         int unsigned                                           NOT NULL DEFAULT '0' COMMENT '上级id',
+    `pids`        varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '上级id路径链',
     `name`        varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '角色名称',
     `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '描述',
     `level`       tinyint                                                NOT NULL DEFAULT '1' COMMENT '层级',
     `sort`        mediumint                                              NOT NULL DEFAULT '0' COMMENT '排序',
-    `status`      tinyint                                                NOT NULL DEFAULT '1' COMMENT '是否启用状态,1启用，2不启用',
+    `status`      tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否启用状态,1是，0否',
     `created_at`  datetime                                                        DEFAULT NULL,
     `updated_at`  datetime                                                        DEFAULT NULL,
     `deleted_at`  int                                                    NOT NULL DEFAULT '0' COMMENT '删除时间戳',
@@ -248,7 +249,7 @@ CREATE TABLE IF NOT EXISTS `a_menu_api_map`
   ROW_FORMAT = DYNAMIC COMMENT ='菜单权限映射表';
 
 -- 创建角色菜单映射表
-CREATE TABLE IF NOT EXISTS `a_menu_role_map`
+CREATE TABLE IF NOT EXISTS `a_role_menu_map`
 (
     `id`         int unsigned NOT NULL AUTO_INCREMENT,
     `role_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '角色id,对应roles表id',

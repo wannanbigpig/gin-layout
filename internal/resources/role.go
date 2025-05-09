@@ -13,19 +13,28 @@ type RoleResources struct {
 	Level       uint8            `json:"level"`
 	Sort        uint16           `json:"sort"`
 	Status      uint8            `json:"status"`
+	Children    []*RoleResources `json:"children"`
 	CreatedAt   utils.FormatDate `json:"created_at"`
 	UpdatedAt   utils.FormatDate `json:"updated_at"`
 }
 
-// RoleTransformer 角色资源转换
-type RoleTransformer struct {
-	BaseResources[*model.Role, *RoleResources]
+func (r *RoleResources) SetChildren(children []*RoleResources) {
+	r.Children = children
+}
+func (r *RoleResources) GetID() uint {
+	return r.ID
+}
+func (r *RoleResources) GetPID() uint {
+	return r.Pid
 }
 
-// NewRoleTransformer 实例化权限资源转换器
-func NewRoleTransformer() RoleTransformer {
-	return RoleTransformer{
-		BaseResources: BaseResources[*model.Role, *RoleResources]{
+type RoleTreeTransformer struct {
+	TreeResource[*model.Role, *RoleResources]
+}
+
+func NewRoleTreeTransformer() RoleTreeTransformer {
+	return RoleTreeTransformer{
+		TreeResource: TreeResource[*model.Role, *RoleResources]{
 			NewResource: func() *RoleResources {
 				return &RoleResources{}
 			},

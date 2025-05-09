@@ -30,7 +30,19 @@ func (api RoleController) List(c *gin.Context) {
 }
 
 func (api RoleController) Edit(c *gin.Context) {
+	// 初始化参数结构体
+	permissionForm := form.NewEditRoleForm()
+	// 绑定参数并使用验证器验证参数
+	if err := validator.CheckPostParams(c, &permissionForm); err != nil {
+		return
+	}
 
+	err := permission.NewRoleService().Edit(permissionForm)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, nil)
 }
 func (api RoleController) Delete(c *gin.Context) {
 
