@@ -27,7 +27,7 @@ var (
 		Use:          "go-layout",
 		Short:        "go-layout",
 		SilenceUsage: true,
-		Long: `Gin framework is used as the core of this project to build a scaffold, 
+		Long: `Gin framework is used as the core of this project to build a scaffold,
 based on the project can be quickly completed business development, out of the box 📦`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			initializeConfig()
