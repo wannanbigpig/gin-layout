@@ -5,7 +5,7 @@
 [![Sync to Gitee](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml/badge.svg?branch=master)](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wannanbigpig/gin-layout)](https://goreportcard.com/report/github.com/wannanbigpig/gin-layout)
 [![GitHub license](https://img.shields.io/github/license/wannanbigpig/gin-layout)](https://github.com/wannanbigpig/gin-layout/blob/master/LICENSE)
-[![Go Version](https://img.shields.io/badge/Go-%3E%3D1.24-blue.svg)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-%3E%3D1.25-blue.svg)](https://golang.org/)
 
 > 基于 Gin 框架的企业级 Go 项目脚手架，开箱即用，快速构建 RESTful API 服务
 
@@ -64,7 +64,7 @@ gin-layout/
 
 ### 环境要求
 
-- Go >= 1.24
+- Go >= 1.25
 - MySQL >= 5.7
 - Redis >= 5.0 (可选)
 
@@ -230,7 +230,7 @@ server {
 ### Docker 部署（可选）
 
 ```dockerfile
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN go build -o go-layout main.go

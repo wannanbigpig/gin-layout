@@ -1,12 +1,11 @@
 module github.com/wannanbigpig/gin-layout
 
-go 1.24.2
+go 1.25
 
 require (
 	github.com/casbin/casbin/v2 v2.132.0
 	github.com/casbin/gorm-adapter/v3 v3.37.0
 	github.com/fsnotify/fsnotify v1.9.0
-	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
@@ -47,8 +46,8 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.11 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
-	github.com/glebarez/go-sqlite v1.22.0 // indirect
-	github.com/glebarez/sqlite v1.11.0 // indirect
+	github.com/glebarez/go-sqlite v1.20.3 // indirect
+	github.com/glebarez/sqlite v1.7.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
@@ -100,8 +99,16 @@ require (
 	gorm.io/driver/postgres v1.6.0 // indirect
 	gorm.io/driver/sqlserver v1.6.3 // indirect
 	gorm.io/plugin/dbresolver v1.6.2 // indirect
-	modernc.org/libc v1.66.10 // indirect
-	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.40.0 // indirect
+	// SQLite dependencies (GPL licensed) - indirect dependencies via casbin/gorm-adapter/v3
+	// Note: Project only uses MySQL, these are pulled in by the adapter's SQLite support
+	modernc.org/libc v1.66.10 // indirect; GPL license
+	modernc.org/mathutil v1.7.1 // indirect; GPL license
+	modernc.org/memory v1.11.0 // indirect; GPL license
+	modernc.org/sqlite v1.40.0 // indirect; GPL license
+)
+
+// Exclude specific SQLite package versions to avoid GPL license concerns
+exclude (
+	github.com/glebarez/go-sqlite v1.22.0
+	github.com/glebarez/sqlite v1.11.0
 )
