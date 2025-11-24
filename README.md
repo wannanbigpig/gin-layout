@@ -9,6 +9,8 @@
 
 > 基于 Gin 框架的企业级 Go 项目脚手架，开箱即用，快速构建 RESTful API 服务
 
+**前端项目：** [go-admin-ui](https://github.com/wannanbigpig/go-admin-ui) - 基于 Vue 3 + Element Plus 的管理后台前端项目
+
 ## ✨ 特性
 
 - 🚀 **开箱即用** - 完整的项目结构，无需从零开始搭建
@@ -178,6 +180,16 @@ go run main.go -h
   - [接口文档](https://apifox.com/apidoc/shared-721e0594-dea4-4d86-bad3-851b51c16e03)
 - **x_l_admin** - 管理台服务分支，包含完整的 RBAC 权限管理
   - [接口文档](https://apifox.com/apidoc/shared-c429e6ec-8246-4eb4-a503-3927602af312)
+
+### 前端项目
+
+本项目配套的前端管理后台项目：
+
+- **[go-admin-ui](https://github.com/wannanbigpig/go-admin-ui)** - 基于 Vue 3 + Element Plus + Vite 构建的现代化管理后台前端
+  - 完整的 RBAC 权限控制
+  - 动态路由和菜单生成
+  - 响应式布局设计
+  - 丰富的组件和工具函数
 
 ## 🚢 部署
 
