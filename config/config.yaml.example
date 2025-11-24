@@ -5,6 +5,29 @@ app:
   language: zh_CN
 #  watch_config: false
 #  base_path: ""
+#  base_url: "https://example.com"  # 文件访问的基础URL，用于拼接本地文件访问地址
+#  # CORS 跨域配置
+#  cors_origins:                    # CORS允许的源列表，空数组表示允许所有源（开发环境）
+#    - "http://localhost:3000"
+#    - "http://localhost:8080"
+#    - "https://example.com"
+#  cors_methods:                    # 允许的HTTP方法，空数组使用默认值（GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS）
+#    - "GET"
+#    - "POST"
+#    - "PUT"
+#    - "PATCH"
+#    - "DELETE"
+#    - "HEAD"
+#    - "OPTIONS"
+#  cors_headers:                    # 允许的请求头，空数组表示允许所有（使用 "*"）
+#    - "Content-Type"
+#    - "Authorization"
+#    - "X-Requested-With"
+#  cors_expose_headers:             # 暴露的响应头，空数组表示暴露所有（使用 "*"）
+#    - "Content-Length"
+#    - "X-Request-Id"
+#  cors_max_age: 43200              # 预检请求缓存时间（秒），默认 43200（12小时）
+#  cors_credentials: false          # 是否允许携带凭证（cookies等），默认 false
 jwt:
   ttl: 7200
   refresh_ttl: 3600

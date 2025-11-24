@@ -22,6 +22,7 @@ type AdminUserInfo struct {
 	Nickname        string `json:"nickname"`
 	PhoneNumber     string `json:"phone_number"`
 	CountryCode     string `json:"country_code"`
+	IsSuperAdmin    uint8  `json:"is_super_admin"`
 }
 
 // Generate 生成JWT Token
@@ -94,6 +95,7 @@ func NewAdminCustomClaims(user *model.AdminUser) AdminCustomClaims {
 			CountryCode:     user.CountryCode,     // phoneRule.Apply(user.Mobile),
 			Email:           user.Email,           // emailRule.Apply(user.Email),
 			Nickname:        user.Nickname,
+			IsSuperAdmin:    user.IsSuperAdmin,
 		},
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt), // 定义过期时间

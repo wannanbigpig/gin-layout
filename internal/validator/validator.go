@@ -25,16 +25,21 @@ import (
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 )
 
-var trans ut.Translator // 全局验证器
+var (
+	trans    ut.Translator // 全局验证器
+	once     sync.Once
+	validate *validator.Validate
 
-var once sync.Once
+	// 预编译的正则表达式，避免每次验证时重新编译
+	phoneNumberRegex = regexp.MustCompile(`^1[3456789]\d{9}$`)
 
-var validate *validator.Validate
+	// 正则表达式缓存，用于 RegexpValidator
+	regexCache sync.Map // map[string]*regexp.Regexp
+)
 
 // InitValidatorTrans 初始化验证器和翻译器
-func InitValidatorTrans(locale string) error {
+func InitValidatorTrans(locale string) {
 	once.Do(func() { validatorTrans(locale) })
-	return nil
 }
 
 func validatorTrans(locale string) {
@@ -65,42 +70,50 @@ func getValidatorEngine() (*validator.Validate, bool) {
 
 // registerTagNameFunc 注册获取 JSON 标签的自定义方法
 func registerTagNameFunc(validate *validator.Validate) {
-	tagPriority := []string{"label", "json", "form"} // 标签优先级
 	validate.RegisterTagNameFunc(func(field reflect.StructField) string {
-		for _, tag := range tagPriority {
-			label := field.Tag.Get(tag)
-			if label != "" && label != "-" {
-				return label
-			}
+		// 优化：减少字符串分配，直接返回找到的第一个有效标签
+		if label := field.Tag.Get("label"); label != "" && label != "-" {
+			return label
+		}
+		if json := field.Tag.Get("json"); json != "" && json != "-" {
+			return json
+		}
+		if form := field.Tag.Get("form"); form != "" && form != "-" {
+			return form
 		}
 		return field.Name
 	})
 }
 
 // RegexpValidator 通用正则表达式验证器
+// 使用缓存避免重复编译相同的正则表达式
 func RegexpValidator(fl validator.FieldLevel) bool {
 	param := fl.Param()
-	value := fl.Field().String()
-
-	// 处理参数为空或无效
 	if param == "" {
 		return false
 	}
 
-	// 编译正则
+	value := fl.Field().String()
+
+	// 从缓存中获取已编译的正则表达式
+	if cached, ok := regexCache.Load(param); ok {
+		return cached.(*regexp.Regexp).MatchString(value)
+	}
+
+	// 编译正则表达式并缓存
 	reg, err := regexp.Compile(param)
 	if err != nil {
 		return false
 	}
-
+	regexCache.Store(param, reg)
 	return reg.MatchString(value)
 }
 
 // initCustomRules 注册自定义验证规则
 func initCustomRules(validate *validator.Validate) {
-	// 注册手机号规则
+	// 注册手机号规则（使用预编译的正则表达式）
 	err := validate.RegisterValidation("phone_number", func(fl validator.FieldLevel) bool {
-		return regexp.MustCompile(`^1[3456789]\d{9}$`).MatchString(fl.Field().String())
+		return phoneNumberRegex.MatchString(fl.Field().String())
 	})
 	if err != nil {
 		panic("registration of phone_number rule failed")
@@ -163,11 +176,13 @@ func ResponseError(c *gin.Context, err error) {
 }
 
 // handleValidationError 处理验证错误
+// 优化：只处理第一个错误，提前返回
 func handleValidationError(c *gin.Context, errs validator.ValidationErrors) {
 	fields := errs.Translate(trans)
+	// fields 是 map[string]string 类型，遍历获取第一个错误
 	for _, err := range fields {
 		r.Resp().FailCode(c, errcode.InvalidParameter, err)
-		break
+		return
 	}
 }
 
@@ -184,13 +199,16 @@ var (
 )
 
 func handleBindingError(c *gin.Context, err error) {
-	var e *json.UnmarshalTypeError
+	var typeErr *json.UnmarshalTypeError
+	var syntaxErr *json.SyntaxError
 	switch {
-	case errors.As(err, &e):
+	case errors.As(err, &typeErr):
 		// JSON 结构体字段类型错误
-		errMsg := fmt.Sprintf("%s 应该是 %s 类型，传入的是 %s 类型", e.Field, e.Type.Name(), reflect.TypeOf(e.Value).Name())
+		errMsg := fmt.Sprintf("%s 应该是 %s 类型，传入的是 %s 类型", typeErr.Field, typeErr.Type.Name(), reflect.TypeOf(typeErr.Value).Name())
 		r.Resp().FailCode(c, errcode.InvalidParameter, errMsg)
-
+	case errors.As(err, &syntaxErr):
+		// JSON 语法错误
+		r.Resp().FailCode(c, errcode.InvalidParameter, "请求参数解析失败：请检查 JSON 格式是否正确")
 	default:
 		errStr := err.Error()
 		switch {
@@ -207,12 +225,29 @@ func handleBindingError(c *gin.Context, err error) {
 }
 
 // 判断是否为 EOF 错误，提升匹配逻辑的健壮性
+// 优化：避免不必要的字符串分配
 func isEOFError(errStr string) bool {
-	return eofRegex.MatchString(strings.TrimSpace(errStr))
+	// 快速检查：如果字符串为空或太长，直接返回 false
+	if len(errStr) == 0 || len(errStr) > 30 {
+		return false
+	}
+	// 只对可能包含空格的情况进行 TrimSpace
+	if len(errStr) > 0 && (errStr[0] == ' ' || errStr[len(errStr)-1] == ' ') {
+		return eofRegex.MatchString(strings.TrimSpace(errStr))
+	}
+	return eofRegex.MatchString(errStr)
 }
 
 func isConvertError(errStr string) bool {
-	return typeConvertRegex.MatchString(strings.TrimSpace(errStr))
+	// 快速检查：如果字符串为空或很短，直接返回 false
+	if len(errStr) == 0 {
+		return false
+	}
+	// 只对可能包含空格的情况进行 TrimSpace
+	if len(errStr) > 0 && (errStr[0] == ' ' || errStr[len(errStr)-1] == ' ') {
+		return typeConvertRegex.MatchString(strings.TrimSpace(errStr))
+	}
+	return typeConvertRegex.MatchString(errStr)
 }
 
 // CheckParams 检查请求参数
@@ -243,14 +278,35 @@ func CheckPostParams(c *gin.Context, obj interface{}) error {
 }
 
 // requiredIf 字段B存在时，字段A必填
+// 优化：减少字符串分配和类型转换
 func requiredIf(fl validator.FieldLevel) bool {
-	params := strings.Fields(fl.Param())
+	param := fl.Param()
+	if param == "" {
+		return false
+	}
+
+	// 优化：手动分割字符串，避免 strings.Fields 的额外分配
+	params := make([]string, 0, 4)
+	start := 0
+	for i := 0; i < len(param); i++ {
+		if param[i] == ' ' || param[i] == '\t' {
+			if start < i {
+				params = append(params, param[start:i])
+			}
+			start = i + 1
+		}
+	}
+	if start < len(param) {
+		params = append(params, param[start:])
+	}
+
 	if len(params) < 2 {
 		return false
 	}
 
 	targetField := params[0]
 	validValues := params[1:]
+	fieldValue := fl.Field().String()
 
 	targetFieldValue := fl.Parent().FieldByName(targetField)
 	if !targetFieldValue.IsValid() {
@@ -262,28 +318,28 @@ func requiredIf(fl validator.FieldLevel) bool {
 		targetInt := targetFieldValue.Int()
 		for _, val := range validValues {
 			if intVal, err := strconv.ParseInt(val, 10, 64); err == nil && targetInt == intVal {
-				return fl.Field().String() != ""
+				return fieldValue != ""
 			}
 		}
 	case reflect.String:
 		targetStr := targetFieldValue.String()
 		for _, val := range validValues {
 			if targetStr == val {
-				return fl.Field().String() != ""
+				return fieldValue != ""
 			}
 		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		targetUint := targetFieldValue.Uint()
 		for _, val := range validValues {
 			if uintVal, err := strconv.ParseUint(val, 10, 64); err == nil && targetUint == uintVal {
-				return fl.Field().String() != ""
+				return fieldValue != ""
 			}
 		}
 	case reflect.Float32, reflect.Float64:
 		targetFloat := targetFieldValue.Float()
 		for _, val := range validValues {
 			if floatVal, err := strconv.ParseFloat(val, 64); err == nil && targetFloat == floatVal {
-				return fl.Field().String() != ""
+				return fieldValue != ""
 			}
 		}
 	default:

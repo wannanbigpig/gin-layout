@@ -4,11 +4,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 )
 
+// Api 控制器基类
 type Api struct {
 	errors.Error
 }
@@ -16,39 +18,40 @@ type Api struct {
 // Success 业务成功响应
 func (api Api) Success(c *gin.Context, data ...any) {
 	response := r.Resp()
-	if data != nil {
+	if len(data) > 0 && data[0] != nil {
 		response.WithDataSuccess(c, data[0])
 		return
 	}
 	response.Success(c)
 }
 
-// FailCode 业务失败响应
+// FailCode 业务失败响应（使用错误码）
 func (api Api) FailCode(c *gin.Context, code int, data ...any) {
 	response := r.Resp()
-	if data != nil {
+	if len(data) > 0 && data[0] != nil {
 		response.WithData(data[0]).FailCode(c, code)
 		return
 	}
 	response.FailCode(c, code)
 }
 
-// Fail 业务失败响应
+// Fail 业务失败响应（自定义错误消息）
 func (api Api) Fail(c *gin.Context, code int, message string, data ...any) {
 	response := r.Resp()
-	if data != nil {
-		response.WithData(data[0]).FailCode(c, code, message)
+	if len(data) > 0 && data[0] != nil {
+		response.WithData(data[0]).Fail(c, code, message)
 		return
 	}
-	response.FailCode(c, code, message)
+	response.Fail(c, code, message)
 }
 
-// Err 判断错误类型是自定义类型则自动返回错误中携带的code和message，否则返回服务器错误
-func (api Api) Err(c *gin.Context, e error) {
-	businessError, err := api.AsBusinessError(e)
-	if err != nil {
-		requestId := c.GetString("requestId")
-		log.Logger.Warn("Unknown error:", zap.Any("requestId:", requestId), zap.Any("Error reason:", err))
+// Err 统一错误处理
+// 判断错误类型是自定义类型则自动返回错误中携带的code和message，否则返回服务器错误
+func (api Api) Err(c *gin.Context, err error) {
+	businessError, parseErr := api.AsBusinessError(err)
+	if parseErr != nil {
+		requestID := c.GetString(middleware.ContextKeyRequestID)
+		log.Logger.Warn("Unknown error:", zap.String("requestId", requestID), zap.Error(parseErr))
 		api.FailCode(c, errors.ServerErr)
 		return
 	}

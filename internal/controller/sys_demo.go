@@ -6,20 +6,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// DemoController Demo控制器
 type DemoController struct {
 	Api
 }
 
+// NewDemoController 创建Demo控制器实例
 func NewDemoController() *DemoController {
 	return &DemoController{}
 }
 
-// HelloWorld 这是一个demo示例
+// HelloWorld Demo示例接口
 func (api DemoController) HelloWorld(c *gin.Context) {
-	str, ok := c.GetQuery("name")
+	name, ok := c.GetQuery("name")
 	if !ok {
-		str = "gin-layout"
+		name = "gin-layout"
 	}
 
-	api.Success(c, fmt.Sprintf("hello %s %s", str, c.Param("id")))
+	id := c.Param("id")
+	result := fmt.Sprintf("hello %s %s", name, id)
+	api.Success(c, result)
 }

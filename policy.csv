@@ -1,0 +1,29 @@
+# 用户-角色绑定
+g, user:1, dept:2
+
+# 角色继承
+g, role:1, role:2
+g, role:2, role:3
+
+# 部门-》角色绑定
+g, dept:1, role:1
+g, dept:2, role:2
+g, dept:2, role:4
+
+# 角色-》菜单绑定
+g, role:1, menu:1
+g, role:3, menu:3
+g, role:2, menu:2
+
+# 菜单-》权限绑定
+p, menu:1, /menu/*, GET
+p, menu:1, /api/hr/*, POST
+p, menu:2, /api/v1/menu/update, POST
+p, menu:2, /api/data, GET
+p, menu:3, /api/v1/menu/list, GET
+p, menu:3, /api/v1/menu/add, POST
+
+# 测试用例
+# user:1, /api/data, GET
+# user:1, /api/v1/menu/update, POST
+# user:1, /api/v1/menu/add1, POST

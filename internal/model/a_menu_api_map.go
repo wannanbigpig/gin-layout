@@ -16,10 +16,6 @@ func (m *MenuApiMap) TableName() string {
 	return "a_menu_api_map"
 }
 
-func (m *MenuApiMap) DeleteByMenuId(menuId uint) error {
-	return m.DB().Where("menu_id = ?", menuId).Delete(&MenuApiMap{}).Error
-}
-
 func (m *MenuApiMap) BatchCreate(menuApi []*MenuApiMap) error {
 	return m.DB().Create(&menuApi).Error
 }

@@ -1,8 +1,9 @@
 package token
 
 import (
-	"github.com/golang-jwt/jwt/v5"
 	"testing"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestGenerate(t *testing.T) {

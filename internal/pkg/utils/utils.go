@@ -2,10 +2,40 @@ package utils
 
 import (
 	"math/rand"
+	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/samber/lo"
 )
+
+// CalculateChanges 计算差集 （一次性获取删除、新增和剩余列表）
+// 计算交集
+// 合并差集和交集
+// 示例：
+//
+//	existingIds := []int{1, 2, 3, 4, 5}
+//	ids := []int{2, 3, 6, 7}
+//	toDelete, toAdd, remainingList := CalculateChanges(existingIds, ids)
+//	fmt.Println("toDelete:", toDelete)
+//	fmt.Println("toAdd:", toAdd)
+//	fmt.Println("remainingList:", remainingList)
+//
+// 输出：
+// toDelete: [1 4 5]
+// toAdd: [6 7]
+// remainingList: [2 3 6 7]
+func CalculateChanges[T comparable](existingIds, ids []T) (toDelete, toAdd, remainingList []T) {
+	// 2. 计算差集（一次性获取删除和新增列表）
+	toDelete, toAdd = lo.Difference(existingIds, lo.Uniq(ids))
+
+	// 2. 计算交集
+	intersection := lo.Intersect(ids, existingIds)
+
+	// 3. 合并差集和交集
+	remainingList = lo.Union(intersection, toAdd)
+	return
+}
 
 // RandString 生成随机字符串
 func RandString(n int) string {
@@ -32,74 +62,19 @@ func RandString(n int) string {
 	return string(b)
 }
 
-type DesensitizeRule struct {
-	KeepPrefixLen   int  // 保留前缀长度
-	KeepSuffixLen   int  // 保留后缀长度
-	MaskChar        rune // 脱敏字符
-	Separator       rune // 特殊分隔符(如邮箱的@)
-	FixedMaskLength int  // 固定脱敏长度(0表示不固定)
-}
+// TrimPrefixAndSuffixAND 去除字符串前后的 AND（不区分大小写，忽略多余空白）
+func TrimPrefixAndSuffixAND(s string) string {
+	s = strings.TrimSpace(s)
 
-// NewPhoneRule 构建手机号码脱敏规则
-func NewPhoneRule() *DesensitizeRule {
-	return &DesensitizeRule{KeepPrefixLen: 3, KeepSuffixLen: 4, MaskChar: '*', FixedMaskLength: 4}
-}
-
-// NewEmailRule 构建邮箱脱敏规则
-func NewEmailRule() *DesensitizeRule {
-	return &DesensitizeRule{KeepPrefixLen: 2, KeepSuffixLen: 0, MaskChar: '*', Separator: '@', FixedMaskLength: 3}
-}
-func (r *DesensitizeRule) Apply(s string) string {
-	if utf8.RuneCountInString(s) == 0 {
-		return s
-	}
-
-	// 处理带分隔符的情况(如邮箱)
-	if r.Separator != 0 {
-		parts := strings.Split(s, string(r.Separator))
-		if len(parts) == 2 {
-			localPart := r.applyToPart(parts[0])
-			return localPart + string(r.Separator) + parts[1]
+	// 正则匹配开头或结尾的 AND（忽略大小写和空白）
+	re := regexp.MustCompile(`(?i)^(AND\s+)|(\s+AND)$`)
+	for {
+		trimmed := re.ReplaceAllString(s, "")
+		if trimmed == s {
+			break
 		}
+		s = strings.TrimSpace(trimmed)
 	}
 
-	return r.applyToPart(s)
-}
-
-func (r *DesensitizeRule) applyToPart(s string) string {
-	runes := []rune(s)
-	length := len(runes)
-
-	// 计算需要保留的前后部分
-	keepPrefix := r.min(r.KeepPrefixLen, length)
-	keepSuffix := r.min(r.KeepSuffixLen, length-keepPrefix)
-
-	// 计算脱敏部分长度
-	var maskLength int
-	if r.FixedMaskLength > 0 {
-		maskLength = r.FixedMaskLength // 使用固定长度
-	} else {
-		maskLength = length - keepPrefix - keepSuffix // 使用可变长度
-	}
-
-	// 构建结果
-	var result strings.Builder
-	if keepPrefix > 0 {
-		result.WriteString(string(runes[:keepPrefix]))
-	}
-	if maskLength > 0 {
-		result.WriteString(strings.Repeat(string(r.MaskChar), maskLength))
-	}
-	if keepSuffix > 0 {
-		result.WriteString(string(runes[length-keepSuffix:]))
-	}
-
-	return result.String()
-}
-
-func (r *DesensitizeRule) min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return s
 }

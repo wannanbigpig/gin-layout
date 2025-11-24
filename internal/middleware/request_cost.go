@@ -7,13 +7,39 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	// ContextKeyRequestStartTime 请求开始时间的上下文键
+	ContextKeyRequestStartTime = "requestStartTime"
+	// ContextKeyRequestID 请求ID的上下文键
+	ContextKeyRequestID = "requestId"
+)
+
+// RequestCostHandler 请求耗时和请求ID中间件
+// 功能：
+// 1. 记录请求开始时间，用于后续计算请求耗时
+// 2. 为每个请求生成唯一的请求ID，用于日志追踪
 func RequestCostHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 设置请求开始时间
-		c.Set("requestStartTime", time.Now())
-		// 设置请求ID,生成一个uuid
-		c.Set("requestId", uuid.New().String())
+		// 设置请求上下文信息
+		setRequestContext(c)
+		// 暂停1-5秒随机时间
+		// randomSeconds := rand.Intn(5) + 1 // 生成1-5的随机数
+		// time.Sleep(time.Duration(randomSeconds) * time.Second)
 		c.Next()
-
 	}
+}
+
+// setRequestContext 设置请求上下文信息
+func setRequestContext(c *gin.Context) {
+	// 设置请求开始时间
+	c.Set(ContextKeyRequestStartTime, time.Now())
+
+	// 生成并设置请求ID
+	requestID := generateRequestID()
+	c.Set(ContextKeyRequestID, requestID)
+}
+
+// generateRequestID 生成请求ID
+func generateRequestID() string {
+	return uuid.New().String()
 }

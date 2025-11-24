@@ -50,9 +50,9 @@ func createEngine() *gin.Engine {
 		// 开发调试模式
 		engine = gin.New()
 		engine.Use(
+			middleware.CorsHandler(), // CORS 必须在最前面
 			middleware.RequestCostHandler(),
 			gin.Logger(),
-			middleware.CorsHandler(),
 			middleware.CustomRecovery(),
 			middleware.CustomLogger(),
 		)
@@ -61,8 +61,8 @@ func createEngine() *gin.Engine {
 		// 生产模式
 		engine = ReleaseRouter()
 		engine.Use(
+			middleware.CorsHandler(), // CORS 必须在最前面
 			middleware.RequestCostHandler(),
-			middleware.CorsHandler(),
 			middleware.CustomRecovery(),
 			middleware.CustomLogger(),
 		)
@@ -104,7 +104,7 @@ func (r *RegisterRouter) route(e gin.IRoutes, method string, path string, handle
 	if r.InitApiTable {
 		api.Method = method
 		api.Path = path
-		api.Auth = 1 // 默认需要鉴
+		api.Auth = 1 // 默认需要鉴权
 		api.GroupCode = ""
 		code := utils.MD5(method + "_" + api.Path)
 		// 初始化 api 信息
@@ -125,13 +125,20 @@ type GroupHandler struct {
 	GroupCode    string
 }
 
+// setGroupCode 设置分组code（用于api权限管理，分组code取之于a_api_group表的code字段,需要提前在a_api_group表中添加对应的分组）
 func (g *GroupHandler) setGroupCode(code string) *GroupHandler {
 	g.GroupCode = code
 	return g
 }
 
 func (g *GroupHandler) group(relativePath string, handler ...gin.HandlerFunc) *GroupHandler {
-	groupHandLer := &GroupHandler{RouterGroup: g.RouterGroup.Group(relativePath, handler...), initApiTable: g.initApiTable}
+	// 创建新的分组，默认继承父分组的 GroupCode
+	// 如果子分组需要不同的 GroupCode，可以显式调用 setGroupCode() 来覆盖
+	groupHandLer := &GroupHandler{
+		RouterGroup:  g.RouterGroup.Group(relativePath, handler...),
+		initApiTable: g.initApiTable,
+		GroupCode:    g.GroupCode, // 继承父分组的 GroupCode
+	}
 	return groupHandLer
 }
 

@@ -13,18 +13,24 @@ DROP TABLE IF EXISTS `a_department`;
 -- 删除角色表
 DROP TABLE IF EXISTS `a_role`;
 -- 删除用户部门映射表
-DROP TABLE IF EXISTS `a_user_department_map`;
+DROP TABLE IF EXISTS `a_admin_user_department_map`;
+-- 删除部门角色映射表
+DROP TABLE IF EXISTS `a_department_role_map`;
+-- 删除用户菜单映射表
+DROP TABLE IF EXISTS `a_admin_user_menu_map`;
 -- 删除菜单权限映射表
 DROP TABLE IF EXISTS `a_menu_api_map`;
 -- 删除角色菜单映射表
-DROP TABLE IF EXISTS `a_menu_role_map`;
+DROP TABLE IF EXISTS `a_role_menu_map`;
 -- 删除用户角色映射表
-DROP TABLE IF EXISTS `a_user_role_map`;
--- 删除用户菜单映射表
-DROP TABLE IF EXISTS `a_user_menu_map`;
--- 删除用户认证令牌及登录日志表
-DROP TABLE IF EXISTS `a_auth_tokens`;
+DROP TABLE IF EXISTS `a_admin_user_role_map`;
 -- 删除请求日志表
 DROP TABLE IF EXISTS `a_request_logs`;
+-- 删除管理员登录日志表
+DROP TABLE IF EXISTS `a_admin_login_logs`;
+-- 删除casbin规则表
+DROP TABLE IF EXISTS `casbin_rule`;
+-- 删除文件上传表
+DROP TABLE IF EXISTS `a_upload_files`;
 
 COMMIT;

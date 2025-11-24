@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,7 +16,7 @@ import (
 
 func TestLogin(t *testing.T) {
 	// 获取验证码
-	captchaRoute := ts.URL + "/api/v1/admin/login-captcha"
+	captchaRoute := ts.URL + "/admin/v1/login-captcha"
 	captchaResp := getRequest(captchaRoute, nil)
 	assert.Nil(t, captchaResp.Error)
 	assert.Equal(t, http.StatusOK, captchaResp.Response.StatusCode)
@@ -27,7 +26,7 @@ func TestLogin(t *testing.T) {
 	assert.Equal(t, e.SUCCESS, captchaResult.Code)
 
 	// 登录
-	route := ts.URL + "/api/v1/admin/login"
+	route := ts.URL + "/admin/v1/login"
 	h := utils.HttpRequest{}
 	captchaData, ok := captchaResult.Data.(map[string]any)
 	assert.True(t, ok)
@@ -50,7 +49,7 @@ func TestLogin(t *testing.T) {
 }
 
 func TestGetAdminUser(t *testing.T) {
-	route := ts.URL + "api/v1/admin/admin-user/get"
+	route := ts.URL + "/admin/v1/admin-user/get"
 	queryParams := &url.Values{}
 	queryParams.Set("id", "1")
 	resp := getRequest(route, queryParams)

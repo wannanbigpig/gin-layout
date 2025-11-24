@@ -1,8 +1,18 @@
 package utils
 
 import (
+	"fmt"
 	"testing"
 )
+
+func TestCalculateChanges(t *testing.T) {
+	existingIds := []int{1, 2, 3, 4, 5}
+	ids := []int{2, 3, 6, 7}
+	toDelete, toAdd, remainingList := CalculateChanges(existingIds, ids)
+	fmt.Println("toDelete:", toDelete)
+	fmt.Println("toAdd:", toAdd)
+	fmt.Println("remainingList:", remainingList)
+}
 
 func TestRandString(t *testing.T) {
 	s := RandString(12)
@@ -29,5 +39,11 @@ func TestDesensitizeRule(b *testing.T) {
 	emailRule := &DesensitizeRule{KeepPrefixLen: 2, KeepSuffixLen: 0, MaskChar: '*', Separator: '@', FixedMaskLength: 3}
 	if emailRule.Apply("test@example.com") != "te***@example.com" {
 		b.Error("邮箱脱敏失败")
+	}
+}
+func BenchmarkTrimPrefixAndSuffixAND(b *testing.B) {
+	input := "   AND AND name = 'Tom' AND age = 18 AND  "
+	for i := 0; i < b.N; i++ {
+		_ = TrimPrefixAndSuffixAND(input)
 	}
 }

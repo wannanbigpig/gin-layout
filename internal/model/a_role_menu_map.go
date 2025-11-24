@@ -16,10 +16,6 @@ func (m *RoleMenuMap) TableName() string {
 	return "a_role_menu_map"
 }
 
-func (m *RoleMenuMap) DeleteByMenuId(roleId uint) error {
-	return m.DB().Where("role_id = ?", roleId).Delete(&RoleMenuMap{}).Error
-}
-
 func (m *RoleMenuMap) BatchCreate(roleMenu []*RoleMenuMap) error {
 	return m.DB().Create(&roleMenu).Error
 }

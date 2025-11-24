@@ -10,6 +10,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
+// Result API响应结果结构
 type Result struct {
 	Code      int    `json:"code"`
 	Msg       string `json:"msg"`
@@ -18,6 +19,7 @@ type Result struct {
 	RequestId string `json:"request_id"`
 }
 
+// NewResult 创建新的响应结果
 func NewResult() *Result {
 	return &Result{
 		Code:      0,
@@ -28,22 +30,17 @@ func NewResult() *Result {
 	}
 }
 
+// Response 响应处理器
 type Response struct {
 	httpCode int
 	result   *Result
 }
 
+// Resp 创建响应处理器实例
 func Resp() *Response {
-	// 初始化response
 	return &Response{
 		httpCode: http.StatusOK,
-		result: &Result{
-			Code:      0,
-			Msg:       "",
-			Data:      nil,
-			Cost:      "",
-			RequestId: "",
-		},
+		result:   NewResult(),
 	}
 }
 
@@ -51,7 +48,7 @@ func Resp() *Response {
 func (r *Response) Fail(c *gin.Context, code int, msg string, data ...any) {
 	r.SetCode(code)
 	r.SetMessage(msg)
-	if data != nil {
+	if len(data) > 0 && data[0] != nil {
 		r.WithData(data[0])
 	}
 	r.json(c)
@@ -60,7 +57,7 @@ func (r *Response) Fail(c *gin.Context, code int, msg string, data ...any) {
 // FailCode 自定义错误码返回
 func (r *Response) FailCode(c *gin.Context, code int, msg ...string) {
 	r.SetCode(code)
-	if msg != nil {
+	if len(msg) > 0 && msg[0] != "" {
 		r.SetMessage(msg[0])
 	}
 	r.json(c)
@@ -91,15 +88,16 @@ func (r *Response) SetHttpCode(code int) *Response {
 	return r
 }
 
+// defaultRes 默认响应数据结构
 type defaultRes struct {
 	Result any `json:"result"`
 }
 
 // WithData 设置返回data数据
 func (r *Response) WithData(data any) *Response {
-	switch data.(type) {
+	switch v := data.(type) {
 	case string, int, bool:
-		r.result.Data = &defaultRes{Result: data}
+		r.result.Data = &defaultRes{Result: v}
 	default:
 		r.result.Data = data
 	}
@@ -114,44 +112,42 @@ func (r *Response) SetMessage(message string) *Response {
 
 var ErrorText = errors.NewErrorText(config.Config.Language)
 
-// json 返回 gin 框架的 HandlerFunc
+// json 返回 gin 框架的 JSON 响应
 func (r *Response) json(c *gin.Context) {
+	// 如果消息为空，使用错误码对应的默认消息
 	if r.result.Msg == "" {
 		r.result.Msg = ErrorText.Text(r.result.Code)
 	}
 
-	// if r.Data == nil {
-	// 	r.Data = struct{}{}
-	// }
-
+	// 计算请求耗时
 	r.result.Cost = time.Since(c.GetTime("requestStartTime")).String()
 	r.result.RequestId = c.GetString("requestId")
 	c.AbortWithStatusJSON(r.httpCode, r.result)
 }
 
-// Success 业务成功响应
+// Success 业务成功响应（便捷方法）
 func Success(c *gin.Context, data ...any) {
-	if data != nil {
+	if len(data) > 0 && data[0] != nil {
 		Resp().WithDataSuccess(c, data[0])
 		return
 	}
 	Resp().Success(c)
 }
 
-// FailCode 业务失败响应
+// FailCode 业务失败响应（便捷方法）
 func FailCode(c *gin.Context, code int, data ...any) {
-	if data != nil {
+	if len(data) > 0 && data[0] != nil {
 		Resp().WithData(data[0]).FailCode(c, code)
 		return
 	}
 	Resp().FailCode(c, code)
 }
 
-// Fail 业务失败响应
+// Fail 业务失败响应（便捷方法）
 func Fail(c *gin.Context, code int, message string, data ...any) {
-	if data != nil {
-		Resp().WithData(data[0]).FailCode(c, code, message)
+	if len(data) > 0 && data[0] != nil {
+		Resp().WithData(data[0]).Fail(c, code, message)
 		return
 	}
-	Resp().FailCode(c, code, message)
+	Resp().Fail(c, code, message)
 }

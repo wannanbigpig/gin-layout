@@ -45,8 +45,10 @@ func Generate(driver base64Captcha.Driver, customStore *base64Captcha.Store) (it
 
 // Verify 校验验证码
 func Verify(id, value string) bool {
-	if strings.ToUpper(value) == strings.ToUpper(store.Get(id, true)) {
-		return true
+	// 如果 store 未初始化，使用默认的内存存储
+	if store == nil {
+		store = base64Captcha.DefaultMemStore
 	}
-	return false
+
+	return strings.EqualFold(value, store.Get(id, true))
 }

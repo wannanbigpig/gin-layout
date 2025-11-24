@@ -152,6 +152,7 @@ func (tr TreeResource[T, R]) BuildTreeByNode(data []T, rootID uint) []R {
 // 抽象出通用的 ToStruct 方法
 func toGenericStruct[T any, R any](data T, newFunc func() R) (R, error) {
 	var resource = newFunc()
+	// 使用 copier.Copy 进行结构体复制
 	err := copier.Copy(&resource, data)
 	if err != nil {
 		log.Logger.Error("Copy data to struct error", zap.Error(err))

@@ -9,7 +9,7 @@ var zhCNText = map[int]string{
 	TooManyRequests:  "请求过多",
 	UserDoesNotExist: "用户不存在",
 	UserDisable:      "用户已被禁用",
-	AuthorizationErr: "暂无访问权限",
+	AuthorizationErr: "暂无权限",
 	NotLogin:         "请先登录",
 	CaptchaErr:       "验证码错误",
 }

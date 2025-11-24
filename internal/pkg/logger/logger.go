@@ -7,9 +7,9 @@ import (
 	"time"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
-	"github.com/natefinch/lumberjack"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/wannanbigpig/gin-layout/config"
 )
@@ -48,7 +48,7 @@ func createZapLog() *zap.Logger {
 	// 在日志文件中使用大写字母记录日志级别
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	encoder := zapcore.NewConsoleEncoder(encoderConfig)
-	filename := filepath.Join(config.Config.StaticBasePath, "/logs/", config.Config.Logger.Filename)
+	filename := filepath.Join(config.Config.BasePath, "logs", config.Config.Logger.Filename)
 	var writer zapcore.WriteSyncer
 	if config.Config.Logger.DefaultDivision == "size" {
 		// 按文件大小切割日志

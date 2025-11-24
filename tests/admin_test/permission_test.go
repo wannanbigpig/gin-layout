@@ -1,7 +1,6 @@
 package admin_test
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
@@ -13,9 +12,9 @@ import (
 )
 
 func TestPermissionEdit(t *testing.T) {
-	route := ts.URL + "api/v1/admin/permission/edit", ts.URL
+	route := ts.URL + "/admin/v1/permission/edit"
 
-	body := `{"id":6,"name":"ping","desc":"","is_auth":1,"sort":100}`
+	body := `{"id":10,"name":"ping","description":"服务心跳检测接口","method":"GET","route":"/ping","is_auth":0,"sort":100}`
 	resp := postRequest(route, &body)
 
 	assert.Nil(t, resp.Error)
@@ -27,7 +26,7 @@ func TestPermissionEdit(t *testing.T) {
 }
 
 func TestPermissionList(t *testing.T) {
-	route := ts.URL + "api/v1/admin/permission/list", ts.URL
+	route := ts.URL + "/admin/v1/permission/list"
 	queryParams := &url.Values{}
 	queryParams.Set("page", "1")
 	queryParams.Set("per_page", "1")

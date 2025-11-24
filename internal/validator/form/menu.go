@@ -10,18 +10,18 @@ type EditMenu struct {
 	AnimateEnter    string  `form:"animate_enter" json:"animate_enter" label:"进入动画，动画类参考URL_ADDRESS" binding:"omitempty"`
 	AnimateLeave    string  `form:"animate_leave" json:"animate_leave" label:"离开动画，动画类参考URL_ADDRESS" binding:"omitempty"`
 	AnimateDuration float32 `form:"animate_duration" json:"animate_duration" label:"动画持续时间" binding:"omitempty"`
-	IsShow          int8    `form:"is_show" json:"is_show" label:"是否显示" binding:"omitempty,oneof=0 1"`               // 0 否 1 是
-	IsAuth          int8    `form:"is_auth" json:"is_auth" label:"是否需要授权" binding:"omitempty,oneof=0 1"`           // 0 否 1 是
-	IsNewWindow     int8    `form:"is_new_window" json:"is_new_window" label:"新窗口打开" binding:"omitempty,oneof=0 1"` // 0 否 1 是
-	Sort            int32   `form:"sort" json:"sort" label:"排序" binding:"required"`
-	Type            int8    `form:"type" json:"type" label:"菜单类型" binding:"required,oneof=1 2 3"` // 1 目录 2 菜单 3 按钮
+	IsShow          uint8   `form:"is_show" json:"is_show" label:"是否显示" binding:"omitempty,oneof=0 1"`              // 0 否 1 是
+	IsAuth          uint8   `form:"is_auth" json:"is_auth" label:"是否需要授权" binding:"omitempty,oneof=0 1"`            // 0 否 1 是
+	IsNewWindow     uint8   `form:"is_new_window" json:"is_new_window" label:"新窗口打开" binding:"omitempty,oneof=0 1"` // 0 否 1 是
+	Sort            uint    `form:"sort" json:"sort" label:"排序" binding:"required"`
+	Type            uint8   `form:"type" json:"type" label:"菜单类型" binding:"required,oneof=1 2 3"` // 1 目录 2 菜单 3 按钮
 	Pid             uint    `form:"pid" json:"pid" label:"上级菜单" binding:"omitempty"`
-	Desc            string  `form:"desc" json:"desc" label:"描述" binding:"omitempty"`
+	Description     string  `form:"description" json:"description" label:"描述" binding:"omitempty"`
 	ApiList         []uint  `form:"api_list" json:"api_list" label:"接口列表" binding:"omitempty"`
 	Component       string  `form:"component" json:"component" label:"前端组件路径"`
-	Status          int8    `form:"status" json:"status" label:"状态" binding:"omitempty,oneof=0 1"` // 0 禁用 1 启用
+	Status          uint8   `form:"status" json:"status" label:"状态" binding:"omitempty,oneof=0 1"` // 0 禁用 1 启用
 	Redirect        string  `form:"redirect" json:"redirect" label:"重定向地址" binding:"omitempty"`
-	IsExternalLinks int8    `form:"is_external_links" json:"is_external_links" label:"是否外链" binding:"omitempty,oneof=0 1"`
+	IsExternalLinks uint8   `form:"is_external_links" json:"is_external_links" label:"是否外链" binding:"omitempty,oneof=0 1"`
 }
 
 func NewEditMenuForm() *EditMenu {

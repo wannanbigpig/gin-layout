@@ -3,7 +3,6 @@ package utils
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,10 +19,16 @@ func If[T any](condition bool, trueVal, falseVal T) T {
 }
 
 // WouldCauseCycle 检查新的父节点是否是当前节点的子节点，防止循环引用
-func WouldCauseCycle(pids string, id uint) bool {
+func WouldCauseCycle(id, parentPid uint, parentPids string) bool {
+	if id == 0 {
+		return false
+	}
+	if parentPid == id {
+		return true
+	}
 	// 检测循环引用
 	idStr := fmt.Sprintf("%d", id)
-	pidsSlice := strings.Split(pids, ",")
+	pidsSlice := strings.Split(parentPids, ",")
 	for _, pid := range pidsSlice {
 		if pid == idStr {
 			return true
@@ -55,32 +60,35 @@ func GetFileDirectoryToCaller(opts ...int) (directory string, ok bool) {
 	return
 }
 
-// GetCurrentAbPathByExecutable 获取当前执行文件绝对路径
+// GetCurrentAbPathByExecutable 获取当前执行文件所在目录的绝对路径
+// 这是最可靠的获取二进制文件所在目录的方法，适用于所有环境
 func GetCurrentAbPathByExecutable() (string, error) {
 	exePath, err := os.Executable()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("获取执行文件路径失败: %w", err)
 	}
-	res, _ := filepath.EvalSymlinks(exePath)
-	return filepath.Dir(res), nil
+
+	// 解析符号链接，获取真实路径
+	realPath, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		// 如果解析符号链接失败，使用原始路径
+		realPath = exePath
+	}
+
+	// 获取目录路径并转换为绝对路径
+	dir := filepath.Dir(realPath)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("获取绝对路径失败: %w", err)
+	}
+
+	return absDir, nil
 }
 
-// GetCurrentPath 获取当前执行文件路径，如果是 development 环境则获取当前文件的的执行路径
+// GetCurrentPath 获取当前执行文件路径（始终使用二进制文件所在目录）
+// 这是统一的路径获取方法，确保所有环境行为一致
 func GetCurrentPath() (dir string, err error) {
-	if os.Getenv("GO_ENV") != "development" {
-		dir, err = GetCurrentAbPathByExecutable()
-		if err != nil {
-			return "", err
-		}
-		return dir, nil
-	}
-
-	var ok bool
-	if dir, ok = GetFileDirectoryToCaller(2); !ok {
-		return "", errors.New("failed to get path")
-	}
-
-	return dir, nil
+	return GetCurrentAbPathByExecutable()
 }
 
 // GetDefaultPath 获取当前执行文件路径，如果是临时目录则获取运行命令的工作目录
