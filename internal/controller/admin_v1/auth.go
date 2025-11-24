@@ -1,10 +1,7 @@
 package admin_v1
 
 import (
-	"image/color"
-
 	"github.com/gin-gonic/gin"
-	"github.com/mojocn/base64Captcha"
 	"github.com/mssola/useragent"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
@@ -14,21 +11,6 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	"github.com/wannanbigpig/gin-layout/pkg/utils/captcha"
-)
-
-var (
-	// captchaFonts 验证码字体列表
-	captchaFonts = []string{
-		"wqy-microhei.ttc",
-		"3Dumb.ttf",
-		"actionj.ttf",
-		"ApothecaryFont.ttf",
-		"chromohv.ttf",
-		"Comismsh.ttf",
-		"DENNEthree-dee.ttf",
-		"Flim-Flam.ttf",
-		"RitaSmith.ttf",
-	}
 )
 
 // LoginController 登录控制器
@@ -89,25 +71,13 @@ func buildLoginLogInfo(c *gin.Context) permission.LoginLogInfo {
 
 // LoginCaptcha 生成登录验证码
 func (api LoginController) LoginCaptcha(c *gin.Context) {
-	driver := createCaptchaDriver()
-	result, err := captcha.Generate(driver, nil)
+	result, err := captcha.Generate()
 	if err != nil {
 		api.Err(c, err)
 		return
 	}
 
 	api.Success(c, result)
-}
-
-// createCaptchaDriver 创建验证码驱动
-func createCaptchaDriver() *base64Captcha.DriverString {
-	return base64Captcha.NewDriverString(
-		48, 120, 6, 2, 4,
-		base64Captcha.TxtAlphabet+base64Captcha.TxtNumbers,
-		&color.RGBA{R: 255, G: 255, B: 255, A: 0},
-		base64Captcha.DefaultEmbeddedFonts,
-		captchaFonts,
-	)
 }
 
 // Logout 管理员用户退出登录
