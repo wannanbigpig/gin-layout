@@ -118,11 +118,11 @@ func Generate() (item *Item, err error) {
 		// 设置验证码长度为4位
 		options.TextLength = 4
 		// 设置字体缩放
-		options.FontScale = 1.2
+		options.FontScale = 1.0
 		// 设置干扰线数量
 		options.CurveNumber = 2
 		// 设置干扰点数量
-		options.Noise = 0.1
+		options.Noise = 0.6
 	})
 	if err != nil {
 		return nil, errors.NewBusinessError(1, "Failed to generate verification code")
