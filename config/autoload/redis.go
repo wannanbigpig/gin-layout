@@ -11,7 +11,7 @@ type RedisConfig struct {
 var Redis = RedisConfig{
 	Enable:   false,
 	Host:     "127.0.0.1",
-	Password: "root1234",
+	Password: "",
 	Port:     "6379",
 	Database: 0,
 }

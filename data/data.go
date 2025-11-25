@@ -1,8 +1,9 @@
 package data
 
 import (
-	c "github.com/wannanbigpig/gin-layout/config"
 	"sync"
+
+	c "github.com/wannanbigpig/gin-layout/config"
 )
 
 var once sync.Once
@@ -11,12 +12,18 @@ func InitData() {
 	once.Do(func() {
 		if c.Config.Mysql.Enable {
 			// 初始化 mysql
-			initMysql()
+			err := initMysql()
+			if err != nil {
+				panic("mysql init error: " + err.Error())
+			}
 		}
 
 		if c.Config.Redis.Enable {
 			// 初始化 redis
-			initRedis()
+			err := initRedis()
+			if err != nil {
+				panic("redis init error: " + err.Error())
+			}
 		}
 	})
 }

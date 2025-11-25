@@ -17,6 +17,7 @@ type LoggerConfig struct {
 	Filename        string       `mapstructure:"file_name"`
 	DivisionTime    DivisionTime `mapstructure:"division_time"`
 	DivisionSize    DivisionSize `mapstructure:"division_size"`
+	Output          string       `mapstructure:"output"`
 }
 
 var Logger = LoggerConfig{

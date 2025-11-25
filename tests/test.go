@@ -1,16 +1,18 @@
 package tests
 
 import (
+	"io"
+	"net/url"
+	"strings"
+
 	"github.com/gin-gonic/gin"
+
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
-	"io"
-	"net/url"
-	"strings"
 )
 
 func SetupRouter() *gin.Engine {
@@ -27,8 +29,12 @@ func SetupRouter() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	gin.DefaultWriter = io.Discard
 	engine := gin.Default()
-
-	routers.SetAdminApiRoute(engine)
+	register := &routers.RegisterRouter{
+		ApiMap:       make(routers.ApiMap),
+		InitApiTable: false,
+		Engine:       engine,
+	}
+	routers.SetAdminApiRoute(register)
 	return engine
 }
 

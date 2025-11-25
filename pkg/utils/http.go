@@ -2,7 +2,6 @@ package utils
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -34,7 +33,7 @@ func (hr *HttpRequest) JsonRequest(method string, url string, body io.Reader, ar
 func (hr *HttpRequest) GetRequest(url string, params *url.Values, args ...any) *HttpRequest {
 	r := url
 	if params != nil {
-		r = fmt.Sprintf("%s?%s", url, params.Encode())
+		r = url + "?" + params.Encode()
 	}
 
 	return hr.Request("GET", r, nil, args...)

@@ -1,0 +1,187 @@
+# golangci-lint 配置文件
+# 参考: https://golangci-lint.run/usage/configuration/
+
+run:
+  # 超时时间
+  timeout: 5m
+  # 并发数
+  concurrency: 4
+  # 包含的测试文件
+  tests: true
+  # 跳过目录
+  skip-dirs:
+    - vendor
+    - build
+    - dist
+    - logs
+    - storage
+    - tmp
+  # 跳过文件
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.gen\\.go$"
+
+# 输出配置
+output:
+  # 输出格式: colored-line-number, line-number, json, tab, checkstyle, code-climate, html, junit-xml, github-actions
+  format: colored-line-number
+  # 打印问题数量
+  print-issued-lines: true
+  # 打印 linter 名称
+  print-linter-name: true
+  # 不打印欢迎信息
+  uniq-by-line: false
+  # 打印源代码行
+  print-welcome: false
+
+# 启用的 linter
+linters:
+  enable:
+    # 代码质量
+    - errcheck          # 检查错误处理
+    - gosimple          # 简化代码建议
+    - govet             # go vet 检查
+    - ineffassign       # 检查未使用的赋值
+    - staticcheck       # 静态分析
+    - unused            # 检查未使用的代码
+    - varcheck          # 检查未使用的变量
+    
+    # 代码风格
+    - gofmt             # 代码格式检查
+    - goimports         # import 语句检查
+    - misspell          # 拼写检查
+    - revive            # Go 代码检查工具（替代 golint）
+    - stylecheck        # 风格检查
+    
+    # 性能
+    - prealloc          # 预分配切片检查
+    
+    # 复杂度
+    - gocyclo           # 圈复杂度检查
+    - gocognit          # 认知复杂度检查
+    
+    # 其他
+    - exportloopref     # 循环变量引用检查
+    - gocritic          # 代码审查建议
+    - gosec             # 安全检查
+    - nakedret          # 检查裸返回
+    - noctx             # 检查 context 传递
+    - rowserrcheck      # 检查 rows.Err()
+    - sqlclosecheck     # 检查 SQL 连接关闭
+
+linters-settings:
+  # errcheck 配置
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  
+  # gocyclo 配置 - 圈复杂度阈值
+  gocyclo:
+    min-complexity: 15
+  
+  # gocognit 配置 - 认知复杂度阈值
+  gocognit:
+    min-complexity: 15
+  
+  # revive 配置
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+      - name: var-naming
+        severity: warning
+      - name: package-comments
+        severity: warning
+      - name: range
+        severity: warning
+      - name: increment-decrement
+        severity: warning
+      - name: error-return
+        severity: warning
+      - name: error-strings
+        severity: warning
+      - name: error-naming
+        severity: warning
+      - name: receiver-naming
+        severity: warning
+      - name: unexported-return
+        severity: warning
+      - name: time-equal
+        severity: warning
+      - name: banned-characters
+        severity: warning
+      - name: context-keys-type
+        severity: warning
+      - name: context-as-argument
+        severity: warning
+      - name: if-return
+        severity: warning
+      - name: increment-decrement
+        severity: warning
+      - name: var-declaration
+        severity: warning
+      - name: range-val-in-closure
+        severity: warning
+      - name: range-val-address
+        severity: warning
+      - name: waitgroup-by-value
+        severity: warning
+      - name: atomic
+        severity: warning
+      - name: empty-lines
+        severity: warning
+      - name: line-length-limit
+        severity: warning
+        arguments:
+          - 120
+  
+  # gocritic 配置
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport # 允许重复导入（某些情况下需要）
+      - ifElseChain # 允许 if-else 链
+      - octalLiteral # 允许八进制字面量
+  
+  # gosec 配置
+  gosec:
+    # 严重程度: low, medium, high
+    severity: medium
+    # 置信度: low, medium, high
+    confidence: medium
+    # 排除的规则
+    excludes:
+      - G104 # 审计错误未检查（某些情况下可以接受）
+      - G401 # 弱随机数生成（某些场景可以接受）
+      - G501 # 导入黑名单（某些依赖是必需的）
+
+issues:
+  # 排除的问题
+  exclude-rules:
+    # 排除测试文件中的某些检查
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - gocritic
+        - gocyclo
+        - gocognit
+  
+  # 最大问题数（0 表示不限制）
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  
+  # 排除的问题模式
+  exclude:
+    # 排除 "Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*printf?|os\.(Un)?Setenv). is not checked"
+    - 'Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*printf?|os\.(Un)?Setenv). is not checked'
+    # 排除 "exported function .* should have comment"
+    - 'exported function .* should have comment'
+    # 排除 "comment on exported .* should be of the form"
+    - 'comment on exported .* should be of the form'
+

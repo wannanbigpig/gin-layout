@@ -3,9 +3,10 @@ package request
 import (
 	"bytes"
 	"errors"
-	"github.com/gin-gonic/gin"
 	"io/ioutil"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 func GetQueryParams(c *gin.Context) map[string]any {

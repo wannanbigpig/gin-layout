@@ -2,20 +2,31 @@ package data
 
 import (
 	"fmt"
-	c "github.com/wannanbigpig/gin-layout/config"
-	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"net/url"
+	"strings"
+	"sync"
+
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
+
+	c "github.com/wannanbigpig/gin-layout/config"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 )
 
-var MysqlDB *gorm.DB
+var (
+	mysqlDB        *gorm.DB
+	mysqlOnce      sync.Once
+	mysqlInitError error
+)
 
+// Writer interface for custom logger
 type Writer interface {
 	Printf(string, ...interface{})
 }
 
+// WriterLog Custom logger implementation
 type WriterLog struct{}
 
 func (w WriterLog) Printf(format string, args ...interface{}) {
@@ -24,45 +35,114 @@ func (w WriterLog) Printf(format string, args ...interface{}) {
 	}
 }
 
-func initMysql() {
+// GenerateDSN generates the MySQL DSN string with proper encoding
+func GenerateDSN() string {
+	// 防御性编码
+	if c.Config.Mysql.Host == "" || c.Config.Mysql.Database == "" {
+		return ""
+	}
+
+	// 特殊字符处理
+	username := strings.Replace(url.QueryEscape(c.Config.Mysql.Username), "%", "%25", -1)
+	password := strings.Replace(url.QueryEscape(c.Config.Mysql.Password), "%", "%25", -1)
+
+	// IPv6处理
+	host := c.Config.Mysql.Host
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+
+	// 强制关键参数
+	charset := "utf8mb4"
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
+		username,
+		password,
+		host,
+		c.Config.Mysql.Port,
+		c.Config.Mysql.Database,
+	)
+
+	// 参数显式排序
+	params := url.Values{
+		"charset":      []string{charset},
+		"parseTime":    []string{"true"},
+		"loc":          []string{"Local"},
+		"timeout":      []string{"5s"},
+		"readTimeout":  []string{"30s"},
+		"writeTimeout": []string{"60s"},
+	}
+
+	return dsn + "?" + params.Encode()
+}
+
+// initMysql initializes the MySQL database connection
+func initMysql() error {
+	// Validate configuration parameters
+	if c.Config.Mysql.MaxIdleConns < 0 || c.Config.Mysql.MaxOpenConns < 0 || c.Config.Mysql.MaxLifetime < 0 {
+		return fmt.Errorf("invalid MySQL configuration: MaxIdleConns, MaxOpenConns, and MaxLifetime must be non-negative")
+	}
+
+	// Initialize logger
 	logConfig := logger.New(
 		WriterLog{},
 		logger.Config{
-			SlowThreshold:             0,                                        // 慢 SQL 阈值
-			LogLevel:                  logger.LogLevel(c.Config.Mysql.LogLevel), // 日志级别
-			IgnoreRecordNotFoundError: false,                                    // 忽略ErrRecordNotFound（记录未找到）错误
-			Colorful:                  false,                                    // 是否启用彩色打印
+			SlowThreshold:             0,                                        // Slow SQL threshold
+			LogLevel:                  logger.LogLevel(c.Config.Mysql.LogLevel), // Log level
+			IgnoreRecordNotFoundError: false,                                    // Ignore ErrRecordNotFound
+			Colorful:                  false,                                    // Disable colorful logs
 		},
 	)
 
+	// Configure GORM settings
 	configs := &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{
-			TablePrefix: c.Config.Mysql.TablePrefix, // 表名前缀
-			// SingularTable: true,  // 使用单数表名
+			TablePrefix: c.Config.Mysql.TablePrefix, // Table prefix
 		},
-		Logger: logConfig,
+		Logger:                 logConfig,
+		SkipDefaultTransaction: true,
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-		c.Config.Mysql.Username,
-		c.Config.Mysql.Password,
-		c.Config.Mysql.Host,
-		c.Config.Mysql.Port,
-		c.Config.Mysql.Database,
-		c.Config.Mysql.Charset,
-	)
+	// Open database connection
+	dsn := GenerateDSN()
 	var err error
-	MysqlDB, err = gorm.Open(mysql.Open(dsn), configs)
-
+	mysqlDB, err = gorm.Open(mysql.Open(dsn), configs)
 	if err != nil {
-		panic("Mysql connection failed：" + err.Error())
+		return fmt.Errorf("failed to connect to MySQL: %s", err.Error())
 	}
 
-	sqlDB, _ := MysqlDB.DB()
-	// SetMaxIdleConns 用于设置连接池中空闲连接的最大数量。
+	// Get underlying sql.DB and configure connection pool
+	sqlDB, err := mysqlDB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql.DB: %s", err.Error())
+	}
+
 	sqlDB.SetMaxIdleConns(c.Config.Mysql.MaxIdleConns)
-	// SetMaxOpenConns 设置打开数据库连接的最大数量。
 	sqlDB.SetMaxOpenConns(c.Config.Mysql.MaxOpenConns)
-	// SetConnMaxLifetime 设置了连接可复用的最大时间。
 	sqlDB.SetConnMaxLifetime(c.Config.Mysql.MaxLifetime)
+
+	// Register callbacks if needed
+	registerCallbacks(mysqlDB)
+	return nil
+}
+
+// registerCallbacks registers GORM callbacks for logging operations
+func registerCallbacks(db *gorm.DB) {
+	// Uncomment and implement these functions if needed
+	// db.Callback().Create().After("gorm:create").Register("log_create_operation", logCreateOperation)
+	// db.Callback().Update().After("gorm:update").Register("log_update_operation", logUpdateOperation)
+	// db.Callback().Delete().After("gorm:delete").Register("log_delete_operation", logDeleteOperation)
+}
+
+// MysqlDB returns the singleton instance of gorm.DB
+func MysqlDB() *gorm.DB {
+	if mysqlDB == nil {
+		mysqlOnce.Do(func() {
+			mysqlInitError = initMysql()
+		})
+	}
+	return mysqlDB
+}
+
+func MysqlInitError() error {
+	return mysqlInitError
 }

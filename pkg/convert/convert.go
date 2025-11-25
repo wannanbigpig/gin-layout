@@ -31,6 +31,12 @@ func GetUint(val interface{}) (ui uint) {
 	return
 }
 
+// GetUint8 returns the value associated with the key as an unsigned integer.
+func GetUint8(val interface{}) (ui uint8) {
+	ui, _ = val.(uint8)
+	return
+}
+
 // GetUint64 returns the value associated with the key as an unsigned integer.
 func GetUint64(val interface{}) (ui64 uint64) {
 	ui64, _ = val.(uint64)

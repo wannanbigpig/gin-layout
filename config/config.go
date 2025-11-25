@@ -1,15 +1,17 @@
 package config
 
 import (
-	"github.com/fsnotify/fsnotify"
-	"github.com/spf13/viper"
-	. "github.com/wannanbigpig/gin-layout/config/autoload"
-	utils2 "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
-	"github.com/wannanbigpig/gin-layout/pkg/utils"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/spf13/viper"
+
+	. "github.com/wannanbigpig/gin-layout/config/autoload"
+	utils2 "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
 // Conf 配置项主结构体
@@ -59,10 +61,35 @@ func checkJwtSecretKey() {
 func load(configPath string) {
 	var filePath string
 	if configPath == "" {
-		runDirectory, _ := utils.GetCurrentPath()
-		// 生成 config.yaml 文件
-		filePath = filepath.Join(runDirectory, "/config.yaml")
-		exampleConfig := filepath.Join(runDirectory, "/config.yaml.example")
+		// 判断是否为开发模式
+		isDevelopment := os.Getenv("GO_ENV") == "development"
+
+		var exampleConfig, targetConfig string
+
+		if isDevelopment {
+			// 开发模式：从当前工作目录查找配置文件
+			workDir, err := os.Getwd()
+			if err != nil {
+				panic("获取工作目录失败: " + err.Error())
+			}
+			// 先尝试项目根目录下的 config/ 目录
+			exampleConfig = filepath.Join(workDir, "config", "config.yaml.example")
+			if _, err := os.Stat(exampleConfig); os.IsNotExist(err) {
+				// 再尝试项目根目录
+				exampleConfig = filepath.Join(workDir, "config.yaml.example")
+			}
+			targetConfig = filepath.Join(workDir, "config.yaml")
+		} else {
+			// 生产模式：从执行文件目录查找配置文件
+			runDirectory, err := utils.GetCurrentPath()
+			if err != nil {
+				panic("获取执行文件目录失败: " + err.Error())
+			}
+			exampleConfig = filepath.Join(runDirectory, "config.yaml.example")
+			targetConfig = filepath.Join(runDirectory, "config.yaml")
+		}
+
+		filePath = targetConfig
 		copyConf(exampleConfig, filePath)
 	} else {
 		filePath = configPath
@@ -84,6 +111,9 @@ func load(configPath string) {
 		panic(err)
 	}
 
+	// 确保 CORS 配置字段有默认值（防止 nil 指针）
+	ensureCorsDefaults()
+
 	// 默认不监听配置变化，有些配置例如端口，数据库连接等即时配置变化不重启也不会变更。会导致配置文件与实际监听端口不一致混淆
 	if Config.WatchConfig {
 		// 监听配置文件变化
@@ -95,7 +125,31 @@ func load(configPath string) {
 			if err := V.Unmarshal(&Config); err != nil {
 				panic(err)
 			}
+			// 确保 CORS 配置字段有默认值
+			ensureCorsDefaults()
 		})
+	}
+}
+
+// ensureCorsDefaults 确保 CORS 配置字段有默认值
+func ensureCorsDefaults() {
+	// 如果切片为 nil，初始化为空切片
+	if Config.CorsOrigins == nil {
+		Config.CorsOrigins = []string{}
+	}
+	if Config.CorsMethods == nil {
+		Config.CorsMethods = []string{}
+	}
+	if Config.CorsHeaders == nil {
+		Config.CorsHeaders = []string{}
+	}
+	if Config.CorsExposeHeaders == nil {
+		Config.CorsExposeHeaders = []string{}
+	}
+	// CorsMaxAge 和 CorsCredentials 是基本类型，不需要检查 nil
+	// 但如果为 0，使用默认值
+	if Config.CorsMaxAge == 0 {
+		Config.CorsMaxAge = 43200 // 默认 12 小时
 	}
 }
 

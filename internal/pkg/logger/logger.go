@@ -1,15 +1,17 @@
 package logger
 
 import (
-	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
-	"github.com/natefinch/lumberjack"
-	"github.com/wannanbigpig/gin-layout/config"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"io"
 	"path/filepath"
 	"sync"
 	"time"
+
+	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/wannanbigpig/gin-layout/config"
 )
 
 var Logger *zap.Logger
@@ -19,10 +21,18 @@ func InitLogger() {
 	once.Do(func() { Logger = createZapLog() })
 }
 
+func Info(msg string, fields ...zap.Field) {
+	Logger.Info(msg, fields...)
+}
+
+func Error(msg string, fields ...zap.Field) {
+	Logger.Error(msg, fields...)
+}
+
 // initZapLog 初始化 zap 日志
 func createZapLog() *zap.Logger {
 	// 开启 debug
-	if config.Config.Debug == true {
+	if config.Config.Logger.Output == "stderr" {
 		if Logger, err := zap.NewDevelopment(); err == nil {
 			return Logger
 		} else {
@@ -38,7 +48,7 @@ func createZapLog() *zap.Logger {
 	// 在日志文件中使用大写字母记录日志级别
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	encoder := zapcore.NewConsoleEncoder(encoderConfig)
-	filename := filepath.Join(config.Config.StaticBasePath, "/logs/", config.Config.Logger.Filename)
+	filename := filepath.Join(config.Config.BasePath, "logs", config.Config.Logger.Filename)
 	var writer zapcore.WriteSyncer
 	if config.Config.Logger.DefaultDivision == "size" {
 		// 按文件大小切割日志
@@ -49,7 +59,7 @@ func createZapLog() *zap.Logger {
 	}
 
 	zapCore := zapcore.NewCore(encoder, writer, zap.InfoLevel)
-	//zap.AddStacktrace(zap.WarnLevel)
+	// zap.AddStacktrace(zap.WarnLevel)
 	return zap.New(zapCore, zap.AddCaller())
 }
 

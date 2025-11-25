@@ -1,15 +1,17 @@
 package errors
 
 const (
-	SUCCESS            = 0
-	FAILURE            = 1
-	AuthorizationError = 403
-	NotFound           = 404
-	NotLogin           = 401
-	InvalidParameter   = 10000
-	UserDoesNotExist   = 10001
-	ServerError        = 10101
-	TooManyRequests    = 10102
+	SUCCESS          = 0
+	FAILURE          = 1
+	AuthorizationErr = 403
+	NotFound         = 404
+	CaptchaErr       = 400
+	NotLogin         = 401
+	ServerErr        = 500
+	InvalidParameter = 10000
+	UserDoesNotExist = 10001
+	UserDisable      = 10002
+	TooManyRequests  = 10102
 )
 
 type ErrorText struct {

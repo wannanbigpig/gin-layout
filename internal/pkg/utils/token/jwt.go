@@ -2,26 +2,27 @@ package token
 
 import (
 	"errors"
+	"strings"
+	"time"
+
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+
 	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"strings"
-	"time"
 )
 
 type AdminUserInfo struct {
 	// 可根据需要自行添加字段
-	UserID   uint   `json:"user_id"`
-	Mobile   string `json:"mobile"`
-	Nickname string `json:"nickname"`
-}
-
-// GetAdminUserInfo 把传入数据转换成AdminUserInfo结构体
-func GetAdminUserInfo(info any) (adminUserInfo AdminUserInfo) {
-	adminUserInfo, _ = info.(AdminUserInfo)
-	return
+	UserID          uint   `json:"user_id"`
+	FullPhoneNumber string `json:"full_phone_number"`
+	Email           string `json:"email"`
+	Nickname        string `json:"nickname"`
+	PhoneNumber     string `json:"phone_number"`
+	CountryCode     string `json:"country_code"`
+	IsSuperAdmin    uint8  `json:"is_super_admin"`
 }
 
 // Generate 生成JWT Token
@@ -81,20 +82,28 @@ type AdminCustomClaims struct {
 }
 
 // NewAdminCustomClaims 初始化AdminCustomClaims
-func NewAdminCustomClaims(user *model.AdminUser, expiresAt time.Time) AdminCustomClaims {
-	//now := time.Now()
+func NewAdminCustomClaims(user *model.AdminUser) AdminCustomClaims {
+	now := time.Now().UTC()
+	expiresAt := now.Add(time.Second * c.Config.Jwt.TTL)
+	// phoneRule := &utils.DesensitizeRule{KeepPrefixLen: 3, KeepSuffixLen: 4, MaskChar: '*'}
+	// emailRule := &utils.DesensitizeRule{KeepPrefixLen: 2, KeepSuffixLen: 0, MaskChar: '*', Separator: '@', FixedMaskLength: 3}
 	return AdminCustomClaims{
 		AdminUserInfo: AdminUserInfo{
-			user.ID,
-			user.Mobile,
-			user.Nickname,
+			UserID:          user.ID,
+			FullPhoneNumber: user.FullPhoneNumber, // phoneRule.Apply(user.Mobile),
+			PhoneNumber:     user.PhoneNumber,     // phoneRule.Apply(user.Mobile),
+			CountryCode:     user.CountryCode,     // phoneRule.Apply(user.Mobile),
+			Email:           user.Email,           // emailRule.Apply(user.Email),
+			Nickname:        user.Nickname,
+			IsSuperAdmin:    user.IsSuperAdmin,
 		},
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt), // 定义过期时间
 			Issuer:    global.Issuer,                 // 签发人
-			//IssuedAt:  jwt.NewNumericDate(now),       // 签发时间
-			Subject: global.Subject, // 签发主体
-			//NotBefore: jwt.NewNumericDate(now),       // 生效时间
+			IssuedAt:  jwt.NewNumericDate(now),       // 签发时间
+			Subject:   global.PcAdminSubject,         // 签发主题
+			NotBefore: jwt.NewNumericDate(now),       // 生效时间
+			ID:        uuid.New().String(),           // 唯一标识
 		},
 	}
 }

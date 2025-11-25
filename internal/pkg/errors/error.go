@@ -3,6 +3,7 @@ package errors
 import (
 	"errors"
 	"fmt"
+
 	c "github.com/wannanbigpig/gin-layout/config"
 )
 
