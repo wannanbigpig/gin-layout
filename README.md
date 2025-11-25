@@ -1,8 +1,8 @@
 # gin-layout
 
-[![Go](https://github.com/wannanbigpig/gin-layout/actions/workflows/go.yml/badge.svg)](https://github.com/wannanbigpig/gin-layout/actions/workflows/go.yml)
-[![CodeQL](https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml/badge.svg)](https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml)
-[![Sync to Gitee](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml/badge.svg?branch=master)](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml)
+[![Go CI](https://github.com/wannanbigpig/gin-layout/actions/workflows/go.yml/badge.svg?branch=x-l-admin)](https://github.com/wannanbigpig/gin-layout/actions/workflows/go.yml)
+[![CodeQL](https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml/badge.svg?branch=x-l-admin)](https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml)
+[![Sync to Gitee](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml/badge.svg?branch=x-l-admin)](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wannanbigpig/gin-layout)](https://goreportcard.com/report/github.com/wannanbigpig/gin-layout)
 [![GitHub license](https://img.shields.io/github/license/wannanbigpig/gin-layout)](https://github.com/wannanbigpig/gin-layout/blob/master/LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-%3E%3D1.25-blue.svg)](https://golang.org/)
@@ -95,9 +95,9 @@ migrate -database 'mysql://root:root@tcp(127.0.0.1:3306)/go_layout?charset=utf8m
 
 4. **配置应用**
 
-首次运行会自动从 `config/config.yaml.example` 复制配置文件到 `config/config.yaml`。
+首次运行会自动从 `config/config.yaml.example` 复制配置文件到项目根目录的 `config.yaml`。
 
-编辑 `config/config.yaml`，配置数据库和 Redis 连接信息：
+编辑项目根目录的 `config.yaml`，配置数据库和 Redis 连接信息：
 
 ```yaml
 mysql:
@@ -159,7 +159,12 @@ go run main.go -h
 
 ### 配置说明
 
-配置文件位于 `config/config.yaml`，主要配置项：
+配置文件位置：
+- **开发模式**：项目根目录的 `config.yaml`
+- **生产模式**：执行文件所在目录的 `config.yaml`
+- **自定义路径**：可通过 `-c` 或 `--config` 参数指定配置文件绝对路径
+
+主要配置项：
 
 - **app** - 应用配置（环境、调试模式、语言等）
 - **jwt** - JWT 配置（密钥、过期时间等）
@@ -168,6 +173,11 @@ go run main.go -h
 - **logger** - 日志配置（输出方式、文件切割等）
 
 详细配置说明请参考 `config/config.yaml.example`。
+
+**配置文件查找顺序**：
+1. 如果通过 `-c` 或 `--config` 参数指定了路径，使用指定的配置文件
+2. 开发模式（`GO_ENV=development`）：从当前工作目录查找 `config.yaml`
+3. 生产模式：从执行文件所在目录查找 `config.yaml`
 
 ### API 路由
 
@@ -252,13 +262,15 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 COPY --from=builder /app/go-layout .
 COPY --from=builder /app/config/config.yaml.example ./config.yaml
+# 或者使用自定义配置文件路径：
+# CMD ["./go-layout", "server", "-c", "/path/to/config.yaml"]
 EXPOSE 9001
 CMD ["./go-layout", "server"]
 ```
 
 ## ⚙️ 生产环境注意事项
 
-1. **配置文件路径** - 生产环境建议使用绝对路径指定配置文件位置
+1. **配置文件路径** - 生产环境建议使用 `-c` 参数指定配置文件的绝对路径，或确保 `config.yaml` 位于执行文件所在目录
 2. **日志路径** - 配置 `base_path`，日志文件会保存在 `{base_path}/logs/` 目录
 3. **JWT 密钥** - 确保 JWT secret_key 足够复杂且保密
 4. **数据库连接** - 配置合适的连接池大小

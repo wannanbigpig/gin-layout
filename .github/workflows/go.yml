@@ -2,9 +2,10 @@ name: Go CI
 
 on:
   push:
-    branches: [ master, main, develop ]
+    branches: [ x-l-admin ]
   pull_request:
-    branches: [ master, main, develop ]
+    branches: [ x-l-admin ]
+  workflow_dispatch: # 允许手动触发
 
 jobs:
   # 代码格式检查
@@ -92,19 +93,19 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Go ${{ matrix.go-version }}
+
+    - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go-version }}
+      with:
+        go-version: ${{ matrix.go-version }}
           cache-dependency-path: go.sum
-      
-      - name: Display Go version
-        run: go version
-      
-      - name: Build
-        run: go build -v ./...
-      
+
+    - name: Display Go version
+      run: go version
+
+    - name: Build
+      run: go build -v ./...
+
       - name: Build binary
         run: go build -o go-layout main.go
         if: matrix.os == 'ubuntu-latest'
