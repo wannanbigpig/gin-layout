@@ -1,6 +1,6 @@
 module github.com/wannanbigpig/gin-layout
 
-go 1.25
+go 1.24.0
 
 require (
 	github.com/casbin/casbin/v2 v2.132.0

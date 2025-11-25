@@ -2,9 +2,9 @@ name: Go CI
 
 on:
   push:
-    branches: [ x-l-admin ]
+    branches: [x-l-admin]
   pull_request:
-    branches: [ x-l-admin ]
+    branches: [x-l-admin]
   workflow_dispatch: # 允许手动触发
 
 jobs:
@@ -14,13 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.23"
           cache-dependency-path: go.sum
-      
+
       - name: Run gofmt
         run: |
           if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
@@ -28,7 +28,7 @@ jobs:
             gofmt -s -d .
             exit 1
           fi
-      
+
       - name: Run goimports
         run: |
           go install golang.org/x/tools/cmd/goimports@latest
@@ -44,13 +44,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.23"
           cache-dependency-path: go.sum
-      
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
@@ -63,16 +63,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.23"
           cache-dependency-path: go.sum
-      
+
       - name: Verify dependencies
         run: go mod verify
-      
+
       - name: Check for unused dependencies
         run: |
           go mod tidy
@@ -89,22 +89,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ['1.25']
+        go-version: ['1.23']
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
-    - name: Setup Go ${{ matrix.go-version }}
+      - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.go-version }}
+        with:
+          go-version: ${{ matrix.go-version }}
           cache-dependency-path: go.sum
 
-    - name: Display Go version
-      run: go version
+      - name: Display Go version
+        run: go version
 
-    - name: Build
-      run: go build -v ./...
+      - name: Build
+        run: go build -v ./...
 
       - name: Build binary
         run: go build -o go-layout main.go
@@ -116,19 +116,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ['1.25']
+        go-version: ["1.23"]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
           cache-dependency-path: go.sum
-      
+
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic $(go list ./... | grep -v /tests/)
-      
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
@@ -136,7 +136,7 @@ jobs:
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
-        if: matrix.go-version == '1.24'
+        if: matrix.go-version == '1.23'
 
   # 安全扫描
   security:
@@ -144,18 +144,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: "1.23"
           cache-dependency-path: go.sum
-      
+
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
         with:
-          args: '-fmt sarif -out gosec-report.sarif ./...'
-      
+          args: "-fmt sarif -out gosec-report.sarif ./..."
+
       - name: Upload Gosec results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
