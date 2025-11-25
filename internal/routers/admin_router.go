@@ -23,7 +23,7 @@ func SetAdminApiRoute(r *RegisterRouter) {
 				lg.post("login", loginC.Login).setTitle("登录").setAuth(0)
 				lg.get("login-captcha", loginC.LoginCaptcha).setTitle("验证码").setAuth(0)
 			}
-			
+
 			// 文件访问（公开文件无需认证，私有文件会在控制器中检查）
 			// 使用UUID查询（32位字符串），比64位hash更短，适合URL
 			commonC := admin_v1.NewCommonController()

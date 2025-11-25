@@ -38,22 +38,22 @@ const (
 
 // 撤销原因码常量
 const (
-	RevokedCodeUserLogout        uint8 = 1 // 用户主动登出（退出登录）
-	RevokedCodeSystemForce       uint8 = 2 // 系统强制登出（账号被封）
-	RevokedCodeTokenRefresh      uint8 = 3 // 系统刷新token
-	RevokedCodeUserDisable       uint8 = 4 // 用户禁用（针对某个设备下线操作）
-	RevokedCodeOther             uint8 = 5 // 其他原因
-	RevokedCodePasswordChangeSelf uint8 = 6 // 用户自己修改密码
+	RevokedCodeUserLogout          uint8 = 1 // 用户主动登出（退出登录）
+	RevokedCodeSystemForce         uint8 = 2 // 系统强制登出（账号被封）
+	RevokedCodeTokenRefresh        uint8 = 3 // 系统刷新token
+	RevokedCodeUserDisable         uint8 = 4 // 用户禁用（针对某个设备下线操作）
+	RevokedCodeOther               uint8 = 5 // 其他原因
+	RevokedCodePasswordChangeSelf  uint8 = 6 // 用户自己修改密码
 	RevokedCodePasswordChangeAdmin uint8 = 7 // 管理员修改密码
 )
 
-// 撤销原因码字典
+// RevokedCodeDict 撤销原因码字典
 var RevokedCodeDict modelDict.Dict = map[uint8]string{
-	RevokedCodeUserLogout:         "用户主动登出（退出登录）",
-	RevokedCodeSystemForce:        "系统强制登出（账号被封）",
-	RevokedCodeTokenRefresh:       "系统刷新token",
-	RevokedCodeUserDisable:        "用户禁用（针对某个设备下线操作）",
-	RevokedCodeOther:              "其他原因",
+	RevokedCodeUserLogout:          "用户主动登出（退出登录）",
+	RevokedCodeSystemForce:         "系统强制登出（账号被封）",
+	RevokedCodeTokenRefresh:        "系统刷新token",
+	RevokedCodeUserDisable:         "用户禁用（针对某个设备下线操作）",
+	RevokedCodeOther:               "其他原因",
 	RevokedCodePasswordChangeSelf:  "用户自己修改密码",
 	RevokedCodePasswordChangeAdmin: "管理员修改密码",
 }
