@@ -1,3 +1,5 @@
+name: Sync to Gitee
+
 on:
   push:
     branches:
@@ -6,16 +8,21 @@ on:
     tags:
       - "*"
 
-name: Sync to Gitee
 jobs:
-  run:
-    name: Run
+  sync:
+    name: Sync to Gitee
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v1
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
       - name: Mirror Github to Gitee
-        uses: Yikun/hub-mirror-action@v1.2
+        uses: Yikun/hub-mirror-action@master
         with:
           src: 'github/${{ github.repository_owner }}'
           dst: 'gitee/${{ secrets.GITEE_USER }}'
@@ -26,3 +33,4 @@ jobs:
           debug: true
           force_update: true
           static_list: ${{ github.event.repository.name }}
+          
