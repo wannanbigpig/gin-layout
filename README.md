@@ -1,8 +1,8 @@
 # gin-layout
 
-[![Go CI](https://github.com/wannanbigpig/gin-layout/actions/workflows/go.yml/badge.svg?branch=x-l-admin)](https://github.com/wannanbigpig/gin-layout/actions/workflows/go.yml)
-[![CodeQL](https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml/badge.svg?branch=x-l-admin)](https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml)
-[![Sync to Gitee](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml/badge.svg?branch=x-l-admin)](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml)
+[![Go](https://github.com/wannanbigpig/gin-layout/actions/workflows/go.yml/badge.svg)](https://github.com/wannanbigpig/gin-layout/actions/workflows/go.yml)
+[![CodeQL](https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml/badge.svg)](https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml)
+[![Sync to Gitee](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml/badge.svg)](https://github.com/wannanbigpig/gin-layout/actions/workflows/gitee-sync.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/wannanbigpig/gin-layout)](https://goreportcard.com/report/github.com/wannanbigpig/gin-layout)
 [![GitHub license](https://img.shields.io/github/license/wannanbigpig/gin-layout)](https://github.com/wannanbigpig/gin-layout/blob/master/LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-%3E%3D1.23-blue.svg)](https://golang.org/)
