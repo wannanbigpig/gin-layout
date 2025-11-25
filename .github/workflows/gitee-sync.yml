@@ -2,6 +2,7 @@ on:
   push:
     branches:
       - master
+      - x_l_admin
     tags:
       - "*"
 
