@@ -189,6 +189,10 @@ func (s *AdminUserService) Edit(params *form.EditAdminUser) error {
 			adminUserModel.Nickname = *params.Nickname
 		}
 		if params.Password != nil && *params.Password != "" {
+			// 检查是否为系统默认超级管理员，系统默认超级管理员不允许修改密码
+			if adminUserModel.ID == global.SuperAdminId {
+				return e.NewBusinessError(e.FAILURE, "系统默认超级管理员不允许修改密码")
+			}
 			// 验证新密码不能与旧密码相同
 			if utils2.ComparePasswords(adminUserModel.Password, *params.Password) {
 				return e.NewBusinessError(e.FAILURE, "新密码不能与当前密码相同")
@@ -360,6 +364,10 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 
 	// 更新密码
 	if params.Password != nil && *params.Password != "" {
+		// 检查是否为系统默认超级管理员，系统默认超级管理员不允许修改密码
+		if uid == global.SuperAdminId {
+			return e.NewBusinessError(e.FAILURE, "系统默认超级管理员不允许修改密码")
+		}
 		// 验证新密码不能与旧密码相同
 		if utils2.ComparePasswords(adminUserModel.Password, *params.Password) {
 			return e.NewBusinessError(e.FAILURE, "新密码不能与当前密码相同")
