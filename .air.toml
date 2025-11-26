@@ -4,8 +4,11 @@ tmp_dir = "tmp"
 
 [build]
   args_bin = []
-  bin = "./tmp/main server -c /Users/liuml/data/go/src/go-layout/config/config.yaml"
+  # 使用相对路径，或者不指定配置文件让程序自动查找
+  bin = "./tmp/main service"
   cmd = "go build -o ./tmp/main"
+  # 设置环境变量
+  env = ["GO_ENV=development"]
   delay = 0
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "logs", "tests"]
   exclude_file = []
