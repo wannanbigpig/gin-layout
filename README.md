@@ -31,7 +31,7 @@
 ```
 gin-layout/
 ├── cmd/                    # 命令行工具
-│   ├── server/            # 服务器启动命令
+│   ├── service/           # 服务器启动命令
 │   ├── command/           # 单次执行命令
 │   ├── cron/              # 定时任务
 │   └── version/           # 版本信息
@@ -117,15 +117,45 @@ redis:
 
 5. **启动服务**
 
-开发模式：
+**正常启动（日常使用）：**
 ```bash
-GO_ENV=development go run main.go server
+GO_ENV=development go run main.go service
 ```
 
-生产模式：
+**首次初始化（仅首次部署时需要）：**
+
+首次部署时，需要初始化数据库中的 API 路由表和菜单-API 映射关系。这两个操作已独立为单独的命令，可以分别执行。
+
+**步骤 1：初始化 API 路由表**
+
+扫描系统中定义的所有 API 路由并写入 `a_api` 表：
+
+```bash
+GO_ENV=development go run main.go command api-route
+```
+
+该命令会自动扫描系统中定义的所有 API 路由，并将路由信息（路径、方法、处理器等）写入 `a_api` 表中，用于权限管理和 API 文档生成。
+
+**步骤 2：初始化菜单-API 映射关系**
+
+API 路由表初始化完成后，建立菜单与 API 的映射关系：
+
+```bash
+GO_ENV=development go run main.go command menu-api-map
+```
+
+该命令会根据 `casbin_rule` 表中的权限规则，自动建立默认菜单与 API 的映射关系，初始化 `a_menu_api_map` 表。
+
+> **重要提示**：
+> - 初始化命令是独立的，可以随时单独执行
+> - 日常启动服务时直接使用 `go run main.go service` 即可，无需任何参数
+> - 如果只需要更新 API 路由表或菜单映射，可以单独执行对应的初始化命令
+> - 初始化命令会直接执行，无需确认
+
+**生产模式：**
 ```bash
 go build -o go-layout main.go
-./go-layout server
+./go-layout service
 ```
 
 6. **测试接口**
@@ -151,8 +181,11 @@ go run main.go -h
 
 **可用命令：**
 
-- `server` - 启动 API 服务器
-- `command` - 执行单次命令
+- `service` - 启动 API 服务器
+- `command` - 执行单次命令（包括初始化命令）
+  - `command api-route` - 初始化 API 路由表
+  - `command menu-api-map` - 初始化菜单-API 映射关系
+  - `command demo` - 执行示例命令
 - `cron` - 启动定时任务
 - `version` - 查看版本信息
 
@@ -215,7 +248,7 @@ go build -o go-layout main.go
 
 ```ini
 [program:go-layout]
-command=/path/to/go-layout server -c=/path/to/config.yaml
+command=/path/to/go-layout service -c=/path/to/config.yaml
 directory=/path/to/go-layout
 autostart=true
 autorestart=true
@@ -262,9 +295,9 @@ WORKDIR /root/
 COPY --from=builder /app/go-layout .
 COPY --from=builder /app/config/config.yaml.example ./config.yaml
 # 或者使用自定义配置文件路径：
-# CMD ["./go-layout", "server", "-c", "/path/to/config.yaml"]
+# CMD ["./go-layout", "service", "-c", "/path/to/config.yaml"]
 EXPOSE 9001
-CMD ["./go-layout", "server"]
+CMD ["./go-layout", "service"]
 ```
 
 ## ⚙️ 生产环境注意事项

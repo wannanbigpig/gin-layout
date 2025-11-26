@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	DemoCmd = &cobra.Command{
+	Cmd = &cobra.Command{
 		Use:     "demo",
 		Short:   "这是一个demo",
 		Example: "go-layout command demo",
@@ -19,7 +19,7 @@ var (
 )
 
 func init() {
-	DemoCmd.Flags().StringVarP(&test, "test", "t", "test", "测试接收参数")
+	Cmd.Flags().StringVarP(&test, "test", "t", "test", "测试接收参数")
 }
 
 func demo() {

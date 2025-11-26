@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 const (
@@ -475,8 +476,20 @@ func GetMaskedRequestBody(bodyBytes []byte, contentType string) string {
 		return ""
 	}
 
+	contentTypeLower := strings.ToLower(contentType)
+
+	// 对于 multipart/form-data 类型的请求（通常是文件上传），不记录二进制数据
+	if strings.Contains(contentTypeLower, "multipart/form-data") {
+		return "[multipart/form-data: file upload, body not logged]"
+	}
+
+	// 检查数据是否为有效的 UTF-8 文本（避免二进制数据导致数据库错误）
+	if !isValidUTF8(bodyBytes) {
+		return "[binary data: non-text content, body not logged]"
+	}
+
 	// 检查是否为 JSON 格式
-	isJSON := strings.Contains(strings.ToLower(contentType), "application/json")
+	isJSON := strings.Contains(contentTypeLower, "application/json")
 
 	// 尝试解析 JSON
 	var data interface{}
@@ -504,10 +517,20 @@ func GetMaskedRequestBody(bodyBytes []byte, contentType string) string {
 	return string(maskedBytes)
 }
 
+// isValidUTF8 检查字节数组是否为有效的 UTF-8 编码
+func isValidUTF8(data []byte) bool {
+	return len(data) == 0 || len(string(data)) == len(data) && utf8.Valid(data)
+}
+
 // GetMaskedResponseBody 获取脱敏后的响应体
 func GetMaskedResponseBody(bodyBytes []byte) string {
 	if len(bodyBytes) == 0 {
 		return ""
+	}
+
+	// 检查数据是否为有效的 UTF-8 文本（避免二进制数据导致数据库错误）
+	if !isValidUTF8(bodyBytes) {
+		return "[binary data: non-text content, body not logged]"
 	}
 
 	// 尝试解析 JSON

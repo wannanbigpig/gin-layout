@@ -26,6 +26,7 @@ type FileInfo struct {
 	Path          string `json:"path"`           // 文件路径
 	Ext           string `json:"ext"`            // 文件扩展名
 	MimeType      string `json:"mime_type"`      // MIME类型
+	URL           string `json:"url"`            // 文件访问完整URL
 	FailureReason string `json:"failure_reason"` // 失败原因
 	Status        string `json:"status"`         // 上传状态：SUCCESS、ERROR
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/cmd/command"
 	"github.com/wannanbigpig/gin-layout/cmd/cron"
-	"github.com/wannanbigpig/gin-layout/cmd/server"
+	"github.com/wannanbigpig/gin-layout/cmd/service"
 	"github.com/wannanbigpig/gin-layout/cmd/version"
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
@@ -60,8 +60,8 @@ func registerFlags() {
 // registerCommands 注册子命令
 func registerCommands() {
 	rootCmd.AddCommand(version.Cmd) // 查看版本: go-layout version
-	rootCmd.AddCommand(server.Cmd)  // 启动服务: go-layout server
-	rootCmd.AddCommand(command.Cmd) // 启动单次运行脚本: go-layout command demo
+	rootCmd.AddCommand(service.Cmd) // 启动服务: go-layout service
+	rootCmd.AddCommand(command.Cmd) // 运行命令: go-layout command demo / go-layout command init api-route
 	rootCmd.AddCommand(cron.Cmd)    // 启动计划任务: go-layout cron
 }
 

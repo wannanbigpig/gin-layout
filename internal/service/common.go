@@ -3,7 +3,9 @@ package service
 import (
 	"fmt"
 	"mime/multipart"
+	"os"
 	"path/filepath"
+	"strings"
 
 	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
@@ -78,17 +80,33 @@ func (s CommonService) UploadFile(fileHeader *multipart.FileHeader, isPublic boo
 		return global.No
 	}())
 	if err == nil {
-		// 文件已存在，直接返回（不重复保存文件）
-		fileInfo.FileID = uploadFile.ID
-		fileInfo.Path = uploadFile.Path
-		fileInfo.Name = uploadFile.Name
-		fileInfo.Size = int64(uploadFile.Size)
-		fileInfo.Ext = uploadFile.Ext
-		fileInfo.Sha256 = uploadFile.Hash
-		fileInfo.UUID = uploadFile.UUID
-		fileInfo.MimeType = uploadFile.MimeType
-		fileInfo.Status = global.SUCCESS
-		return fileInfo, nil
+		// 数据库有记录，检查文件是否实际存在
+		var basePath string
+		if isPublic {
+			basePath = filepath.Join(c.Config.BasePath, "storage/public")
+		} else {
+			basePath = filepath.Join(c.Config.BasePath, "storage/private")
+		}
+
+		// 构建完整文件路径（uploadFile.Path 已经是相对路径，如 "avatar/filename.jpg"）
+		fullPath := filepath.Join(basePath, uploadFile.Path)
+
+		// 检查文件是否实际存在
+		if _, err := os.Stat(fullPath); err == nil {
+			// 文件存在，直接返回（不重复保存文件）
+			fileInfo.FileID = uploadFile.ID
+			fileInfo.Path = uploadFile.Path
+			fileInfo.Name = uploadFile.Name
+			fileInfo.Size = int64(uploadFile.Size)
+			fileInfo.Ext = uploadFile.Ext
+			fileInfo.Sha256 = uploadFile.Hash
+			fileInfo.UUID = uploadFile.UUID
+			fileInfo.MimeType = uploadFile.MimeType
+			fileInfo.URL = buildFileURL(uploadFile.UUID)
+			fileInfo.Status = global.SUCCESS
+			return fileInfo, nil
+		}
+		// 文件不存在，继续保存流程（重新保存文件）
 	}
 
 	var basePath string
@@ -149,6 +167,7 @@ func (s CommonService) UploadFile(fileHeader *multipart.FileHeader, isPublic boo
 	fileInfo.Sha256 = result.Sha256
 	fileInfo.UUID = result.UUID
 	fileInfo.MimeType = result.MimeType
+	fileInfo.URL = buildFileURL(result.UUID)
 	fileInfo.Status = global.SUCCESS
 
 	return fileInfo, nil
@@ -191,8 +210,24 @@ func (s CommonService) GetFileAccessPath(fileUUID string, checkAuth bool, curren
 	}
 
 	// 拼接完整文件路径
-	fullPath := filepath.Join(basePath, uploadFile.Path, uploadFile.Name)
+	// uploadFile.Path 已经是相对路径（包含文件名），如 "avatar/cdae4c96-54d3-4e93-8052-ef48c29345d0.jpg"
+	fullPath := filepath.Join(basePath, uploadFile.Path)
 	return fullPath, nil
+}
+
+// buildFileURL 构建文件访问完整URL
+func buildFileURL(uuid string) string {
+	if uuid == "" {
+		return ""
+	}
+	// 拼接文件访问地址
+	baseURL := strings.TrimSuffix(c.Config.BaseURL, "/")
+	if baseURL == "" {
+		// 如果未配置BaseURL，返回相对路径（前端需要自己处理）
+		return "/admin/v1/file/" + uuid
+	}
+	// 拼接完整的URL地址
+	return baseURL + "/admin/v1/file/" + uuid
 }
 
 func setFileFailure(info *utils.FileInfo, reason string, err error) (*utils.FileInfo, error) {

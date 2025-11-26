@@ -1,10 +1,7 @@
 package resources
 
 import (
-	"strings"
-
 	"github.com/samber/lo"
-	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
@@ -48,8 +45,8 @@ func (r *AdminUserResources) SetCustomFields(data *model.AdminUser) {
 	// 设置映射字段
 	r.IsSuperAdminName = data.IsSuperAdminMap()
 	r.StatusName = data.StatusMap()
-	// 处理头像URL：如果是外部链接（https开头）直接返回，否则拼接文件访问地址
-	r.Avatar = formatAvatarURL(data.Avatar)
+	// 头像URL原样返回
+	r.Avatar = data.Avatar
 	// 如果 RoleList 有数据，则提取 RoleId
 	if len(data.RoleList) > 0 {
 		r.RoleList = lo.Map(data.RoleList, func(m model.AdminUserRoleMap, _ int) uint {
@@ -66,27 +63,6 @@ func (r *AdminUserResources) SetCustomFields(data *model.AdminUser) {
 			}
 		})
 	}
-}
-
-// formatAvatarURL 格式化头像URL
-// 如果是 https 开头（外部链接），直接返回
-// 否则（文件UUID），拼接配置的BaseURL和文件访问地址，返回完整的https地址
-func formatAvatarURL(avatar string) string {
-	if avatar == "" {
-		return ""
-	}
-	// 如果是外部链接（https或http开头），直接返回
-	if strings.HasPrefix(avatar, "https://") || strings.HasPrefix(avatar, "http://") {
-		return avatar
-	}
-	// 否则是文件UUID（32位十六进制字符串），拼接文件访问地址
-	baseURL := strings.TrimSuffix(c.Config.BaseURL, "/")
-	if baseURL == "" {
-		// 如果未配置BaseURL，返回相对路径（前端需要自己处理）
-		return "/admin/v1/file/" + avatar
-	}
-	// 拼接完整的https地址
-	return baseURL + "/admin/v1/file/" + avatar
 }
 
 // NewAdminUserTransformer 返回 AdminUserTransformer 实例，绑定资源创建函数
@@ -126,7 +102,7 @@ func (AdminUserTransformer) ToCollection(page, perPage int, total int64, data []
 			PhoneNumber:      phoneRule.Apply(v.PhoneNumber),
 			CountryCode:      v.CountryCode,
 			Email:            emailRule.Apply(v.Email),
-			Avatar:           formatAvatarURL(v.Avatar),
+			Avatar:           v.Avatar,
 			Status:           v.Status,
 			StatusName:       v.StatusMap(),
 			LastIp:           v.LastIp,
