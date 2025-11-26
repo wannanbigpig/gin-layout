@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
@@ -13,24 +12,23 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	casbinx "github.com/wannanbigpig/gin-layout/internal/pkg/utils/casbin"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
-	"github.com/wannanbigpig/gin-layout/internal/service/permission"
 )
 
 // AdminAuthHandler 管理员权限验证中间件
+// 注意：此中间件需要在ParseTokenHandler之后使用，因为需要从context获取用户信息
 func AdminAuthHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 提取并验证Token
-		accessToken, err := extractAccessToken(c)
-		if err != nil {
-			response.Fail(c, e.NotLogin, err.Error())
+		// 从context获取用户信息（由ParseTokenHandler设置）
+		uid := c.GetUint("uid")
+		if uid == 0 {
+			response.Fail(c, e.NotLogin, "请先登录")
 			c.Abort()
 			return
 		}
 
-		// 验证Token并获取用户信息
-		adminUser, ok := validateToken(c, accessToken)
-		if !ok {
+		// 获取用户信息（从context获取，如果不存在则查询数据库）
+		adminUser := getUserFromContext(c)
+		if adminUser == nil {
 			response.Fail(c, e.NotLogin, "登录已失效，请重新登录")
 			c.Abort()
 			return
@@ -49,33 +47,8 @@ func AdminAuthHandler() gin.HandlerFunc {
 			}
 		}
 
-		// 设置用户信息到上下文
-		setUserContext(c, adminUser)
 		c.Next()
 	}
-}
-
-// extractAccessToken 从请求头中提取访问令牌
-func extractAccessToken(c *gin.Context) (string, error) {
-	authorization := c.GetHeader("Authorization")
-	return token.GetAccessToken(authorization)
-}
-
-// validateToken 验证Token并返回用户信息
-func validateToken(c *gin.Context, accessToken string) (*model.AdminUser, bool) {
-	loginService := permission.NewLoginService()
-	loginService.SetCtx(c)
-	adminUser, ok := loginService.CheckToken(accessToken)
-
-	// 如果验证成功，解析 token 获取 jwt_id 并设置到上下文
-	if ok {
-		claims := &token.AdminCustomClaims{}
-		if err := token.Parse(accessToken, claims, jwt.WithSubject(global.PcAdminSubject), jwt.WithIssuer(global.Issuer)); err == nil {
-			c.Set("jwt_id", claims.ID)
-		}
-	}
-
-	return adminUser, ok
 }
 
 // isSuperAdmin 判断是否为超级管理员
@@ -113,11 +86,27 @@ func checkPermission(c *gin.Context, adminUser *model.AdminUser) error {
 	return nil
 }
 
-// setUserContext 设置用户信息到上下文
-func setUserContext(c *gin.Context, adminUser *model.AdminUser) {
-	c.Set("uid", adminUser.ID)
-	c.Set("username", adminUser.Username)
-	c.Set("full_phone_number", adminUser.FullPhoneNumber)
-	c.Set("nickname", adminUser.Nickname)
-	c.Set("email", adminUser.Email)
+// getUserFromContext 从context获取用户信息
+func getUserFromContext(c *gin.Context) *model.AdminUser {
+	// 优先从context获取完整的用户对象
+	if user, exists := c.Get("admin_user"); exists {
+		if adminUser, ok := user.(*model.AdminUser); ok {
+			return adminUser
+		}
+	}
+
+	// 如果context中没有完整对象，但有uid，则查询数据库
+	uid := c.GetUint("uid")
+	if uid == 0 {
+		return nil
+	}
+
+	adminUser := model.NewAdminUsers()
+	if err := adminUser.GetById(adminUser, uid); err != nil {
+		return nil
+	}
+
+	// 将查询到的用户信息设置回context，避免重复查询
+	setUserContext(c, adminUser)
+	return adminUser
 }

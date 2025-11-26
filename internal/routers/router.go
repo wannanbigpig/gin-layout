@@ -50,8 +50,9 @@ func createEngine() *gin.Engine {
 		// 开发调试模式
 		engine = gin.New()
 		engine.Use(
-			middleware.CorsHandler(), // CORS 必须在最前面
-			middleware.RequestCostHandler(),
+			middleware.CorsHandler(),
+			middleware.RequestCostHandler(), // 请求耗时统计
+			middleware.ParseTokenHandler(),  // 全局token解析（所有路由都走）
 			gin.Logger(),
 			middleware.CustomRecovery(),
 			middleware.CustomLogger(),
@@ -61,8 +62,9 @@ func createEngine() *gin.Engine {
 		// 生产模式
 		engine = ReleaseRouter()
 		engine.Use(
-			middleware.CorsHandler(), // CORS 必须在最前面
-			middleware.RequestCostHandler(),
+			middleware.CorsHandler(),
+			middleware.RequestCostHandler(), // 请求耗时统计
+			middleware.ParseTokenHandler(),  // 全局token解析（所有路由都走）
 			middleware.CustomRecovery(),
 			middleware.CustomLogger(),
 		)
