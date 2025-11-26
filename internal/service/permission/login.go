@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,9 +28,50 @@ import (
 )
 
 const (
-	tokenTypeBearer = "Bearer"
-	blacklistPrefix = "blacklist:"
+	tokenTypeBearer   = "Bearer"
+	blacklistPrefix   = "blacklist:"
+	refreshLockPrefix = "refresh_token_lock:"
+	refreshLockTTL    = 5 * time.Second // 锁的过期时间，防止死锁
 )
+
+// refreshTokenLock 内存锁存储（当Redis未启用时使用）
+type refreshTokenLock struct {
+	mu    sync.Mutex
+	locks sync.Map // map[string]*sync.Mutex
+}
+
+// getLock 获取或创建指定key的锁
+func (r *refreshTokenLock) getLock(key string) *sync.Mutex {
+	// 先尝试获取已存在的锁
+	if lock, ok := r.locks.Load(key); ok {
+		return lock.(*sync.Mutex)
+	}
+
+	// 如果不存在，创建新锁
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// 双重检查，防止并发创建
+	if lock, ok := r.locks.Load(key); ok {
+		return lock.(*sync.Mutex)
+	}
+
+	// 创建新锁并存储
+	newLock := &sync.Mutex{}
+	r.locks.Store(key, newLock)
+
+	// 启动goroutine在过期后清理锁（防止内存泄漏）
+	go func() {
+		time.Sleep(refreshLockTTL)
+		r.mu.Lock()
+		r.locks.Delete(key)
+		r.mu.Unlock()
+	}()
+
+	return newLock
+}
+
+var memoryRefreshLock = &refreshTokenLock{}
 
 // TokenResponse Token响应体
 type TokenResponse struct {
@@ -508,6 +550,37 @@ func (s *LoginService) tryRefreshToken(claims *token.AdminCustomClaims) {
 	refreshTTL := config.Config.Jwt.RefreshTTL * time.Second
 
 	if diff < refreshTTL && s.GetCtx() != nil {
+		lockKey := refreshLockPrefix + strconv.FormatUint(uint64(claims.UserID), 10) + ":" + claims.ID
+
+		// 根据Redis是否启用来选择锁机制
+		if config.Config.Redis.Enable && data.RedisClient() != nil {
+			// 使用Redis分布式锁
+			ctx := context.Background()
+			redisClient := data.RedisClient()
+			locked, err := redisClient.SetNX(ctx, lockKey, "1", refreshLockTTL).Result()
+			if err != nil {
+				// Redis操作失败，降级到内存锁
+				log.Logger.Warn("获取刷新token Redis锁失败，降级到内存锁", zap.Error(err), zap.Uint("user_id", claims.UserID), zap.String("jwt_id", claims.ID))
+				// 使用内存锁
+				memLock := memoryRefreshLock.getLock(lockKey)
+				memLock.Lock()
+				defer memLock.Unlock()
+			} else if !locked {
+				// 锁已被其他请求获取，说明正在刷新中，直接返回
+				return
+			} else {
+				// 成功获取Redis锁，确保在函数返回时释放
+				defer func() {
+					_ = redisClient.Del(ctx, lockKey).Err()
+				}()
+			}
+		} else {
+			// Redis未启用，使用内存锁
+			memLock := memoryRefreshLock.getLock(lockKey)
+			memLock.Lock()
+			defer memLock.Unlock()
+		}
+
 		// 构建登录日志信息（用于记录刷新token日志）
 		logInfo := s.buildRefreshLogInfo(s.GetCtx())
 		tokenResponse, _ := s.Refresh(claims.UserID, logInfo)
