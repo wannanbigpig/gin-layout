@@ -3,11 +3,15 @@ package permission
 import (
 	"strings"
 
+	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"github.com/wannanbigpig/gin-layout/pkg/utils/crypto"
+	"go.uber.org/zap"
 )
 
 // LoginLogService 登录日志服务
@@ -94,7 +98,44 @@ func (s *AdminLoginLogService) Detail(id uint) (any, error) {
 	if err := loginLog.GetById(loginLog, id); err != nil || loginLog.ID == 0 {
 		return nil, e.NewBusinessError(1, "登录日志不存在")
 	}
+
+	// 解密 access_token 和 refresh_token
+	s.decryptTokens(loginLog)
+
 	// 使用资源类转换，详情包含所有字段
 	transformer := resources.NewAdminLoginLogTransformer()
 	return transformer.ToStruct(loginLog), nil
+}
+
+// decryptTokens 解密登录日志中的 token
+func (s *AdminLoginLogService) decryptTokens(loginLog *model.AdminLoginLogs) {
+	encryptKey := config.Config.Jwt.SecretKey
+
+	// 解密 access_token
+	if loginLog.AccessToken != "" {
+		decrypted, err := crypto.Decrypt(encryptKey, loginLog.AccessToken)
+		if err != nil {
+			log.Logger.Warn("解密 access_token 失败",
+				zap.Error(err),
+				zap.Uint("log_id", loginLog.ID),
+				zap.Uint("user_id", loginLog.UID))
+			loginLog.AccessToken = "" // 解密失败时返回空字符串
+		} else {
+			loginLog.AccessToken = decrypted
+		}
+	}
+
+	// 解密 refresh_token
+	if loginLog.RefreshToken != "" {
+		decrypted, err := crypto.Decrypt(encryptKey, loginLog.RefreshToken)
+		if err != nil {
+			log.Logger.Warn("解密 refresh_token 失败",
+				zap.Error(err),
+				zap.Uint("log_id", loginLog.ID),
+				zap.Uint("user_id", loginLog.UID))
+			loginLog.RefreshToken = "" // 解密失败时返回空字符串
+		} else {
+			loginLog.RefreshToken = decrypted
+		}
+	}
 }

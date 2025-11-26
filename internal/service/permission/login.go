@@ -25,6 +25,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
+	"github.com/wannanbigpig/gin-layout/pkg/utils/crypto"
 )
 
 const (
@@ -32,6 +33,7 @@ const (
 	blacklistPrefix   = "blacklist:"
 	refreshLockPrefix = "refresh_token_lock:"
 	refreshLockTTL    = 5 * time.Second // 锁的过期时间，防止死锁
+	defaultTokenTTL   = 24 * time.Hour  // 默认 token 过期时间（当 token_expires 为 NULL 时使用）
 )
 
 // refreshTokenLock 内存锁存储（当Redis未启用时使用）
@@ -129,7 +131,8 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
 
 	// 记录登录日志并更新用户信息
-	if err := s.recordLoginLog(adminUser, claims, accessToken, logInfo, model.LoginTypeLogin); err != nil {
+	// 注意：目前系统未使用 refresh_token，传入空字符串
+	if err := s.recordLoginLog(adminUser, claims, accessToken, "", logInfo, model.LoginTypeLogin); err != nil {
 		return nil, e.NewBusinessError(e.FAILURE, "登录失败，请稍后重试")
 	}
 
@@ -162,10 +165,10 @@ func (s *LoginService) validateUser(username, password string) (*model.AdminUser
 }
 
 // recordLoginLog 记录登录日志并更新用户信息
-func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.AdminCustomClaims, accessToken string, logInfo LoginLogInfo, logType uint8) error {
+func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.AdminCustomClaims, accessToken, refreshToken string, logInfo LoginLogInfo, logType uint8) error {
 	return model.DB().Transaction(func(tx *gorm.DB) error {
 		// 记录登录成功日志
-		loginLog := s.buildLoginLog(adminUser.ID, adminUser.Username, claims.ID, accessToken, claims.ExpiresAt.Time, logInfo, model.LoginStatusSuccess, "", logType)
+		loginLog := s.buildLoginLog(adminUser.ID, adminUser.Username, claims.ID, accessToken, refreshToken, claims.ExpiresAt.Time, logInfo, model.LoginStatusSuccess, "", logType)
 		loginLog.SetDB(tx)
 		if err := tx.Create(loginLog).Error; err != nil {
 			log.Logger.Error("记录登录日志失败", zap.Error(err), zap.Uint("user_id", adminUser.ID), zap.String("username", adminUser.Username))
@@ -186,15 +189,16 @@ func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.A
 }
 
 // buildLoginLog 构建登录日志记录（公共方法，提取重复代码）
-func (s *LoginService) buildLoginLog(uid uint, username, jwtId, accessToken string, expiresAt time.Time, logInfo LoginLogInfo, loginStatus uint8, failReason string, logType uint8) *model.AdminLoginLogs {
+func (s *LoginService) buildLoginLog(uid uint, username, jwtId, accessToken, refreshToken string, expiresAt time.Time, logInfo LoginLogInfo, loginStatus uint8, failReason string, logType uint8) *model.AdminLoginLogs {
 	loginLog := model.NewAdminLoginLogs()
 	loginLog.UID = uid
 	loginLog.Username = username
 	loginLog.JwtID = jwtId
-	loginLog.AccessToken = accessToken
-	if accessToken != "" {
-		loginLog.TokenHash = s.calculateTokenHash(accessToken)
-	}
+
+	// 加密保存 token
+	s.encryptAndSetToken(loginLog, accessToken, refreshToken, uid)
+
+	// 设置日志基本信息
 	loginLog.IP = logInfo.IP
 	loginLog.UserAgent = logInfo.UserAgent
 	loginLog.OS = logInfo.OS
@@ -203,12 +207,43 @@ func (s *LoginService) buildLoginLog(uid uint, username, jwtId, accessToken stri
 	loginLog.LoginStatus = loginStatus
 	loginLog.LoginFailReason = failReason
 	loginLog.Type = logType
-	if expiresAt.IsZero() {
-		loginLog.TokenExpires = nil
-	} else {
+
+	// 设置 token 过期时间
+	if !expiresAt.IsZero() {
 		loginLog.TokenExpires = &(utils.FormatDate{Time: expiresAt})
 	}
+
 	return loginLog
+}
+
+// encryptAndSetToken 加密并设置 token 到登录日志
+func (s *LoginService) encryptAndSetToken(loginLog *model.AdminLoginLogs, accessToken, refreshToken string, uid uint) {
+	encryptKey := config.Config.Jwt.SecretKey
+
+	// 加密保存 access_token
+	if accessToken != "" {
+		loginLog.AccessToken = s.encryptToken(encryptKey, accessToken, "access_token", uid)
+		loginLog.TokenHash = s.calculateTokenHash(accessToken)
+	}
+
+	// 加密保存 refresh_token
+	if refreshToken != "" {
+		loginLog.RefreshToken = s.encryptToken(encryptKey, refreshToken, "refresh_token", uid)
+		loginLog.RefreshTokenHash = s.calculateTokenHash(refreshToken)
+	}
+}
+
+// encryptToken 加密 token，失败时返回空字符串并记录错误
+func (s *LoginService) encryptToken(key, token, tokenType string, uid uint) string {
+	encrypted, err := crypto.Encrypt(key, token)
+	if err != nil {
+		log.Logger.Error("加密 token 失败",
+			zap.Error(err),
+			zap.String("token_type", tokenType),
+			zap.Uint("user_id", uid))
+		return ""
+	}
+	return encrypted
 }
 
 // extractErrorMessage 提取简洁的错误消息
@@ -223,7 +258,7 @@ func (s *LoginService) extractErrorMessage(err error) string {
 
 // RecordLoginFailLog 记录登录失败日志（公开方法，供Controller调用）
 func (s *LoginService) RecordLoginFailLog(username, failReason string, logInfo LoginLogInfo) {
-	loginLog := s.buildLoginLog(0, username, "", "", time.Time{}, logInfo, model.LoginStatusFail, failReason, model.LoginTypeLogin)
+	loginLog := s.buildLoginLog(0, username, "", "", "", time.Time{}, logInfo, model.LoginStatusFail, failReason, model.LoginTypeLogin)
 
 	// 异步记录，避免影响登录响应速度
 	go func() {
@@ -264,7 +299,8 @@ func (s *LoginService) Refresh(id uint, logInfo LoginLogInfo) (*TokenResponse, e
 	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
 
 	// 记录刷新token日志
-	if err := s.recordLoginLog(adminUserModel, claims, accessToken, logInfo, model.LoginTypeRefresh); err != nil {
+	// 注意：目前系统未使用 refresh_token，传入空字符串
+	if err := s.recordLoginLog(adminUserModel, claims, accessToken, "", logInfo, model.LoginTypeRefresh); err != nil {
 		log.Logger.Error("记录刷新token日志失败", zap.Error(err), zap.Uint("user_id", id))
 		// 记录日志失败不影响token刷新，继续返回token
 	}
@@ -454,34 +490,56 @@ func (s *LoginService) RevokeUserTokens(userId uint, revokedCode uint8, revokedR
 		return err
 	}
 
-	// 将这些token加入Redis黑名单
+	// 将这些token加入Redis黑名单（批量操作）
+	s.addTokensToBlacklist(loginLogs)
+
+	return nil
+}
+
+// addTokensToBlacklist 批量将 token 加入 Redis 黑名单
+func (s *LoginService) addTokensToBlacklist(loginLogs []model.AdminLoginLogs) {
+	if len(loginLogs) == 0 {
+		return
+	}
+
 	ctx := context.Background()
+	redisClient := data.RedisClient()
+	if redisClient == nil {
+		return
+	}
+
+	now := time.Now()
 	for _, loginLogItem := range loginLogs {
 		if loginLogItem.JwtID == "" {
 			continue
 		}
 
-		// 计算剩余过期时间
-		var remainingTime time.Duration
-		if loginLogItem.TokenExpires != nil {
-			remainingTime = time.Until(loginLogItem.TokenExpires.Time)
-			if remainingTime > 0 {
-				blacklistKey := s.getBlacklistKey(loginLogItem.JwtID)
-				if err := data.RedisClient().Set(ctx, blacklistKey, "1", remainingTime).Err(); err != nil {
-					log.Logger.Error("将token加入Redis黑名单失败", zap.Error(err), zap.String("jwt_id", loginLogItem.JwtID))
-					// 不阻断流程，继续处理其他token
-				}
-			}
-		} else {
-			// token_expires 为 NULL 的情况，设置一个默认过期时间（24小时）
-			blacklistKey := s.getBlacklistKey(loginLogItem.JwtID)
-			if err := data.RedisClient().Set(ctx, blacklistKey, "1", 24*time.Hour).Err(); err != nil {
-				log.Logger.Error("将token加入Redis黑名单失败", zap.Error(err), zap.String("jwt_id", loginLogItem.JwtID))
-			}
+		remainingTime := s.calculateRemainingTime(loginLogItem.TokenExpires, now)
+		if remainingTime <= 0 {
+			continue
+		}
+
+		blacklistKey := s.getBlacklistKey(loginLogItem.JwtID)
+		if err := redisClient.Set(ctx, blacklistKey, "1", remainingTime).Err(); err != nil {
+			log.Logger.Error("将token加入Redis黑名单失败",
+				zap.Error(err),
+				zap.String("jwt_id", loginLogItem.JwtID))
+			// 不阻断流程，继续处理其他token
 		}
 	}
+}
 
-	return nil
+// calculateRemainingTime 计算 token 剩余过期时间
+func (s *LoginService) calculateRemainingTime(tokenExpires *utils.FormatDate, now time.Time) time.Duration {
+	if tokenExpires != nil {
+		remainingTime := tokenExpires.Time.Sub(now)
+		if remainingTime > 0 {
+			return remainingTime
+		}
+		return 0
+	}
+	// token_expires 为 NULL 的情况，使用默认过期时间
+	return defaultTokenTTL
 }
 
 // CheckToken 检查Token是否有效
@@ -496,7 +554,7 @@ func (s *LoginService) CheckToken(accessToken string) (*model.AdminUser, bool) {
 		return nil, false
 	}
 
-	// 尝试自动刷新Token
+	// 尝试自动刷新Token（异步，不阻塞）
 	s.tryRefreshToken(claims)
 
 	// 获取用户信息
@@ -536,58 +594,105 @@ func (s *LoginService) buildRefreshLogInfo(c *gin.Context) LoginLogInfo {
 
 // tryRefreshToken 尝试自动刷新Token
 func (s *LoginService) tryRefreshToken(claims *token.AdminCustomClaims) {
-	if config.Config.Jwt.RefreshTTL <= 0 {
+	if !s.shouldRefreshToken(claims) {
 		return
+	}
+
+	lockKey := s.buildRefreshLockKey(claims)
+	unlock := s.acquireRefreshLock(lockKey, claims)
+	if unlock == nil {
+		return
+	}
+	defer unlock()
+
+	// 执行刷新操作
+	s.doRefreshToken(claims)
+}
+
+// shouldRefreshToken 判断是否需要刷新 token
+func (s *LoginService) shouldRefreshToken(claims *token.AdminCustomClaims) bool {
+	if config.Config.Jwt.RefreshTTL <= 0 {
+		return false
+	}
+
+	if s.GetCtx() == nil {
+		return false
 	}
 
 	exp, err := claims.GetExpirationTime()
 	if err != nil || exp == nil {
-		return
+		return false
 	}
 
 	now := time.Now()
 	diff := exp.Time.Sub(now)
 	refreshTTL := config.Config.Jwt.RefreshTTL * time.Second
 
-	if diff < refreshTTL && s.GetCtx() != nil {
-		lockKey := refreshLockPrefix + strconv.FormatUint(uint64(claims.UserID), 10) + ":" + claims.ID
+	return diff < refreshTTL
+}
 
-		// 根据Redis是否启用来选择锁机制
-		if config.Config.Redis.Enable && data.RedisClient() != nil {
-			// 使用Redis分布式锁
-			ctx := context.Background()
-			redisClient := data.RedisClient()
-			locked, err := redisClient.SetNX(ctx, lockKey, "1", refreshLockTTL).Result()
-			if err != nil {
-				// Redis操作失败，降级到内存锁
-				log.Logger.Warn("获取刷新token Redis锁失败，降级到内存锁", zap.Error(err), zap.Uint("user_id", claims.UserID), zap.String("jwt_id", claims.ID))
-				// 使用内存锁
-				memLock := memoryRefreshLock.getLock(lockKey)
-				memLock.Lock()
-				defer memLock.Unlock()
-			} else if !locked {
-				// 锁已被其他请求获取，说明正在刷新中，直接返回
-				return
-			} else {
-				// 成功获取Redis锁，确保在函数返回时释放
-				defer func() {
-					_ = redisClient.Del(ctx, lockKey).Err()
-				}()
-			}
-		} else {
-			// Redis未启用，使用内存锁
-			memLock := memoryRefreshLock.getLock(lockKey)
-			memLock.Lock()
-			defer memLock.Unlock()
-		}
+// buildRefreshLockKey 构建刷新锁的 key
+func (s *LoginService) buildRefreshLockKey(claims *token.AdminCustomClaims) string {
+	return refreshLockPrefix + strconv.FormatUint(uint64(claims.UserID), 10) + ":" + claims.ID
+}
 
-		// 构建登录日志信息（用于记录刷新token日志）
-		logInfo := s.buildRefreshLogInfo(s.GetCtx())
-		tokenResponse, _ := s.Refresh(claims.UserID, logInfo)
-		if tokenResponse != nil {
-			s.GetCtx().Writer.Header().Set("refresh-access-token", tokenResponse.AccessToken)
-			s.GetCtx().Writer.Header().Set("refresh-exp", strconv.FormatInt(tokenResponse.ExpiresAt, 10))
-		}
+// acquireRefreshLock 获取刷新锁，返回解锁函数，失败返回 nil
+func (s *LoginService) acquireRefreshLock(lockKey string, claims *token.AdminCustomClaims) func() {
+	if config.Config.Redis.Enable && data.RedisClient() != nil {
+		return s.acquireRedisLock(lockKey, claims)
+	}
+	return s.acquireMemoryLock(lockKey)
+}
+
+// acquireRedisLock 获取 Redis 分布式锁，返回解锁函数
+func (s *LoginService) acquireRedisLock(lockKey string, claims *token.AdminCustomClaims) func() {
+	ctx := context.Background()
+	redisClient := data.RedisClient()
+	locked, err := redisClient.SetNX(ctx, lockKey, "1", refreshLockTTL).Result()
+
+	if err != nil {
+		// Redis 操作失败，降级到内存锁
+		log.Logger.Warn("获取刷新token Redis锁失败，降级到内存锁",
+			zap.Error(err),
+			zap.Uint("user_id", claims.UserID),
+			zap.String("jwt_id", claims.ID))
+		return s.acquireMemoryLock(lockKey)
+	}
+
+	if !locked {
+		// 锁已被其他请求获取，说明正在刷新中
+		return nil
+	}
+
+	// 成功获取 Redis 锁，返回解锁函数
+	return func() {
+		_ = redisClient.Del(ctx, lockKey).Err()
+	}
+}
+
+// acquireMemoryLock 获取内存锁，返回解锁函数
+func (s *LoginService) acquireMemoryLock(lockKey string) func() {
+	memLock := memoryRefreshLock.getLock(lockKey)
+	memLock.Lock()
+	return memLock.Unlock
+}
+
+// doRefreshToken 执行刷新 token 操作
+func (s *LoginService) doRefreshToken(claims *token.AdminCustomClaims) {
+	logInfo := s.buildRefreshLogInfo(s.GetCtx())
+	tokenResponse, err := s.Refresh(claims.UserID, logInfo)
+	if err != nil {
+		log.Logger.Warn("自动刷新token失败",
+			zap.Error(err),
+			zap.Uint("user_id", claims.UserID),
+			zap.String("jwt_id", claims.ID))
+		return
+	}
+
+	if tokenResponse != nil {
+		ctx := s.GetCtx()
+		ctx.Writer.Header().Set("refresh-access-token", tokenResponse.AccessToken)
+		ctx.Writer.Header().Set("refresh-exp", strconv.FormatInt(tokenResponse.ExpiresAt, 10))
 	}
 }
 
@@ -595,10 +700,13 @@ func (s *LoginService) tryRefreshToken(claims *token.AdminCustomClaims) {
 func (s *LoginService) getUserById(userId uint) (*model.AdminUser, error) {
 	adminUser := model.NewAdminUsers()
 	err := adminUser.GetById(adminUser, userId)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Error("权限中间件获取用户信息失败", zap.Error(err))
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Logger.Error("获取用户信息失败", zap.Error(err), zap.Uint("user_id", userId))
+		}
+		return nil, err
 	}
-	return adminUser, err
+	return adminUser, nil
 }
 
 // isUserValid 检查用户是否有效（状态和黑名单）

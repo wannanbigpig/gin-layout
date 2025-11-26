@@ -36,12 +36,15 @@ type AdminLoginLogListResources struct {
 // AdminLoginLogResources 管理员登录日志详情资源
 type AdminLoginLogResources struct {
 	AdminLoginLogBaseResources
-	JwtID          string            `json:"jwt_id"`          // JWT唯一标识(jti claim)
-	UserAgent      string            `json:"user_agent"`      // 用户代理（浏览器/设备信息）
-	TokenExpires   *utils.FormatDate `json:"token_expires"`   // Token过期时间
-	RefreshExpires *utils.FormatDate `json:"refresh_expires"` // Refresh Token过期时间
-	UpdatedAt      utils.FormatDate  `json:"updated_at"`      // 更新时间
-	// 注意：不返回敏感信息 access_token、refresh_token、token_hash、refresh_token_hash
+	JwtID            string            `json:"jwt_id"`             // JWT唯一标识(jti claim)
+	UserAgent        string            `json:"user_agent"`         // 用户代理（浏览器/设备信息）
+	AccessToken      string            `json:"access_token"`       // 访问令牌（解密后）
+	RefreshToken     string            `json:"refresh_token"`      // 刷新令牌（解密后）
+	TokenHash        string            `json:"token_hash"`         // Token的SHA256哈希值
+	RefreshTokenHash string            `json:"refresh_token_hash"` // Refresh Token的哈希值
+	TokenExpires     *utils.FormatDate `json:"token_expires"`      // Token过期时间
+	RefreshExpires   *utils.FormatDate `json:"refresh_expires"`    // Refresh Token过期时间
+	UpdatedAt        utils.FormatDate  `json:"updated_at"`         // 更新时间
 }
 
 // AdminLoginLogTransformer 管理员登录日志资源转换器
@@ -92,10 +95,13 @@ func (r AdminLoginLogTransformer) ToStruct(data *model.AdminLoginLogs) *AdminLog
 		AdminLoginLogBaseResources: base,
 		JwtID:                      data.JwtID,
 		UserAgent:                  data.UserAgent,
+		AccessToken:                data.AccessToken,  // 已在 service 层解密
+		RefreshToken:               data.RefreshToken, // 已在 service 层解密
+		TokenHash:                  data.TokenHash,
+		RefreshTokenHash:           data.RefreshTokenHash,
 		TokenExpires:               data.TokenExpires,
 		RefreshExpires:             data.RefreshExpires,
 		UpdatedAt:                  data.UpdatedAt,
-		// 注意：不返回敏感信息 access_token、refresh_token、token_hash、refresh_token_hash
 	}
 }
 
