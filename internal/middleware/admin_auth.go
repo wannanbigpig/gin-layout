@@ -107,6 +107,7 @@ func getUserFromContext(c *gin.Context) *model.AdminUser {
 	}
 
 	// 将查询到的用户信息设置回context，避免重复查询
-	setUserContext(c, adminUser)
+	// 注意：从数据库查询时没有jwtID，传入空字符串
+	setUserContext(c, adminUser, "")
 	return adminUser
 }
