@@ -33,10 +33,8 @@ require (
 )
 
 require (
-	github.com/golang-migrate/migrate/v4 v4.19.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
-	github.com/hashicorp/errwrap v1.1.0 // indirect
-	github.com/hashicorp/go-multierror v1.1.1 // indirect
+	github.com/lib/pq v1.10.9 // indirect
 	golang.org/x/image v0.0.0-20210628002857-a66eb6448b8d // indirect
 )
 
