@@ -17,7 +17,7 @@ import (
 )
 
 type FileInfo struct {
-	FileID        uint   `json:"file_id"`        // 文件ID（数据库ID）
+	FileID        uint   `json:"-"`              // 文件ID（数据库ID，不返回给前端）
 	Sha256        string `json:"sha256"`         // 文件SHA256哈希值（用于去重）
 	UUID          string `json:"uuid"`           // 文件UUID（用于URL访问，32位十六进制字符串）
 	Name          string `json:"name"`           // 存储的文件名（UUID+扩展名）

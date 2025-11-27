@@ -10,6 +10,8 @@
 
 **前端项目：** [go-admin-ui](https://github.com/wannanbigpig/go-admin-ui) - 基于 Vue 3 + Element Plus 的管理后台前端项目
 
+**API 文档：** [在线文档](https://wannanbigpig.apifox.cn/) - 完整的接口文档和使用说明
+
 ## 📌 项目简介
 
 **gin-layout** 是一个功能完整的 **Go Admin 后台管理系统**框架，专为快速构建企业级管理后台而设计。本项目提供了完整的 RBAC 权限管理、JWT 认证、日志系统等核心功能，是构建 Go 管理后台、Go Admin Panel、Go 后台管理系统的理想选择。

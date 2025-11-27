@@ -94,7 +94,6 @@ func (s CommonService) UploadFile(fileHeader *multipart.FileHeader, isPublic boo
 		// 检查文件是否实际存在
 		if _, err := os.Stat(fullPath); err == nil {
 			// 文件存在，直接返回（不重复保存文件）
-			fileInfo.FileID = uploadFile.ID
 			fileInfo.Path = uploadFile.Path
 			fileInfo.Name = uploadFile.Name
 			fileInfo.Size = int64(uploadFile.Size)
@@ -158,8 +157,6 @@ func (s CommonService) UploadFile(fileHeader *multipart.FileHeader, isPublic boo
 		return setFileFailure(fileInfo, "保存文件信息失败", err)
 	}
 
-	result.FileID = uploadFileModel.ID
-	fileInfo.FileID = uploadFileModel.ID
 	fileInfo.Path = result.Path
 	fileInfo.Name = result.Name
 	fileInfo.Size = result.Size
