@@ -6,25 +6,30 @@
 [![GitHub license](https://img.shields.io/github/license/wannanbigpig/gin-layout)](https://github.com/wannanbigpig/gin-layout/blob/master/LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-%3E%3D1.23-blue.svg)](https://golang.org/)
 
-> 基于 Gin 框架的企业级 Go 项目脚手架，开箱即用，快速构建 RESTful API 服务
+> 基于 Gin 框架的企业级 Go 项目脚手架（Go Admin 后台管理系统），开箱即用的 Go 管理后台框架，快速构建 RESTful API 服务和管理后台系统
 
 **前端项目：** [go-admin-ui](https://github.com/wannanbigpig/go-admin-ui) - 基于 Vue 3 + Element Plus 的管理后台前端项目
 
+## 📌 项目简介
+
+**gin-layout** 是一个功能完整的 **Go Admin 后台管理系统**框架，专为快速构建企业级管理后台而设计。本项目提供了完整的 RBAC 权限管理、JWT 认证、日志系统等核心功能，是构建 Go 管理后台、Go Admin Panel、Go 后台管理系统的理想选择。
+
 ## ✨ 特性
 
-- 🚀 **开箱即用** - 完整的项目结构，无需从零开始搭建
-- 🔐 **RBAC 权限管理** - 基于 Casbin 的完整权限控制系统
-- 📝 **JWT 认证** - 支持 Token 生成、刷新和黑名单管理
+- 🚀 **开箱即用** - 完整的 Go Admin 项目结构，无需从零开始搭建
+- 🔐 **RBAC 权限管理** - 基于 Casbin 的完整权限控制系统，适合构建 Go 管理后台系统
+- 📝 **JWT 认证** - 支持 Token 生成、刷新和黑名单管理，保障 Go Admin 系统安全
 - 📦 **数据库迁移** - 使用 migrate 进行数据库版本管理
 - 📊 **日志系统** - 基于 zap 的高性能日志，支持文件和控制台输出
 - 🔄 **CORS 支持** - 完整的跨域资源共享配置
 - 📤 **文件上传** - 支持公开/私有文件存储，UUID 标识
 - 🛡️ **参数验证** - 基于 validator 的请求参数验证
-- 📈 **请求日志** - 自动记录 API 请求日志
+- 📈 **请求日志** - 自动记录 API 请求日志，便于 Go Admin 系统监控
 - 🎯 **统一响应** - 标准化的 API 响应格式
 - ⚙️ **配置管理** - 基于 Viper 的灵活配置系统
 - 🔧 **CLI 工具** - 支持 server、command、cron 等多种命令
 - 📱 **软删除** - 支持数据库软删除功能
+- 🔒 **数据加密** - 支持敏感数据加密存储（如 Token 加密）
 
 ## 📋 目录结构
 
@@ -62,6 +67,8 @@ gin-layout/
 ```
 
 ## 🚀 快速开始
+
+本 Go Admin 框架支持快速搭建管理后台系统，适用于企业级 Go 后台管理系统开发。
 
 ### 环境要求
 
@@ -170,6 +177,17 @@ curl http://127.0.0.1:9001/admin/v1/demo
 ```
 
 ## 📖 使用说明
+
+### Go Admin 系统功能
+
+本框架提供了完整的 Go 管理后台功能，包括：
+
+- **用户管理** - 管理员用户管理、角色分配、部门管理
+- **权限管理** - 基于 RBAC 的权限控制系统，支持角色、菜单、API 权限管理
+- **登录认证** - JWT Token 认证、登录日志记录、Token 刷新机制
+- **日志管理** - 登录日志、请求日志记录和查询
+- **菜单管理** - 动态菜单配置，支持多级菜单
+- **API 管理** - API 路由自动扫描和权限配置
 
 ### 命令行工具
 
@@ -310,6 +328,8 @@ CMD ["./go-layout", "service"]
 
 ## 🛠️ 技术栈
 
+本 Go Admin 框架采用现代化的技术栈，为构建高性能的管理后台系统提供坚实基础。
+
 ### 核心框架
 - [Gin](https://github.com/gin-gonic/gin) - HTTP Web 框架
 - [GORM](https://gorm.io/) - ORM 框架
@@ -332,6 +352,10 @@ CMD ["./go-layout", "service"]
 更多依赖请查看 `go.mod` 文件。
 
 ## 📝 开发指南
+
+### 构建 Go Admin 系统
+
+使用本框架可以快速构建功能完整的 Go 管理后台系统，支持用户管理、权限控制、数据管理等核心功能。
 
 ### 添加新接口
 
@@ -356,6 +380,17 @@ migrate -database 'mysql://...' -path data/migrations up
 ```bash
 migrate -database 'mysql://...' -path data/migrations down
 ```
+
+## 🔍 相关搜索关键词
+
+- Go Admin - Go 后台管理系统框架
+- Go 管理后台 - 基于 Gin 的管理后台系统
+- Go Admin Panel - Go 管理面板框架
+- Go 后台框架 - 企业级 Go 后台管理系统
+- Go Admin System - 完整的 Go 管理后台解决方案
+- Gin Admin - 基于 Gin 框架的管理后台
+- Go 管理系统 - RBAC 权限管理的 Go 系统
+- Go 后台管理 - 开箱即用的 Go Admin 框架
 
 ## 🤝 贡献
 
