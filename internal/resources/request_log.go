@@ -19,7 +19,7 @@ type RequestLogBaseResources struct {
 	OperatorAccount     string           `json:"operator_account"`      // 操作账号
 	OperatorName        string           `json:"operator_name"`         // 操作人员
 	ResponseStatus      int              `json:"response_status"`       // 响应状态码
-	ExecutionTime       int              `json:"execution_time"`        // 执行时间（毫秒）
+	ExecutionTime       float64          `json:"execution_time"`        // 执行时间（毫秒，支持小数，最多4位）
 	CreatedAt           utils.FormatDate `json:"created_at"`            // 创建时间
 }
 

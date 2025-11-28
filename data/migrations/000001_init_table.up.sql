@@ -353,7 +353,7 @@ CREATE TABLE IF NOT EXISTS `a_request_logs`
     `response_status` int(11)      NOT NULL DEFAULT '0' COMMENT '响应状态码',
     `response_body`   text                  DEFAULT NULL COMMENT '响应体',
     `response_header` text                  DEFAULT NULL COMMENT '响应头',
-    `execution_time`  int(11)      NOT NULL DEFAULT '0' COMMENT '执行时间（毫秒）',
+    `execution_time`  DECIMAL(10,4) NOT NULL DEFAULT '0.0000' COMMENT '执行时间（毫秒，支持小数，最多4位）',
     `created_at`      datetime              DEFAULT NULL COMMENT '创建时间',
     `updated_at`      datetime              DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),

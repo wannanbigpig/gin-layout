@@ -197,8 +197,11 @@ func saveRequestLogToDB(c *gin.Context, recorder *responseRecorder, resp *respon
 		}
 	}()
 
-	// 计算执行时间
-	executionTime := int(time.Since(c.GetTime("requestStartTime")).Milliseconds())
+	// 计算执行时间（毫秒，支持小数，最多4位）
+	duration := time.Since(c.GetTime("requestStartTime"))
+	executionTime := float64(duration.Nanoseconds()) / 1000000.0
+	// 保留4位小数（四舍五入）
+	executionTime = float64(int(executionTime*10000+0.5)) / 10000.0
 
 	// 获取请求ID
 	requestID := c.GetString("requestId")

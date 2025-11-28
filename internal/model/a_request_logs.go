@@ -19,10 +19,10 @@ type RequestLogs struct {
 	RequestHeaders  string `json:"request_headers"`  // 请求头（JSON格式）
 	RequestQuery    string `json:"request_query"`    // 请求参数
 	RequestBody     string `json:"request_body"`     // 请求体
-	ResponseStatus  int    `json:"response_status"`  // 响应状态码
-	ResponseBody    string `json:"response_body"`    // 响应体
-	ResponseHeader  string `json:"response_header"`  // 响应头
-	ExecutionTime   int    `json:"execution_time"`   // 执行时间（毫秒）
+	ResponseStatus  int     `json:"response_status"`  // 响应状态码
+	ResponseBody    string  `json:"response_body"`    // 响应体
+	ResponseHeader  string  `json:"response_header"`  // 响应头
+	ExecutionTime   float64 `json:"execution_time"`   // 执行时间（毫秒，支持小数，最多4位）
 }
 
 func NewRequestLogs() *RequestLogs {
