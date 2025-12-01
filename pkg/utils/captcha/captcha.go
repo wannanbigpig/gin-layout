@@ -1,19 +1,15 @@
 package captcha
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/steambap/captcha"
+	"github.com/mojocn/base64Captcha"
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
 type Item struct {
@@ -31,6 +27,10 @@ type memoryStore struct {
 var memStore = &memoryStore{
 	data: make(map[string]string),
 }
+
+// captchaInstance 验证码实例
+var captchaInstance *base64Captcha.Captcha
+var captchaOnce sync.Once
 
 func (m *memoryStore) Set(id, answer string, expiration time.Duration) {
 	m.mu.Lock()
@@ -63,7 +63,38 @@ const (
 	captchaRedisKeyPrefix = "captcha:"
 	// captchaExpiration 验证码过期时间（5分钟）
 	captchaExpiration = 5 * time.Minute
+	// captchaLength 验证码长度
+	captchaLength = 4
+	// captchaCharset 验证码字符集：使用库提供的字符集，避免乱码
+	// 组合字母和数字，排除容易混淆的字符（如 0/O, 1/l/I）
+	captchaCharset = base64Captcha.TxtAlphabet + base64Captcha.TxtNumbers
 )
+
+// initCaptcha 初始化验证码实例
+func initCaptcha() {
+	captchaOnce.Do(func() {
+		// 创建字母数字混合验证码驱动
+		// 使用 NewDriverString 支持自定义字符集
+		// 参数：高度80，宽度240，干扰线数量2，显示选项，长度4，字符集
+		driver := base64Captcha.NewDriverString(
+			80,  // 高度
+			240, // 宽度
+			2,   // 干扰线数量
+			base64Captcha.OptionShowHollowLine|base64Captcha.OptionShowSlimeLine, // 显示选项
+			captchaLength,                      // 长度
+			captchaCharset,                     // 字符集（字母数字混合）
+			nil,                                // 背景色（nil 使用默认）
+			base64Captcha.DefaultEmbeddedFonts, // 字体存储
+			nil,                                // 字体列表（nil 使用默认字体）
+		)
+
+		// 创建内存存储
+		store := base64Captcha.NewMemoryStore(1000, captchaExpiration)
+
+		// 创建验证码实例
+		captchaInstance = base64Captcha.NewCaptcha(driver, store)
+	})
+}
 
 // setCaptchaAnswer 存储验证码答案
 func setCaptchaAnswer(id, answer string) {
@@ -111,71 +142,93 @@ func deleteCaptchaAnswer(id string) {
 // 返回验证码 ID、base64 编码的图片和答案（本地环境返回答案，其他环境不返回）
 // 验证码为4位字母数字混合
 func Generate() (item *Item, err error) {
-	// 创建验证码图片，4位字母数字
-	img, err := captcha.New(200, 80, func(options *captcha.Options) {
-		// 设置字符集：大小写字母和数字
-		options.CharPreset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-		// 设置验证码长度为4位
-		options.TextLength = 4
-		// 设置字体缩放
-		options.FontScale = 1.0
-		// 设置干扰线数量
-		options.CurveNumber = 2
-		// 设置干扰点数量
-		options.Noise = 0.6
-	})
-	if err != nil {
-		return nil, errors.NewBusinessError(1, "Failed to generate verification code")
-	}
+	// 初始化验证码实例
+	initCaptcha()
 
-	// 创建图片缓冲区
-	var buf bytes.Buffer
-
-	// 将图片编码为 PNG 并写入缓冲区
-	err = img.WriteImage(&buf)
-	if err != nil {
-		return nil, errors.NewBusinessError(1, "Failed to encode verification code image")
-	}
-
-	// 将图片编码为 base64
-	b64s := base64.StdEncoding.EncodeToString(buf.Bytes())
-	// 添加 data URI 前缀
-	b64s = "data:image/png;base64," + b64s
-
-	// 生成唯一的验证码 ID
+	// 生成唯一的验证码 ID（我们使用 UUID）
 	captchaID := uuid.New().String()
 
-	// 存储验证码答案
-	setCaptchaAnswer(captchaID, img.Text)
+	// 生成验证码（返回内部 ID、base64 编码的图片、答案和可能的错误）
+	internalID, b64s, answer, err := captchaInstance.Generate()
+	if err != nil {
+		return nil, err
+	}
+
+	// 存储验证码答案（使用我们的 UUID 作为 key，存储实际的验证码文本）
+	setCaptchaAnswer(captchaID, answer)
+
+	// 同时存储内部 ID 到 UUID 的映射，以便后续验证时能找到
+	setCaptchaAnswer("internal:"+captchaID, internalID)
+
+	// 添加 data URI 前缀（base64Captcha 已经返回了 base64 字符串）
+	if len(b64s) > 0 && b64s[:5] != "data:" {
+		b64s = "data:image/png;base64," + b64s
+	}
 
 	// 获取验证码答案（仅用于本地/测试环境）
-	var answer string
+	var answerForClient string
 	if config.Config.AppEnv == "local" || config.Config.AppEnv == "test" {
-		answer = img.Text
+		answerForClient = answer
 	}
 
 	return &Item{
 		Id:     captchaID,
 		B64s:   b64s,
-		Answer: answer,
+		Answer: answerForClient,
 	}, nil
 }
 
 // Verify 校验验证码
 func Verify(id, value string) bool {
-	// 获取存储的验证码答案
-	answer, ok := getCaptchaAnswer(id)
+	// 初始化验证码实例
+	initCaptcha()
+
+	// 获取存储的内部验证码 ID
+	internalID, ok := getCaptchaAnswer("internal:" + id)
 	if !ok {
-		return false
+		// 如果找不到内部 ID，尝试从存储中获取答案进行直接验证
+		answer, ok := getCaptchaAnswer(id)
+		if !ok {
+			return false
+		}
+		// 比较验证码（不区分大小写）
+		if !equalIgnoreCase(answer, value) {
+			return false
+		}
+		// 验证成功后删除
+		deleteCaptchaAnswer(id)
+		return true
 	}
 
-	// 比较验证码（不区分大小写）
-	if !strings.EqualFold(answer, value) {
-		return false
+	// 使用 base64Captcha 的验证方法
+	// 第三个参数 true 表示验证后删除
+	if captchaInstance.Verify(internalID, value, true) {
+		// 验证成功后删除我们的存储
+		deleteCaptchaAnswer(id)
+		deleteCaptchaAnswer("internal:" + id)
+		return true
 	}
 
-	// 验证成功后删除验证码（一次性使用）
-	deleteCaptchaAnswer(id)
+	return false
+}
 
+// equalIgnoreCase 不区分大小写比较字符串
+func equalIgnoreCase(s1, s2 string) bool {
+	if len(s1) != len(s2) {
+		return false
+	}
+	for i := 0; i < len(s1); i++ {
+		c1 := s1[i]
+		c2 := s2[i]
+		if c1 >= 'A' && c1 <= 'Z' {
+			c1 += 32 // 转小写
+		}
+		if c2 >= 'A' && c2 <= 'Z' {
+			c2 += 32 // 转小写
+		}
+		if c1 != c2 {
+			return false
+		}
+	}
 	return true
 }
