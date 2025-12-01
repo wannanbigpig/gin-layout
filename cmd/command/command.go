@@ -6,6 +6,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/console/demo"
 	initconsole "github.com/wannanbigpig/gin-layout/internal/console/init"
+	"github.com/wannanbigpig/gin-layout/internal/console/system_init"
 )
 
 var (
@@ -30,4 +31,5 @@ func registerSubCommands() {
 	Cmd.AddCommand(demo.Cmd)
 	Cmd.AddCommand(initconsole.ApiRouteCmd)   // 初始化API路由表: go-layout command api-route
 	Cmd.AddCommand(initconsole.MenuApiMapCmd) // 初始化菜单-API映射: go-layout command menu-api-map
+	Cmd.AddCommand(system_init.InitSystemCmd) // 初始化系统: go-layout command init-system
 }

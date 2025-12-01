@@ -133,7 +133,25 @@ GO_ENV=development go run main.go service
 
 **首次初始化（仅首次部署时需要）：**
 
-首次部署时，需要初始化数据库中的 API 路由表和菜单-API 映射关系。这两个操作已独立为单独的命令，可以分别执行。
+首次部署时，需要初始化数据库中的 API 路由表和菜单-API 映射关系。你可以选择两种方式：
+
+**方式一：完整初始化系统（推荐）**
+
+一键完成所有初始化操作，包括回滚迁移、重新执行迁移、初始化路由和路由映射：
+
+```bash
+GO_ENV=development go run main.go command init-system
+```
+
+该命令会执行以下操作：
+1. 回滚所有数据库迁移
+2. 重新执行所有迁移
+3. 重新初始化 API 路由表
+4. 重新初始化菜单-API 映射关系
+
+**方式二：分步初始化**
+
+如果需要分步执行，可以使用以下命令：
 
 **步骤 1：初始化 API 路由表**
 
@@ -159,7 +177,8 @@ GO_ENV=development go run main.go command menu-api-map
 > - 初始化命令是独立的，可以随时单独执行
 > - 日常启动服务时直接使用 `go run main.go service` 即可，无需任何参数
 > - 如果只需要更新 API 路由表或菜单映射，可以单独执行对应的初始化命令
-> - 初始化命令会直接执行，无需确认
+> - `command init-system` 命令会直接执行，无需确认
+> - 系统会在每天凌晨2点自动执行初始化任务（通过 `go-layout cron` 启动定时任务服务）
 
 **生产模式：**
 ```bash
@@ -205,8 +224,9 @@ go run main.go -h
 - `command` - 执行单次命令（包括初始化命令）
   - `command api-route` - 初始化 API 路由表
   - `command menu-api-map` - 初始化菜单-API 映射关系
+  - `command init-system` - 初始化系统数据（回滚迁移、重新执行迁移、重新初始化路由和路由映射）
   - `command demo` - 执行示例命令
-- `cron` - 启动定时任务
+- `cron` - 启动定时任务（每天凌晨2点自动执行系统初始化）
 - `version` - 查看版本信息
 
 ### 配置说明
