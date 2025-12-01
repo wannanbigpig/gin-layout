@@ -45,10 +45,18 @@ var (
 func Start() {
 	// 初始化定时器
 	crontab := createCronScheduler()
+	if crontab == nil {
+		errMsg := "创建定时任务调度器失败"
+		log.Logger.Error(errMsg)
+		fmt.Fprintf(os.Stderr, "错误: %s\n", errMsg)
+		os.Exit(1)
+	}
 
 	// 添加任务
 	if err := addCronJob(crontab); err != nil {
-		log.Logger.Error("Failed to add cron job", zap.Error(err))
+		errMsg := fmt.Sprintf("定时任务启动失败: %v", err)
+		log.Logger.Error(errMsg, zap.Error(err))
+		fmt.Fprintf(os.Stderr, "错误: %s\n", errMsg)
 		os.Exit(1)
 	}
 
@@ -81,8 +89,9 @@ func addCronJob(crontab *cron.Cron) error {
 		cron.SkipIfStillRunning(myLog),
 		cron.Recover(myLog),
 	).Then(cron.FuncJob(runTask))
-	if _, err := crontab.AddJob(cronSchedule, testJob); err != nil {
-		return fmt.Errorf("添加测试任务失败: %w", err)
+	_, err := crontab.AddJob(cronSchedule, testJob)
+	if err != nil {
+		return fmt.Errorf("添加测试任务失败 (schedule: %s): %w", cronSchedule, err)
 	}
 
 	// 2. 添加重置系统数据任务（每天凌晨2点执行）
@@ -90,8 +99,9 @@ func addCronJob(crontab *cron.Cron) error {
 		cron.SkipIfStillRunning(myLog),
 		cron.Recover(myLog),
 	).Then(cron.FuncJob(resetSystemDataTask))
-	if _, err := crontab.AddJob(resetSystemDataSchedule, resetJob); err != nil {
-		return fmt.Errorf("添加重置系统数据任务失败: %w", err)
+	_, err = crontab.AddJob(resetSystemDataSchedule, resetJob)
+	if err != nil {
+		return fmt.Errorf("添加重置系统数据任务失败 (schedule: %s): %w", resetSystemDataSchedule, err)
 	}
 
 	log.Logger.Info("定时任务添加成功",
