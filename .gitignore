@@ -25,3 +25,4 @@ logs/
 migrate
 tmp
 build/
+go-layout

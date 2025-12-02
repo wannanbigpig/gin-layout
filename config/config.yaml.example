@@ -11,6 +11,10 @@ app:
 #    - "http://localhost:3000"
 #    - "http://localhost:8080"
 #    - "https://example.com"
+#    # 支持通配符匹配，例如：
+#    - "https://*.wannanbigpig.com"  # 匹配所有 wannanbigpig.com 的子域名（如 https://x-l-admin.wannanbigpig.com）
+#    # 或者明确指定：
+#    - "https://x-l-admin.wannanbigpig.com"
 #  cors_methods:                    # 允许的HTTP方法，空数组使用默认值（GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS）
 #    - "GET"
 #    - "POST"
