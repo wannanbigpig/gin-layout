@@ -63,8 +63,8 @@ INSERT INTO `a_menu` (`id`, `icon`, `title`, `code`, `path`, `full_path`, `redir
 (37, 'ant-design:search-outlined', '列表', 'menu:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 4, 3, '0,2,4', 0, '', '2025-11-25 17:23:02', '2025-11-25 17:23:02', 0),
 (38, 'ant-design:search-outlined', '列表', 'api:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 3, 3, '0,2,3', 0, '', '2025-11-25 17:23:35', '2025-11-25 17:23:35', 0),
 (39, 'ant-design:search-outlined', '列表', 'adminLoginLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', '2025-11-25 17:24:20', '2025-11-25 17:24:20', 0),
-(40, 'ant-design:search-outlined', '列表', 'requestLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', '2025-11-25 17:25:04', '2025-11-25 17:25:04', 0);
-(41, 'mdi:github', 'GITHUB', '', 'https://github.com/wannanbigpig/gin-layout', 'https://github.com/wannanbigpig/gin-layout', '', 'GITHUB', '', '', '', 0.00, 1, 1, 1, 1, 0, 80, 2, 0, 1, '0', 0, '', '2025-04-16 16:51:17', '2025-04-18 18:08:51', 0),
+(40, 'ant-design:search-outlined', '列表', 'requestLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', '2025-11-25 17:25:04', '2025-11-25 17:25:04', 0),
+(41, 'mdi:github', 'GITHUB', '', 'https://github.com/wannanbigpig/gin-layout', 'https://github.com/wannanbigpig/gin-layout', '', 'GITHUB', '', '', '', 0.00, 1, 1, 1, 1, 0, 80, 2, 0, 1, '0', 0, '', '2025-04-16 16:51:17', '2025-04-18 18:08:51', 0);
 
 -- 初始化casbin_rule表（菜单-API关联规则，p类型）
 INSERT INTO `casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
