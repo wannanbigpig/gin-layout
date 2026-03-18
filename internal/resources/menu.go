@@ -5,7 +5,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
 
-// MenuBaseResources 菜单基础资源（公共字段）
+// MenuBaseResources 表示菜单响应的公共字段。
 type MenuBaseResources struct {
 	ID              uint             `json:"id"`
 	Icon            string           `json:"icon"`                  // 图标
@@ -32,7 +32,7 @@ type MenuBaseResources struct {
 	UpdatedAt       utils.FormatDate `json:"updated_at"`
 }
 
-// MenuResources 菜单详情资源
+// MenuResources 表示菜单详情响应。
 type MenuResources struct {
 	MenuBaseResources
 	IsExternalLinksName string           `json:"is_external_links_name,omitempty"`
@@ -47,11 +47,12 @@ type MenuResources struct {
 	ApiList             []uint           `json:"api_list"`
 }
 
+// MenuTransformer 负责菜单详情资源转换。
 type MenuTransformer struct {
 	BaseResources[*model.Menu, *MenuResources]
 }
 
-// NewMenuTransformer 实例化菜单资源转换器
+// NewMenuTransformer 创建菜单资源转换器。
 func NewMenuTransformer() MenuTransformer {
 	return MenuTransformer{
 		BaseResources: BaseResources[*model.Menu, *MenuResources]{
@@ -62,12 +63,12 @@ func NewMenuTransformer() MenuTransformer {
 	}
 }
 
-// ToStruct 转换为单个资源
+// ToStruct 将菜单模型转换为详情响应。
 func (m MenuTransformer) ToStruct(data *model.Menu) *MenuResources {
 	return buildMenuResource(data)
 }
 
-// ToCollection 转换为集合资源
+// ToCollection 将菜单模型集合转换为分页响应。
 func (m MenuTransformer) ToCollection(page, perPage int, total int64, data []*model.Menu) *Collection {
 	response := make([]any, 0, len(data))
 	for _, v := range data {
@@ -76,7 +77,7 @@ func (m MenuTransformer) ToCollection(page, perPage int, total int64, data []*mo
 	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
 }
 
-// buildMenuBaseResources 构建菜单基础资源（公共字段）
+// buildMenuBaseResources 提取菜单响应的公共字段。
 func buildMenuBaseResources(v *model.Menu) MenuBaseResources {
 	return MenuBaseResources{
 		ID:              v.ID,
@@ -105,7 +106,7 @@ func buildMenuBaseResources(v *model.Menu) MenuBaseResources {
 	}
 }
 
-// buildMenuResource 构造函数：将重复构建 MenuResources 的代码提取出来
+// buildMenuResource 构建菜单详情响应。
 func buildMenuResource(v *model.Menu) *MenuResources {
 	base := buildMenuBaseResources(v)
 	return &MenuResources{
@@ -122,26 +123,33 @@ func buildMenuResource(v *model.Menu) *MenuResources {
 	}
 }
 
-// MenuCollectionResources 菜单集合资源
+// MenuCollectionResources 表示菜单树节点响应。
 type MenuCollectionResources struct {
 	MenuBaseResources
 	Children []*MenuCollectionResources `json:"children,omitempty"`
 }
 
+// SetChildren 设置菜单树节点的子节点。
 func (r *MenuCollectionResources) SetChildren(children []*MenuCollectionResources) {
 	r.Children = children
 }
+
+// GetID 返回当前菜单节点 ID。
 func (r *MenuCollectionResources) GetID() uint {
 	return r.ID
 }
+
+// GetPID 返回当前菜单节点父级 ID。
 func (r *MenuCollectionResources) GetPID() uint {
 	return r.Pid
 }
 
+// MenuTreeTransformer 负责菜单树资源转换。
 type MenuTreeTransformer struct {
 	TreeResource[*model.Menu, *MenuCollectionResources]
 }
 
+// NewMenuTreeTransformer 创建菜单树转换器。
 func NewMenuTreeTransformer() MenuTreeTransformer {
 	return MenuTreeTransformer{
 		TreeResource: TreeResource[*model.Menu, *MenuCollectionResources]{
@@ -152,11 +160,12 @@ func NewMenuTreeTransformer() MenuTreeTransformer {
 	}
 }
 
+// SetCustomFields 填充菜单树节点的扩展字段。
 func (r *MenuCollectionResources) SetCustomFields(data *model.Menu) {
 	r.TypeName = data.MenuTypeMap()
 }
 
-// buildListMenuResource 构造函数：将重复构建 MenuCollectionResources 的代码提取出来
+// buildListMenuResource 构建菜单树节点响应。
 func buildListMenuResource(v *model.Menu) *MenuCollectionResources {
 	base := buildMenuBaseResources(v)
 	return &MenuCollectionResources{

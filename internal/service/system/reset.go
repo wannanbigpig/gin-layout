@@ -93,7 +93,7 @@ func (s *ResetService) ResetSystemData() error {
 // 1. 回滚所有迁移
 // 2. 重新执行迁移
 // 3. 重新初始化API路由
-// 4. 重新初始化菜单-API映射
+// 4. 全量重建用户最终 API 权限
 func (s *ResetService) ReinitializeSystemData() error {
 	log.Logger.Info("开始重新初始化系统数据")
 
@@ -118,12 +118,12 @@ func (s *ResetService) ReinitializeSystemData() error {
 	}
 	log.Logger.Info("初始化API路由完成")
 
-	// 步骤4: 重新初始化菜单-API映射
-	if err := s.initMenuApiMap(); err != nil {
-		log.Logger.Error("初始化菜单-API映射失败", zap.Error(err))
-		return fmt.Errorf("初始化菜单-API映射失败: %w", err)
+	// 步骤4: 全量重建用户最终 API 权限
+	if err := s.rebuildUserPermissions(); err != nil {
+		log.Logger.Error("重建用户最终 API 权限失败", zap.Error(err))
+		return fmt.Errorf("重建用户最终 API 权限失败: %w", err)
 	}
-	log.Logger.Info("初始化菜单-API映射完成")
+	log.Logger.Info("重建用户最终 API 权限完成")
 
 	log.Logger.Info("系统数据重新初始化完成")
 	return nil
@@ -226,8 +226,8 @@ func (s *ResetService) initApiRoutes() error {
 	return initService.InitApiRoutes()
 }
 
-// initMenuApiMap 初始化菜单-API映射（跳过用户确认）
-func (s *ResetService) initMenuApiMap() error {
+// rebuildUserPermissions 全量重建用户最终 API 权限（跳过用户确认）。
+func (s *ResetService) rebuildUserPermissions() error {
 	initService := NewInitService()
-	return initService.InitMenuApiMap()
+	return initService.RebuildUserPermissions()
 }

@@ -7,6 +7,7 @@ type LoginAuth struct {
 	CaptchaID string `form:"captcha_id" json:"captcha_id" binding:"required"`
 }
 
+// NewLoginForm 创建登录表单。
 func NewLoginForm() *LoginAuth {
 	return &LoginAuth{}
 }

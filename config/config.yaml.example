@@ -6,6 +6,12 @@ app:
 #  watch_config: false
 #  base_path: ""
 #  base_url: "https://example.com"  # 文件访问的基础URL，用于拼接本地文件访问地址
+#  trusted_proxies:                # 受信任代理列表，仅这些代理转发的 X-Forwarded-For / X-Real-IP 会被信任
+#    - "127.0.0.1"
+#    # 生产环境可按实际代理网段配置，例如：
+#    # - "10.0.0.0/8"
+#    # - "172.16.0.0/12"
+#    # - "192.168.0.0/16"
 #  # CORS 跨域配置
 #  cors_origins:                    # CORS允许的源列表，空数组表示允许所有源（开发环境）
 #    - "http://localhost:3000"

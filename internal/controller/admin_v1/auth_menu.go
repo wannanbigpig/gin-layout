@@ -4,8 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"github.com/wannanbigpig/gin-layout/internal/service/permission"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -22,12 +21,12 @@ func NewMenuController() *MenuController {
 
 // Edit 编辑菜单
 func (api MenuController) Edit(c *gin.Context) {
-	params := form.NewEditMenuForm()
+	params := form.NewUpdateMenuForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	if err := permission.NewMenuService().Edit(params); err != nil {
+	if err := access.NewMenuService().Edit(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -37,15 +36,12 @@ func (api MenuController) Edit(c *gin.Context) {
 
 // Create 新增菜单
 func (api MenuController) Create(c *gin.Context) {
-	params := form.NewEditMenuForm()
+	params := form.NewCreateMenuForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 为空，表示新增
-	params.Id = 0
-
-	if err := permission.NewMenuService().Edit(params); err != nil {
+	if err := access.NewMenuService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -55,18 +51,12 @@ func (api MenuController) Create(c *gin.Context) {
 
 // Update 更新菜单
 func (api MenuController) Update(c *gin.Context) {
-	params := form.NewEditMenuForm()
+	params := form.NewUpdateMenuForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 不为空，表示更新
-	if params.Id == 0 {
-		api.Err(c, e.NewBusinessError(1, "更新菜单时ID不能为空"))
-		return
-	}
-
-	if err := permission.NewMenuService().Edit(params); err != nil {
+	if err := access.NewMenuService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -76,7 +66,7 @@ func (api MenuController) Update(c *gin.Context) {
 
 // UpdateAllMenuPermissions 批量更新菜单权限到casbin
 func (api MenuController) UpdateAllMenuPermissions(c *gin.Context) {
-	if err := permission.NewMenuService().UpdateAllMenuPermissions(); err != nil {
+	if err := access.NewMenuService().UpdateAllMenuPermissions(); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -91,7 +81,7 @@ func (api MenuController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := permission.NewMenuService().Detail(query.ID)
+	detail, err := access.NewMenuService().Detail(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -106,7 +96,7 @@ func (api MenuController) List(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	result := permission.NewMenuService().List(params)
+	result := access.NewMenuService().List(params)
 	api.Success(c, result)
 }
 
@@ -117,7 +107,7 @@ func (api MenuController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := permission.NewMenuService().Delete(params.ID); err != nil {
+	if err := access.NewMenuService().Delete(params.ID); err != nil {
 		api.Err(c, err)
 		return
 	}

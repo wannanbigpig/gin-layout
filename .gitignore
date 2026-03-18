@@ -26,3 +26,4 @@ migrate
 tmp
 build/
 go-layout
+PROJECT_ARCHITECTURE.md

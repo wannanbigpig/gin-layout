@@ -20,6 +20,7 @@ var (
 // 所有配置项都可以通过 config.yaml 进行配置
 func CorsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		cfg := config.GetConfig()
 		origin := c.Request.Header.Get("Origin")
 
 		// 处理 OPTIONS 预检请求（需要在检查 origin 之前处理）
@@ -43,7 +44,7 @@ func CorsHandler() gin.HandlerFunc {
 
 					// 是否允许携带凭证（从配置读取）
 					// 注意：如果 AllowCredentials 为 true，Access-Control-Allow-Origin 不能为 *
-					credentials := config.Config.CorsCredentials
+					credentials := cfg.CorsCredentials
 					c.Header("Access-Control-Allow-Credentials", fmt.Sprintf("%t", credentials))
 				} else {
 					// 如果不允许，返回 403
@@ -67,7 +68,7 @@ func CorsHandler() gin.HandlerFunc {
 
 				// 是否允许携带凭证（从配置读取）
 				// 注意：如果 AllowCredentials 为 true，Access-Control-Allow-Origin 不能为 *
-				credentials := config.Config.CorsCredentials
+				credentials := cfg.CorsCredentials
 				c.Header("Access-Control-Allow-Credentials", fmt.Sprintf("%t", credentials))
 			} else {
 				// 如果不允许，不设置 Access-Control-Allow-Origin
@@ -84,8 +85,9 @@ func CorsHandler() gin.HandlerFunc {
 
 // getAllowedMethods 获取允许的HTTP方法
 func getAllowedMethods() []string {
-	if len(config.Config.CorsMethods) > 0 {
-		return config.Config.CorsMethods
+	cfg := config.GetConfig()
+	if len(cfg.CorsMethods) > 0 {
+		return cfg.CorsMethods
 	}
 	return defaultMethods
 }
@@ -93,8 +95,9 @@ func getAllowedMethods() []string {
 // getAllowedHeaders 获取允许的请求头
 func getAllowedHeaders(c *gin.Context) string {
 	// 如果配置了允许的请求头列表
-	if len(config.Config.CorsHeaders) > 0 {
-		return strings.Join(config.Config.CorsHeaders, ", ")
+	cfg := config.GetConfig()
+	if len(cfg.CorsHeaders) > 0 {
+		return strings.Join(cfg.CorsHeaders, ", ")
 	}
 
 	// 如果未配置，检查预检请求中的 Access-Control-Request-Headers
@@ -109,8 +112,9 @@ func getAllowedHeaders(c *gin.Context) string {
 
 // getExposeHeaders 获取暴露的响应头
 func getExposeHeaders() string {
-	if len(config.Config.CorsExposeHeaders) > 0 {
-		return strings.Join(config.Config.CorsExposeHeaders, ", ")
+	cfg := config.GetConfig()
+	if len(cfg.CorsExposeHeaders) > 0 {
+		return strings.Join(cfg.CorsExposeHeaders, ", ")
 	}
 	// 默认暴露所有响应头
 	return "*"
@@ -118,8 +122,9 @@ func getExposeHeaders() string {
 
 // getMaxAge 获取预检请求缓存时间（秒）
 func getMaxAge() int {
-	if config.Config.CorsMaxAge > 0 {
-		return config.Config.CorsMaxAge
+	cfg := config.GetConfig()
+	if cfg.CorsMaxAge > 0 {
+		return cfg.CorsMaxAge
 	}
 	// 默认 12 小时
 	return 43200
@@ -127,9 +132,10 @@ func getMaxAge() int {
 
 // isOriginAllowed 检查源是否被允许
 func isOriginAllowed(origin string) bool {
+	cfg := config.GetConfig()
 	// 如果配置了允许的源列表，检查是否在列表中
-	if len(config.Config.CorsOrigins) > 0 {
-		for _, allowedOrigin := range config.Config.CorsOrigins {
+	if len(cfg.CorsOrigins) > 0 {
+		for _, allowedOrigin := range cfg.CorsOrigins {
 			if origin == allowedOrigin {
 				return true
 			}

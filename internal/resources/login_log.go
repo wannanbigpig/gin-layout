@@ -5,7 +5,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
 
-// AdminLoginLogBaseResources 管理员登录日志基础资源（公共字段）
+// AdminLoginLogBaseResources 表示登录日志的公共响应字段。
 type AdminLoginLogBaseResources struct {
 	ID              uint              `json:"id"`
 	UID             uint              `json:"uid"`               // 用户ID（登录失败时为0）
@@ -28,12 +28,12 @@ type AdminLoginLogBaseResources struct {
 	CreatedAt       utils.FormatDate  `json:"created_at"`        // 创建时间
 }
 
-// AdminLoginLogListResources 管理员登录日志列表资源（简化版，不包含大字段）
+// AdminLoginLogListResources 表示登录日志列表项。
 type AdminLoginLogListResources struct {
 	AdminLoginLogBaseResources
 }
 
-// AdminLoginLogResources 管理员登录日志详情资源
+// AdminLoginLogResources 表示登录日志详情响应。
 type AdminLoginLogResources struct {
 	AdminLoginLogBaseResources
 	JwtID            string            `json:"jwt_id"`             // JWT唯一标识(jti claim)
@@ -47,12 +47,12 @@ type AdminLoginLogResources struct {
 	UpdatedAt        utils.FormatDate  `json:"updated_at"`         // 更新时间
 }
 
-// AdminLoginLogTransformer 管理员登录日志资源转换器
+// AdminLoginLogTransformer 负责登录日志资源转换。
 type AdminLoginLogTransformer struct {
 	BaseResources[*model.AdminLoginLogs, *AdminLoginLogResources]
 }
 
-// NewAdminLoginLogTransformer 实例化管理员登录日志资源转换器
+// NewAdminLoginLogTransformer 创建登录日志资源转换器。
 func NewAdminLoginLogTransformer() AdminLoginLogTransformer {
 	return AdminLoginLogTransformer{
 		BaseResources: BaseResources[*model.AdminLoginLogs, *AdminLoginLogResources]{
@@ -63,7 +63,7 @@ func NewAdminLoginLogTransformer() AdminLoginLogTransformer {
 	}
 }
 
-// buildAdminLoginLogBaseResources 构建基础资源（公共字段）
+// buildAdminLoginLogBaseResources 提取登录日志公共字段。
 func buildAdminLoginLogBaseResources(data *model.AdminLoginLogs) AdminLoginLogBaseResources {
 	return AdminLoginLogBaseResources{
 		ID:              data.ID,
@@ -88,15 +88,15 @@ func buildAdminLoginLogBaseResources(data *model.AdminLoginLogs) AdminLoginLogBa
 	}
 }
 
-// ToStruct 转换为单个资源（详情）
+// ToStruct 将登录日志模型转换为详情响应。
 func (r AdminLoginLogTransformer) ToStruct(data *model.AdminLoginLogs) *AdminLoginLogResources {
 	base := buildAdminLoginLogBaseResources(data)
 	return &AdminLoginLogResources{
 		AdminLoginLogBaseResources: base,
 		JwtID:                      data.JwtID,
 		UserAgent:                  data.UserAgent,
-		AccessToken:                data.AccessToken,  // 已在 service 层解密
-		RefreshToken:               data.RefreshToken, // 已在 service 层解密
+		AccessToken:                data.AccessToken,
+		RefreshToken:               data.RefreshToken,
 		TokenHash:                  data.TokenHash,
 		RefreshTokenHash:           data.RefreshTokenHash,
 		TokenExpires:               data.TokenExpires,
@@ -105,7 +105,7 @@ func (r AdminLoginLogTransformer) ToStruct(data *model.AdminLoginLogs) *AdminLog
 	}
 }
 
-// ToCollection 转换为集合资源（列表，不包含大字段）
+// ToCollection 将登录日志模型集合转换为分页响应。
 func (r AdminLoginLogTransformer) ToCollection(page, perPage int, total int64, data []*model.AdminLoginLogs) *Collection {
 	response := make([]any, 0, len(data))
 	for _, v := range data {

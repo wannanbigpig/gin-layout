@@ -4,6 +4,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 )
 
+// ApiResources 表示接口权限的响应结构。
 type ApiResources struct {
 	ID              uint    `json:"id"`
 	Name            string  `json:"name"`              // 权限名称
@@ -36,6 +37,7 @@ func NewApiTransformer() ApiTransformer {
 	}
 }
 
+// ToStruct 将 API 模型转换为响应结构。
 func (ApiTransformer) ToStruct(data *model.Api) *ApiResources {
 	isAuthName := data.IsAuthMap()
 	isEffectiveName := data.IsEffectiveMap()
@@ -56,6 +58,7 @@ func (ApiTransformer) ToStruct(data *model.Api) *ApiResources {
 	}
 }
 
+// ToCollection 将 API 模型集合转换为分页响应。
 func (ApiTransformer) ToCollection(page, perPage int, total int64, data []*model.Api) *Collection {
 	response := make([]any, 0, len(data))
 	for _, v := range data {

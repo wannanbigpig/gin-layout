@@ -2,6 +2,7 @@ package autoload
 
 import "time"
 
+// MysqlConfig 定义 MySQL 连接与连接池配置。
 type MysqlConfig struct {
 	Enable       bool          `mapstructure:"enable"`
 	Host         string        `mapstructure:"host"`

@@ -3,7 +3,7 @@ BEGIN;
 -- 初始化系统数据
 
 -- 初始密码 123456
-INSERT INTO `a_admin_user` (`id`, `nickname`, `username`, `password`, `phone_number`, `full_phone_number`,
+INSERT INTO `admin_user` (`id`, `nickname`, `username`, `password`, `phone_number`, `full_phone_number`,
                             `country_code`, `email`, `avatar`, `status`,
                             `is_super_admin`,
                             `created_at`, `updated_at`, `deleted_at`)
@@ -11,8 +11,24 @@ VALUES (1, '超级管理员', 'super_admin', '$2a$10$OuKQoJGH7xkCgwFISmDve.euBDb
         '8618888888888', '86', 'admin@go-layout.com', 'https://avatars.githubusercontent.com/u/48752601?v=4', 1, 1,
         '2023-05-01 00:00:00', '2023-05-01 00:00:00', 0);
 
+INSERT INTO `department` (`id`, `code`, `is_system`, `pid`, `pids`, `name`, `description`, `level`, `sort`,
+                          `children_num`, `user_number`, `created_at`, `updated_at`, `deleted_at`)
+VALUES (1, 'default_department', 1, 0, '0', '默认部门', '系统默认部门', 1, 100, 0, 1,
+        '2023-05-01 00:00:00', '2023-05-01 00:00:00', 0);
+
+INSERT INTO `role` (`id`, `code`, `is_system`, `pid`, `pids`, `name`, `description`, `level`, `sort`, `children_num`,
+                    `status`, `created_at`, `updated_at`, `deleted_at`)
+VALUES (1, 'super_admin', 1, 0, '0', '超级管理员', '系统默认超级管理员角色', 1, 100, 0, 1,
+        '2023-05-01 00:00:00', '2023-05-01 00:00:00', 0);
+
+INSERT INTO `admin_user_department_map` (`uid`, `dept_id`, `is_admin`, `created_at`, `updated_at`)
+VALUES (1, 1, 1, '2023-05-01 00:00:00', '2023-05-01 00:00:00');
+
+INSERT INTO `admin_user_role_map` (`uid`, `role_id`, `created_at`, `updated_at`)
+VALUES (1, 1, '2023-05-01 00:00:00', '2023-05-01 00:00:00');
+
 -- 初始化权限分组数据
-INSERT INTO `a_api_group` (`id`, `pid`, `code`, `name`, `created_at`, `updated_at`)
+INSERT INTO `api_group` (`id`, `pid`, `code`, `name`, `created_at`, `updated_at`)
 VALUES (1, 0, 'other', '其他', '2025-04-26 18:00:00', '2025-04-26 18:00:00'),
        (2, 0, 'login', '登录模块', '2025-04-26 18:00:00', '2025-04-26 18:00:00'),
        (3, 0, 'auth', '权限模块', '2025-04-26 18:00:00', '2025-04-26 18:00:00'),
@@ -24,7 +40,7 @@ VALUES (1, 0, 'other', '其他', '2025-04-26 18:00:00', '2025-04-26 18:00:00'),
        (9, 0, 'log', '日志模块', '2025-04-26 18:00:00', '2025-04-26 18:00:00');
 
 -- 初始化菜单数据
-INSERT INTO `a_menu` (`id`, `icon`, `title`, `code`, `path`, `full_path`, `redirect`, `name`, `component`, `animate_enter`, `animate_leave`, `animate_duration`, `is_show`, `status`, `is_auth`, `is_external_links`, `is_new_window`, `sort`, `type`, `pid`, `level`, `pids`, `children_num`, `description`, `created_at`, `updated_at`, `deleted_at`) VALUES
+INSERT INTO `menu` (`id`, `icon`, `title`, `code`, `path`, `full_path`, `redirect`, `name`, `component`, `animate_enter`, `animate_leave`, `animate_duration`, `is_show`, `status`, `is_auth`, `is_external_links`, `is_new_window`, `sort`, `type`, `pid`, `level`, `pids`, `children_num`, `description`, `created_at`, `updated_at`, `deleted_at`) VALUES
 (1, 'ep:menu', '首页', '', '', '/', '', 'Home', 'home/index.vue', '', '', 0.00, 1, 1, 0, 0, 0, 100, 2, 0, 1, '0', 0, '', '2024-09-27 13:36:50', '2025-11-15 14:36:40', 0),
 (2, 'ant-design:lock-outlined', '权限管理', '', 'permission', '/permission', 'AdminUserList', 'Permission', '', '', '', 0.00, 1, 1, 1, 0, 0, 99, 1, 0, 1, '0', 0, '', '2025-04-16 15:36:33', '2025-04-22 18:16:25', 0),
 (3, 'ant-design:api-outlined', '接口', '', 'list', '/permission/list', '', 'PermissionList', 'permission/api.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 2, 2, '0,2', 2, '', '2025-04-16 15:41:54', '2025-11-25 17:23:53', 0),
@@ -66,47 +82,9 @@ INSERT INTO `a_menu` (`id`, `icon`, `title`, `code`, `path`, `full_path`, `redir
 (40, 'ant-design:search-outlined', '列表', 'requestLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', '2025-11-25 17:25:04', '2025-11-25 17:25:04', 0),
 (41, 'mdi:github', 'GITHUB', '', 'https://github.com/wannanbigpig/gin-layout', 'https://github.com/wannanbigpig/gin-layout', '', 'GITHUB', '', '', '', 0.00, 1, 1, 1, 1, 1, 80, 2, 0, 1, '0', 0, '', '2025-04-16 16:51:17', '2025-04-18 18:08:51', 0);
 
--- 初始化casbin_rule表（菜单-API关联规则，p类型）
-INSERT INTO `casbin_rule` (`id`, `ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`) VALUES
-(1, 'p', 'menu:10', '/admin/v1/admin-user/update', 'POST', '', '', ''),
-(2, 'p', 'menu:11', '/admin/v1/admin-user/create', 'POST', '', '', ''),
-(3, 'p', 'menu:12', '/admin/v1/admin-user/bind-role', 'POST', '', '', ''),
-(4, 'p', 'menu:12', '/admin/v1/admin-user/detail', 'GET', '', '', ''),
-(5, 'p', 'menu:12', '/admin/v1/role/list', 'GET', '', '', ''),
-(6, 'p', 'menu:13', '/admin/v1/admin-user/delete', 'POST', '', '', ''),
-(7, 'p', 'menu:14', '/admin/v1/menu/create', 'POST', '', '', ''),
-(8, 'p', 'menu:14', '/admin/v1/permission/list', 'GET', '', '', ''),
-(9, 'p', 'menu:15', '/admin/v1/menu/create', 'POST', '', '', ''),
-(10, 'p', 'menu:15', '/admin/v1/permission/list', 'GET', '', '', ''),
-(11, 'p', 'menu:16', '/admin/v1/menu/detail', 'GET', '', '', ''),
-(12, 'p', 'menu:16', '/admin/v1/menu/update', 'POST', '', '', ''),
-(13, 'p', 'menu:16', '/admin/v1/permission/list', 'GET', '', '', ''),
-(14, 'p', 'menu:17', '/admin/v1/menu/delete', 'POST', '', '', ''),
-(15, 'p', 'menu:18', '/admin/v1/menu/list', 'GET', '', '', ''),
-(16, 'p', 'menu:18', '/admin/v1/role/create', 'POST', '', '', ''),
-(17, 'p', 'menu:19', '/admin/v1/menu/list', 'GET', '', '', ''),
-(18, 'p', 'menu:19', '/admin/v1/role/detail', 'GET', '', '', ''),
-(19, 'p', 'menu:19', '/admin/v1/role/update', 'POST', '', '', ''),
-(20, 'p', 'menu:20', '/admin/v1/role/delete', 'POST', '', '', ''),
-(21, 'p', 'menu:21', '/admin/v1/department/create', 'POST', '', '', ''),
-(22, 'p', 'menu:22', '/admin/v1/department/create', 'POST', '', '', ''),
-(23, 'p', 'menu:23', '/admin/v1/department/update', 'POST', '', '', ''),
-(24, 'p', 'menu:24', '/admin/v1/department/bind-role', 'POST', '', '', ''),
-(25, 'p', 'menu:24', '/admin/v1/department/detail', 'GET', '', '', ''),
-(26, 'p', 'menu:24', '/admin/v1/role/list', 'GET', '', '', ''),
-(27, 'p', 'menu:25', '/admin/v1/department/delete', 'POST', '', '', ''),
-(28, 'p', 'menu:26', '/admin/v1/permission/update', 'POST', '', '', ''),
-(29, 'p', 'menu:27', '/admin/v1/permission/edit', 'POST', '', '', ''),
-(30, 'p', 'menu:28', '/admin/v1/role/create', 'POST', '', '', ''),
-(31, 'p', 'menu:32', '/admin/v1/log/login/detail', 'GET', '', '', ''),
-(32, 'p', 'menu:33', '/admin/v1/log/request/detail', 'GET', '', '', ''),
-(33, 'p', 'menu:34', '/admin/v1/department/list', 'GET', '', '', ''),
-(34, 'p', 'menu:34', '/admin/v1/admin-user/list', 'GET', '', '', ''),
-(35, 'p', 'menu:35', '/admin/v1/department/list', 'GET', '', '', ''),
-(36, 'p', 'menu:36', '/admin/v1/role/list', 'GET', '', '', ''),
-(37, 'p', 'menu:37', '/admin/v1/menu/list', 'GET', '', '', ''),
-(38, 'p', 'menu:38', '/admin/v1/permission/list', 'GET', '', '', ''),
-(39, 'p', 'menu:39', '/admin/v1/log/login/list', 'GET', '', '', ''),
-(40, 'p', 'menu:40', '/admin/v1/log/request/list', 'GET', '', '', '');
+INSERT INTO `role_menu_map` (`role_id`, `menu_id`, `created_at`, `updated_at`)
+SELECT 1, `id`, '2023-05-01 00:00:00', '2023-05-01 00:00:00'
+FROM `menu`
+WHERE `deleted_at` = 0;
 
 COMMIT;

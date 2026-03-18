@@ -3,50 +3,48 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	"github.com/wannanbigpig/gin-layout/cmd/bootstrapx"
 	"github.com/wannanbigpig/gin-layout/cmd/command"
 	"github.com/wannanbigpig/gin-layout/cmd/cron"
 	"github.com/wannanbigpig/gin-layout/cmd/service"
 	"github.com/wannanbigpig/gin-layout/cmd/version"
-	"github.com/wannanbigpig/gin-layout/config"
-	"github.com/wannanbigpig/gin-layout/internal/global"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/runtime"
 )
 
 const (
-	welcomeMessage       = "Welcome to go-layout. Use -h to see more commands"
-	errorLoadingLocation = "Error loading location: %v"
+	welcomeMessage = "Welcome to go-layout. Use -h to see more commands"
 )
 
 var (
 	rootCmd = &cobra.Command{
-		Use:          "go-layout",
-		Short:        "go-layout",
-		SilenceUsage: true,
+		Use:           "go-layout",
+		Short:         "go-layout",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		Long: `Gin framework is used as the core of this project to build a scaffold,
 based on the project can be quickly completed business development, out of the box 📦`,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			initializeConfig()
-			initializeTimezone()
-			initializeLogger()
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := bootstrapx.InitializeConfig(configPath); err != nil {
+				return err
+			}
+			bootstrapx.InitializeTimezone()
+			bootstrapx.InitializeLogger()
+			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			if printVersion {
-				fmt.Println(global.Version)
-				return
-			}
 			fmt.Printf("%s\n", welcomeMessage)
 		},
 	}
-	configPath   string
-	printVersion bool
+	configPath string
 )
 
 func init() {
+	runtime.RegisterConfigReloadHandlers()
 	registerFlags()
 	registerCommands()
 }
@@ -54,7 +52,6 @@ func init() {
 // registerFlags 注册命令行标志
 func registerFlags() {
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "The absolute path of the configuration file")
-	rootCmd.Flags().BoolVarP(&printVersion, "version", "v", false, "Get version info")
 }
 
 // registerCommands 注册子命令
@@ -65,35 +62,12 @@ func registerCommands() {
 	rootCmd.AddCommand(cron.Cmd)    // 启动计划任务: go-layout cron
 }
 
-// initializeConfig 初始化配置
-func initializeConfig() {
-	config.InitConfig(configPath)
-}
-
-// initializeTimezone 初始化时区
-func initializeTimezone() {
-	if config.Config.Timezone == nil {
-		return
-	}
-
-	location, err := time.LoadLocation(*config.Config.Timezone)
-	if err != nil {
-		log.Logger.Error(fmt.Sprintf(errorLoadingLocation, err), zap.Error(err))
-		fmt.Printf(errorLoadingLocation+"\n", err)
-		return
-	}
-	time.Local = location
-}
-
-// initializeLogger 初始化日志
-func initializeLogger() {
-	log.InitLogger()
-}
-
 // Execute 执行命令
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		log.Logger.Error("Command execution failed", zap.Error(err))
+		if log.Logger != nil {
+			log.Logger.Error("Command execution failed", zap.Error(err))
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

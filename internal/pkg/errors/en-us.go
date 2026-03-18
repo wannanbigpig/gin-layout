@@ -12,4 +12,8 @@ var enUSText = map[int]string{
 	AuthorizationErr: "You have no permission",
 	NotLogin:         "Please login first",
 	CaptchaErr:       "Captcha error",
+	FileIdentifierInvalid: "invalid file identifier",
+	FilePrivateAuthNeeded: "login required for private file access",
+	FileAccessDenied:      "no permission to access this file",
+	FileUploadPartialFail: "partial image upload failure",
 }

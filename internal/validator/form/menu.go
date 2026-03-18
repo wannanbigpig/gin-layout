@@ -1,7 +1,6 @@
 package form
 
-type EditMenu struct {
-	Id              uint    `form:"id" json:"id" binding:"omitempty"`
+type menuPayload struct {
 	Icon            string  `form:"icon" json:"icon" label:"图标" binding:"omitempty,max=255"`
 	Title           string  `form:"title" json:"title" label:"标题" binding:"required,max=60"`
 	Code            string  `form:"code" json:"code" label:"前端按钮权限标识" binding:"required_if=Type 3"`
@@ -24,8 +23,25 @@ type EditMenu struct {
 	IsExternalLinks uint8   `form:"is_external_links" json:"is_external_links" label:"是否外链" binding:"omitempty,oneof=0 1"`
 }
 
-func NewEditMenuForm() *EditMenu {
-	return &EditMenu{}
+type CreateMenu struct {
+	menuPayload
+}
+
+func NewCreateMenuForm() *CreateMenu {
+	return &CreateMenu{}
+}
+
+type UpdateMenu struct {
+	Id uint `form:"id" json:"id" binding:"required"`
+	menuPayload
+}
+
+func NewUpdateMenuForm() *UpdateMenu {
+	return &UpdateMenu{}
+}
+
+func (f *UpdateMenu) GetIDPointer() *uint {
+	return &f.Id
 }
 
 type ListMenu struct {
@@ -35,6 +51,7 @@ type ListMenu struct {
 	Status  *int8  `form:"status" json:"status" binding:"omitempty"`   // 状态
 }
 
+// NewMenuListQuery 创建菜单列表查询表单。
 func NewMenuListQuery() *ListMenu {
 	return &ListMenu{}
 }

@@ -2,6 +2,7 @@ package service
 
 import "github.com/gin-gonic/gin"
 
+// Base 为服务层提供上下文和当前管理员信息。
 type Base struct {
 	ctx         *gin.Context
 	adminUserId uint

@@ -4,8 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"github.com/wannanbigpig/gin-layout/internal/service/permission"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -27,18 +26,18 @@ func (api DeptController) List(c *gin.Context) {
 		return
 	}
 
-	result := permission.NewDeptService().List(params)
+	result := access.NewDeptService().List(params)
 	api.Success(c, result)
 }
 
 // Edit 编辑部门
 func (api DeptController) Edit(c *gin.Context) {
-	params := form.NewEditDeptForm()
+	params := form.NewUpdateDeptForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	if err := permission.NewDeptService().Edit(params); err != nil {
+	if err := access.NewDeptService().Edit(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -48,15 +47,12 @@ func (api DeptController) Edit(c *gin.Context) {
 
 // Create 新增部门
 func (api DeptController) Create(c *gin.Context) {
-	params := form.NewEditDeptForm()
+	params := form.NewCreateDeptForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 为空，表示新增
-	params.Id = 0
-
-	if err := permission.NewDeptService().Edit(params); err != nil {
+	if err := access.NewDeptService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -66,18 +62,12 @@ func (api DeptController) Create(c *gin.Context) {
 
 // Update 更新部门
 func (api DeptController) Update(c *gin.Context) {
-	params := form.NewEditDeptForm()
+	params := form.NewUpdateDeptForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 不为空，表示更新
-	if params.Id == 0 {
-		api.Err(c, e.NewBusinessError(1, "更新部门时ID不能为空"))
-		return
-	}
-
-	if err := permission.NewDeptService().Edit(params); err != nil {
+	if err := access.NewDeptService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -92,7 +82,7 @@ func (api DeptController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := permission.NewDeptService().Delete(params.ID); err != nil {
+	if err := access.NewDeptService().Delete(params.ID); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -107,7 +97,7 @@ func (api DeptController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := permission.NewDeptService().Detail(query.ID)
+	detail, err := access.NewDeptService().Detail(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -123,7 +113,7 @@ func (api DeptController) BindRole(c *gin.Context) {
 		return
 	}
 
-	if err := permission.NewDeptService().BindRole(params); err != nil {
+	if err := access.NewDeptService().BindRole(params); err != nil {
 		api.Err(c, err)
 		return
 	}

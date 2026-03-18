@@ -4,8 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"github.com/wannanbigpig/gin-layout/internal/service/permission"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -22,12 +21,12 @@ func NewApiController() *ApiController {
 
 // Edit 编辑API权限
 func (api ApiController) Edit(c *gin.Context) {
-	params := form.NewEditApiForm()
+	params := form.NewUpdateApiForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	if err := permission.NewApiService().Edit(params); err != nil {
+	if err := access.NewApiService().Edit(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -37,15 +36,12 @@ func (api ApiController) Edit(c *gin.Context) {
 
 // Create 新增API权限
 func (api ApiController) Create(c *gin.Context) {
-	params := form.NewEditApiForm()
+	params := form.NewCreateApiForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 为空，表示新增
-	params.Id = 0
-
-	if err := permission.NewApiService().Edit(params); err != nil {
+	if err := access.NewApiService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -55,18 +51,12 @@ func (api ApiController) Create(c *gin.Context) {
 
 // Update 更新API权限
 func (api ApiController) Update(c *gin.Context) {
-	params := form.NewEditApiForm()
+	params := form.NewUpdateApiForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 不为空，表示更新
-	if params.Id == 0 {
-		api.Err(c, e.NewBusinessError(1, "更新API权限时ID不能为空"))
-		return
-	}
-
-	if err := permission.NewApiService().Edit(params); err != nil {
+	if err := access.NewApiService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -81,6 +71,6 @@ func (api ApiController) List(c *gin.Context) {
 		return
 	}
 
-	result := permission.NewApiService().ListPage(params)
+	result := access.NewApiService().ListPage(params)
 	api.Success(c, result)
 }

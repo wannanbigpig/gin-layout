@@ -4,15 +4,11 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
-	"github.com/wannanbigpig/gin-layout/internal/service/permission"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
-)
-
-const (
-	contextKeyUID = "uid"
 )
 
 // AdminUserController 管理员用户控制器
@@ -27,8 +23,8 @@ func NewAdminUserController() *AdminUserController {
 
 // GetUserInfo 获取当前登录用户基本信息
 func (api AdminUserController) GetUserInfo(c *gin.Context) {
-	uid := c.GetUint(contextKeyUID)
-	result, err := permission.NewAdminUserService().GetUserInfo(uid)
+	uid := c.GetUint(global.ContextKeyUID)
+	result, err := access.NewAdminUserService().GetUserInfo(uid)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -39,13 +35,13 @@ func (api AdminUserController) GetUserInfo(c *gin.Context) {
 
 // UpdateProfile 更新个人资料（只能更新自己的手机号、邮箱、密码、昵称）
 func (api AdminUserController) UpdateProfile(c *gin.Context) {
-	uid := c.GetUint(contextKeyUID)
+	uid := c.GetUint(global.ContextKeyUID)
 	params := form.NewUpdateProfile()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	if err := permission.NewAdminUserService().UpdateProfile(uid, params); err != nil {
+	if err := access.NewAdminUserService().UpdateProfile(uid, params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -55,8 +51,8 @@ func (api AdminUserController) UpdateProfile(c *gin.Context) {
 
 // GetUserMenuInfo 获取当前登录用户权限信息
 func (api AdminUserController) GetUserMenuInfo(c *gin.Context) {
-	uid := c.GetUint(contextKeyUID)
-	result, err := permission.NewAdminUserService().GetUserMenuInfo(uid)
+	uid := c.GetUint(global.ContextKeyUID)
+	result, err := access.NewAdminUserService().GetUserMenuInfo(uid)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -67,12 +63,12 @@ func (api AdminUserController) GetUserMenuInfo(c *gin.Context) {
 
 // Edit 编辑管理员信息
 func (api AdminUserController) Edit(c *gin.Context) {
-	params := form.NewEditAdminUser()
+	params := form.NewCreateAdminUser()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	if err := permission.NewAdminUserService().Edit(params); err != nil {
+	if err := access.NewAdminUserService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -82,15 +78,12 @@ func (api AdminUserController) Edit(c *gin.Context) {
 
 // Create 新增管理员
 func (api AdminUserController) Create(c *gin.Context) {
-	params := form.NewEditAdminUser()
+	params := form.NewCreateAdminUser()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 为空，表示新增
-	params.Id = 0
-
-	if err := permission.NewAdminUserService().Edit(params); err != nil {
+	if err := access.NewAdminUserService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -100,18 +93,12 @@ func (api AdminUserController) Create(c *gin.Context) {
 
 // Update 更新管理员
 func (api AdminUserController) Update(c *gin.Context) {
-	params := form.NewEditAdminUser()
+	params := form.NewUpdateAdminUser()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 不为空，表示更新
-	if params.Id == 0 {
-		api.Err(c, e.NewBusinessError(1, "更新管理员时ID不能为空"))
-		return
-	}
-
-	if err := permission.NewAdminUserService().Edit(params); err != nil {
+	if err := access.NewAdminUserService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -126,7 +113,7 @@ func (api AdminUserController) List(c *gin.Context) {
 		return
 	}
 
-	result := permission.NewAdminUserService().List(params)
+	result := access.NewAdminUserService().List(params)
 	api.Success(c, result)
 }
 
@@ -137,7 +124,7 @@ func (api AdminUserController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := permission.NewAdminUserService().Delete(params.ID); err != nil {
+	if err := access.NewAdminUserService().Delete(params.ID); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -152,7 +139,7 @@ func (api AdminUserController) BindRole(c *gin.Context) {
 		return
 	}
 
-	if err := permission.NewAdminUserService().BindRole(params); err != nil {
+	if err := access.NewAdminUserService().BindRole(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -167,7 +154,7 @@ func (api AdminUserController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := permission.NewAdminUserService().GetUserInfo(query.ID)
+	detail, err := access.NewAdminUserService().GetUserInfo(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -207,7 +194,7 @@ func (api AdminUserController) getUserInfo(c *gin.Context) (*resources.AdminUser
 		return nil, err
 	}
 
-	result, err := permission.NewAdminUserService().GetUserInfo(query.ID)
+	result, err := access.NewAdminUserService().GetUserInfo(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return nil, err

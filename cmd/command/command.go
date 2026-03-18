@@ -3,22 +3,18 @@ package command
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/wannanbigpig/gin-layout/data"
+	"github.com/wannanbigpig/gin-layout/cmd/bootstrapx"
 	"github.com/wannanbigpig/gin-layout/internal/console/demo"
 	initconsole "github.com/wannanbigpig/gin-layout/internal/console/init"
 	"github.com/wannanbigpig/gin-layout/internal/console/system_init"
 )
 
 var (
-	Cmd = &cobra.Command{
+	Cmd = bootstrapx.WrapCommand(&cobra.Command{
 		Use:     "command",
 		Short:   "The control head runs the command",
 		Example: "go-layout command demo",
-		PreRun: func(cmd *cobra.Command, args []string) {
-			// 初始化数据库
-			data.InitData()
-		},
-	}
+	}, bootstrapx.Requirements{Data: true})
 )
 
 func init() {
@@ -29,7 +25,7 @@ func init() {
 func registerSubCommands() {
 	// 一次性运行脚本
 	Cmd.AddCommand(demo.Cmd)
-	Cmd.AddCommand(initconsole.ApiRouteCmd)   // 初始化API路由表: go-layout command api-route
-	Cmd.AddCommand(initconsole.MenuApiMapCmd) // 初始化菜单-API映射: go-layout command menu-api-map
-	Cmd.AddCommand(system_init.InitSystemCmd) // 初始化系统: go-layout command init-system
+	Cmd.AddCommand(initconsole.ApiRouteCmd)               // 初始化API路由表: go-layout command api-route
+	Cmd.AddCommand(initconsole.RebuildUserPermissionsCmd) // 重建用户最终 API 权限: go-layout command rebuild-user-permissions
+	Cmd.AddCommand(system_init.InitSystemCmd)             // 初始化系统: go-layout command init-system
 }

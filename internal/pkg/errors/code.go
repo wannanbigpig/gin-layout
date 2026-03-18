@@ -14,16 +14,19 @@ const (
 	TooManyRequests  = 10102
 )
 
+// ErrorText 根据语言返回业务错误文案。
 type ErrorText struct {
 	Language string
 }
 
+// NewErrorText 创建错误文案解析器。
 func NewErrorText(language string) *ErrorText {
 	return &ErrorText{
 		Language: language,
 	}
 }
 
+// Text 按错误码和语言返回错误消息。
 func (et *ErrorText) Text(code int) (str string) {
 	var ok bool
 	switch et.Language {

@@ -1,5 +1,6 @@
 package autoload
 
+// RedisConfig 定义 Redis 连接配置。
 type RedisConfig struct {
 	Enable   bool   `mapstructure:"enable"`
 	Host     string `mapstructure:"host"`

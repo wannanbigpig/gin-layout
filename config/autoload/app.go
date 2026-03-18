@@ -4,6 +4,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
+// AppConfig 定义应用运行时基础配置。
 type AppConfig struct {
 	AppEnv      string  `mapstructure:"app_env"`
 	Debug       bool    `mapstructure:"debug"`
@@ -12,6 +13,8 @@ type AppConfig struct {
 	BasePath    string  `mapstructure:"base_path"`
 	BaseURL     string  `mapstructure:"base_url"` // 文件访问的基础URL（如：https://example.com）
 	Timezone    *string `mapstructure:"timezone"`
+	// 受信任代理配置
+	TrustedProxies []string `mapstructure:"trusted_proxies"` // 允许解析 X-Forwarded-For/X-Real-IP 的代理地址或网段
 	// CORS 配置
 	CorsOrigins       []string `mapstructure:"cors_origins"`        // CORS允许的源列表（如：["http://localhost:3000", "https://example.com"]），空数组表示允许所有源
 	CorsMethods       []string `mapstructure:"cors_methods"`        // 允许的HTTP方法（如：["GET", "POST", "PUT", "DELETE"]），空数组使用默认值
@@ -29,6 +32,7 @@ var App = AppConfig{
 	BasePath:          getDefaultPath(),
 	BaseURL:           "", // 默认空，需要配置
 	Timezone:          nil,
+	TrustedProxies:    []string{"127.0.0.1"},
 	CorsOrigins:       []string{}, // 默认空数组，表示允许所有源（开发环境）
 	CorsMethods:       []string{}, // 默认空数组，使用默认方法列表
 	CorsHeaders:       []string{}, // 默认空数组，表示允许所有请求头（使用 "*"）

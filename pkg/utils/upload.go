@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -16,6 +17,7 @@ import (
 	"github.com/h2non/filetype/types"
 )
 
+// FileInfo 描述上传文件的存储结果和对外展示字段。
 type FileInfo struct {
 	FileID        uint   `json:"-"`              // 文件ID（数据库ID，不返回给前端）
 	Sha256        string `json:"sha256"`         // 文件SHA256哈希值（用于去重）
@@ -31,9 +33,7 @@ type FileInfo struct {
 	Status        string `json:"status"`         // 上传状态：SUCCESS、ERROR
 }
 
-// UploadFile 接收上传文件并保存为 SHA256 命名
-// path 参数可以是相对路径或绝对路径
-// 如果是相对路径，会基于二进制文件所在目录来构建完整路径
+// UploadFile 接收上传文件并保存到目标目录。
 func UploadFile(fileHeader *multipart.FileHeader, path ...string) (fileInfo *FileInfo, err error) {
 	uploadSubDir := "default"
 	if len(path) > 0 && path[0] != "" {
@@ -65,7 +65,7 @@ func UploadFile(fileHeader *multipart.FileHeader, path ...string) (fileInfo *Fil
 	return
 }
 
-// SaveUploadedFileWithUUID 保存文件，使用 UUID 命名，计算 SHA256
+// SaveUploadedFileWithUUID 保存文件、计算摘要并生成 UUID 文件名。
 func SaveUploadedFileWithUUID(fileHeader *multipart.FileHeader, uploadDir string) (*FileInfo, error) {
 	src, err := fileHeader.Open()
 	if err != nil {
@@ -124,9 +124,7 @@ func SaveUploadedFileWithUUID(fileHeader *multipart.FileHeader, uploadDir string
 	}, nil
 }
 
-// EnsureAbsPath 确保路径是绝对路径
-// 如果 path 是相对路径，则基于 baseDir 转换为绝对路径
-// 如果 baseDir 为空，则使用二进制文件所在目录
+// EnsureAbsPath 将相对路径转换为绝对路径。
 func EnsureAbsPath(path string, baseDir ...string) (string, error) {
 	if filepath.IsAbs(path) {
 		return path, nil
@@ -146,7 +144,7 @@ func EnsureAbsPath(path string, baseDir ...string) (string, error) {
 	return filepath.Join(base, path), nil
 }
 
-// GetFileSha256AndSizeFromHeader 计算文件的 SHA-256 和大小（需支持 ReadSeeker）
+// GetFileSha256AndSizeFromHeader 计算文件的 SHA-256 和大小。
 func GetFileSha256AndSizeFromHeader(file io.ReadSeeker) (string, int64, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return "", 0, fmt.Errorf("指针重置失败: %w", err)
@@ -165,17 +163,21 @@ func GetFileSha256AndSizeFromHeader(file io.ReadSeeker) (string, int64, error) {
 	return hex.EncodeToString(hash.Sum(nil)), size, nil
 }
 
-// IsAllowedImage 判断文件是否是允许的图片格式
+// IsAllowedImage 判断文件头是否匹配允许的图片类型。
 func IsAllowedImage(file io.ReadSeeker) (string, bool, error) {
 	head := make([]byte, 261)
-	if _, err := file.Read(head); err != nil {
+	n, err := file.Read(head)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return "", false, fmt.Errorf("读取文件头失败: %w", err)
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return "", false, fmt.Errorf("重置文件指针失败: %w", err)
 	}
+	if n == 0 {
+		return "", false, nil
+	}
 
-	kind, err := filetype.Match(head)
+	kind, err := filetype.Match(head[:n])
 	if err != nil {
 		return "", false, fmt.Errorf("检测文件类型失败: %w", err)
 	}

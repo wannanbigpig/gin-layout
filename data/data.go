@@ -1,6 +1,7 @@
 package data
 
 import (
+	"fmt"
 	"sync"
 
 	c "github.com/wannanbigpig/gin-layout/config"
@@ -8,22 +9,34 @@ import (
 
 var once sync.Once
 
+// InitData 按配置初始化 MySQL 和 Redis 数据源。
 func InitData() {
 	once.Do(func() {
-		if c.Config.Mysql.Enable {
-			// 初始化 mysql
-			err := initMysql()
-			if err != nil {
-				panic("mysql init error: " + err.Error())
+		cfg := c.GetConfig()
+		if cfg.Mysql.Enable {
+			if err := initMysql(); err != nil {
+				panic(fmt.Sprintf("mysql init error: %v", err))
 			}
 		}
 
-		if c.Config.Redis.Enable {
-			// 初始化 redis
-			err := initRedis()
-			if err != nil {
-				panic("redis init error: " + err.Error())
+		if cfg.Redis.Enable {
+			if err := initRedis(); err != nil {
+				panic(fmt.Sprintf("redis init error: %v", err))
 			}
 		}
 	})
+}
+
+// Shutdown 关闭当前已初始化的数据源。
+func Shutdown() error {
+	var firstErr error
+
+	if err := CloseRedis(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := CloseMysql(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+
+	return firstErr
 }

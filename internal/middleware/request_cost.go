@@ -5,13 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-)
 
-const (
-	// ContextKeyRequestStartTime 请求开始时间的上下文键
-	ContextKeyRequestStartTime = "requestStartTime"
-	// ContextKeyRequestID 请求ID的上下文键
-	ContextKeyRequestID = "requestId"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 )
 
 // RequestCostHandler 请求耗时和请求ID中间件
@@ -32,11 +27,11 @@ func RequestCostHandler() gin.HandlerFunc {
 // setRequestContext 设置请求上下文信息
 func setRequestContext(c *gin.Context) {
 	// 设置请求开始时间
-	c.Set(ContextKeyRequestStartTime, time.Now())
+	c.Set(global.ContextKeyRequestStartTime, time.Now())
 
 	// 生成并设置请求ID
 	requestID := generateRequestID()
-	c.Set(ContextKeyRequestID, requestID)
+	c.Set(global.ContextKeyRequestID, requestID)
 }
 
 // generateRequestID 生成请求ID

@@ -4,8 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"github.com/wannanbigpig/gin-layout/internal/service/permission"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -27,18 +26,18 @@ func (api RoleController) List(c *gin.Context) {
 		return
 	}
 
-	result := permission.NewRoleService().List(params)
+	result := access.NewRoleService().List(params)
 	api.Success(c, result)
 }
 
 // Edit 编辑角色
 func (api RoleController) Edit(c *gin.Context) {
-	params := form.NewEditRoleForm()
+	params := form.NewUpdateRoleForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	if err := permission.NewRoleService().Edit(params); err != nil {
+	if err := access.NewRoleService().Edit(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -48,15 +47,12 @@ func (api RoleController) Edit(c *gin.Context) {
 
 // Create 新增角色
 func (api RoleController) Create(c *gin.Context) {
-	params := form.NewEditRoleForm()
+	params := form.NewCreateRoleForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 为空，表示新增
-	params.Id = 0
-
-	if err := permission.NewRoleService().Edit(params); err != nil {
+	if err := access.NewRoleService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -66,18 +62,12 @@ func (api RoleController) Create(c *gin.Context) {
 
 // Update 更新角色
 func (api RoleController) Update(c *gin.Context) {
-	params := form.NewEditRoleForm()
+	params := form.NewUpdateRoleForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 
-	// 确保 ID 不为空，表示更新
-	if params.Id == 0 {
-		api.Err(c, e.NewBusinessError(1, "更新角色时ID不能为空"))
-		return
-	}
-
-	if err := permission.NewRoleService().Edit(params); err != nil {
+	if err := access.NewRoleService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -92,7 +82,7 @@ func (api RoleController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := permission.NewRoleService().Delete(params.ID); err != nil {
+	if err := access.NewRoleService().Delete(params.ID); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -107,7 +97,7 @@ func (api RoleController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := permission.NewRoleService().Detail(query.ID)
+	detail, err := access.NewRoleService().Detail(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return

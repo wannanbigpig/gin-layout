@@ -14,6 +14,7 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
+// AdminUserInfo 是写入 JWT 的管理员基础信息。
 type AdminUserInfo struct {
 	// 可根据需要自行添加字段
 	UserID          uint   `json:"user_id"`
@@ -28,9 +29,10 @@ type AdminUserInfo struct {
 // Generate 生成JWT Token
 func Generate(claims jwt.Claims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	cfg := c.GetConfig()
 
 	// 生成签名字符串
-	tokenStr, err := token.SignedString([]byte(c.Config.Jwt.SecretKey))
+	tokenStr, err := token.SignedString([]byte(cfg.Jwt.SecretKey))
 	if err != nil {
 		return "", err
 	}
@@ -44,8 +46,9 @@ func Refresh(claims jwt.Claims) (string, error) {
 
 // Parse 解析token
 func Parse(accessToken string, claims jwt.Claims, options ...jwt.ParserOption) error {
+	cfg := c.GetConfig()
 	token, err := jwt.ParseWithClaims(accessToken, claims, func(token *jwt.Token) (i interface{}, err error) {
-		return []byte(c.Config.Jwt.SecretKey), err
+		return []byte(cfg.Jwt.SecretKey), err
 	}, options...)
 	if err != nil {
 		return err
@@ -83,8 +86,9 @@ type AdminCustomClaims struct {
 
 // NewAdminCustomClaims 初始化AdminCustomClaims
 func NewAdminCustomClaims(user *model.AdminUser) AdminCustomClaims {
+	cfg := c.GetConfig()
 	now := time.Now().UTC()
-	expiresAt := now.Add(time.Second * c.Config.Jwt.TTL)
+	expiresAt := now.Add(time.Second * cfg.Jwt.TTL)
 	// phoneRule := &utils.DesensitizeRule{KeepPrefixLen: 3, KeepSuffixLen: 4, MaskChar: '*'}
 	// emailRule := &utils.DesensitizeRule{KeepPrefixLen: 2, KeepSuffixLen: 0, MaskChar: '*', Separator: '@', FixedMaskLength: 3}
 	return AdminCustomClaims{

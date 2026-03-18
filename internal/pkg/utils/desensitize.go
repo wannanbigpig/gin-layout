@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 )
 
+// DesensitizeRule 描述字符串脱敏策略。
 type DesensitizeRule struct {
 	KeepPrefixLen   int  // 保留前缀长度
 	KeepSuffixLen   int  // 保留后缀长度
@@ -22,6 +23,8 @@ func NewPhoneRule() *DesensitizeRule {
 func NewEmailRule() *DesensitizeRule {
 	return &DesensitizeRule{KeepPrefixLen: 2, KeepSuffixLen: 0, MaskChar: '*', Separator: '@', FixedMaskLength: 3}
 }
+
+// Apply 按当前规则对输入字符串做脱敏。
 func (r *DesensitizeRule) Apply(s string) string {
 	if utf8.RuneCountInString(s) == 0 {
 		return s

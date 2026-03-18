@@ -4,7 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/service/permission"
+	"github.com/wannanbigpig/gin-layout/internal/service/audit"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -26,7 +26,7 @@ func (api RequestLogController) List(c *gin.Context) {
 		return
 	}
 
-	result := permission.NewRequestLogService().List(params)
+	result := audit.NewRequestLogService().List(params)
 	api.Success(c, result)
 }
 
@@ -37,7 +37,7 @@ func (api RequestLogController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := permission.NewRequestLogService().Detail(query.ID)
+	detail, err := audit.NewRequestLogService().Detail(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return

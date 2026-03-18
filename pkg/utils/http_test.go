@@ -1,26 +1,72 @@
 package utils
 
 import (
-	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 )
 
-func TestGetRequest(t *testing.T) {
-	http := HttpRequest{}
-	_, err := http.Request("GET", "https://www.baidu.com", nil).ParseBytes()
-	if err != nil {
-		t.Error("请求失败")
-	}
+type roundTripFunc func(*http.Request) (*http.Response, error)
 
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
-func ExampleRequest() {
-	http := HttpRequest{}
-	// You can define map directly or define a structure corresponding to the return value to receive data
-	var resp map[string]any
-	err := http.Request("GET", "http://127.0.0.1:9999/api/v1/hello-world?name=world", nil).ParseJson(&resp)
-	if err != nil {
-		panic(err)
+func TestGetRequest(t *testing.T) {
+	client := HttpRequest{}
+	client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Query().Get("name") != "world" {
+			t.Fatalf("unexpected query: %s", req.URL.RawQuery)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"hello":"world"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	params := &url.Values{}
+	params.Set("name", "world")
+	resp := client.GetRequest("http://example.com", params)
+	if resp.Error != nil {
+		t.Fatalf("request failed: %v", resp.Error)
 	}
-	fmt.Printf("%#v", resp)
+
+	var payload map[string]string
+	if err := resp.ParseJson(&payload); err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if payload["hello"] != "world" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestJsonRequestSetsContentType(t *testing.T) {
+	client := HttpRequest{}
+	client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("unexpected content-type: %s", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	options := map[string]string{}
+	resp := client.JsonRequest(http.MethodPost, "http://example.com", strings.NewReader(`{"x":1}`), options)
+	if resp.Error != nil {
+		t.Fatalf("request failed: %v", resp.Error)
+	}
+
+	raw, err := resp.Raw()
+	if err != nil {
+		t.Fatalf("raw failed: %v", err)
+	}
+	if raw != "ok" {
+		t.Fatalf("unexpected raw: %s", raw)
+	}
 }

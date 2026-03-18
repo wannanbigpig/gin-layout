@@ -1,133 +1,166 @@
 package routers
 
 import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/controller/admin_v1"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 )
 
-// SetAdminApiRoute 设置管理员API路由并保存权限信息
-func SetAdminApiRoute(r *RegisterRouter) {
-	// version 1
-	v1 := r.group("admin/v1/")
-	{
-		/******************************* 无需校验权限 start ************************************/
-		reqNotAuth := v1.group("").setGroupCode("other")
-		{
-			demo := controller.NewDemoController()
-			reqNotAuth.get("demo", demo.HelloWorld).setTitle("Demo 示例").setDesc("Demo 示例备注").setAuth(0)
-
-			loginC := admin_v1.NewLoginController()
-			lg := reqNotAuth.group("").setGroupCode("login")
+// AppRouteTree 返回应用完整路由树。
+func AppRouteTree() RouteGroupDef {
+	return RouteGroupDef{
+		Routes: []RouteDef{
 			{
-				lg.post("login", loginC.Login).setTitle("登录").setAuth(0)
-				lg.get("login-captcha", loginC.LoginCaptcha).setTitle("验证码").setAuth(0)
-			}
+				Method: http.MethodGet,
+				Path:   "ping",
+				Title:  "ping",
+				Desc:   "服务心跳检测接口",
+				Auth:   0,
+				Handlers: []gin.HandlerFunc{func(c *gin.Context) {
+					c.String(http.StatusOK, "pong")
+				}},
+			},
+		},
+		Children: []RouteGroupDef{AdminRouteTree()},
+	}
+}
 
-			// 文件访问（公开文件无需认证，私有文件会在控制器中检查）
-			// 使用UUID查询（32位字符串），比64位hash更短，适合URL
-			commonC := admin_v1.NewCommonController()
-			reqNotAuth.get("file/:uuid", commonC.GetFile).setTitle("获取文件").setAuth(0)
-		}
-		/******************************* 无需校验权限 end **************************************/
+// AdminRouteTree 返回管理员后台路由声明树。
+func AdminRouteTree() RouteGroupDef {
+	demo := controller.NewDemoController()
+	loginC := admin_v1.NewLoginController()
+	commonC := admin_v1.NewCommonController()
+	adminUserC := admin_v1.NewAdminUserController()
+	apiC := admin_v1.NewApiController()
+	menuC := admin_v1.NewMenuController()
+	roleC := admin_v1.NewRoleController()
+	deptC := admin_v1.NewDeptController()
+	requestLogC := admin_v1.NewRequestLogController()
+	loginLogC := admin_v1.NewAdminLoginLogController()
 
-		/******************************* 需校验权限 start **************************************/
-		reqAuth := v1.group("", middleware.AdminAuthHandler())
-		{
-			common := reqAuth.group("common").setGroupCode("common")
+	return RouteGroupDef{
+		Prefix: "admin/v1",
+		Children: []RouteGroupDef{
 			{
-				c := admin_v1.NewCommonController()
-				common.post("upload", c.Upload).setTitle("上传文件").setAuth(0)
-			}
-
-			// 授权管理
-			auth := reqAuth.group("auth").setGroupCode("auth")
+				GroupCode: "other",
+				Routes: []RouteDef{
+					{Method: http.MethodGet, Path: "demo", Title: "Demo 示例", Desc: "Demo 示例备注", Auth: 0, Handlers: []gin.HandlerFunc{demo.HelloWorld}},
+					{Method: http.MethodGet, Path: "file/:uuid", Title: "获取文件", Auth: 0, Handlers: []gin.HandlerFunc{commonC.GetFile}},
+				},
+				Children: []RouteGroupDef{
+					{
+						GroupCode: "login",
+						Routes: []RouteDef{
+							{Method: http.MethodPost, Path: "login", Title: "登录", Auth: 0, Handlers: []gin.HandlerFunc{loginC.Login}},
+							{Method: http.MethodGet, Path: "login-captcha", Title: "验证码", Auth: 0, Handlers: []gin.HandlerFunc{loginC.LoginCaptcha}},
+						},
+					},
+				},
+			},
 			{
-				c := admin_v1.NewLoginController()
-				auth.post("logout", c.Logout).setTitle("退出登录").setAuth(0)
-				auth.get("check-token", c.CheckToken).setTitle("检查Token是否有效").setAuth(0)
-			}
-
-			// 管理员用户
-			adminUser := reqAuth.group("admin-user").setGroupCode("adminUser")
-			{
-				c := admin_v1.NewAdminUserController()
-				adminUser.get("get", c.GetUserInfo).setTitle("获取当前登录用户基本信息").setAuth(0)
-				adminUser.get("user-menu-info", c.GetUserMenuInfo).setTitle("获取当前登录用户权限信息").setAuth(0)
-				adminUser.post("update-profile", c.UpdateProfile).setTitle("更新个人资料").setAuth(0)
-				adminUser.get("list", c.List).setTitle("获取管理员用户列表").setAuth(1)
-				adminUser.get("detail", c.Detail).setTitle("获取管理员详情").setAuth(1)
-				adminUser.get("get-full-phone", c.GetFullPhone).setTitle("获取管理员完整手机号").setAuth(1)
-				adminUser.get("get-full-email", c.GetFullEmail).setTitle("获取管理员完整邮箱").setAuth(1)
-				adminUser.post("create", c.Create).setTitle("新增管理员").setAuth(1)
-				adminUser.post("update", c.Update).setTitle("更新管理员").setAuth(1)
-				adminUser.post("delete", c.Delete).setTitle("删除管理员").setAuth(1)
-				adminUser.post("bind-role", c.BindRole).setTitle("管理员绑定角色").setAuth(1)
-			}
-
-			// api权限管理
-			permissions := reqAuth.group("permission").setGroupCode("api")
-			{
-				c := admin_v1.NewApiController()
-				// permissions.post("create", c.Create).setTitle("新增接口").setAuth(1)
-				permissions.post("update", c.Update).setTitle("更新接口").setAuth(1)
-				permissions.get("list", c.List).setTitle("接口列表").setAuth(1)
-			}
-
-			// 菜单管理
-			menu := reqAuth.group("menu").setGroupCode("menu")
-			{
-				c := admin_v1.NewMenuController()
-				menu.get("list", c.List).setTitle("菜单列表").setAuth(1)
-				menu.post("delete", c.Delete).setTitle("删除菜单").setAuth(1)
-				menu.post("create", c.Create).setTitle("新增菜单").setAuth(1)
-				menu.post("update", c.Update).setTitle("更新菜单").setAuth(1)
-				menu.post("update-all-menu-permissions", c.UpdateAllMenuPermissions).setTitle("更新全部菜单权限关系缓存").setAuth(1)
-				menu.get("detail", c.Detail).setTitle("菜单详情").setAuth(1)
-			}
-
-			// 角色管理
-			role := reqAuth.group("role").setGroupCode("role")
-			{
-				c := admin_v1.NewRoleController()
-				role.get("list", c.List).setTitle("获取角色列表").setAuth(1)
-				role.post("create", c.Create).setTitle("新增角色").setAuth(1)
-				role.post("update", c.Update).setTitle("更新角色").setAuth(1)
-				role.get("detail", c.Detail).setTitle("角色详情").setAuth(1)
-				role.post("delete", c.Delete).setTitle("删除角色").setAuth(1)
-			}
-
-			// 部门管理
-			dept := reqAuth.group("department").setGroupCode("department")
-			{
-				c := admin_v1.NewDeptController()
-				dept.get("list", c.List).setTitle("获取部门列表").setAuth(1)
-				dept.post("create", c.Create).setTitle("新增部门").setAuth(1)
-				dept.post("update", c.Update).setTitle("更新部门").setAuth(1)
-				dept.get("detail", c.Detail).setTitle("部门详情").setAuth(1)
-				dept.post("delete", c.Delete).setTitle("删除部门").setAuth(1)
-				dept.post("bind-role", c.BindRole).setTitle("部门绑定角色").setAuth(1)
-			}
-
-			// 日志管理
-			log := reqAuth.group("log").setGroupCode("log")
-			{
-				// 请求日志
-				requestLog := log.group("request")
-				{
-					requestLogC := admin_v1.NewRequestLogController()
-					requestLog.get("list", requestLogC.List).setTitle("获取请求日志列表").setAuth(1)
-					requestLog.get("detail", requestLogC.Detail).setTitle("请求日志详情").setAuth(1)
-				}
-				// 登录日志
-				loginLog := log.group("login")
-				{
-					loginLogC := admin_v1.NewAdminLoginLogController()
-					loginLog.get("list", loginLogC.List).setTitle("获取登录日志列表").setAuth(1)
-					loginLog.get("detail", loginLogC.Detail).setTitle("登录日志详情").setAuth(1)
-				}
-			}
-		}
-		/******************************* 需校验权限 end ****************************************/
+				Middleware: []gin.HandlerFunc{middleware.AdminAuthHandler()},
+				Children: []RouteGroupDef{
+					{
+						Prefix:    "common",
+						GroupCode: "common",
+						Routes: []RouteDef{
+							{Method: http.MethodPost, Path: "upload", Title: "上传文件", Auth: 0, Handlers: []gin.HandlerFunc{commonC.Upload}},
+						},
+					},
+					{
+						Prefix:    "auth",
+						GroupCode: "auth",
+						Routes: []RouteDef{
+							{Method: http.MethodPost, Path: "logout", Title: "退出登录", Auth: 0, Handlers: []gin.HandlerFunc{loginC.Logout}},
+							{Method: http.MethodGet, Path: "check-token", Title: "检查Token是否有效", Auth: 0, Handlers: []gin.HandlerFunc{loginC.CheckToken}},
+						},
+					},
+					{
+						Prefix:    "admin-user",
+						GroupCode: "adminUser",
+						Routes: []RouteDef{
+							{Method: http.MethodGet, Path: "get", Title: "获取当前登录用户基本信息", Auth: 0, Handlers: []gin.HandlerFunc{adminUserC.GetUserInfo}},
+							{Method: http.MethodGet, Path: "user-menu-info", Title: "获取当前登录用户权限信息", Auth: 0, Handlers: []gin.HandlerFunc{adminUserC.GetUserMenuInfo}},
+							{Method: http.MethodPost, Path: "update-profile", Title: "更新个人资料", Auth: 0, Handlers: []gin.HandlerFunc{adminUserC.UpdateProfile}},
+							{Method: http.MethodGet, Path: "list", Title: "获取管理员用户列表", Auth: 1, Handlers: []gin.HandlerFunc{adminUserC.List}},
+							{Method: http.MethodGet, Path: "detail", Title: "获取管理员详情", Auth: 1, Handlers: []gin.HandlerFunc{adminUserC.Detail}},
+							{Method: http.MethodGet, Path: "get-full-phone", Title: "获取管理员完整手机号", Auth: 1, Handlers: []gin.HandlerFunc{adminUserC.GetFullPhone}},
+							{Method: http.MethodGet, Path: "get-full-email", Title: "获取管理员完整邮箱", Auth: 1, Handlers: []gin.HandlerFunc{adminUserC.GetFullEmail}},
+							{Method: http.MethodPost, Path: "create", Title: "新增管理员", Auth: 1, Handlers: []gin.HandlerFunc{adminUserC.Create}},
+							{Method: http.MethodPost, Path: "update", Title: "更新管理员", Auth: 1, Handlers: []gin.HandlerFunc{adminUserC.Update}},
+							{Method: http.MethodPost, Path: "delete", Title: "删除管理员", Auth: 1, Handlers: []gin.HandlerFunc{adminUserC.Delete}},
+							{Method: http.MethodPost, Path: "bind-role", Title: "管理员绑定角色", Auth: 1, Handlers: []gin.HandlerFunc{adminUserC.BindRole}},
+						},
+					},
+					{
+						Prefix:    "permission",
+						GroupCode: "api",
+						Routes: []RouteDef{
+							{Method: http.MethodPost, Path: "update", Title: "更新接口", Auth: 1, Handlers: []gin.HandlerFunc{apiC.Update}},
+							{Method: http.MethodGet, Path: "list", Title: "接口列表", Auth: 1, Handlers: []gin.HandlerFunc{apiC.List}},
+						},
+					},
+					{
+						Prefix:    "menu",
+						GroupCode: "menu",
+						Routes: []RouteDef{
+							{Method: http.MethodGet, Path: "list", Title: "菜单列表", Auth: 1, Handlers: []gin.HandlerFunc{menuC.List}},
+							{Method: http.MethodPost, Path: "delete", Title: "删除菜单", Auth: 1, Handlers: []gin.HandlerFunc{menuC.Delete}},
+							{Method: http.MethodPost, Path: "create", Title: "新增菜单", Auth: 1, Handlers: []gin.HandlerFunc{menuC.Create}},
+							{Method: http.MethodPost, Path: "update", Title: "更新菜单", Auth: 1, Handlers: []gin.HandlerFunc{menuC.Update}},
+							{Method: http.MethodPost, Path: "update-all-menu-permissions", Title: "更新全部菜单权限关系缓存", Auth: 1, Handlers: []gin.HandlerFunc{menuC.UpdateAllMenuPermissions}},
+							{Method: http.MethodGet, Path: "detail", Title: "菜单详情", Auth: 1, Handlers: []gin.HandlerFunc{menuC.Detail}},
+						},
+					},
+					{
+						Prefix:    "role",
+						GroupCode: "role",
+						Routes: []RouteDef{
+							{Method: http.MethodGet, Path: "list", Title: "获取角色列表", Auth: 1, Handlers: []gin.HandlerFunc{roleC.List}},
+							{Method: http.MethodPost, Path: "create", Title: "新增角色", Auth: 1, Handlers: []gin.HandlerFunc{roleC.Create}},
+							{Method: http.MethodPost, Path: "update", Title: "更新角色", Auth: 1, Handlers: []gin.HandlerFunc{roleC.Update}},
+							{Method: http.MethodGet, Path: "detail", Title: "角色详情", Auth: 1, Handlers: []gin.HandlerFunc{roleC.Detail}},
+							{Method: http.MethodPost, Path: "delete", Title: "删除角色", Auth: 1, Handlers: []gin.HandlerFunc{roleC.Delete}},
+						},
+					},
+					{
+						Prefix:    "department",
+						GroupCode: "department",
+						Routes: []RouteDef{
+							{Method: http.MethodGet, Path: "list", Title: "获取部门列表", Auth: 1, Handlers: []gin.HandlerFunc{deptC.List}},
+							{Method: http.MethodPost, Path: "create", Title: "新增部门", Auth: 1, Handlers: []gin.HandlerFunc{deptC.Create}},
+							{Method: http.MethodPost, Path: "update", Title: "更新部门", Auth: 1, Handlers: []gin.HandlerFunc{deptC.Update}},
+							{Method: http.MethodGet, Path: "detail", Title: "部门详情", Auth: 1, Handlers: []gin.HandlerFunc{deptC.Detail}},
+							{Method: http.MethodPost, Path: "delete", Title: "删除部门", Auth: 1, Handlers: []gin.HandlerFunc{deptC.Delete}},
+							{Method: http.MethodPost, Path: "bind-role", Title: "部门绑定角色", Auth: 1, Handlers: []gin.HandlerFunc{deptC.BindRole}},
+						},
+					},
+					{
+						Prefix:    "log",
+						GroupCode: "log",
+						Children: []RouteGroupDef{
+							{
+								Prefix: "request",
+								Routes: []RouteDef{
+									{Method: http.MethodGet, Path: "list", Title: "获取请求日志列表", Auth: 1, Handlers: []gin.HandlerFunc{requestLogC.List}},
+									{Method: http.MethodGet, Path: "detail", Title: "请求日志详情", Auth: 1, Handlers: []gin.HandlerFunc{requestLogC.Detail}},
+								},
+							},
+							{
+								Prefix: "login",
+								Routes: []RouteDef{
+									{Method: http.MethodGet, Path: "list", Title: "获取登录日志列表", Auth: 1, Handlers: []gin.HandlerFunc{loginLogC.List}},
+									{Method: http.MethodGet, Path: "detail", Title: "登录日志详情", Auth: 1, Handlers: []gin.HandlerFunc{loginLogC.Detail}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 }

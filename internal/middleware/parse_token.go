@@ -7,7 +7,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
-	"github.com/wannanbigpig/gin-layout/internal/service/permission"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
 // ParseTokenHandler 全局token解析中间件（所有路由都走）
@@ -58,7 +58,7 @@ func validateToken(c *gin.Context, accessToken string) (*model.AdminUser, string
 	}
 
 	// 使用CheckToken进行完整验证（包括过期检查、用户状态、黑名单等）
-	loginService := permission.NewLoginService()
+	loginService := auth.NewLoginService()
 	loginService.SetCtx(c)
 	adminUser, ok := loginService.CheckToken(accessToken)
 	if !ok {
@@ -77,7 +77,7 @@ func validateToken(c *gin.Context, accessToken string) (*model.AdminUser, string
 //   - jwtID: JWT唯一标识（用于token撤销等操作）
 func setUserContext(c *gin.Context, adminUser *model.AdminUser, jwtID string) {
 	// 设置用户基本信息（供日志、权限验证等使用）
-	c.Set("uid", adminUser.ID)
+	c.Set(global.ContextKeyUID, adminUser.ID)
 	c.Set("username", adminUser.Username)
 	c.Set("full_phone_number", adminUser.FullPhoneNumber)
 	c.Set("nickname", adminUser.Nickname)
@@ -89,5 +89,5 @@ func setUserContext(c *gin.Context, adminUser *model.AdminUser, jwtID string) {
 	}
 
 	// 将完整的用户对象也存储到context，避免后续中间件重复查询数据库
-	c.Set("admin_user", adminUser)
+	c.Set(global.ContextKeyAdminUser, adminUser)
 }

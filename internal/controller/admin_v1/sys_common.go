@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 )
@@ -34,7 +35,7 @@ func (api CommonController) Upload(c *gin.Context) {
 	}
 
 	// 获取用户ID
-	uid := c.GetUint("uid")
+	uid := c.GetUint(global.ContextKeyUID)
 	commonService := service.NewCommonService()
 	commonService.SetAdminUserId(uid)
 
@@ -42,8 +43,12 @@ func (api CommonController) Upload(c *gin.Context) {
 	path := getUploadPath(form)
 
 	// 执行文件上传
-	result, err := commonService.UploadFiles(form.File["files"], path)
+	result, err := commonService.UploadImages(form.File["files"], path)
 	if err != nil {
+		if service.IsPartialImageUploadError(err) {
+			api.Fail(c, errors.FileUploadPartialFail, err.Error(), result)
+			return
+		}
 		api.Err(c, err)
 		return
 	}
@@ -68,7 +73,7 @@ func (api CommonController) GetFile(c *gin.Context) {
 	// 获取当前用户ID（如果已登录）
 	var currentUID uint
 	var checkAuth bool
-	if uid, exists := c.Get("uid"); exists {
+	if uid, exists := c.Get(global.ContextKeyUID); exists {
 		currentUID = uid.(uint)
 		checkAuth = true
 		commonService.SetAdminUserId(currentUID)

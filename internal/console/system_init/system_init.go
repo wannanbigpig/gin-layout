@@ -22,7 +22,7 @@ var (
 1. Rollback all database migrations
 2. Re-execute all migrations
 3. Re-initialize API routes
-4. Re-initialize menu-API mappings
+4. Rebuild final user API permissions
 
 This is the same task that runs automatically at 2:00 AM daily.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -34,7 +34,7 @@ This is the same task that runs automatically at 2:00 AM daily.`,
 // runInitSystem 执行初始化系统
 func runInitSystem() error {
 	// 用户确认
-	if !confirmOperation("此命令将执行系统初始化，包括回滚迁移、重新执行迁移、重新初始化路由和路由映射。此操作会清空现有数据，确定要继续吗？ [Y/N]: ") {
+	if !confirmOperation("此命令将执行系统初始化，包括回滚迁移、重新执行迁移、重新初始化 API 路由并重建用户最终 API 权限。此操作会清空现有数据，确定要继续吗？ [Y/N]: ") {
 		fmt.Println("操作已取消。")
 		return nil
 	}

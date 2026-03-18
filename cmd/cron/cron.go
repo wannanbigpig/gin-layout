@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/wannanbigpig/gin-layout/data"
+	"github.com/wannanbigpig/gin-layout/cmd/bootstrapx"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service/system"
 )
@@ -27,37 +27,28 @@ const (
 )
 
 var (
-	Cmd = &cobra.Command{
+	Cmd = bootstrapx.WrapCommand(&cobra.Command{
 		Use:     "cron",
 		Short:   "Starting a scheduled task",
 		Example: "go-layout cron",
-		PreRun: func(cmd *cobra.Command, args []string) {
-			// 计划任务中使用数据请先初始化数据库链接
-			data.InitData()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return Start()
 		},
-		Run: func(cmd *cobra.Command, args []string) {
-			Start()
-		},
-	}
+	}, bootstrapx.Requirements{Data: true})
 )
 
 // Start 启动定时任务服务
-func Start() {
+func Start() error {
 	// 初始化定时器
 	crontab := createCronScheduler()
 	if crontab == nil {
-		errMsg := "创建定时任务调度器失败"
-		log.Logger.Error(errMsg)
-		fmt.Fprintf(os.Stderr, "错误: %s\n", errMsg)
-		os.Exit(1)
+		return fmt.Errorf("创建定时任务调度器失败")
 	}
 
 	// 添加任务
 	if err := addCronJob(crontab); err != nil {
-		errMsg := fmt.Sprintf("定时任务启动失败: %v", err)
-		log.Logger.Error(errMsg, zap.Error(err))
-		fmt.Fprintf(os.Stderr, "错误: %s\n", errMsg)
-		os.Exit(1)
+		log.Logger.Error("定时任务启动失败", zap.Error(err))
+		return fmt.Errorf("定时任务启动失败: %w", err)
 	}
 
 	// 启动定时器
@@ -69,6 +60,7 @@ func Start() {
 	// 优雅关闭
 	waitForShutdown()
 	log.Logger.Info("Cron service stopped gracefully")
+	return nil
 }
 
 // createCronScheduler 创建定时任务调度器

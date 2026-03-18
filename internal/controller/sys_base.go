@@ -4,7 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/wannanbigpig/gin-layout/internal/middleware"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
@@ -50,7 +50,7 @@ func (api Api) Fail(c *gin.Context, code int, message string, data ...any) {
 func (api Api) Err(c *gin.Context, err error) {
 	businessError, parseErr := api.AsBusinessError(err)
 	if parseErr != nil {
-		requestID := c.GetString(middleware.ContextKeyRequestID)
+		requestID := c.GetString(global.ContextKeyRequestID)
 		log.Logger.Warn("Unknown error:", zap.String("requestId", requestID), zap.Error(parseErr))
 		api.FailCode(c, errors.ServerErr)
 		return

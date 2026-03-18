@@ -26,36 +26,85 @@ import (
 )
 
 var (
-	trans    ut.Translator // 全局验证器
-	once     sync.Once
-	validate *validator.Validate
-
 	// 预编译的正则表达式，避免每次验证时重新编译
 	phoneNumberRegex = regexp.MustCompile(`^1[3456789]\d{9}$`)
 
 	// 正则表达式缓存，用于 RegexpValidator
 	regexCache sync.Map // map[string]*regexp.Regexp
+
+	validatorRuntime = newValidatorRuntime()
 )
 
-// InitValidatorTrans 初始化验证器和翻译器
-func InitValidatorTrans(locale string) {
-	once.Do(func() { validatorTrans(locale) })
+type validatorRuntimeState struct {
+	once             sync.Once
+	validate         *validator.Validate
+	trans            ut.Translator
+	translatorLocale string
+	rulesReady       bool
+	tagNameReady     bool
+	initErr          error
 }
 
-func validatorTrans(locale string) {
-	var ok bool
-	if validate, ok = getValidatorEngine(); !ok {
-		panic("Failed to initialize the validator")
+func newValidatorRuntime() *validatorRuntimeState {
+	return &validatorRuntimeState{}
+}
+
+// InitValidatorTrans 初始化验证器和翻译器
+func InitValidatorTrans(locale string) error {
+	err := validatorRuntime.initOnce(locale)
+	if err != nil {
+		if log.Logger != nil {
+			log.Logger.Error("初始化 validator 失败", zap.String("locale", locale), zap.Error(err))
+		}
 	}
+	return err
+}
 
-	// 注册自定义验证规则
-	initCustomRules(validate)
+func (s *validatorRuntimeState) initOnce(locale string) error {
+	s.once.Do(func() {
+		s.initErr = s.init(locale)
+	})
+	return s.initErr
+}
 
-	// 注册获取 JSON 标签的自定义方法
-	registerTagNameFunc(validate)
+func (s *validatorRuntimeState) init(locale string) error {
+	engine, ok := getValidatorEngine()
+	if !ok {
+		return errors.New("初始化 validator 失败")
+	}
+	s.validate = engine
 
-	// 注册翻译器
-	initTranslator(validate, locale)
+	if err := s.ensureRules(); err != nil {
+		return err
+	}
+	s.ensureTagNameFunc()
+
+	trans, err := initTranslator(s.validate, locale)
+	if err != nil {
+		return err
+	}
+	s.trans = trans
+	s.translatorLocale = locale
+	return nil
+}
+
+func (s *validatorRuntimeState) ensureRules() error {
+	if s.rulesReady {
+		return nil
+	}
+	if err := initCustomRules(s.validate); err != nil {
+		return err
+	}
+	s.rulesReady = true
+	return nil
+}
+
+func (s *validatorRuntimeState) ensureTagNameFunc() {
+	if s.tagNameReady {
+		return
+	}
+	registerTagNameFunc(s.validate)
+	s.tagNameReady = true
 }
 
 // 获取验证器引擎
@@ -110,38 +159,39 @@ func RegexpValidator(fl validator.FieldLevel) bool {
 }
 
 // initCustomRules 注册自定义验证规则
-func initCustomRules(validate *validator.Validate) {
+func initCustomRules(validate *validator.Validate) error {
 	// 注册手机号规则（使用预编译的正则表达式）
 	err := validate.RegisterValidation("phone_number", func(fl validator.FieldLevel) bool {
 		return phoneNumberRegex.MatchString(fl.Field().String())
 	})
 	if err != nil {
-		panic("registration of phone_number rule failed")
+		return errors.New("注册 phone_number 校验规则失败")
 	}
 
 	// 注册 required_if_exist 规则
 	err = validate.RegisterValidation("required_if_exist", requiredIf)
 	if err != nil {
-		panic("registration of required_if_exist rule failed")
+		return errors.New("注册 required_if_exist 校验规则失败")
 	}
 
 	// 注册通用正则验证规则
 	err = validate.RegisterValidation("regexp", RegexpValidator)
 	if err != nil {
-		panic("registration of regexp rule failed")
+		return errors.New("注册 regexp 校验规则失败")
 	}
+	return nil
 }
 
 // initTranslator 初始化语言翻译器
-func initTranslator(validate *validator.Validate, locale string) {
+func initTranslator(validate *validator.Validate, locale string) (ut.Translator, error) {
 	zhT := zh.New() // 中文翻译器
 	enT := en.New() // 英文翻译器
 	uni := ut.New(enT, zhT, enT)
 
 	var ok bool
-	trans, ok = uni.GetTranslator(locale)
+	trans, ok := uni.GetTranslator(locale)
 	if !ok {
-		panic("Initialize a language not supported by the validator")
+		return nil, fmt.Errorf("validator 不支持语言 %s", locale)
 	}
 
 	var err error
@@ -156,13 +206,14 @@ func initTranslator(validate *validator.Validate, locale string) {
 	}
 
 	if err != nil {
-		panic("Failed to register translator when initializing validator")
+		return nil, fmt.Errorf("注册默认翻译器失败: %w", err)
 	}
 
 	// 注册自定义翻译
-	if err := customRegisTranslation(); err != nil {
-		panic("Failed to register custom translations")
+	if err := customRegisTranslation(validate, trans); err != nil {
+		return nil, fmt.Errorf("注册自定义翻译失败: %w", err)
 	}
+	return trans, nil
 }
 
 // ResponseError 处理错误并返回给前端
@@ -178,7 +229,7 @@ func ResponseError(c *gin.Context, err error) {
 // handleValidationError 处理验证错误
 // 优化：只处理第一个错误，提前返回
 func handleValidationError(c *gin.Context, errs validator.ValidationErrors) {
-	fields := errs.Translate(trans)
+	fields := errs.Translate(validatorRuntime.trans)
 	// fields 是 map[string]string 类型，遍历获取第一个错误
 	for _, err := range fields {
 		r.Resp().FailCode(c, errcode.InvalidParameter, err)
@@ -198,6 +249,7 @@ var (
 	typeConvertRegex = regexp.MustCompile(typeConvertErrorPattern)
 )
 
+// handleBindingError 将绑定错误转换为面向前端的校验响应。
 func handleBindingError(c *gin.Context, err error) {
 	var typeErr *json.UnmarshalTypeError
 	var syntaxErr *json.SyntaxError
@@ -224,11 +276,9 @@ func handleBindingError(c *gin.Context, err error) {
 	}
 }
 
-// 判断是否为 EOF 错误，提升匹配逻辑的健壮性
-// 优化：避免不必要的字符串分配
+// isEOFError 判断绑定错误是否属于 multipart EOF 场景。
 func isEOFError(errStr string) bool {
-	// 快速检查：如果字符串为空或太长，直接返回 false
-	if len(errStr) == 0 || len(errStr) > 30 {
+	if len(errStr) == 0 {
 		return false
 	}
 	// 只对可能包含空格的情况进行 TrimSpace
@@ -238,6 +288,7 @@ func isEOFError(errStr string) bool {
 	return eofRegex.MatchString(errStr)
 }
 
+// isConvertError 判断绑定错误是否属于类型转换失败场景。
 func isConvertError(errStr string) bool {
 	// 快速检查：如果字符串为空或很短，直接返回 false
 	if len(errStr) == 0 {
@@ -358,18 +409,18 @@ type translation struct {
 }
 
 // customRegisTranslation 自定义校验错误信息
-func customRegisTranslation() error {
+func customRegisTranslation(validate *validator.Validate, trans ut.Translator) error {
 	translations := []translation{
 		{tag: "phone_number", translation: "{0}格式不正确", override: false},
 		{tag: "required_if_exist", translation: "{0}字段必填", override: false},
 		{tag: "regexp", translation: "{0}字段规则不匹配", override: false},
 	}
 
-	return registerTranslation(translations)
+	return registerTranslation(validate, trans, translations)
 }
 
 // registerTranslation 注册翻译
-func registerTranslation(translations []translation) error {
+func registerTranslation(validate *validator.Validate, trans ut.Translator, translations []translation) error {
 	for _, t := range translations {
 		var regFunc validator.RegisterTranslationsFunc
 		if t.customRegisFunc != nil {

@@ -8,25 +8,18 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 )
 
 func TestPermissionEdit(t *testing.T) {
-	route := ts.URL + "/admin/v1/permission/edit"
-
 	body := `{"id":10,"name":"ping","description":"服务心跳检测接口","method":"GET","route":"/ping","is_auth":0,"sort":100}`
-	resp := postRequest(route, &body)
+	resp := anonymousPostRequest("/admin/v1/permission/update", &body)
 
-	assert.Nil(t, resp.Error)
-	assert.Equal(t, http.StatusOK, resp.Response.StatusCode)
-	result := new(response.Result)
-	err := resp.ParseJson(result)
-	assert.Nil(t, err)
-	assert.Equal(t, e.SUCCESS, result.Code)
+	assert.Equal(t, http.StatusOK, resp.Code)
+	result := decodeResult(t, resp)
+	assert.Equal(t, e.NotLogin, result.Code)
 }
 
 func TestPermissionList(t *testing.T) {
-	route := ts.URL + "/admin/v1/permission/list"
 	queryParams := &url.Values{}
 	queryParams.Set("page", "1")
 	queryParams.Set("per_page", "1")
@@ -34,12 +27,35 @@ func TestPermissionList(t *testing.T) {
 	queryParams.Set("method", "GET")
 	queryParams.Set("route", "/ping")
 	queryParams.Set("is_auth", "1")
-	resp := getRequest(route, queryParams)
+	resp := anonymousGetRequest("/admin/v1/permission/list", queryParams)
 
-	assert.Nil(t, resp.Error)
-	assert.Equal(t, http.StatusOK, resp.Response.StatusCode)
-	result := new(response.Result)
-	err := resp.ParseJson(result)
-	assert.Nil(t, err)
+	assert.Equal(t, http.StatusOK, resp.Code)
+	result := decodeResult(t, resp)
+	assert.Equal(t, e.NotLogin, result.Code)
+}
+
+func TestPermissionListWithAuthorization(t *testing.T) {
+	requireMySQL(t)
+
+	queryParams := &url.Values{}
+	queryParams.Set("page", "1")
+	queryParams.Set("per_page", "5")
+	queryParams.Set("method", "GET")
+
+	resp := getRequest("/admin/v1/permission/list", queryParams)
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	result := decodeResult(t, resp)
 	assert.Equal(t, e.SUCCESS, result.Code)
+}
+
+func TestPermissionUpdateValidationWithAuthorization(t *testing.T) {
+	requireMySQL(t)
+
+	body := `{}`
+	resp := postRequest("/admin/v1/permission/update", &body)
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	result := decodeResult(t, resp)
+	assert.Equal(t, e.InvalidParameter, result.Code)
 }

@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/model"
-	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
@@ -38,10 +37,12 @@ func (s *InitService) InitApiRoutes() error {
 	}
 
 	// 初始化验证器
-	validator.InitValidatorTrans("zh")
+	if err := validator.InitValidatorTrans("zh"); err != nil {
+		return fmt.Errorf("初始化验证器失败: %w", err)
+	}
 
-	// 设置路由（需要获取路由信息）
-	engine, apiMap := routers.SetRouters(true)
+	engine := routers.SetRouters()
+	apiMap := routers.CollectAdminRouteMeta()
 
 	// 构建API数据
 	apiData := s.buildApiData(engine, apiMap)
@@ -50,43 +51,32 @@ func (s *InitService) InitApiRoutes() error {
 	if err := s.saveApiData(apiData); err != nil {
 		return fmt.Errorf("保存API数据失败: %w", err)
 	}
+	if err := access.NewMenuAPIDefaultsService().Sync(); err != nil {
+		return fmt.Errorf("同步默认菜单接口关系失败: %w", err)
+	}
 
-	return nil
+	return access.NewSystemDefaultsService().Ensure()
 }
 
-// InitMenuApiMap 初始化菜单-API映射
-func (s *InitService) InitMenuApiMap() error {
+// RebuildUserPermissions 按数据库关系全量重建用户最终 API 权限。
+func (s *InitService) RebuildUserPermissions() error {
 	// 检查数据库连接
 	if err := s.checkDatabaseConnection(); err != nil {
 		return err
 	}
 
-	// 执行初始化
-	return s.buildMenuApiMap()
-}
-
-// checkDatabaseConnection 检查数据库连接
-func (s *InitService) checkDatabaseConnection() error {
-	db := data.MysqlDB()
-	if db == nil {
-		return fmt.Errorf("数据库连接未初始化，请检查配置")
+	// 在方案A中，菜单-API 关系以数据库关系表为准，这里改为全量重建用户最终 API 权限
+	if err := access.NewMenuAPIDefaultsService().Sync(); err != nil {
+		return err
 	}
-
-	// 测试数据库连接
-	sqlDB, err := db.DB()
-	if err != nil {
-		return fmt.Errorf("获取数据库连接失败: %w", err)
+	if err := access.NewSystemDefaultsService().Ensure(); err != nil {
+		return err
 	}
-
-	if err := sqlDB.Ping(); err != nil {
-		return fmt.Errorf("数据库连接测试失败: %w", err)
-	}
-
-	return nil
+	return access.NewUserPermissionSyncService().SyncAllUsers()
 }
 
 // buildApiData 构建API数据
-func (s *InitService) buildApiData(engine *gin.Engine, apiMap routers.ApiMap) []map[string]any {
+func (s *InitService) buildApiData(engine *gin.Engine, apiMap routers.RouteMetaMap) []map[string]any {
 	date := time.Now().Format(time.DateTime)
 	apiData := make([]map[string]any, 0, len(engine.Routes()))
 
@@ -99,7 +89,7 @@ func (s *InitService) buildApiData(engine *gin.Engine, apiMap routers.ApiMap) []
 }
 
 // extractApiInfo 提取API信息
-func (s *InitService) extractApiInfo(route gin.RouteInfo, apiMap routers.ApiMap, date string) map[string]any {
+func (s *InitService) extractApiInfo(route gin.RouteInfo, apiMap routers.RouteMetaMap, date string) map[string]any {
 	code := utils.MD5(route.Method + "_" + route.Path)
 	name := route.Path
 	isAuth := defaultIsAuth
@@ -146,32 +136,26 @@ func (s *InitService) extractHandlerName(handler string) string {
 func (s *InitService) saveApiData(apiData []map[string]any) error {
 	apiModel := model.NewApi()
 	date := time.Now().Format(time.DateTime)
-	return apiModel.InitRegisters(apiData, date)
+	if err := apiModel.InitRegisters(apiData, date); err != nil {
+		return err
+	}
+	return access.NewApiRouteCacheService().RefreshCache()
 }
 
-// buildMenuApiMap 构建菜单API关联表，根据casbin_rule表自动生成关联
-func (s *InitService) buildMenuApiMap() error {
+// checkDatabaseConnection 检查数据库连接
+func (s *InitService) checkDatabaseConnection() error {
 	db := data.MysqlDB()
+	if db == nil {
+		return fmt.Errorf("数据库连接未初始化，请检查配置")
+	}
 
-	// 执行 SQL：从 casbin_rule 表中提取菜单ID和API的route+method来关联
-	sql := `INSERT INTO a_menu_api_map (menu_id, api_id, created_at, updated_at)
-			SELECT 
-				CAST(SUBSTRING_INDEX(c.v0, ':', -1) AS UNSIGNED) AS menu_id,
-				a.id AS api_id,
-				NOW() AS created_at,
-				NOW() AS updated_at
-			FROM casbin_rule c
-			INNER JOIN a_api a ON a.route = c.v1 AND a.method = c.v2 AND a.deleted_at = 0
-			INNER JOIN a_menu m ON m.id = CAST(SUBSTRING_INDEX(c.v0, ':', -1) AS UNSIGNED) AND m.deleted_at = 0
-			WHERE c.ptype = 'p' 
-			  AND c.v0 LIKE 'menu:%'
-			  AND c.v1 != ''
-			  AND c.v2 != ''
-			ON DUPLICATE KEY UPDATE updated_at = NOW()`
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("获取数据库连接失败: %w", err)
+	}
 
-	if err := db.Exec(sql).Error; err != nil {
-		log.Logger.Error("构建菜单API映射失败", zap.Error(err))
-		return err
+	if err := sqlDB.Ping(); err != nil {
+		return fmt.Errorf("数据库连接测试失败: %w", err)
 	}
 
 	return nil

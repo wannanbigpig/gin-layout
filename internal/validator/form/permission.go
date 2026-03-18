@@ -1,19 +1,35 @@
 package form
 
-type EditPermission struct {
-	Id          uint   `form:"id" json:"id" binding:"required"`                                                                      // id
-	Name        string `form:"name" json:"name" binding:"required,max=60"`                                                           // 权限名称
-	Description string `form:"description" json:"desc" binding:"omitempty"`                                                          // 描述
-	Method      string `form:"method" json:"method" binding:"omitempty,oneof=GET POST PUT DELETE OPTIONS HEAD PATCH" label:"接口请求方法"` // 接口请求方法
-	Route       string `form:"route" json:"route" binding:"omitempty"`                                                               // 接口路由
-	Func        string `form:"func" json:"func" binding:"omitempty"`                                                                 // 接口方法
-	FuncPath    string `form:"func_path" json:"func_path" binding:"omitempty"`                                                       // 接口方法
-	IsAuth      *int8  `form:"is_auth" json:"is_auth" binding:"required,oneof=0 1"`                                                  // 接口方法
-	Sort        int32  `form:"sort" json:"sort" binding:"required"`                                                                  // 排序
+type apiBasePayload struct {
+	Name        string `form:"name" json:"name" binding:"required,max=60"`          // 权限名称
+	Description string `form:"description" json:"desc" binding:"omitempty"`         // 描述
+	IsAuth      *int8  `form:"is_auth" json:"is_auth" binding:"required,oneof=0 1"` // 接口方法
+	Sort        int32  `form:"sort" json:"sort" binding:"required"`                 // 排序
 }
 
-func NewEditApiForm() *EditPermission {
-	return &EditPermission{}
+type CreatePermission struct {
+	apiBasePayload
+	Method   string `form:"method" json:"method" binding:"omitempty,oneof=GET POST PUT DELETE OPTIONS HEAD PATCH" label:"接口请求方法"` // 接口请求方法
+	Route    string `form:"route" json:"route" binding:"omitempty"`                                                               // 接口路由
+	Func     string `form:"func" json:"func" binding:"omitempty"`                                                                 // 接口方法
+	FuncPath string `form:"func_path" json:"func_path" binding:"omitempty"`                                                       // 接口方法
+}
+
+func NewCreateApiForm() *CreatePermission {
+	return &CreatePermission{}
+}
+
+type UpdatePermission struct {
+	Id uint `form:"id" json:"id" binding:"required"` // id
+	apiBasePayload
+}
+
+func NewUpdateApiForm() *UpdatePermission {
+	return &UpdatePermission{}
+}
+
+func (f *UpdatePermission) GetIDPointer() *uint {
+	return &f.Id
 }
 
 type ListPermission struct {
@@ -26,6 +42,7 @@ type ListPermission struct {
 	IsEffective *int8  `form:"is_effective" json:"is_effective" binding:"omitempty,oneof=0 1"`                                       // 是否授权
 }
 
+// NewListApiQuery 创建 API 列表查询表单。
 func NewListApiQuery() *ListPermission {
 	return &ListPermission{}
 }

@@ -11,8 +11,9 @@ var (
 		Use:     "demo",
 		Short:   "这是一个demo",
 		Example: "go-layout command demo",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			demo()
+			return nil
 		},
 	}
 	test string

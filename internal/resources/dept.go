@@ -7,8 +7,11 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
 
+// DeptResources 表示部门树节点的响应结构。
 type DeptResources struct {
 	ID          uint             `json:"id"`
+	Code        string           `json:"code"`
+	IsSystem    uint8            `json:"is_system"`
 	Pid         uint             `json:"pid"`
 	Name        string           `json:"name"`
 	Description string           `json:"description"`
@@ -22,27 +25,34 @@ type DeptResources struct {
 	UpdatedAt   utils.FormatDate `json:"updated_at"`
 }
 
+// SetChildren 设置部门节点的子节点。
 func (r *DeptResources) SetChildren(children []*DeptResources) {
 	r.Children = children
 }
+
+// GetID 返回当前部门节点 ID。
 func (r *DeptResources) GetID() uint {
 	return r.ID
 }
+
+// GetPID 返回当前部门节点父级 ID。
 func (r *DeptResources) GetPID() uint {
 	return r.Pid
 }
 
+// DeptTreeTransformer 负责把部门模型转换为树形响应结构。
 type DeptTreeTransformer struct {
 	TreeResource[*model.Department, *DeptResources]
 }
 
+// SetCustomFields 填充部门资源的扩展字段。
 func (r *DeptResources) SetCustomFields(data *model.Department) {
-	// 初始化 RoleList 为空切片，确保字段总是存在
 	r.RoleList = []uint{}
 	if data == nil {
 		return
 	}
-	// 如果 RoleList 有数据，则提取 RoleId
+	r.Code = data.Code
+	r.IsSystem = data.IsSystem
 	if len(data.RoleList) > 0 {
 		r.RoleList = lo.Map(data.RoleList, func(m model.DeptRoleMap, _ int) uint {
 			return m.RoleId
@@ -50,6 +60,7 @@ func (r *DeptResources) SetCustomFields(data *model.Department) {
 	}
 }
 
+// NewDeptTreeTransformer 创建部门树资源转换器。
 func NewDeptTreeTransformer() DeptTreeTransformer {
 	return DeptTreeTransformer{
 		TreeResource: TreeResource[*model.Department, *DeptResources]{

@@ -14,8 +14,9 @@ var (
 		Use:     "version",
 		Short:   "Get version info",
 		Example: "go-layout version",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Println(global.Version)
+			return nil
 		},
 	}
 )

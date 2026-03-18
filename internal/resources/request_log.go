@@ -5,7 +5,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
 
-// RequestLogBaseResources 请求日志基础资源（公共字段）
+// RequestLogBaseResources 表示请求日志的公共响应字段。
 type RequestLogBaseResources struct {
 	ID                  uint             `json:"id"`
 	RequestID           string           `json:"request_id"`            // 请求唯一标识
@@ -23,12 +23,12 @@ type RequestLogBaseResources struct {
 	CreatedAt           utils.FormatDate `json:"created_at"`            // 创建时间
 }
 
-// RequestLogListResources 请求日志列表资源（简化版，不包含大字段）
+// RequestLogListResources 表示请求日志列表项。
 type RequestLogListResources struct {
 	RequestLogBaseResources
 }
 
-// RequestLogResources 请求日志详情资源
+// RequestLogResources 表示请求日志详情响应。
 type RequestLogResources struct {
 	RequestLogBaseResources
 	JwtID          string           `json:"jwt_id"`          // 请求授权的jwtId
@@ -43,12 +43,12 @@ type RequestLogResources struct {
 	UpdatedAt      utils.FormatDate `json:"updated_at"`      // 更新时间
 }
 
-// RequestLogTransformer 请求日志资源转换器
+// RequestLogTransformer 负责请求日志资源转换。
 type RequestLogTransformer struct {
 	BaseResources[*model.RequestLogs, *RequestLogResources]
 }
 
-// NewRequestLogTransformer 实例化请求日志资源转换器
+// NewRequestLogTransformer 创建请求日志资源转换器。
 func NewRequestLogTransformer() RequestLogTransformer {
 	return RequestLogTransformer{
 		BaseResources: BaseResources[*model.RequestLogs, *RequestLogResources]{
@@ -59,7 +59,7 @@ func NewRequestLogTransformer() RequestLogTransformer {
 	}
 }
 
-// buildRequestLogBaseResources 构建基础资源（公共字段）
+// buildRequestLogBaseResources 提取请求日志公共字段。
 func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResources {
 	return RequestLogBaseResources{
 		ID:                  data.ID,
@@ -79,7 +79,7 @@ func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResourc
 	}
 }
 
-// ToStruct 转换为单个资源（详情）
+// ToStruct 将请求日志模型转换为详情响应。
 func (r RequestLogTransformer) ToStruct(data *model.RequestLogs) *RequestLogResources {
 	base := buildRequestLogBaseResources(data)
 	return &RequestLogResources{
@@ -97,7 +97,7 @@ func (r RequestLogTransformer) ToStruct(data *model.RequestLogs) *RequestLogReso
 	}
 }
 
-// ToCollection 转换为集合资源（列表，不包含大字段）
+// ToCollection 将请求日志模型集合转换为分页响应。
 func (r RequestLogTransformer) ToCollection(page, perPage int, total int64, data []*model.RequestLogs) *Collection {
 	response := make([]any, 0, len(data))
 	for _, v := range data {
@@ -109,7 +109,7 @@ func (r RequestLogTransformer) ToCollection(page, perPage int, total int64, data
 	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
 }
 
-// getOperationStatusName 获取操作状态名称
+// getOperationStatusName 将业务码映射为结果名称。
 func getOperationStatusName(code int) string {
 	if code == 0 {
 		return "成功"

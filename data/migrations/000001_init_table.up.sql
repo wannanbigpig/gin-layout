@@ -1,7 +1,7 @@
 BEGIN;
 
 -- 创建管理员表
-CREATE TABLE IF NOT EXISTS `a_admin_user`
+CREATE TABLE IF NOT EXISTS `admin_user`
 (
     `id`                int unsigned                                                 NOT NULL AUTO_INCREMENT,
     `nickname`          varchar(30)                                                  NOT NULL DEFAULT '' COMMENT '昵称',
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS `a_admin_user`
   COLLATE = utf8mb4_0900_ai_ci COMMENT ='后台管理用户表';
 
 -- 创建权限分组表
-CREATE TABLE IF NOT EXISTS `a_api_group`
+CREATE TABLE IF NOT EXISTS `api_group`
 (
     `id`         int unsigned                                          NOT NULL AUTO_INCREMENT,
     `pid`        int unsigned                                          NOT NULL DEFAULT '0' COMMENT '上级组织id',
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS `a_api_group`
   ROW_FORMAT = DYNAMIC COMMENT ='权限分组表';
 
 -- 创建权限表
-CREATE TABLE IF NOT EXISTS `a_api`
+CREATE TABLE IF NOT EXISTS `api`
 (
     `id`           int unsigned                                           NOT NULL AUTO_INCREMENT,
     `code`         varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '权限唯一code码',
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS `a_api`
   ROW_FORMAT = DYNAMIC COMMENT ='权限表';
 
 -- 创建菜单表
-CREATE TABLE IF NOT EXISTS `a_menu`
+CREATE TABLE IF NOT EXISTS `menu`
 (
     `id`                int                                                    NOT NULL AUTO_INCREMENT,
     `icon`              varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '图标',
@@ -119,9 +119,11 @@ CREATE TABLE IF NOT EXISTS `a_menu`
   ROW_FORMAT = DYNAMIC COMMENT ='菜单表';
 
 -- 创建组织表
-CREATE TABLE IF NOT EXISTS `a_department`
+CREATE TABLE IF NOT EXISTS `department`
 (
     `id`          int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `code`        varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '部门业务编码',
+    `is_system`   tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否系统保留对象,1是 0否',
     `pid`         int unsigned                                           NOT NULL DEFAULT '0' COMMENT '上级部门id',
     `pids`        varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
     `name`        varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '部门名称',
@@ -134,7 +136,9 @@ CREATE TABLE IF NOT EXISTS `a_department`
     `updated_at`  datetime                                                        DEFAULT NULL,
     `deleted_at`  int                                                    NOT NULL DEFAULT '0' COMMENT '删除时间戳',
     PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_code_deleted_at` (`code`, `deleted_at`),
     KEY `idx_name_deleted_at` (`name`, `deleted_at`),
+    KEY `idx_is_system_deleted_at` (`is_system`, `deleted_at`),
     KEY `idx_pid_deleted_at_sort_id` (`pid`, `deleted_at`, `sort`, `id`),
     KEY `idx_pids_deleted_at` (`pids`, `deleted_at`)
 ) ENGINE = InnoDB
@@ -143,9 +147,11 @@ CREATE TABLE IF NOT EXISTS `a_department`
   ROW_FORMAT = DYNAMIC COMMENT ='部门表';
 
 -- 创建角色表
-CREATE TABLE IF NOT EXISTS `a_role`
+CREATE TABLE IF NOT EXISTS `role`
 (
     `id`          int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `code`        varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '角色业务编码',
+    `is_system`   tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否系统保留对象,1是 0否',
     `pid`         int unsigned                                           NOT NULL DEFAULT '0' COMMENT '上级id',
     `pids`        varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '上级id路径链',
     `name`        varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '角色名称',
@@ -158,7 +164,9 @@ CREATE TABLE IF NOT EXISTS `a_role`
     `updated_at`  datetime                                                        DEFAULT NULL,
     `deleted_at`  int                                                    NOT NULL DEFAULT '0' COMMENT '删除时间戳',
     PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_code_deleted_at` (`code`, `deleted_at`),
     KEY `idx_name_deleted_at` (`name`, `deleted_at`),
+    KEY `idx_is_system_deleted_at` (`is_system`, `deleted_at`),
     KEY `idx_pid_deleted_at_sort_id` (`pid`, `deleted_at`, `sort`, `id`),
     KEY `idx_status_deleted_at` (`status`, `deleted_at`),
     KEY `idx_pids_deleted_at` (`pids`, `deleted_at`)
@@ -168,11 +176,11 @@ CREATE TABLE IF NOT EXISTS `a_role`
   ROW_FORMAT = DYNAMIC COMMENT ='角色表';
 
 -- 创建用户部门映射表
-CREATE TABLE IF NOT EXISTS `a_admin_user_department_map`
+CREATE TABLE IF NOT EXISTS `admin_user_department_map`
 (
     `id`         int unsigned NOT NULL AUTO_INCREMENT,
     `uid`        int unsigned NOT NULL DEFAULT '0' COMMENT 'admin_users表id',
-    `dept_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '部门id，a_department表id',
+    `dept_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '部门id，department表id',
     `is_admin`   tinyint      NOT NULL DEFAULT '0' COMMENT '是否管理员，1是，0否',
     `created_at` datetime              DEFAULT NULL,
     `updated_at` datetime              DEFAULT NULL,
@@ -186,7 +194,7 @@ CREATE TABLE IF NOT EXISTS `a_admin_user_department_map`
   ROW_FORMAT = DYNAMIC COMMENT ='用户部门映射表';
 
 -- 创建菜单权限映射表
-CREATE TABLE IF NOT EXISTS `a_menu_api_map`
+CREATE TABLE IF NOT EXISTS `menu_api_map`
 (
     `id`         int unsigned NOT NULL AUTO_INCREMENT,
     `menu_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '菜单id,对应menu表id',
@@ -202,27 +210,12 @@ CREATE TABLE IF NOT EXISTS `a_menu_api_map`
   COLLATE = utf8mb4_bin
   ROW_FORMAT = DYNAMIC COMMENT ='菜单权限映射表';
 
--- 初始化菜单API关联表，根据casbin_rule表自动生成关联（不依赖ID）
--- 从casbin_rule表中提取菜单ID（从v0字段的'menu:10'格式中提取10）和API的route+method来关联
--- 请先执行 ‘go-layout server -R’ 生成a_api表数据后执行下面的sql
-
--- INSERT INTO `a_menu_api_map` (`menu_id`, `api_id`, `created_at`, `updated_at`)
--- SELECT 
---     CAST(SUBSTRING_INDEX(c.v0, ':', -1) AS UNSIGNED) AS menu_id,
---     a.id AS api_id,
---     NOW() AS created_at,
---     NOW() AS updated_at
--- FROM `casbin_rule` c
--- INNER JOIN `a_api` a ON a.route = c.v1 AND a.method = c.v2 AND a.deleted_at = 0
--- INNER JOIN `a_menu` m ON m.id = CAST(SUBSTRING_INDEX(c.v0, ':', -1) AS UNSIGNED) AND m.deleted_at = 0
--- WHERE c.ptype = 'p' 
---   AND c.v0 LIKE 'menu:%'
---   AND c.v1 != ''
---   AND c.v2 != ''
--- ON DUPLICATE KEY UPDATE `updated_at` = NOW();
+-- menu_api_map 维护菜单与 API 的静态关系。
+-- api 表由 `go-layout command api-route` 或 `init-system` 写入后，
+-- 默认菜单与 API 的初始绑定由 Go 初始化逻辑幂等补齐。
 
 -- 创建角色菜单映射表
-CREATE TABLE IF NOT EXISTS `a_role_menu_map`
+CREATE TABLE IF NOT EXISTS `role_menu_map`
 (
     `id`         int unsigned NOT NULL AUTO_INCREMENT,
     `role_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '角色id,对应roles表id',
@@ -239,7 +232,7 @@ CREATE TABLE IF NOT EXISTS `a_role_menu_map`
   ROW_FORMAT = DYNAMIC COMMENT ='角色菜单映射表';
 
 -- 创建用户菜单映射表
-CREATE TABLE IF NOT EXISTS `a_admin_user_menu_map`
+CREATE TABLE IF NOT EXISTS `admin_user_menu_map`
 (
     `id`         int unsigned NOT NULL AUTO_INCREMENT,
     `uid`        int unsigned NOT NULL DEFAULT '0' COMMENT 'uid,admin_users表id',
@@ -256,10 +249,10 @@ CREATE TABLE IF NOT EXISTS `a_admin_user_menu_map`
   ROW_FORMAT = DYNAMIC COMMENT ='用户菜单映射表';
 
 -- 创建部门角色映射表
-CREATE TABLE IF NOT EXISTS `a_department_role_map`
+CREATE TABLE IF NOT EXISTS `department_role_map`
 (
     `id`         int unsigned NOT NULL AUTO_INCREMENT,
-    `dept_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '部门id,对应a_department表id',
+    `dept_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '部门id,对应department表id',
     `role_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '角色id,对应roles表id',
     `created_at` datetime              DEFAULT NULL,
     `updated_at` datetime              DEFAULT NULL,
@@ -273,7 +266,7 @@ CREATE TABLE IF NOT EXISTS `a_department_role_map`
   ROW_FORMAT = DYNAMIC COMMENT ='部门角色映射表';
 
 -- 创建用户角色映射表
-CREATE TABLE IF NOT EXISTS `a_admin_user_role_map`
+CREATE TABLE IF NOT EXISTS `admin_user_role_map`
 (
     `id`         int unsigned NOT NULL AUTO_INCREMENT,
     `uid`        int unsigned NOT NULL DEFAULT '0' COMMENT 'uid,admin_users表id',
@@ -290,7 +283,7 @@ CREATE TABLE IF NOT EXISTS `a_admin_user_role_map`
   ROW_FORMAT = DYNAMIC COMMENT ='用户角色映射表';
 
 -- 创建管理员登录日志表
-CREATE TABLE IF NOT EXISTS `a_admin_login_logs`
+CREATE TABLE IF NOT EXISTS `admin_login_logs`
 (
     `id`                 bigint unsigned  NOT NULL AUTO_INCREMENT,
     `uid`                int unsigned     NOT NULL DEFAULT '0' COMMENT '用户ID（登录失败时为0）',
@@ -331,7 +324,7 @@ CREATE TABLE IF NOT EXISTS `a_admin_login_logs`
   COLLATE = utf8mb4_unicode_ci COMMENT ='管理员登录日志表';
 
 -- 创建请求日志表
-CREATE TABLE IF NOT EXISTS `a_request_logs`
+CREATE TABLE IF NOT EXISTS `request_logs`
 (
     `id`              bigint(20)   NOT NULL AUTO_INCREMENT COMMENT '日志ID',
     `request_id`      varchar(64)  NOT NULL DEFAULT '' COMMENT '请求唯一标识',
@@ -385,7 +378,7 @@ CREATE TABLE IF NOT EXISTS `casbin_rule`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_0900_ai_ci COMMENT ='casbin_rule表';
 
-CREATE TABLE IF NOT EXISTS `a_upload_files`
+CREATE TABLE IF NOT EXISTS `upload_files`
 (
     `id`          int unsigned NOT NULL AUTO_INCREMENT,
     `uid`         int unsigned NOT NULL DEFAULT '0' COMMENT '用户ID',

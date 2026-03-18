@@ -2,11 +2,13 @@ package response
 
 import (
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
@@ -24,7 +26,7 @@ func NewResult() *Result {
 	return &Result{
 		Code:      0,
 		Msg:       "",
-		Data:      nil,
+		Data:      emptyObject(),
 		Cost:      "",
 		RequestId: "",
 	}
@@ -95,12 +97,15 @@ type defaultRes struct {
 
 // WithData 设置返回data数据
 func (r *Response) WithData(data any) *Response {
-	switch v := data.(type) {
-	case string, int, bool:
-		r.result.Data = &defaultRes{Result: v}
-	default:
-		r.result.Data = data
+	if data == nil {
+		r.result.Data = emptyObject()
+		return r
 	}
+	if isScalarData(data) {
+		r.result.Data = &defaultRes{Result: data}
+		return r
+	}
+	r.result.Data = data
 	return r
 }
 
@@ -110,18 +115,16 @@ func (r *Response) SetMessage(message string) *Response {
 	return r
 }
 
-var ErrorText = errors.NewErrorText(config.Config.Language)
-
 // json 返回 gin 框架的 JSON 响应
 func (r *Response) json(c *gin.Context) {
 	// 如果消息为空，使用错误码对应的默认消息
 	if r.result.Msg == "" {
-		r.result.Msg = ErrorText.Text(r.result.Code)
+		r.result.Msg = errors.NewErrorText(config.GetConfig().Language).Text(r.result.Code)
 	}
 
 	// 计算请求耗时
-	r.result.Cost = time.Since(c.GetTime("requestStartTime")).String()
-	r.result.RequestId = c.GetString("requestId")
+	r.result.Cost = time.Since(c.GetTime(global.ContextKeyRequestStartTime)).String()
+	r.result.RequestId = c.GetString(global.ContextKeyRequestID)
 	c.AbortWithStatusJSON(r.httpCode, r.result)
 }
 
@@ -150,4 +153,26 @@ func Fail(c *gin.Context, code int, message string, data ...any) {
 		return
 	}
 	Resp().Fail(c, code, message)
+}
+
+func emptyObject() map[string]any {
+	return map[string]any{}
+}
+
+func isScalarData(data any) bool {
+	value := reflect.ValueOf(data)
+	if !value.IsValid() {
+		return false
+	}
+
+	switch value.Kind() {
+	case reflect.Bool,
+		reflect.String,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64:
+		return true
+	default:
+		return false
+	}
 }

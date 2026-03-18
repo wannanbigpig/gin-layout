@@ -16,26 +16,26 @@ import (
 const (
 	msgProcessingComplete     = "Processing complete."
 	msgFailedToSaveRoute      = "Failed to save the initial route data to the routing table."
-	msgMenuApiMapComplete     = "Menu-API mapping initialization complete."
-	msgFailedToInitMenuApiMap = "Failed to initialize menu-API mapping."
+	msgUserPermissionComplete = "User API permissions rebuilt successfully."
+	msgFailedToRebuildPerms   = "Failed to rebuild final user API permissions."
 )
 
 var (
 	ApiRouteCmd = &cobra.Command{
 		Use:   "api-route",
 		Short: "Initialize API route table",
-		Long:  "This command scans all defined API routes in the system and stores them in the a_api table for permission management and API documentation.",
+		Long:  "This command scans all defined API routes in the system and stores them in the api table for permission management and API documentation.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInitApiRoute()
 		},
 	}
 
-	MenuApiMapCmd = &cobra.Command{
-		Use:   "menu-api-map",
-		Short: "Initialize menu-API mapping table from casbin_rule table",
-		Long:  "This command initializes the a_menu_api_map table by extracting menu-API relationships from the casbin_rule table.",
+	RebuildUserPermissionsCmd = &cobra.Command{
+		Use:   "rebuild-user-permissions",
+		Short: "Rebuild final user API permissions from database relationships",
+		Long:  "This command rebuilds final user API permissions from database user, department, role, menu, and API relationships.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInitMenuApiMap()
+			return runRebuildUserPermissions()
 		},
 	}
 )
@@ -47,7 +47,7 @@ func init() {
 // runInitApiRoute 执行API路由表初始化
 func runInitApiRoute() error {
 	// 用户确认
-	if !confirmOperation("This command is used to obtain the defined API in the system and store it in the a_api table. Are you sure to perform the operation? [Y/N]: ") {
+	if !confirmOperation("This command is used to obtain the defined API in the system and store it in the api table. Are you sure to perform the operation? [Y/N]: ") {
 		fmt.Println("Operation cancelled.")
 		return nil
 	}
@@ -64,23 +64,23 @@ func runInitApiRoute() error {
 	return nil
 }
 
-// runInitMenuApiMap 执行菜单API映射初始化
-func runInitMenuApiMap() error {
+// runRebuildUserPermissions 执行用户最终 API 权限重建。
+func runRebuildUserPermissions() error {
 	// 用户确认
-	if !confirmOperation("This command is used to initialize the menu-API mapping table from casbin_rule table. Are you sure to perform the operation? [Y/N]: ") {
+	if !confirmOperation("This command rebuilds final user API permissions from database relationships. Are you sure to perform the operation? [Y/N]: ") {
 		fmt.Println("Operation cancelled.")
 		return nil
 	}
 
 	// 调用服务层方法
 	initService := system.NewInitService()
-	if err := initService.InitMenuApiMap(); err != nil {
-		log.Logger.Error(msgFailedToInitMenuApiMap, zap.Error(err))
-		fmt.Println(msgFailedToInitMenuApiMap)
+	if err := initService.RebuildUserPermissions(); err != nil {
+		log.Logger.Error(msgFailedToRebuildPerms, zap.Error(err))
+		fmt.Println(msgFailedToRebuildPerms)
 		return err
 	}
 
-	fmt.Println(msgMenuApiMapComplete)
+	fmt.Println(msgUserPermissionComplete)
 	return nil
 }
 

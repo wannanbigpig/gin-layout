@@ -21,7 +21,7 @@ type AdminUserResources struct {
 	Avatar           string           `json:"avatar"`              // 头像链接
 	CreatedAt        utils.FormatDate `json:"created_at"`          // 创建时间
 	UpdatedAt        utils.FormatDate `json:"updated_at"`          // 更新时间
-	Status           int8             `json:"status"`              // 状态（1启用/2禁用）
+	Status           uint8            `json:"status"`              // 状态（1启用/0禁用）
 	StatusName       string           `json:"status_name"`         // 状态名称
 	LastIp           string           `json:"last_ip"`             // 上次登录 IP
 	LastLogin        utils.FormatDate `json:"last_login"`          // 上次登录时间
@@ -35,6 +35,7 @@ type AdminUserTransformer struct {
 	BaseResources[*model.AdminUser, *AdminUserResources]
 }
 
+// SetCustomFields 填充管理员资源的映射字段和关联字段。
 func (r *AdminUserResources) SetCustomFields(data *model.AdminUser) {
 	// 初始化 RoleList 和 Departments 为空切片，确保字段总是存在
 	r.RoleList = []uint{}
@@ -84,7 +85,7 @@ func (AdminUserTransformer) ToCollection(page, perPage int, total int64, data []
 	emailRule := utils.NewEmailRule() // 邮箱脱敏规则
 
 	for _, v := range data {
-		deptSlice := make([]department, 0, len(data))
+		deptSlice := make([]department, 0, len(v.Department))
 		for _, d := range v.Department {
 			deptSlice = append(deptSlice, department{
 				ID:   d.ID,

@@ -12,8 +12,7 @@ func NewRoleListQuery() *RoleList {
 	return &RoleList{}
 }
 
-type EditRole struct {
-	Id          uint   `form:"id" json:"id" binding:"omitempty"`
+type rolePayload struct {
 	Name        string `form:"name" json:"name" binding:"required"`
 	Description string `form:"description" json:"description" binding:"omitempty"`
 	Status      uint8  `form:"status" json:"status"  binding:"omitempty,oneof=0 1"`
@@ -22,6 +21,23 @@ type EditRole struct {
 	MenuList    []uint `form:"menu_ids" json:"menu_list" binding:"omitempty"`
 }
 
-func NewEditRoleForm() *EditRole {
-	return &EditRole{}
+type CreateRole struct {
+	rolePayload
+}
+
+func NewCreateRoleForm() *CreateRole {
+	return &CreateRole{}
+}
+
+type UpdateRole struct {
+	Id uint `form:"id" json:"id" binding:"required"`
+	rolePayload
+}
+
+func NewUpdateRoleForm() *UpdateRole {
+	return &UpdateRole{}
+}
+
+func (f *UpdateRole) GetIDPointer() *uint {
+	return &f.Id
 }

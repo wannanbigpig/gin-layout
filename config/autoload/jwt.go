@@ -2,6 +2,7 @@ package autoload
 
 import "time"
 
+// JwtConfig 定义 JWT 相关配置。
 type JwtConfig struct {
 	TTL time.Duration `mapstructure:"ttl"`
 	// 默认0，不主动刷新 Token

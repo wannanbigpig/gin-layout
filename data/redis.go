@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -14,39 +15,99 @@ var (
 	redisDb        *redis.Client
 	redisOnce      sync.Once
 	redisInitError error
+	redisValue     atomic.Value
+	redisMu        sync.Mutex
 )
 
+type redisSlot struct {
+	client *redis.Client
+}
+
 func initRedis() error {
-	// 创建带超时的上下文
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	return reloadRedis(c.GetConfig())
+}
 
-	redisDb = redis.NewClient(&redis.Options{
-		Addr:     c.Config.Redis.Host + ":" + c.Config.Redis.Port,
-		Password: c.Config.Redis.Password,
-		DB:       c.Config.Redis.Database,
-	})
+func reloadRedis(cfg *c.Conf) error {
+	redisMu.Lock()
+	defer redisMu.Unlock()
 
-	_, err := redisDb.Ping(ctx).Result()
+	next, err := openRedis(cfg)
 	if err != nil {
-		_ = redisDb.Close() // 忽略关闭错误，但确保资源释放
-		redisDb = nil
 		return err
+	}
+	old := currentRedis()
+	redisDb = next
+	redisValue.Store(redisSlot{client: next})
+	redisInitError = nil
+	if old != nil {
+		_ = old.Close()
 	}
 	return nil
 }
 
+func openRedis(cfg *c.Conf) (*redis.Client, error) {
+	if cfg == nil || !cfg.Redis.Enable {
+		return nil, nil
+	}
+	// 创建带超时的上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Host + ":" + cfg.Redis.Port,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.Database,
+	})
+
+	_, err := client.Ping(ctx).Result()
+	if err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
 // RedisClient 返回 Redis 客户端和初始化错误
 func RedisClient() *redis.Client {
+	if client := currentRedis(); client != nil {
+		return client
+	}
 	if redisDb == nil {
 		redisOnce.Do(func() {
 			redisInitError = initRedis()
 		})
 	}
-	return redisDb
+	return currentRedis()
 }
 
 // GetRedisInitError 返回 Redis 初始化错误，供外部检查
 func GetRedisInitError() error {
 	return redisInitError
+}
+
+// ReloadRedis 重新加载 Redis 客户端。
+func ReloadRedis(cfg *c.Conf) error {
+	return reloadRedis(cfg)
+}
+
+// CloseRedis 关闭当前 Redis 客户端。
+func CloseRedis() error {
+	redisMu.Lock()
+	defer redisMu.Unlock()
+
+	current := currentRedis()
+	redisDb = nil
+	redisValue.Store(redisSlot{})
+	redisInitError = nil
+	if current == nil {
+		return nil
+	}
+	return current.Close()
+}
+
+func currentRedis() *redis.Client {
+	if slot, ok := redisValue.Load().(redisSlot); ok {
+		return slot.client
+	}
+	return redisDb
 }

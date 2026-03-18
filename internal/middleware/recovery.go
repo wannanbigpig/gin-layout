@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
@@ -37,6 +38,9 @@ func handlePanic(c *gin.Context, err interface{}) {
 
 	// 记录错误日志
 	logPanicError(c, errStr)
+
+	// 为 panic 请求补充数据库审计日志，避免绕过 CustomLogger 的落库流程。
+	go savePanicRequestLogToDB(c, errStr)
 
 	// 返回错误响应
 	sendErrorResponse(c, errStr)
@@ -66,8 +70,8 @@ func logPanicError(c *gin.Context, errStr string) {
 
 // buildPanicLogFields 构建 panic 日志字段
 func buildPanicLogFields(c *gin.Context, errStr string) []zap.Field {
-	cost := time.Since(c.GetTime("requestStartTime"))
-	requestID := c.GetString("requestId")
+	cost := time.Since(c.GetTime(global.ContextKeyRequestStartTime))
+	requestID := c.GetString(global.ContextKeyRequestID)
 
 	return []zap.Field{
 		zap.String("requestId", requestID),
