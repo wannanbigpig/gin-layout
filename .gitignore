@@ -27,5 +27,5 @@ tmp
 build/
 go-layout
 PROJECT_ARCHITECTURE.md
-.gocache/
-.go-test-cache/
+.gocache
+.go-test-cache
