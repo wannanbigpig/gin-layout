@@ -6,7 +6,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
-	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/admin"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -24,7 +24,7 @@ func NewAdminUserController() *AdminUserController {
 // GetUserInfo 获取当前登录用户基本信息
 func (api AdminUserController) GetUserInfo(c *gin.Context) {
 	uid := c.GetUint(global.ContextKeyUID)
-	result, err := access.NewAdminUserService().GetUserInfo(uid)
+	result, err := admin.NewAdminUserService().GetUserInfo(uid)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -41,7 +41,7 @@ func (api AdminUserController) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewAdminUserService().UpdateProfile(uid, params); err != nil {
+	if err := admin.NewAdminUserService().UpdateProfile(uid, params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -52,7 +52,7 @@ func (api AdminUserController) UpdateProfile(c *gin.Context) {
 // GetUserMenuInfo 获取当前登录用户权限信息
 func (api AdminUserController) GetUserMenuInfo(c *gin.Context) {
 	uid := c.GetUint(global.ContextKeyUID)
-	result, err := access.NewAdminUserService().GetUserMenuInfo(uid)
+	result, err := admin.NewAdminUserService().GetUserMenuInfo(uid)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -68,7 +68,7 @@ func (api AdminUserController) Edit(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewAdminUserService().Create(params); err != nil {
+	if err := admin.NewAdminUserService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -83,7 +83,7 @@ func (api AdminUserController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewAdminUserService().Create(params); err != nil {
+	if err := admin.NewAdminUserService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -98,7 +98,7 @@ func (api AdminUserController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewAdminUserService().Update(params); err != nil {
+	if err := admin.NewAdminUserService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -113,7 +113,7 @@ func (api AdminUserController) List(c *gin.Context) {
 		return
 	}
 
-	result := access.NewAdminUserService().List(params)
+	result := admin.NewAdminUserService().List(params)
 	api.Success(c, result)
 }
 
@@ -124,7 +124,7 @@ func (api AdminUserController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewAdminUserService().Delete(params.ID); err != nil {
+	if err := admin.NewAdminUserService().Delete(params.ID); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -139,7 +139,7 @@ func (api AdminUserController) BindRole(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewAdminUserService().BindRole(params); err != nil {
+	if err := admin.NewAdminUserService().BindRole(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -154,7 +154,7 @@ func (api AdminUserController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := access.NewAdminUserService().GetUserInfo(query.ID)
+	detail, err := admin.NewAdminUserService().GetUserInfo(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -194,7 +194,7 @@ func (api AdminUserController) getUserInfo(c *gin.Context) (*resources.AdminUser
 		return nil, err
 	}
 
-	result, err := access.NewAdminUserService().GetUserInfo(query.ID)
+	result, err := admin.NewAdminUserService().GetUserInfo(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return nil, err

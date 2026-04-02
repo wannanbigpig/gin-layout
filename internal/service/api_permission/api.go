@@ -1,12 +1,12 @@
-package access
+package api_permission
 
 import (
-	"strings"
-
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
@@ -55,15 +55,15 @@ func (s *ApiService) updateApi(apiModel *model.Api, params *form.UpdatePermissio
 	if err := apiModel.UpdateById(params.Id, data); err != nil {
 		return err
 	}
-	if err := NewApiRouteCacheService().RefreshCache(); err != nil {
+	if err := access.NewApiRouteCacheService().RefreshCache(); err != nil {
 		return err
 	}
-	return NewPermissionSyncCoordinator().SyncAll()
+	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByAPIs([]uint{params.Id})
 }
 
 // createApi 创建新 API 权限并刷新路由缓存与权限策略。
 func (s *ApiService) createApi(apiModel *model.Api, params *form.CreatePermission) error {
-	exists, err := apiModel.Exists("route =?", params.Route)
+	exists, err := apiModel.Exists("route = ? AND method = ?", params.Route, params.Method)
 	if err != nil {
 		return err
 	}
@@ -86,10 +86,10 @@ func (s *ApiService) createApi(apiModel *model.Api, params *form.CreatePermissio
 	if err := apiModel.Create(data); err != nil {
 		return err
 	}
-	if err := NewApiRouteCacheService().RefreshCache(); err != nil {
+	if err := access.NewApiRouteCacheService().RefreshCache(); err != nil {
 		return err
 	}
-	return NewPermissionSyncCoordinator().SyncAll()
+	return nil
 }
 
 // ListPage 分页查询 API 权限列表。
@@ -116,38 +116,23 @@ func (s *ApiService) ListPage(params *form.ListPermission) *resources.Collection
 
 // buildListCondition 构建 API 权限列表查询条件。
 func (s *ApiService) buildListCondition(params *form.ListPermission) (string, []any) {
-	var conditions []string
-	var args []any
-
+	qb := query_builder.New()
 	if params.Keyword != "" {
-		conditions = append(conditions, "(name like ? OR route like ? OR code = ?)")
-		args = append(args, "%"+params.Keyword+"%", "%"+params.Keyword+"%", params.Keyword)
+		qb.AddCondition("(name like ? OR route like ? OR code = ?)", "%"+params.Keyword+"%", "%"+params.Keyword+"%", params.Keyword)
 	}
 
-	if params.Name != "" {
-		conditions = append(conditions, "name like ?")
-		args = append(args, "%"+params.Name+"%")
-	}
+	qb.AddLike("name", params.Name).
+		AddEq("method", emptyToNil(params.Method)).
+		AddLike("route", params.Route).
+		AddEq("is_auth", params.IsAuth).
+		AddEq("is_effective", params.IsEffective)
 
-	if params.Method != "" {
-		conditions = append(conditions, "method = ?")
-		args = append(args, params.Method)
-	}
+	return qb.Build()
+}
 
-	if params.Route != "" {
-		conditions = append(conditions, "route like ?")
-		args = append(args, "%"+params.Route+"%")
+func emptyToNil(value string) any {
+	if value == "" {
+		return nil
 	}
-
-	if params.IsAuth != nil {
-		conditions = append(conditions, "is_auth = ?")
-		args = append(args, params.IsAuth)
-	}
-
-	if params.IsEffective != nil {
-		conditions = append(conditions, "is_effective = ?")
-		args = append(args, params.IsEffective)
-	}
-
-	return strings.Join(conditions, " AND "), args
+	return value
 }

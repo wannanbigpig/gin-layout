@@ -60,6 +60,18 @@ redis:
   port: 6379
   password:
   database: 0
+queue:
+  enable: false
+  namespace: go_layout
+  concurrency: 8
+  strict_priority: false
+  queues:
+    critical: 4
+    default: 2
+    audit: 2
+    low: 1
+  audit_max_retry: 3
+  audit_timeout_seconds: 10
 logger:
   # 日志输出默认为文件，stderr 可选
   output: file

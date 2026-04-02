@@ -8,6 +8,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
 // Api 控制器基类
@@ -57,4 +58,17 @@ func (api Api) Err(c *gin.Context, err error) {
 	}
 
 	api.Fail(c, businessError.GetCode(), businessError.GetMessage())
+}
+
+// GetCurrentUserID 获取当前登录用户的ID
+func (api Api) GetCurrentUserID(c *gin.Context) uint {
+	return c.GetUint(global.ContextKeyUID)
+}
+
+// GetCurrentAdminUser 获取当前登录用户的完整信息
+func (api Api) GetCurrentAdminUser(c *gin.Context) interface{} {
+	if principal := auth.GetAuthPrincipal(c); principal != nil {
+		return principal.User
+	}
+	return nil
 }

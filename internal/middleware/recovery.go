@@ -12,6 +12,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
@@ -39,8 +40,9 @@ func handlePanic(c *gin.Context, err interface{}) {
 	// 记录错误日志
 	logPanicError(c, errStr)
 
-	// 为 panic 请求补充数据库审计日志，避免绕过 CustomLogger 的落库流程。
-	go savePanicRequestLogToDB(c, errStr)
+	// 为 panic 请求补充异步审计日志，避免绕过 CustomLogger 的落库流程。
+	snapshot := buildPanicAuditLogSnapshot(c, errStr)
+	enqueueAuditLog(c, jobs.AuditLogKindPanic, snapshot)
 
 	// 返回错误响应
 	sendErrorResponse(c, errStr)

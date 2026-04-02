@@ -215,24 +215,38 @@ func (s *LoginService) calculateRemainingTime(tokenExpires *utils.FormatDate, no
 
 // CheckToken 检查 Token 是否有效。
 func (s *LoginService) CheckToken(accessToken string) (*model.AdminUser, bool) {
+	principal, ok := s.ResolvePrincipal(accessToken)
+	if !ok || principal == nil {
+		return nil, false
+	}
+	return principal.User, true
+}
+
+// ResolvePrincipal 解析并验证当前访问令牌对应的认证主体。
+func (s *LoginService) ResolvePrincipal(accessToken string) (*AuthPrincipal, bool) {
 	claims, err := s.parseToken(accessToken)
 	if err != nil {
 		return nil, false
 	}
+	return s.resolvePrincipalFromClaims(claims)
+}
+
+func (s *LoginService) resolvePrincipalFromClaims(claims *token.AdminCustomClaims) (*AuthPrincipal, bool) {
 	if !s.isTokenValid(claims) {
 		return nil, false
 	}
-
-	s.tryRefreshToken(claims)
 
 	adminUser, err := s.getUserById(claims.UserID)
 	if err != nil {
 		return nil, false
 	}
 	if !s.isUserValid(adminUser, claims.ID) {
-		return adminUser, false
+		return nil, false
 	}
-	return adminUser, true
+
+	principal := newAuthPrincipal(adminUser, claims)
+	s.tryRefreshToken(principal)
+	return principal, true
 }
 
 // isTokenValid 检查 Token 是否未过期。

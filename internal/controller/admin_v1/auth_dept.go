@@ -4,7 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/dept"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -26,7 +26,7 @@ func (api DeptController) List(c *gin.Context) {
 		return
 	}
 
-	result := access.NewDeptService().List(params)
+	result := dept.NewDeptService().List(params)
 	api.Success(c, result)
 }
 
@@ -37,7 +37,7 @@ func (api DeptController) Edit(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewDeptService().Edit(params); err != nil {
+	if err := dept.NewDeptService().Edit(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -52,7 +52,7 @@ func (api DeptController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewDeptService().Create(params); err != nil {
+	if err := dept.NewDeptService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -67,7 +67,7 @@ func (api DeptController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewDeptService().Update(params); err != nil {
+	if err := dept.NewDeptService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -82,7 +82,7 @@ func (api DeptController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewDeptService().Delete(params.ID); err != nil {
+	if err := dept.NewDeptService().Delete(params.ID); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -97,7 +97,7 @@ func (api DeptController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := access.NewDeptService().Detail(query.ID)
+	detail, err := dept.NewDeptService().Detail(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -113,7 +113,7 @@ func (api DeptController) BindRole(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewDeptService().BindRole(params); err != nil {
+	if err := dept.NewDeptService().BindRole(params); err != nil {
 		api.Err(c, err)
 		return
 	}

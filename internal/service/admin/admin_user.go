@@ -1,9 +1,8 @@
-package access
+package admin
 
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -14,9 +13,11 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
@@ -46,7 +47,7 @@ func (s *AdminUserService) handleMutationError(err error, fallback string) error
 }
 
 func (s *AdminUserService) runMutationTransaction(db *gorm.DB, fallback string, fn func(tx *gorm.DB) error) error {
-	return s.handleMutationError(runInTransaction(db, fn), fallback)
+	return s.handleMutationError(access.RunInTransaction(db, fn), fallback)
 }
 
 func (s *AdminUserService) revokeUserTokens(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) {
@@ -91,7 +92,7 @@ func (s *AdminUserService) GetUserMenuInfo(id uint) (any, error) {
 	}
 	condition, args := s.userMenuQuery(id == global.SuperAdminId, nil)
 	if id != global.SuperAdminId {
-		menuIDs, err := NewPermissionSyncCoordinator().AccessibleMenuIDs(id, true)
+		menuIDs, err := access.NewPermissionSyncCoordinator().AccessibleMenuIDs(id, true)
 		if err != nil {
 			return nil, err
 		}
@@ -131,39 +132,29 @@ func (s *AdminUserService) List(params *form.AdminUserList) *resources.Collectio
 }
 
 func (s *AdminUserService) buildListCondition(params *form.AdminUserList) (string, []any) {
-	var conditions []string
-	var args []any
+	qb := query_builder.New().
+		AddLike("username", params.UserName).
+		AddEq("id", zeroToNil(params.ID)).
+		AddLike("nickname", params.NickName).
+		AddLike("email", params.Email).
+		AddLike("full_phone_number", params.PhoneNumber).
+		AddEq("status", params.Status)
 
-	if params.UserName != "" {
-		conditions = append(conditions, "username like ?")
-		args = append(args, "%"+params.UserName+"%")
-	}
-	if params.ID != 0 {
-		conditions = append(conditions, "id = ?")
-		args = append(args, params.ID)
-	}
-	if params.NickName != "" {
-		conditions = append(conditions, "nickname like ?")
-		args = append(args, "%"+params.NickName+"%")
-	}
-	if params.Email != "" {
-		conditions = append(conditions, "email like ?")
-		args = append(args, "%"+params.Email+"%")
-	}
-	if params.PhoneNumber != "" {
-		conditions = append(conditions, "full_phone_number like ?")
-		args = append(args, "%"+params.PhoneNumber+"%")
-	}
-	if params.Status != nil {
-		conditions = append(conditions, "status = ?")
-		args = append(args, params.Status)
-	}
 	if params.DeptId > 0 {
-		conditions = append(conditions, "EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND admin_user_department_map.dept_id = ?)")
-		args = append(args, params.DeptId)
+		qb.AddCondition(
+			"EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND admin_user_department_map.dept_id = ?)",
+			params.DeptId,
+		)
 	}
 
-	return strings.Join(conditions, " AND "), args
+	return qb.Build()
+}
+
+func zeroToNil(value uint) any {
+	if value == 0 {
+		return nil
+	}
+	return value
 }
 
 func (s *AdminUserService) userMenuQuery(isSuperAdmin bool, menuIDs []uint) (string, []any) {
@@ -232,7 +223,7 @@ func (s *AdminUserService) edit(params *adminUserEditParams) error {
 		// 编辑模式：从数据库加载现有数据
 		err := adminUserModel.GetById(params.Id)
 		if err != nil {
-			return e.NewBusinessError(e.FAILURE, "用户不存在")
+			return e.NewBusinessError(e.UserDoesNotExist)
 		}
 		where = fmt.Sprintf(" AND id != %d", params.Id)
 
@@ -249,15 +240,15 @@ func (s *AdminUserService) edit(params *adminUserEditParams) error {
 		if params.Password != nil && *params.Password != "" {
 			// 检查是否为系统默认超级管理员，系统默认超级管理员不允许修改密码
 			if adminUserModel.ID == global.SuperAdminId {
-				return e.NewBusinessError(e.FAILURE, "系统默认超级管理员不允许修改密码")
+				return e.NewBusinessError(e.SuperAdminCannotModify)
 			}
 			// 验证新密码不能与旧密码相同
 			if utils2.ComparePasswords(adminUserModel.Password, *params.Password) {
-				return e.NewBusinessError(e.FAILURE, "新密码不能与当前密码相同")
+				return e.NewBusinessError(e.SamePassword)
 			}
 			passwordHash, err := utils2.PasswordHash(*params.Password)
 			if err != nil {
-				return e.NewBusinessError(e.FAILURE, "密码处理失败")
+				return e.NewBusinessError(e.PasswordProcessFailed)
 			}
 			adminUserModel.Password = passwordHash
 		}
@@ -276,7 +267,7 @@ func (s *AdminUserService) edit(params *adminUserEditParams) error {
 		if params.Status != nil {
 			// 检查是否为系统默认超级管理员，系统默认超级管理员不允许被禁用
 			if *params.Status == model.AdminUserStatusDisabled && adminUserModel.ID == global.SuperAdminId {
-				return e.NewBusinessError(e.FAILURE, "系统默认超级管理员不允许被禁用")
+				return e.NewBusinessError(e.SuperAdminCannotDisable)
 			}
 			adminUserModel.Status = *params.Status
 		}
@@ -291,10 +282,10 @@ func (s *AdminUserService) edit(params *adminUserEditParams) error {
 	} else {
 		// 创建模式：验证必填字段
 		if params.Username == nil || *params.Username == "" {
-			return e.NewBusinessError(e.FAILURE, "用户名必填")
+			return e.NewBusinessError(e.UsernameRequired)
 		}
 		if params.Nickname == nil || *params.Nickname == "" {
-			return e.NewBusinessError(e.FAILURE, "昵称必填")
+			return e.NewBusinessError(e.NicknameRequired)
 		}
 
 		// 创建模式：按原来的逻辑处理
@@ -314,7 +305,7 @@ func (s *AdminUserService) edit(params *adminUserEditParams) error {
 		if params.Password != nil && *params.Password != "" {
 			passwordHash, err := utils2.PasswordHash(*params.Password)
 			if err != nil {
-				return e.NewBusinessError(e.FAILURE, "密码处理失败")
+				return e.NewBusinessError(e.PasswordProcessFailed)
 			}
 			adminUserModel.Password = passwordHash
 		}
@@ -332,7 +323,7 @@ func (s *AdminUserService) edit(params *adminUserEditParams) error {
 	if err != nil {
 		return e.NewBusinessError(e.FAILURE, title+"用户失败，请重试！")
 	}
-	err = runInTransaction(db, func(tx *gorm.DB) error {
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
 
 		// 在事务内使用 SELECT FOR UPDATE 加锁检查唯一性
@@ -370,14 +361,14 @@ func (s *AdminUserService) edit(params *adminUserEditParams) error {
 			}
 		}
 
-		return NewPermissionSyncCoordinator().SyncUser(adminUserModel.ID, tx)
+		return access.NewPermissionSyncCoordinator().SyncUser(adminUserModel.ID, tx)
 	})
 
 	if err := s.handleMutationError(err, title+"用户失败，请重试！"); err != nil {
 		return err
 	}
 
-	return NewPermissionSyncCoordinator().ReloadPolicyCacheWithMessage(title + "用户后刷新权限缓存失败，请重试！")
+	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithMessage(title + "用户后刷新权限缓存失败，请重试！")
 }
 
 // UpdateProfile 更新个人资料（只能更新自己的手机号、邮箱、密码、昵称）
@@ -388,7 +379,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	err := adminUserModel.GetById(uid)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return e.NewBusinessError(e.FAILURE, "用户不存在")
+			return e.NewBusinessError(e.UserDoesNotExist)
 		}
 		return err
 	}
@@ -407,15 +398,15 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	if params.Password != nil && *params.Password != "" {
 		// 检查是否为系统默认超级管理员，系统默认超级管理员不允许修改密码
 		if uid == global.SuperAdminId {
-			return e.NewBusinessError(e.FAILURE, "系统默认超级管理员不允许修改密码")
+			return e.NewBusinessError(e.SuperAdminCannotModify)
 		}
 		// 验证新密码不能与旧密码相同
 		if utils2.ComparePasswords(adminUserModel.Password, *params.Password) {
-			return e.NewBusinessError(e.FAILURE, "新密码不能与当前密码相同")
+			return e.NewBusinessError(e.SamePassword)
 		}
 		passwordHash, err := utils2.PasswordHash(*params.Password)
 		if err != nil {
-			return e.NewBusinessError(e.FAILURE, "密码处理失败")
+			return e.NewBusinessError(e.PasswordProcessFailed)
 		}
 		adminUserModel.Password = passwordHash
 		hasUpdate = true
@@ -463,7 +454,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	// 在事务内验证唯一性并更新
 	db, err := model.GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "更新个人资料失败，请重试！")
+		return e.NewBusinessError(e.UpdateUserFailed)
 	}
 	err = s.runMutationTransaction(db, "更新个人资料失败，请重试！", func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
@@ -550,7 +541,7 @@ func (s *AdminUserService) BindDept(uid uint, deptId []uint, tx ...*gorm.DB) (er
 	}
 
 	_ = remainingList
-	return NewPermissionSyncCoordinator().SyncUser(uid, tx...)
+	return access.NewPermissionSyncCoordinator().SyncUser(uid, tx...)
 }
 
 // updateDeptUserNumber 更新部门的用户数量
@@ -600,7 +591,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 				return err
 			}
 			if exists {
-				return e.NewBusinessError(1, fmt.Sprintf("用户名 %s 已存在", *username))
+				return e.NewBusinessError(e.UserExists, fmt.Sprintf("用户名 %s 已存在", *username))
 			}
 		}
 	}
@@ -628,7 +619,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 					return err
 				}
 				if exists {
-					return e.NewBusinessError(1, fmt.Sprintf("手机号 %s 已存在", fullPhoneNumber))
+					return e.NewBusinessError(e.PhoneNumberExists, fmt.Sprintf("手机号 %s 已存在", fullPhoneNumber))
 				}
 			}
 		}
@@ -649,7 +640,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 				return err
 			}
 			if exists {
-				return e.NewBusinessError(1, fmt.Sprintf("邮箱 %s 已存在", *email))
+				return e.NewBusinessError(e.EmailExists, fmt.Sprintf("邮箱 %s 已存在", *email))
 			}
 		}
 	}
@@ -660,7 +651,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 // Delete 删除用户
 func (s *AdminUserService) Delete(id uint) error {
 	if id == 1 {
-		return e.NewBusinessError(1, "系统默认超级管理员不允许删除")
+		return e.NewBusinessError(e.SuperAdminCannotDelete)
 	}
 
 	adminUserModel := model.NewAdminUsers()
@@ -669,15 +660,15 @@ func (s *AdminUserService) Delete(id uint) error {
 	adminUserDeptMap := model.NewAdminUserDeptMap()
 	deptIds, err := model.ExtractColumnsByCondition[model.AdminUserDeptMap, *model.AdminUserDeptMap, uint](adminUserDeptMap, "dept_id", "uid = ?", id)
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "查询用户部门关联失败")
+		return e.NewBusinessError(e.QueryUserDeptFailed)
 	}
 
 	// 使用事务确保数据一致性
 	db, err := adminUserModel.GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "删除用户失败")
+		return e.NewBusinessError(e.DeleteUserFailed)
 	}
-	err = runInTransaction(db, func(tx *gorm.DB) error {
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
 
 		// 删除用户
@@ -693,14 +684,14 @@ func (s *AdminUserService) Delete(id uint) error {
 			}
 		}
 
-		return NewPermissionSyncCoordinator().ClearUser(id, tx)
+		return access.NewPermissionSyncCoordinator().ClearUser(id, tx)
 	})
 
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "删除用户失败")
+		return e.NewBusinessError(e.DeleteUserFailed)
 	}
 
-	return NewPermissionSyncCoordinator().ReloadPolicyCacheWithMessage("删除用户后刷新权限缓存失败")
+	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithMessage("删除用户后刷新权限缓存失败")
 }
 
 // BindRole 绑定角色
@@ -717,7 +708,7 @@ func (s *AdminUserService) BindRole(params *form.BindRole) error {
 	if err != nil {
 		return e.NewBusinessError(e.FAILURE, "判断角色是否存在失败")
 	}
-	if err := NewSystemDefaultsService().RequireSuperAdminRoleForUser(adminUserModel.ID, ids); err != nil {
+	if err := access.NewSystemDefaultsService().RequireSuperAdminRoleForUser(adminUserModel.ID, ids); err != nil {
 		return err
 	}
 
@@ -726,7 +717,7 @@ func (s *AdminUserService) BindRole(params *form.BindRole) error {
 	if err != nil {
 		return e.NewBusinessError(e.FAILURE, "绑定角色失败")
 	}
-	err = NewPermissionSyncCoordinator().RunAfterCommit(db, "绑定角色后刷新权限缓存失败", func(tx *gorm.DB) error {
+	err = access.NewPermissionSyncCoordinator().RunAfterCommit(db, "绑定角色后刷新权限缓存失败", func(tx *gorm.DB) error {
 		return s.updateAdminUserRole(adminUserModel.ID, ids, tx)
 	})
 
@@ -738,7 +729,7 @@ func (s *AdminUserService) BindRole(params *form.BindRole) error {
 
 // updateMenuPermissions 更新用户角色到关联中间表
 func (s *AdminUserService) updateAdminUserRole(uid uint, roleIds []uint, tx ...*gorm.DB) error {
-	if err := NewSystemDefaultsService().RequireSuperAdminRoleForUser(uid, roleIds); err != nil {
+	if err := access.NewSystemDefaultsService().RequireSuperAdminRoleForUser(uid, roleIds); err != nil {
 		return err
 	}
 
@@ -777,5 +768,5 @@ func (s *AdminUserService) updateAdminUserRole(uid uint, roleIds []uint, tx ...*
 	}
 
 	_ = remainingList
-	return NewPermissionSyncCoordinator().SyncUser(uid, tx...)
+	return access.NewPermissionSyncCoordinator().SyncUser(uid, tx...)
 }

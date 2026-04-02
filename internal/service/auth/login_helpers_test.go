@@ -99,12 +99,13 @@ func TestShouldRefreshToken(t *testing.T) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(10 * time.Second)),
 		},
 	}
-	if !service.shouldRefreshToken(claims) {
+	principal := &AuthPrincipal{Claims: claims}
+	if !service.shouldRefreshToken(principal) {
 		t.Fatal("expected token to require refresh")
 	}
 
 	claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(2 * time.Minute))
-	if service.shouldRefreshToken(claims) {
+	if service.shouldRefreshToken(principal) {
 		t.Fatal("expected token with long remaining ttl to skip refresh")
 	}
 }

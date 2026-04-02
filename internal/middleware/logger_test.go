@@ -11,6 +11,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
 // TestCacheRequestBody 验证请求体缓存逻辑。
@@ -159,4 +160,35 @@ func TestLogRequestSkipsPing(t *testing.T) {
 
 	respRecorder := createResponseRecorder(ctx)
 	logRequest(ctx, respRecorder)
+}
+
+func TestBuildRequestAuditLogSnapshotUsesPrincipal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/demo", bytes.NewBufferString(`{"name":"codex"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+	ctx.Set(global.ContextKeyRequestID, "req-1")
+	cacheRequestBody(ctx)
+
+	auth.StoreAuthPrincipal(ctx, &auth.AuthPrincipal{
+		UserID:   12,
+		JWTID:    "jwt-1",
+		Username: "tester",
+		Nickname: "Tester",
+	})
+
+	respRecorder := createResponseRecorder(ctx)
+	respRecorder.body.WriteString(`{"code":0,"msg":"ok","data":{"name":"demo"}}`)
+	snapshot := buildRequestAuditLogSnapshot(ctx, respRecorder, &response.Result{Code: 0})
+	if snapshot == nil {
+		t.Fatal("expected audit snapshot")
+	}
+	if snapshot.OperatorID != 12 || snapshot.JwtID != "jwt-1" {
+		t.Fatalf("unexpected operator fields: %#v", snapshot)
+	}
+	if snapshot.OperatorAccount != "tester" || snapshot.OperatorName != "Tester" {
+		t.Fatalf("unexpected operator names: %#v", snapshot)
+	}
 }

@@ -69,6 +69,7 @@ func BuildAppliedConfig(oldConfig, newConfig *Conf, diff ConfigDiff) *Conf {
 	}
 	applied := *newConfig
 	applied.AppConfig = cloneAppConfig(newConfig.AppConfig)
+	applied.Queue = cloneQueueConfig(newConfig.Queue)
 
 	if diff.JWTSecretChanged {
 		applied.Jwt.SecretKey = oldConfig.Jwt.SecretKey

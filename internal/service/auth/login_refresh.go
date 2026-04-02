@@ -36,29 +36,29 @@ func (s *LoginService) buildRefreshLogInfo(c *gin.Context) LoginLogInfo {
 }
 
 // tryRefreshToken 尝试自动刷新 Token。
-func (s *LoginService) tryRefreshToken(claims *token.AdminCustomClaims) {
-	if !s.shouldRefreshToken(claims) {
+func (s *LoginService) tryRefreshToken(principal *AuthPrincipal) {
+	if !s.shouldRefreshToken(principal) {
 		return
 	}
 
-	lockKey := s.buildRefreshLockKey(claims)
-	unlock := s.acquireRefreshLock(lockKey, claims)
+	lockKey := s.buildRefreshLockKey(principal.Claims)
+	unlock := s.acquireRefreshLock(lockKey, principal.Claims)
 	if unlock == nil {
 		return
 	}
 	defer unlock()
 
-	s.doRefreshToken(claims)
+	s.doRefreshToken(principal)
 }
 
 // shouldRefreshToken 判断是否需要刷新 token。
-func (s *LoginService) shouldRefreshToken(claims *token.AdminCustomClaims) bool {
+func (s *LoginService) shouldRefreshToken(principal *AuthPrincipal) bool {
 	cfg := config.GetConfig()
-	if cfg.Jwt.RefreshTTL <= 0 || s.GetCtx() == nil {
+	if cfg.Jwt.RefreshTTL <= 0 || s.GetCtx() == nil || principal == nil || principal.Claims == nil {
 		return false
 	}
 
-	exp, err := claims.GetExpirationTime()
+	exp, err := principal.Claims.GetExpirationTime()
 	if err != nil || exp == nil {
 		return false
 	}
@@ -105,11 +105,14 @@ func (s *LoginService) acquireMemoryLock(lockKey string) func() {
 }
 
 // doRefreshToken 执行刷新 token。
-func (s *LoginService) doRefreshToken(claims *token.AdminCustomClaims) {
+func (s *LoginService) doRefreshToken(principal *AuthPrincipal) {
+	if principal == nil || principal.Claims == nil {
+		return
+	}
 	logInfo := s.buildRefreshLogInfo(s.GetCtx())
-	tokenResponse, err := s.Refresh(claims.UserID, logInfo)
+	tokenResponse, err := s.Refresh(principal.UserID, logInfo)
 	if err != nil {
-		log.Logger.Warn("自动刷新token失败", zap.Error(err), zap.Uint("user_id", claims.UserID), zap.String("jwt_id", claims.ID))
+		log.Logger.Warn("自动刷新token失败", zap.Error(err), zap.Uint("user_id", principal.UserID), zap.String("jwt_id", principal.JWTID))
 		return
 	}
 	if tokenResponse == nil {

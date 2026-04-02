@@ -12,7 +12,11 @@ import (
 	"github.com/wannanbigpig/gin-layout/cmd/cron"
 	"github.com/wannanbigpig/gin-layout/cmd/service"
 	"github.com/wannanbigpig/gin-layout/cmd/version"
+	"github.com/wannanbigpig/gin-layout/cmd/worker"
+	"github.com/wannanbigpig/gin-layout/config"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/queue"
+	_ "github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
 	"github.com/wannanbigpig/gin-layout/internal/runtime"
 )
 
@@ -34,6 +38,9 @@ based on the project can be quickly completed business development, out of the b
 			}
 			bootstrapx.InitializeTimezone()
 			bootstrapx.InitializeLogger()
+			if err := queue.InitPublisher(config.GetConfig()); err != nil {
+				log.Warn("Queue publisher initialization failed", zap.Error(err))
+			}
 			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
@@ -60,6 +67,7 @@ func registerCommands() {
 	rootCmd.AddCommand(service.Cmd) // 启动服务: go-layout service
 	rootCmd.AddCommand(command.Cmd) // 运行命令: go-layout command demo / go-layout command init api-route
 	rootCmd.AddCommand(cron.Cmd)    // 启动计划任务: go-layout cron
+	rootCmd.AddCommand(worker.Cmd)  // 启动异步任务 worker: go-layout worker
 }
 
 // Execute 执行命令

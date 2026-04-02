@@ -67,7 +67,7 @@ func NewMenuAPIDefaultsService() *MenuAPIDefaultsService {
 
 // Sync 将默认菜单接口映射写入数据库。
 func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
-	execTx := firstTx(tx)
+	execTx := FirstTx(tx)
 	if execTx == nil {
 		db, err := model.GetDB()
 		if err != nil {

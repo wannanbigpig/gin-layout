@@ -1,4 +1,4 @@
-package access
+package admin
 
 import (
 	"errors"
@@ -16,7 +16,7 @@ func TestAdminUserCreateRequiresUsername(t *testing.T) {
 
 	err := service.Create(params)
 
-	assertBusinessErrorMessage(t, err, e.FAILURE, "用户名必填")
+	assertBusinessErrorMessage(t, err, e.UsernameRequired, "用户名必填")
 }
 
 func TestAdminUserCreateRequiresNickname(t *testing.T) {
@@ -27,7 +27,7 @@ func TestAdminUserCreateRequiresNickname(t *testing.T) {
 
 	err := service.Create(params)
 
-	assertBusinessErrorMessage(t, err, e.FAILURE, "昵称必填")
+	assertBusinessErrorMessage(t, err, e.NicknameRequired, "昵称必填")
 }
 
 func assertBusinessErrorMessage(t *testing.T, err error, code int, message string) {

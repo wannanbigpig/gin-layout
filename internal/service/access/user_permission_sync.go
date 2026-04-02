@@ -28,9 +28,11 @@ func (s *UserPermissionSyncService) SyncUser(userID uint, tx ...*gorm.DB) error 
 // SyncUsers 重建多个用户的最终接口权限并同步到 Casbin。
 func (s *UserPermissionSyncService) SyncUsers(userIDs []uint, tx ...*gorm.DB) error {
 	return s.withSyncTransaction(tx, func(execTx *gorm.DB) error {
-		return s.forEachUser(userIDs, func(userID uint) error {
-			return s.syncUserWithTx(userID, execTx)
-		})
+		enforcer, err := getPolicyEnforcer()
+		if err != nil {
+			return err
+		}
+		return s.batchSyncUsersWithEnforcer(userIDs, enforcer, execTx)
 	})
 }
 
@@ -41,9 +43,11 @@ func (s *UserPermissionSyncService) SyncAllUsers(tx ...*gorm.DB) error {
 		if err != nil {
 			return err
 		}
-		return s.forEachUser(userIDs, func(userID uint) error {
-			return s.syncUserWithTx(userID, execTx)
-		})
+		enforcer, err := getPolicyEnforcer()
+		if err != nil {
+			return err
+		}
+		return s.batchSyncUsersWithEnforcer(userIDs, enforcer, execTx)
 	})
 }
 
@@ -54,7 +58,7 @@ func (s *UserPermissionSyncService) ClearUser(userID uint, tx ...*gorm.DB) error
 		if err != nil {
 			return err
 		}
-		return enforcer.SetDB(execTx).EditPolicyPermissions(s.userKey(userID), nil)
+		return enforcer.SetDB(execTx).EditPolicyPermissions(s.UserKey(userID), nil)
 	})
 }
 
@@ -66,7 +70,7 @@ func (s *UserPermissionSyncService) AccessibleMenuIDs(userID uint, includeParent
 		return nil, err
 	}
 
-	menuIDs, err := s.roleMenuIDs(roleIDs, tx...)
+	menuIDs, err := s.RoleMenuIDs(roleIDs, tx...)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +97,7 @@ func (s *UserPermissionSyncService) collectUserPolicies(userID uint, tx ...*gorm
 		return nil, err
 	}
 
-	menuIDs, err := s.roleMenuIDs(roleIDs, tx...)
+	menuIDs, err := s.RoleMenuIDs(roleIDs, tx...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,9 +105,114 @@ func (s *UserPermissionSyncService) collectUserPolicies(userID uint, tx ...*gorm
 	return s.menuAPIPolicies(menuIDs, tx...)
 }
 
+func (s *UserPermissionSyncService) collectPoliciesForUsers(userIDs []uint, tx *gorm.DB) (map[uint][][]string, error) {
+	uniqueIDs := UniqueUintSlice(userIDs)
+	result := make(map[uint][][]string, len(uniqueIDs))
+	if len(uniqueIDs) == 0 {
+		return result, nil
+	}
+
+	type userRow struct {
+		ID           uint
+		Status       uint8
+		IsSuperAdmin uint8
+	}
+	var users []userRow
+	if err := tx.Table("admin_user").
+		Select("id,status,is_super_admin").
+		Where("id IN ? AND deleted_at = 0", uniqueIDs).
+		Scan(&users).Error; err != nil {
+		return nil, err
+	}
+
+	activeUserIDs := make([]uint, 0, len(users))
+	for _, user := range users {
+		if user.Status != model.AdminUserStatusEnabled || user.ID == global.SuperAdminId || user.IsSuperAdmin == global.Yes {
+			result[user.ID] = nil
+			continue
+		}
+		activeUserIDs = append(activeUserIDs, user.ID)
+	}
+	if len(activeUserIDs) == 0 {
+		return result, nil
+	}
+
+	userRoleMap, err := s.userBaseRoleMap(activeUserIDs, tx)
+	if err != nil {
+		return nil, err
+	}
+	if len(userRoleMap) == 0 {
+		return result, nil
+	}
+
+	roleStatusMap, err := s.loadRoleStatusMap(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	userExpandedRoles := make(map[uint][]uint, len(userRoleMap))
+	allRoleIDs := make([]uint, 0)
+	for userID, roleIDs := range userRoleMap {
+		expanded := expandRoleAncestors(roleIDs, roleStatusMap)
+		userExpandedRoles[userID] = expanded
+		allRoleIDs = append(allRoleIDs, expanded...)
+	}
+	allRoleIDs = UniqueUintSlice(allRoleIDs)
+	if len(allRoleIDs) == 0 {
+		return result, nil
+	}
+
+	roleMenuMap, err := s.roleMenuMap(allRoleIDs, tx)
+	if err != nil {
+		return nil, err
+	}
+	if len(roleMenuMap) == 0 {
+		return result, nil
+	}
+
+	enabledMenus, err := s.enabledMenuSet(roleMenuMap.AllMenuIDs(), tx)
+	if err != nil {
+		return nil, err
+	}
+	menuPolicies, err := s.menuPolicyMap(roleMenuMap.AllMenuIDs(), tx)
+	if err != nil {
+		return nil, err
+	}
+
+	for userID, roleIDs := range userExpandedRoles {
+		menuSet := make(map[uint]struct{})
+		for _, roleID := range roleIDs {
+			for _, menuID := range roleMenuMap[roleID] {
+				if _, ok := enabledMenus[menuID]; ok {
+					menuSet[menuID] = struct{}{}
+				}
+			}
+		}
+
+		policies := make([][]string, 0)
+		seenPolicy := make(map[string]struct{})
+		for menuID := range menuSet {
+			for _, policy := range menuPolicies[menuID] {
+				if len(policy) < 2 {
+					continue
+				}
+				key := policy[0] + "::" + policy[1]
+				if _, exists := seenPolicy[key]; exists {
+					continue
+				}
+				seenPolicy[key] = struct{}{}
+				policies = append(policies, policy)
+			}
+		}
+		result[userID] = policies
+	}
+
+	return result, nil
+}
+
 // withSyncTransaction 使用现有事务或新事务执行权限同步，确保写入原子性。
 func (s *UserPermissionSyncService) withSyncTransaction(tx []*gorm.DB, fn func(execTx *gorm.DB) error) error {
-	if existingTx := firstTx(tx); existingTx != nil {
+	if existingTx := FirstTx(tx); existingTx != nil {
 		return fn(existingTx)
 	}
 	db, err := s.resolveDB(nil)
@@ -117,19 +226,43 @@ func (s *UserPermissionSyncService) withSyncTransaction(tx []*gorm.DB, fn func(e
 }
 
 func (s *UserPermissionSyncService) resolveDB(tx []*gorm.DB) (*gorm.DB, error) {
-	if db := firstTx(tx); db != nil {
+	if db := FirstTx(tx); db != nil {
 		return db, nil
 	}
 	return model.GetDB()
 }
 
 func (s *UserPermissionSyncService) forEachUser(userIDs []uint, fn func(userID uint) error) error {
-	for _, userID := range uniqueUintSlice(userIDs) {
+	uniqueIDs := UniqueUintSlice(userIDs)
+	if len(uniqueIDs) == 0 {
+		return nil
+	}
+	for _, userID := range uniqueIDs {
 		if err := fn(userID); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// batchSyncUsersWithEnforcer 批量同步多个用户的权限，使用同一个enforcer减少重复获取
+func (s *UserPermissionSyncService) batchSyncUsersWithEnforcer(userIDs []uint, enforcer *casbinx.CasbinEnforcer, tx *gorm.DB) error {
+	uniqueIDs := UniqueUintSlice(userIDs)
+	if len(uniqueIDs) == 0 {
+		return nil
+	}
+
+	policiesByUser, err := s.collectPoliciesForUsers(uniqueIDs, tx)
+	if err != nil {
+		return err
+	}
+
+	subjectPolicies := make(map[string][][]string, len(uniqueIDs))
+	for _, userID := range uniqueIDs {
+		subjectPolicies[s.UserKey(userID)] = policiesByUser[userID]
+	}
+
+	return enforcer.EditPolicyPermissionsBatch(subjectPolicies, tx)
 }
 
 // syncUserWithTx 在指定事务内同步单个用户的最终接口权限。
@@ -144,7 +277,7 @@ func (s *UserPermissionSyncService) syncUserWithTx(userID uint, tx *gorm.DB) err
 		return err
 	}
 
-	return enforcer.SetDB(tx).EditPolicyPermissions(s.userKey(userID), policies)
+	return enforcer.SetDB(tx).EditPolicyPermissions(s.UserKey(userID), policies)
 }
 
 // userRoleIDs 收集用户直属角色和部门角色，并展开继承角色。
@@ -154,25 +287,25 @@ func (s *UserPermissionSyncService) userRoleIDs(userID uint, tx ...*gorm.DB) ([]
 		return nil, err
 	}
 
-	directRoleIDs, err := s.queryUintColumn(db.Table("admin_user_role_map").Where("uid = ?", userID), "role_id")
+	directRoleIDs, err := s.QueryUintColumn(db.Table("admin_user_role_map").Where("uid = ?", userID), "role_id")
 	if err != nil {
 		return nil, err
 	}
 
-	deptIDs, err := s.queryUintColumn(db.Table("admin_user_department_map").Where("uid = ?", userID), "dept_id")
+	deptIDs, err := s.QueryUintColumn(db.Table("admin_user_department_map").Where("uid = ?", userID), "dept_id")
 	if err != nil {
 		return nil, err
 	}
 
 	deptRoleIDs := make([]uint, 0)
 	if len(deptIDs) > 0 {
-		deptRoleIDs, err = s.queryUintColumn(db.Table("department_role_map").Where("dept_id IN ?", deptIDs), "role_id")
+		deptRoleIDs, err = s.QueryUintColumn(db.Table("department_role_map").Where("dept_id IN ?", deptIDs), "role_id")
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	roleIDs := uniqueUintSlice(append(directRoleIDs, deptRoleIDs...))
+	roleIDs := UniqueUintSlice(append(directRoleIDs, deptRoleIDs...))
 	return s.expandRoleIDs(roleIDs, tx...)
 }
 
@@ -217,11 +350,11 @@ func (s *UserPermissionSyncService) expandRoleIDs(roleIDs []uint, tx ...*gorm.DB
 		allRoleIDs = append(allRoleIDs, roleID)
 	}
 
-	return s.queryUintColumn(db.Table("role").Where("id IN ? AND status = 1 AND deleted_at = 0", allRoleIDs), "id")
+	return s.QueryUintColumn(db.Table("role").Where("id IN ? AND status = 1 AND deleted_at = 0", allRoleIDs), "id")
 }
 
-// roleMenuIDs 根据角色列表解析出启用状态的菜单 ID。
-func (s *UserPermissionSyncService) roleMenuIDs(roleIDs []uint, tx ...*gorm.DB) ([]uint, error) {
+// RoleMenuIDs 根据角色列表解析出启用状态的菜单 ID。
+func (s *UserPermissionSyncService) RoleMenuIDs(roleIDs []uint, tx ...*gorm.DB) ([]uint, error) {
 	if len(roleIDs) == 0 {
 		return nil, nil
 	}
@@ -231,7 +364,7 @@ func (s *UserPermissionSyncService) roleMenuIDs(roleIDs []uint, tx ...*gorm.DB) 
 		return nil, err
 	}
 
-	menuIDs, err := s.queryUintColumn(db.Table("role_menu_map").Where("role_id IN ?", roleIDs), "menu_id")
+	menuIDs, err := s.QueryUintColumn(db.Table("role_menu_map").Where("role_id IN ?", roleIDs), "menu_id")
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +372,7 @@ func (s *UserPermissionSyncService) roleMenuIDs(roleIDs []uint, tx ...*gorm.DB) 
 		return nil, nil
 	}
 
-	return s.queryUintColumn(db.Table("menu").Where("id IN ? AND status = 1 AND deleted_at = 0", uniqueUintSlice(menuIDs)), "id")
+	return s.QueryUintColumn(db.Table("menu").Where("id IN ? AND status = 1 AND deleted_at = 0", UniqueUintSlice(menuIDs)), "id")
 }
 
 // expandMenuIDsWithParents 为菜单集合补齐祖先菜单 ID。
@@ -283,7 +416,7 @@ func (s *UserPermissionSyncService) expandMenuIDsWithParents(menuIDs []uint, tx 
 		allMenuIDs = append(allMenuIDs, menuID)
 	}
 
-	return s.queryUintColumn(db.Table("menu").Where("id IN ? AND status = 1 AND deleted_at = 0", allMenuIDs), "id")
+	return s.QueryUintColumn(db.Table("menu").Where("id IN ? AND status = 1 AND deleted_at = 0", allMenuIDs), "id")
 }
 
 // menuAPIPolicies 将菜单与接口关系转换为 Casbin 权限元组。
@@ -328,14 +461,14 @@ func (s *UserPermissionSyncService) allUserIDs(tx ...*gorm.DB) ([]uint, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.queryUintColumn(db.Table("admin_user").Where("deleted_at = 0"), "id")
+	return s.QueryUintColumn(db.Table("admin_user").Where("deleted_at = 0"), "id")
 }
 
 // userInfo 加载指定用户 ID 对应的管理员模型。
 func (s *UserPermissionSyncService) userInfo(userID uint, tx ...*gorm.DB) (*model.AdminUser, error) {
 	user := model.NewAdminUsers()
-	if firstTx(tx) != nil {
-		user.SetDB(firstTx(tx))
+	if FirstTx(tx) != nil {
+		user.SetDB(FirstTx(tx))
 	}
 	if err := user.GetById(userID); err != nil {
 		return nil, err
@@ -343,22 +476,207 @@ func (s *UserPermissionSyncService) userInfo(userID uint, tx ...*gorm.DB) (*mode
 	return user, nil
 }
 
-// queryUintColumn 提取 uint 列并去重。
-func (s *UserPermissionSyncService) queryUintColumn(db *gorm.DB, column string) ([]uint, error) {
-	var values []uint
-	if err := db.Pluck(column, &values).Error; err != nil {
-		return nil, err
-	}
-	return uniqueUintSlice(values), nil
+// QueryUintColumn 提取 uint 列并去重。
+func (s *UserPermissionSyncService) QueryUintColumn(db *gorm.DB, column string) ([]uint, error) {
+	return queryUintColumn(db, column)
 }
 
-// userKey 生成管理员用户对应的 Casbin subject。
-func (s *UserPermissionSyncService) userKey(userID uint) string {
+// UserKey 生成管理员用户对应的 Casbin subject。
+func (s *UserPermissionSyncService) UserKey(userID uint) string {
 	return fmt.Sprintf("%s%s%d", global.CasbinAdminUserPrefix, global.CasbinSeparator, userID)
 }
 
-// uniqueUintSlice 对 uint 切片去重并保留首次出现顺序。
-func uniqueUintSlice(values []uint) []uint {
+type roleStatusInfo struct {
+	ID     uint
+	Pids   string
+	Status uint8
+}
+
+type roleMenuIDMap map[uint][]uint
+
+func (m roleMenuIDMap) AllMenuIDs() []uint {
+	menuIDs := make([]uint, 0)
+	for _, values := range m {
+		menuIDs = append(menuIDs, values...)
+	}
+	return UniqueUintSlice(menuIDs)
+}
+
+func (s *UserPermissionSyncService) userBaseRoleMap(userIDs []uint, tx *gorm.DB) (map[uint][]uint, error) {
+	userRoleMap := make(map[uint][]uint, len(userIDs))
+	if len(userIDs) == 0 {
+		return userRoleMap, nil
+	}
+
+	type userRoleRow struct {
+		UID    uint
+		RoleID uint
+	}
+	var directRows []userRoleRow
+	if err := tx.Table("admin_user_role_map").Select("uid,role_id").Where("uid IN ?", userIDs).Scan(&directRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range directRows {
+		userRoleMap[row.UID] = append(userRoleMap[row.UID], row.RoleID)
+	}
+
+	type userDeptRow struct {
+		UID    uint
+		DeptID uint
+	}
+	var deptRows []userDeptRow
+	if err := tx.Table("admin_user_department_map").Select("uid,dept_id").Where("uid IN ?", userIDs).Scan(&deptRows).Error; err != nil {
+		return nil, err
+	}
+	if len(deptRows) == 0 {
+		return userRoleMap, nil
+	}
+
+	deptIDs := make([]uint, 0, len(deptRows))
+	userDepts := make(map[uint][]uint, len(deptRows))
+	for _, row := range deptRows {
+		userDepts[row.UID] = append(userDepts[row.UID], row.DeptID)
+		deptIDs = append(deptIDs, row.DeptID)
+	}
+
+	type deptRoleRow struct {
+		DeptID uint
+		RoleID uint
+	}
+	var deptRoleRows []deptRoleRow
+	if err := tx.Table("department_role_map").Select("dept_id,role_id").Where("dept_id IN ?", UniqueUintSlice(deptIDs)).Scan(&deptRoleRows).Error; err != nil {
+		return nil, err
+	}
+
+	deptRoleMap := make(map[uint][]uint, len(deptRoleRows))
+	for _, row := range deptRoleRows {
+		deptRoleMap[row.DeptID] = append(deptRoleMap[row.DeptID], row.RoleID)
+	}
+
+	for userID, deptIDs := range userDepts {
+		for _, deptID := range deptIDs {
+			userRoleMap[userID] = append(userRoleMap[userID], deptRoleMap[deptID]...)
+		}
+		userRoleMap[userID] = UniqueUintSlice(userRoleMap[userID])
+	}
+
+	return userRoleMap, nil
+}
+
+func (s *UserPermissionSyncService) loadRoleStatusMap(tx *gorm.DB) (map[uint]roleStatusInfo, error) {
+	var rows []roleStatusInfo
+	if err := tx.Table("role").Select("id,pids,status").Where("deleted_at = 0").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	roleMap := make(map[uint]roleStatusInfo, len(rows))
+	for _, row := range rows {
+		roleMap[row.ID] = row
+	}
+	return roleMap, nil
+}
+
+func (s *UserPermissionSyncService) roleMenuMap(roleIDs []uint, tx *gorm.DB) (roleMenuIDMap, error) {
+	result := make(roleMenuIDMap)
+	if len(roleIDs) == 0 {
+		return result, nil
+	}
+
+	type roleMenuRow struct {
+		RoleID uint
+		MenuID uint
+	}
+	var rows []roleMenuRow
+	if err := tx.Table("role_menu_map").Select("role_id,menu_id").Where("role_id IN ?", roleIDs).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.RoleID] = append(result[row.RoleID], row.MenuID)
+	}
+	return result, nil
+}
+
+func (s *UserPermissionSyncService) enabledMenuSet(menuIDs []uint, tx *gorm.DB) (map[uint]struct{}, error) {
+	menuIDs = UniqueUintSlice(menuIDs)
+	result := make(map[uint]struct{}, len(menuIDs))
+	if len(menuIDs) == 0 {
+		return result, nil
+	}
+
+	enabledMenuIDs, err := queryUintColumn(tx.Table("menu").Where("id IN ? AND status = 1 AND deleted_at = 0", menuIDs), "id")
+	if err != nil {
+		return nil, err
+	}
+	for _, menuID := range enabledMenuIDs {
+		result[menuID] = struct{}{}
+	}
+	return result, nil
+}
+
+func (s *UserPermissionSyncService) menuPolicyMap(menuIDs []uint, tx *gorm.DB) (map[uint][][]string, error) {
+	menuIDs = UniqueUintSlice(menuIDs)
+	result := make(map[uint][][]string, len(menuIDs))
+	if len(menuIDs) == 0 {
+		return result, nil
+	}
+
+	type menuPermissionRow struct {
+		MenuID uint
+		Route  string
+		Method string
+	}
+	var rows []menuPermissionRow
+	err := tx.Table("menu_api_map m").
+		Select("m.menu_id, a.route, a.method").
+		Joins("JOIN api a ON a.id = m.api_id").
+		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = 1 AND a.is_effective = 1", menuIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		if row.Route == "" || row.Method == "" {
+			continue
+		}
+		result[row.MenuID] = append(result[row.MenuID], []string{row.Route, row.Method})
+	}
+	return result, nil
+}
+
+func expandRoleAncestors(roleIDs []uint, roleStatusMap map[uint]roleStatusInfo) []uint {
+	roleSet := make(map[uint]struct{})
+	for _, roleID := range UniqueUintSlice(roleIDs) {
+		role, ok := roleStatusMap[roleID]
+		if !ok || role.Status != 1 {
+			continue
+		}
+		roleSet[roleID] = struct{}{}
+		for _, pid := range strings.Split(role.Pids, ",") {
+			pid = strings.TrimSpace(pid)
+			if pid == "" || pid == "0" {
+				continue
+			}
+			parsed, err := strconv.ParseUint(pid, 10, 64)
+			if err != nil {
+				continue
+			}
+			ancestorID := uint(parsed)
+			if ancestor, ok := roleStatusMap[ancestorID]; ok && ancestor.Status == 1 {
+				roleSet[ancestorID] = struct{}{}
+			}
+		}
+	}
+
+	result := make([]uint, 0, len(roleSet))
+	for roleID := range roleSet {
+		result = append(result, roleID)
+	}
+	return UniqueUintSlice(result)
+}
+
+// UniqueUintSlice 对 uint 切片去重并保留首次出现顺序。
+func UniqueUintSlice(values []uint) []uint {
 	if len(values) == 0 {
 		return nil
 	}

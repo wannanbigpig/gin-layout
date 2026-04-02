@@ -24,6 +24,7 @@ type Conf struct {
 	Redis              autoload.RedisConfig  `mapstructure:"redis"`
 	Logger             autoload.LoggerConfig `mapstructure:"logger"`
 	Jwt                autoload.JwtConfig    `mapstructure:"jwt"`
+	Queue              autoload.QueueConfig  `mapstructure:"queue"`
 }
 
 var (
@@ -33,6 +34,7 @@ var (
 		Redis:     autoload.Redis,
 		Logger:    autoload.Logger,
 		Jwt:       autoload.Jwt,
+		Queue:     cloneQueueConfig(autoload.Queue),
 	}
 	once        sync.Once
 	initErr     error
@@ -272,6 +274,7 @@ func cloneDefaultConfig() *Conf {
 		Redis:     autoload.Redis,
 		Logger:    autoload.Logger,
 		Jwt:       autoload.Jwt,
+		Queue:     cloneQueueConfig(autoload.Queue),
 	}
 }
 
@@ -285,6 +288,17 @@ func cloneAppConfig(src autoload.AppConfig) autoload.AppConfig {
 	if src.Timezone != nil {
 		tz := *src.Timezone
 		cloned.Timezone = &tz
+	}
+	return cloned
+}
+
+func cloneQueueConfig(src autoload.QueueConfig) autoload.QueueConfig {
+	cloned := src
+	if src.Queues != nil {
+		cloned.Queues = make(map[string]int, len(src.Queues))
+		for key, value := range src.Queues {
+			cloned.Queues[key] = value
+		}
 	}
 	return cloned
 }

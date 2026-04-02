@@ -10,25 +10,6 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 )
 
-// AppRouteTree 返回应用完整路由树。
-func AppRouteTree() RouteGroupDef {
-	return RouteGroupDef{
-		Routes: []RouteDef{
-			{
-				Method: http.MethodGet,
-				Path:   "ping",
-				Title:  "ping",
-				Desc:   "服务心跳检测接口",
-				Auth:   0,
-				Handlers: []gin.HandlerFunc{func(c *gin.Context) {
-					c.String(http.StatusOK, "pong")
-				}},
-			},
-		},
-		Children: []RouteGroupDef{AdminRouteTree()},
-	}
-}
-
 // AdminRouteTree 返回管理员后台路由声明树。
 func AdminRouteTree() RouteGroupDef {
 	demo := controller.NewDemoController()

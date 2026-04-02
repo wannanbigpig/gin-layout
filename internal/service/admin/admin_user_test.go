@@ -1,10 +1,11 @@
-package access
+package admin
 
 import (
 	"errors"
 	"testing"
 
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -31,7 +32,7 @@ func TestAdminUserBuildListCondition(t *testing.T) {
 }
 
 func TestUniqueUintSlice(t *testing.T) {
-	menuIDs := uniqueUintSlice([]uint{2, 5, 2, 0, 5})
+	menuIDs := access.UniqueUintSlice([]uint{2, 5, 2, 0, 5})
 	if len(menuIDs) != 3 {
 		t.Fatalf("unexpected menu id count: %#v", menuIDs)
 	}
@@ -41,7 +42,7 @@ func TestUniqueUintSlice(t *testing.T) {
 }
 
 func TestUserPermissionSyncUserKey(t *testing.T) {
-	key := NewUserPermissionSyncService().userKey(12)
+	key := access.NewUserPermissionSyncService().UserKey(12)
 	if key != "adminUser:12" {
 		t.Fatalf("unexpected user key: %s", key)
 	}

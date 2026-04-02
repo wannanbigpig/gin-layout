@@ -105,12 +105,31 @@ redis:
   port: 6379
   password: ""
   database: 0
+
+queue:
+  enable: true
+  namespace: go_layout
+  concurrency: 8
+  strict_priority: false
+  queues:
+    critical: 4
+    default: 2
+    audit: 2
+    low: 1
+  audit_max_retry: 3
+  audit_timeout_seconds: 10
 ```
 
 ### 5. Start Service
 
 ```bash
 GO_ENV=development go run main.go service
+```
+
+If `queue.enable=true`, start the worker in a separate process as well:
+
+```bash
+GO_ENV=development go run main.go worker
 ```
 
 ### 6. Verify
@@ -149,6 +168,7 @@ Common commands:
 | Command | Description |
 | --- | --- |
 | `go run main.go service` | Start the API service |
+| `go run main.go worker` | Start the Asynq async worker |
 | `go run main.go command api-route` | Scan the declarative route tree and rebuild the `api` route table |
 | `go run main.go command rebuild-user-permissions` | Rebuild final user API permissions from database relationships |
 | `go run main.go command init-system` | Roll back and rerun migrations, rebuild API routes, and rebuild user permissions |
@@ -181,9 +201,17 @@ Config lookup order:
 | `jwt` | Token secret, expiration, and auto-refresh thresholds |
 | `mysql` | Database enable flag and connection settings |
 | `redis` | Cache, blacklist, and distributed lock settings |
+| `queue` | Asynq enable flag, queue concurrency, priorities, and audit-log retry settings |
 | `logger` | Log output, rotation, and retention strategy |
 
 If requests pass through Nginx, Ingress, or a load balancer, keep `app.trusted_proxies` aligned or client IP logging may be inaccurate.
+
+### Worker And Cron
+
+- `service` serves the HTTP API.
+- `worker` consumes Asynq jobs. The first phase only moves request audit-log persistence to Asynq.
+- `cron` still owns the existing scheduled jobs and is not migrated in this change.
+- Do not register the same recurring business task in both `cron` and the async worker flow, or it will run twice.
 
 ### Hot Reload
 

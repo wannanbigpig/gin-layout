@@ -38,3 +38,17 @@ func TestUserPermissionSyncForEachUserStopsOnError(t *testing.T) {
 		t.Fatalf("expected %v, got %v", wantErr, err)
 	}
 }
+
+func TestExpandRoleAncestorsSkipsDisabledRoles(t *testing.T) {
+	roleMap := map[uint]roleStatusInfo{
+		1: {ID: 1, Status: 1},
+		2: {ID: 2, Pids: "1", Status: 1},
+		3: {ID: 3, Pids: "1,2", Status: 0},
+	}
+
+	got := expandRoleAncestors([]uint{2, 3}, roleMap)
+	want := []uint{2, 1}
+	if !reflect.DeepEqual(got, want) && !reflect.DeepEqual(got, []uint{1, 2}) {
+		t.Fatalf("unexpected expanded roles: got %v want %v", got, want)
+	}
+}

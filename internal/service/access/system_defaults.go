@@ -22,7 +22,7 @@ func NewSystemDefaultsService() *SystemDefaultsService {
 
 // Ensure 确保系统默认数据和关联关系存在。
 func (s *SystemDefaultsService) Ensure(tx ...*gorm.DB) error {
-	existingTx := firstTx(tx)
+	existingTx := FirstTx(tx)
 	if existingTx != nil {
 		return s.ensureWithTx(existingTx)
 	}

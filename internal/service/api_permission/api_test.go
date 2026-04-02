@@ -1,4 +1,4 @@
-package access
+package api_permission
 
 import (
 	"testing"

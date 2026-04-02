@@ -1,17 +1,18 @@
-package access
+package dept
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
@@ -32,7 +33,7 @@ func NewDeptService() *DeptService {
 }
 
 func (s *DeptService) resolveDB(tx ...*gorm.DB) (*gorm.DB, error) {
-	if db := firstTx(tx); db != nil {
+	if db := access.FirstTx(tx); db != nil {
 		return db, nil
 	}
 	return model.GetDB()
@@ -55,20 +56,10 @@ func (s *DeptService) List(params *form.ListDept) any {
 
 // buildListCondition 构建部门列表查询条件。
 func (s *DeptService) buildListCondition(params *form.ListDept) (string, []any) {
-	var conditions []string
-	var args []any
-
-	if params.Name != "" {
-		conditions = append(conditions, "name like ?")
-		args = append(args, "%"+params.Name+"%")
-	}
-
-	if params.Pid != nil {
-		conditions = append(conditions, "pid = ?")
-		args = append(args, params.Pid)
-	}
-
-	return strings.Join(conditions, " AND "), args
+	return query_builder.New().
+		AddLike("name", params.Name).
+		AddEq("pid", params.Pid).
+		Build()
 }
 
 // Create 新增部门。
@@ -111,7 +102,7 @@ func (s *DeptService) edit(params *deptMutation) error {
 	if err != nil {
 		return err
 	}
-	if params.Id > 0 && NewSystemDefaultsService().IsProtectedDepartment(dept) {
+	if params.Id > 0 && access.NewSystemDefaultsService().IsProtectedDepartment(dept) {
 		if params.Pid != dept.Pid || params.Sort != dept.Sort {
 			return e.NewBusinessError(e.FAILURE, "默认部门只允许修改名称和描述")
 		}
@@ -211,7 +202,7 @@ func (s *DeptService) executeEditTransaction(dept *model.Department, originPids 
 	if err != nil {
 		return err
 	}
-	return runInTransaction(db, func(tx *gorm.DB) error {
+	return access.RunInTransaction(db, func(tx *gorm.DB) error {
 		dept.SetDB(tx)
 
 		if err := dept.Save(); err != nil {
@@ -275,7 +266,7 @@ func (s *DeptService) Delete(id uint) error {
 	if err := dept.GetById(id); err != nil || dept.ID == 0 {
 		return e.NewBusinessError(1, "部门不存在")
 	}
-	if NewSystemDefaultsService().IsProtectedDepartment(dept) {
+	if access.NewSystemDefaultsService().IsProtectedDepartment(dept) {
 		return e.NewBusinessError(e.FAILURE, "默认部门不允许删除")
 	}
 
@@ -294,8 +285,13 @@ func (s *DeptService) executeDeleteTransaction(dept *model.Department, id uint) 
 	if err != nil {
 		return e.NewBusinessError(1, "删除部门失败")
 	}
-	err = NewPermissionSyncCoordinator().RunAfterCommit(db, "删除部门后刷新权限缓存失败", func(tx *gorm.DB) error {
+	err = access.NewPermissionSyncCoordinator().RunAfterCommit(db, "删除部门后刷新权限缓存失败", func(tx *gorm.DB) error {
 		dept.SetDB(tx)
+
+		affectedUserIDs, err := s.userIDsByDept(id, tx)
+		if err != nil {
+			return err
+		}
 
 		// 删除部门角色关联
 		deptRoleMap := model.NewDeptRoleMap()
@@ -326,7 +322,7 @@ func (s *DeptService) executeDeleteTransaction(dept *model.Department, id uint) 
 			}
 		}
 
-		return NewPermissionSyncCoordinator().SyncAllInTx(tx)
+		return access.NewPermissionSyncCoordinator().SyncUsers(affectedUserIDs, tx)
 	})
 
 	if err != nil {
@@ -371,7 +367,7 @@ func (s *DeptService) executeBindRoleTransaction(deptId uint, roleIds []uint) er
 	if err != nil {
 		return e.NewBusinessError(e.FAILURE, "绑定角色失败")
 	}
-	err = NewPermissionSyncCoordinator().RunAfterCommit(db, "绑定角色后刷新权限缓存失败", func(tx *gorm.DB) error {
+	err = access.NewPermissionSyncCoordinator().RunAfterCommit(db, "绑定角色后刷新权限缓存失败", func(tx *gorm.DB) error {
 		return s.updateDeptRole(deptId, roleIds, tx)
 	})
 
@@ -429,7 +425,7 @@ func (s *DeptService) updateDeptRole(deptId uint, roleIds []uint, tx ...*gorm.DB
 	if err != nil {
 		return err
 	}
-	return NewPermissionSyncCoordinator().SyncUsers(userIDs, tx...)
+	return access.NewPermissionSyncCoordinator().SyncUsers(userIDs, tx...)
 }
 
 func (s *DeptService) userIDsByDept(deptId uint, tx ...*gorm.DB) ([]uint, error) {
@@ -437,5 +433,5 @@ func (s *DeptService) userIDsByDept(deptId uint, tx ...*gorm.DB) ([]uint, error)
 	if err != nil {
 		return nil, err
 	}
-	return NewUserPermissionSyncService().queryUintColumn(db.Table("admin_user_department_map").Where("dept_id = ?", deptId), "uid")
+	return access.NewUserPermissionSyncService().QueryUintColumn(db.Table("admin_user_department_map").Where("dept_id = ?", deptId), "uid")
 }

@@ -4,7 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/api_permission"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -26,7 +26,7 @@ func (api ApiController) Edit(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewApiService().Edit(params); err != nil {
+	if err := api_permission.NewApiService().Edit(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -41,7 +41,7 @@ func (api ApiController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewApiService().Create(params); err != nil {
+	if err := api_permission.NewApiService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -56,7 +56,7 @@ func (api ApiController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewApiService().Update(params); err != nil {
+	if err := api_permission.NewApiService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -71,6 +71,6 @@ func (api ApiController) List(c *gin.Context) {
 		return
 	}
 
-	result := access.NewApiService().ListPage(params)
+	result := api_permission.NewApiService().ListPage(params)
 	api.Success(c, result)
 }

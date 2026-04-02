@@ -1,4 +1,4 @@
-package access
+package menu
 
 import (
 	"testing"
@@ -36,5 +36,29 @@ func TestAssembleFullPath(t *testing.T) {
 	}
 	if got := service.buildFullPath("button", "/admin", model.BUTTON); got != "" {
 		t.Fatalf("expected empty path for button, got %s", got)
+	}
+}
+
+func TestApplyDescendantMenuState(t *testing.T) {
+	service := NewMenuService()
+	parent := &model.Menu{Pids: "0,1", Level: 3, FullPath: "/system"}
+	parent.ID = 10
+	child := &model.Menu{Path: "users", Type: model.MENU}
+
+	service.applyDescendantMenuState(parent, child)
+	if child.Pids != "0,1,10" {
+		t.Fatalf("unexpected child pids: %s", child.Pids)
+	}
+	if child.Level != 4 {
+		t.Fatalf("unexpected child level: %d", child.Level)
+	}
+	if child.FullPath != "/system/users" {
+		t.Fatalf("unexpected child full path: %s", child.FullPath)
+	}
+
+	buttonChild := &model.Menu{Path: "submit", Type: model.BUTTON}
+	service.applyDescendantMenuState(parent, buttonChild)
+	if buttonChild.FullPath != "" {
+		t.Fatalf("expected empty full path for button child, got %s", buttonChild.FullPath)
 	}
 }

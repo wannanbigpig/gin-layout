@@ -1,18 +1,19 @@
-package access
+package role
 
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
@@ -56,26 +57,11 @@ func (s *RoleService) List(params *form.RoleList) interface{} {
 
 // buildListCondition 构建列表查询条件
 func (s *RoleService) buildListCondition(params *form.RoleList) (string, []any) {
-	var conditions []string
-	var args []any
-
-	if params.Name != "" {
-		conditions = append(conditions, "name like ?")
-		args = append(args, "%"+params.Name+"%")
-	}
-
-	if params.Status != nil {
-		conditions = append(conditions, "status = ?")
-		args = append(args, params.Status)
-	}
-
-	// 父级ID过滤
-	if params.Pid != nil {
-		conditions = append(conditions, "pid = ?")
-		args = append(args, params.Pid)
-	}
-
-	return strings.Join(conditions, " AND "), args
+	return query_builder.New().
+		AddLike("name", params.Name).
+		AddEq("status", params.Status).
+		AddEq("pid", params.Pid).
+		Build()
 }
 
 // Create 新增角色。
@@ -124,8 +110,8 @@ func (s *RoleService) edit(params *roleMutation) error {
 	if err != nil {
 		return err
 	}
-	if params.Id > 0 && NewSystemDefaultsService().IsProtectedRole(role) {
-		return e.NewBusinessError(e.FAILURE, "系统默认超级管理员角色不允许修改")
+	if params.Id > 0 && access.NewSystemDefaultsService().IsProtectedRole(role) {
+		return e.NewBusinessError(e.SuperAdminCannotModify)
 	}
 
 	// 处理父级变化
@@ -135,7 +121,7 @@ func (s *RoleService) edit(params *roleMutation) error {
 
 	// 验证层级限制
 	if role.Level > maxRoleLevel {
-		return e.NewBusinessError(1, "最多只能创建2层角色")
+		return e.NewBusinessError(e.MaxRoleDepth)
 	}
 
 	// 赋值角色字段
@@ -144,7 +130,7 @@ func (s *RoleService) edit(params *roleMutation) error {
 	// 验证菜单ID有效性
 	menuList, err := model.VerifyExistingIDs(model.NewMenu(), params.MenuList)
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "判断菜单是否存在失败")
+		return e.NewBusinessError(e.MenuNotFound)
 	}
 
 	// 执行编辑事务
@@ -163,7 +149,7 @@ func (s *RoleService) prepareEditContext(role *model.Role, params *roleMutation)
 
 	if params.Id > 0 {
 		if err := role.GetById(params.Id); err != nil || role.ID == 0 {
-			return nil, e.NewBusinessError(1, "编辑的角色不存在")
+			return nil, e.NewBusinessError(e.RoleNotFound)
 		}
 		ctx.originPids = role.Pids
 		ctx.originPid = role.Pid
@@ -190,12 +176,12 @@ func (s *RoleService) handleParentChange(role *model.Role, params *roleMutation)
 func (s *RoleService) updateRoleWithParent(role *model.Role, params *roleMutation) error {
 	parentRole := model.NewRole()
 	if err := parentRole.GetById(params.Pid); err != nil || parentRole.ID == 0 {
-		return e.NewBusinessError(1, "上级角色不存在")
+		return e.NewBusinessError(e.ParentRoleNotExists)
 	}
 
 	// 防止循环引用
 	if role.ID > 0 && utils2.WouldCauseCycle(role.ID, params.Pid, parentRole.Pids) {
-		return e.NewBusinessError(1, "上级角色不能是当前角色自身或其子角色")
+		return e.NewBusinessError(e.ParentRoleInvalid)
 	}
 
 	// 检查顶级角色下的子角色数量限制
@@ -205,7 +191,7 @@ func (s *RoleService) updateRoleWithParent(role *model.Role, params *roleMutatio
 		// 如果是新增或父级变化，需要检查是否超过限制
 		if role.ID == 0 || role.Pid != params.Pid {
 			if parentRole.ChildrenNum >= maxChildrenPerTop {
-				return e.NewBusinessError(1, fmt.Sprintf("每个顶级角色下最多只能创建%d个子角色", maxChildrenPerTop))
+				return e.NewBusinessError(e.MaxChildRoles, fmt.Sprintf("每个顶级角色下最多只能创建%d个子角色", maxChildrenPerTop))
 			}
 		}
 	}
@@ -247,7 +233,7 @@ func (s *RoleService) executeEditTransaction(role *model.Role, menuList []uint, 
 	if err != nil {
 		return err
 	}
-	err = runInTransaction(db, func(tx *gorm.DB) error {
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		role.SetDB(tx)
 
 		// 保存角色信息
@@ -288,7 +274,7 @@ func (s *RoleService) executeEditTransaction(role *model.Role, menuList []uint, 
 		return err
 	}
 
-	return NewPermissionSyncCoordinator().SyncAll()
+	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByRoles([]uint{role.ID})
 }
 
 // updateChildrenLevels 更新子角色层级
@@ -390,15 +376,15 @@ func (s *RoleService) updateRoleMenu(roleId uint, menuList []uint, tx ...*gorm.D
 func (s *RoleService) Delete(id uint) error {
 	role := model.NewRole()
 	if err := role.GetById(id); err != nil || role.ID == 0 {
-		return e.NewBusinessError(1, "角色不存在")
+		return e.NewBusinessError(e.RoleNotFound)
 	}
-	if NewSystemDefaultsService().IsProtectedRole(role) {
-		return e.NewBusinessError(e.FAILURE, "系统默认超级管理员角色不允许删除")
+	if access.NewSystemDefaultsService().IsProtectedRole(role) {
+		return e.NewBusinessError(e.SuperAdminCannotDelete)
 	}
 
 	// 检查是否有子角色（使用 children_num 字段判断，性能更好）
 	if role.ChildrenNum > 0 {
-		return e.NewBusinessError(1, "该角色有子角色，无法删除")
+		return e.NewBusinessError(e.RoleHasChildren)
 	}
 
 	// 执行删除事务
@@ -409,9 +395,9 @@ func (s *RoleService) Delete(id uint) error {
 func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error {
 	db, err := role.GetDB()
 	if err != nil {
-		return e.NewBusinessError(1, "删除角色失败")
+		return e.NewBusinessError(e.RoleCannotDelete)
 	}
-	err = runInTransaction(db, func(tx *gorm.DB) error {
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		role.SetDB(tx)
 
 		// 删除角色菜单关联
@@ -440,17 +426,17 @@ func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error 
 	})
 
 	if err != nil {
-		return e.NewBusinessError(1, "删除角色失败")
+		return e.NewBusinessError(e.RoleCannotDelete)
 	}
 
-	return NewPermissionSyncCoordinator().SyncAll()
+	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByRoles([]uint{id})
 }
 
 // Detail 获取角色详情
 func (s *RoleService) Detail(id uint) (any, error) {
 	role := model.NewRole()
 	if err := role.GetAllById(id); err != nil || role.ID == 0 {
-		return nil, e.NewBusinessError(1, "角色不存在")
+		return nil, e.NewBusinessError(e.RoleNotFound)
 	}
 	return resources.NewRoleTransformer().ToStruct(role), nil
 }
@@ -459,12 +445,12 @@ func (s *RoleService) Detail(id uint) (any, error) {
 func (s *RoleService) GetRoleMenus(roleId uint) ([]string, error) {
 	role := model.NewRole()
 	if err := role.GetById(roleId); err != nil || role.ID == 0 {
-		return nil, e.NewBusinessError(1, "角色不存在")
+		return nil, e.NewBusinessError(e.RoleNotFound)
 	}
 
-	menuIDs, err := NewUserPermissionSyncService().roleMenuIDs([]uint{roleId})
+	menuIDs, err := access.NewUserPermissionSyncService().RoleMenuIDs([]uint{roleId})
 	if err != nil {
-		return nil, e.NewBusinessError(1, "获取失败")
+		return nil, e.NewBusinessError(e.FAILURE)
 	}
 
 	result := make([]string, 0, len(menuIDs))

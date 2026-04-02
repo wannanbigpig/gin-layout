@@ -4,7 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/role"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -26,7 +26,7 @@ func (api RoleController) List(c *gin.Context) {
 		return
 	}
 
-	result := access.NewRoleService().List(params)
+	result := role.NewRoleService().List(params)
 	api.Success(c, result)
 }
 
@@ -37,7 +37,7 @@ func (api RoleController) Edit(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewRoleService().Edit(params); err != nil {
+	if err := role.NewRoleService().Edit(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -52,7 +52,7 @@ func (api RoleController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewRoleService().Create(params); err != nil {
+	if err := role.NewRoleService().Create(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -67,7 +67,7 @@ func (api RoleController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewRoleService().Update(params); err != nil {
+	if err := role.NewRoleService().Update(params); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -82,7 +82,7 @@ func (api RoleController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := access.NewRoleService().Delete(params.ID); err != nil {
+	if err := role.NewRoleService().Delete(params.ID); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -97,7 +97,7 @@ func (api RoleController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := access.NewRoleService().Detail(query.ID)
+	detail, err := role.NewRoleService().Detail(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return

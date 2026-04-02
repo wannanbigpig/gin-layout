@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 )
 
@@ -48,8 +49,9 @@ func logRequest(c *gin.Context, recorder *responseRecorder) {
 	// 记录精简日志到文件（用于快速查看和调试）
 	logRequestToFile(c, recorder)
 
-	// 保存详细日志到数据库（异步执行，避免影响响应速度）
-	go saveRequestLogToDB(c, recorder, resp)
+	// 先提取不可变快照，再发布异步任务，避免请求链路内直接落库。
+	snapshot := buildRequestAuditLogSnapshot(c, recorder, resp)
+	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }
 
 // logRequestToFile 记录精简日志到文件（用于快速查看和调试）

@@ -105,12 +105,31 @@ redis:
   port: 6379
   password: ""
   database: 0
+
+queue:
+  enable: true
+  namespace: go_layout
+  concurrency: 8
+  strict_priority: false
+  queues:
+    critical: 4
+    default: 2
+    audit: 2
+    low: 1
+  audit_max_retry: 3
+  audit_timeout_seconds: 10
 ```
 
 ### 5. 启动服务
 
 ```bash
 GO_ENV=development go run main.go service
+```
+
+如果启用了 `queue.enable=true`，还需要单独启动 worker：
+
+```bash
+GO_ENV=development go run main.go worker
 ```
 
 ### 6. 验证服务
@@ -149,6 +168,7 @@ go run main.go command -h
 | 命令 | 说明 |
 | --- | --- |
 | `go run main.go service` | 启动 API 服务 |
+| `go run main.go worker` | 启动 Asynq 异步任务消费进程 |
 | `go run main.go command api-route` | 扫描声明式路由树并重建 `api` 路由表 |
 | `go run main.go command rebuild-user-permissions` | 按数据库关系重建用户最终 API 权限 |
 | `go run main.go command init-system` | 回滚并重新执行迁移、重建 API 路由、重建用户权限 |
@@ -181,9 +201,17 @@ go run main.go -c /path/to/config.yaml command init-system
 | `jwt` | Token 密钥、过期时间与自动刷新阈值 |
 | `mysql` | 数据库开关与连接信息 |
 | `redis` | 缓存、黑名单和分布式锁配置 |
+| `queue` | Asynq 异步任务开关、队列并发度、优先级和审计日志重试策略 |
 | `logger` | 日志输出、切割和保留策略 |
 
 如果通过 Nginx、Ingress 或负载均衡转发请求，需要同步配置 `app.trusted_proxies`，否则客户端 IP 可能记录不准确。
+
+### Worker 与 Cron
+
+- `service` 负责提供 HTTP API。
+- `worker` 负责消费 Asynq 异步任务。当前首版只接入请求审计日志异步落库。
+- `cron` 仍负责现有定时任务，本次没有迁移到 Asynq。
+- 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
 
 ### 热更新
 

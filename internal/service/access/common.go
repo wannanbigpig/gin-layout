@@ -15,8 +15,8 @@ func getPolicyEnforcer() (*casbinx.CasbinEnforcer, error) {
 	return enforcer, nil
 }
 
-// firstTx 返回可选事务切片中的第一个事务。
-func firstTx(tx []*gorm.DB) *gorm.DB {
+// FirstTx 返回可选事务切片中的第一个事务。
+func FirstTx(tx []*gorm.DB) *gorm.DB {
 	if len(tx) == 0 {
 		return nil
 	}

@@ -13,6 +13,7 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	accesssvc "github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
 // AdminAuthHandler 依赖 ParseTokenHandler 预先写入用户上下文。
@@ -25,15 +26,15 @@ func AdminAuthHandler() gin.HandlerFunc {
 			return
 		}
 
-		adminUser := getUserFromContext(c)
-		if adminUser == nil {
+		principal := getPrincipalFromContext(c)
+		if principal == nil || principal.User == nil {
 			response.Fail(c, e.NotLogin, "登录已失效，请重新登录")
 			c.Abort()
 			return
 		}
 
-		if !isSuperAdmin(adminUser) {
-			if err := checkPermission(c, adminUser); err != nil {
+		if !isSuperAdmin(principal.User) {
+			if err := checkPermission(c, principal.User); err != nil {
 				if businessErr, ok := err.(*e.BusinessError); ok {
 					response.Fail(c, businessErr.GetCode(), businessErr.GetMessage())
 				} else {
@@ -80,14 +81,11 @@ func checkPermission(c *gin.Context, adminUser *model.AdminUser) error {
 	return nil
 }
 
-// getUserFromContext 优先复用上下文中的用户对象，缺失时再回源数据库。
-func getUserFromContext(c *gin.Context) *model.AdminUser {
-	if user, exists := c.Get(global.ContextKeyAdminUser); exists {
-		if adminUser, ok := user.(*model.AdminUser); ok {
-			return adminUser
-		}
+// getPrincipalFromContext 优先复用上下文中的认证主体，缺失时再做异常兜底。
+func getPrincipalFromContext(c *gin.Context) *auth.AuthPrincipal {
+	if principal := auth.GetAuthPrincipal(c); principal != nil {
+		return principal
 	}
-
 	uid := c.GetUint(global.ContextKeyUID)
 	if uid == 0 {
 		return nil
@@ -97,7 +95,14 @@ func getUserFromContext(c *gin.Context) *model.AdminUser {
 	if err := adminUser.GetById(uid); err != nil {
 		return nil
 	}
-
-	setUserContext(c, adminUser, "")
-	return adminUser
+	principal := &auth.AuthPrincipal{
+		User:            adminUser,
+		UserID:          adminUser.ID,
+		Username:        adminUser.Username,
+		Nickname:        adminUser.Nickname,
+		Email:           adminUser.Email,
+		FullPhoneNumber: adminUser.FullPhoneNumber,
+	}
+	auth.StoreAuthPrincipal(c, principal)
+	return principal
 }

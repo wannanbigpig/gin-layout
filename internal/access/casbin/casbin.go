@@ -135,6 +135,40 @@ func (e *CasbinEnforcer) EditPolicyPermissions(user string, policy [][]string, t
 	})
 }
 
+// EditPolicyPermissionsBatch 批量覆盖多个 subject 的权限策略。
+func (e *CasbinEnforcer) EditPolicyPermissionsBatch(subjectPolicies map[string][][]string, tx ...*gorm.DB) error {
+	return e.execute(firstTx(tx), func(enforcer casbin.IEnforcer) error {
+		for subject, policy := range subjectPolicies {
+			if _, err := enforcer.DeletePermissionsForUser(subject); err != nil {
+				return err
+			}
+
+			if len(policy) == 0 {
+				continue
+			}
+
+			policies := make([][]string, 0, len(policy))
+			for _, p := range policy {
+				if len(p) > 0 {
+					policies = append(policies, append([]string{subject}, p...))
+				}
+			}
+			if len(policies) == 0 {
+				continue
+			}
+
+			ok, err := enforcer.AddPolicies(policies)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errors.New("添加权限失败")
+			}
+		}
+		return nil
+	})
+}
+
 // EditPolicyRoles 编辑策略角色
 func (e *CasbinEnforcer) EditPolicyRoles(user string, policy []string, tx ...*gorm.DB) error {
 	return e.execute(firstTx(tx), func(enforcer casbin.IEnforcer) error {

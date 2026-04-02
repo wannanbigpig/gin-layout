@@ -1,4 +1,4 @@
-package access
+package menu
 
 import (
 	"fmt"
@@ -9,8 +9,10 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
@@ -146,22 +148,24 @@ func (s *MenuService) edit(params *menuMutation) error {
 	}
 
 	// 执行数据库事务操作
-	return s.executeEditTransaction(menu, params.ApiList, editContext.originPids, editContext.originPid)
+	return s.executeEditTransaction(menu, params.ApiList, editContext)
 }
 
 // menuEditContext 菜单编辑上下文信息
 type menuEditContext struct {
-	originPids   string
-	originPid    uint
-	excludeWhere string
+	originPids     string
+	originPid      uint
+	originFullPath string
+	excludeWhere   string
 }
 
 // prepareEditContext 准备编辑上下文信息
 func (s *MenuService) prepareEditContext(menu *model.Menu, params *menuMutation) (*menuEditContext, error) {
 	ctx := &menuEditContext{
-		originPids:   menuRootPid,
-		originPid:    0,
-		excludeWhere: "",
+		originPids:     menuRootPid,
+		originPid:      0,
+		originFullPath: "",
+		excludeWhere:   "",
 	}
 
 	// 编辑模式：加载现有菜单数据
@@ -171,6 +175,7 @@ func (s *MenuService) prepareEditContext(menu *model.Menu, params *menuMutation)
 		}
 		ctx.originPids = menu.Pids
 		ctx.originPid = menu.Pid
+		ctx.originFullPath = menu.FullPath
 		ctx.excludeWhere = fmt.Sprintf(" AND id != %d", params.Id)
 	}
 
@@ -351,12 +356,12 @@ func (s *MenuService) validateAndFilterApiList(params *menuMutation) error {
 }
 
 // executeEditTransaction 执行编辑事务
-func (s *MenuService) executeEditTransaction(menu *model.Menu, apiList []uint, originPids string, originPid uint) error {
+func (s *MenuService) executeEditTransaction(menu *model.Menu, apiList []uint, editContext *menuEditContext) error {
 	db, err := menu.GetDB()
 	if err != nil {
 		return err
 	}
-	err = runInTransaction(db, func(tx *gorm.DB) error {
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		menu.SetDB(tx)
 
 		// 保存菜单
@@ -365,21 +370,21 @@ func (s *MenuService) executeEditTransaction(menu *model.Menu, apiList []uint, o
 		}
 
 		// 更新子菜单的层级信息
-		if err := s.updateChildrenLevels(menu, originPids, tx); err != nil {
+		if err := s.updateChildrenLevels(menu, editContext.originPids, editContext.originFullPath, tx); err != nil {
 			return err
 		}
 
 		// 更新父级的 children_num
 		// 如果 pid 发生变化，需要更新旧父级和新父级
 		// 如果是新增操作（originPid = 0），只需要更新新父级
-		if originPid > 0 && originPid != menu.Pid {
+		if editContext.originPid > 0 && editContext.originPid != menu.Pid {
 			// 更新旧父级的 children_num（编辑操作且父级发生变化时）
-			if err := model.UpdateChildrenNum(model.NewMenu(), originPid, tx); err != nil {
+			if err := model.UpdateChildrenNum(model.NewMenu(), editContext.originPid, tx); err != nil {
 				return err
 			}
 		}
 		// 更新新父级的 children_num（新增或父级变化时都需要更新）
-		if menu.Pid > 0 && menu.Pid != originPid {
+		if menu.Pid > 0 && menu.Pid != editContext.originPid {
 			if err := model.UpdateChildrenNum(model.NewMenu(), menu.Pid, tx); err != nil {
 				return err
 			}
@@ -397,21 +402,60 @@ func (s *MenuService) executeEditTransaction(menu *model.Menu, apiList []uint, o
 		return err
 	}
 
-	return NewPermissionSyncCoordinator().SyncAll()
+	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByMenus([]uint{menu.ID})
 }
 
-// updateChildrenLevels 更新子菜单的层级和路径信息
-func (s *MenuService) updateChildrenLevels(menu *model.Menu, originPids string, tx *gorm.DB) error {
-	if menu.Pids == originPids {
+// updateChildrenLevels 更新子菜单的层级和路径信息。
+func (s *MenuService) updateChildrenLevels(menu *model.Menu, originPids string, originFullPath string, tx *gorm.DB) error {
+	if menu.Pids == originPids && menu.FullPath == originFullPath {
 		return nil
 	}
 
-	return tx.Model(model.NewMenu()).
-		Where("FIND_IN_SET(?,pids)", menu.ID).
-		Updates(map[string]interface{}{
-			"pids":  gorm.Expr("replace(pids,?,?)", originPids, menu.Pids),
-			"level": gorm.Expr("length(pids) - length(replace(pids, ',', '')) + 1"),
-		}).Error
+	var descendants []*model.Menu
+	if err := tx.Where("FIND_IN_SET(?,pids)", menu.ID).Order("level asc, id asc").Find(&descendants).Error; err != nil {
+		return err
+	}
+	if len(descendants) == 0 {
+		return nil
+	}
+
+	childrenByPID := make(map[uint][]*model.Menu, len(descendants))
+	for _, child := range descendants {
+		childrenByPID[child.Pid] = append(childrenByPID[child.Pid], child)
+	}
+
+	return s.rebuildMenuDescendants(tx, menu, childrenByPID)
+}
+
+func (s *MenuService) rebuildMenuDescendants(tx *gorm.DB, parent *model.Menu, childrenByPID map[uint][]*model.Menu) error {
+	children := childrenByPID[parent.ID]
+	for _, child := range children {
+		s.applyDescendantMenuState(parent, child)
+
+		if err := tx.Model(model.NewMenu()).
+			Where("id = ?", child.ID).
+			Updates(map[string]any{
+				"pids":      child.Pids,
+				"level":     child.Level,
+				"full_path": child.FullPath,
+			}).Error; err != nil {
+			return err
+		}
+
+		if err := s.rebuildMenuDescendants(tx, child, childrenByPID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *MenuService) applyDescendantMenuState(parent *model.Menu, child *model.Menu) {
+	child.Pids = s.buildPids(parent.Pids, parent.ID)
+	child.Level = parent.Level + 1
+	child.FullPath = s.buildFullPath(child.Path, parent.FullPath, child.Type)
+	if child.Type == model.BUTTON {
+		child.FullPath = ""
+	}
 }
 
 // updateMenuPermissions 更新菜单权限关联
@@ -463,7 +507,7 @@ func (s *MenuService) updateMenuPermissions(menu *model.Menu, apiList []uint, tx
 
 // UpdateAllMenuPermissions 批量更新所有菜单的权限到 Casbin
 func (s *MenuService) UpdateAllMenuPermissions() error {
-	return NewPermissionSyncCoordinator().SyncAll()
+	return access.NewPermissionSyncCoordinator().SyncAll()
 }
 
 // ListPage 分页查询菜单列表
@@ -494,25 +538,17 @@ func (s *MenuService) List(params *form.ListMenu) any {
 
 // buildListCondition 构建列表查询条件
 func (s *MenuService) buildListCondition(params *form.ListMenu, includeStatus bool) (string, []any) {
-	var conditions []string
-	var args []any
-
+	qb := query_builder.New()
 	if params.Keyword != "" {
-		conditions = append(conditions, "(title like ? OR path like ? OR code = ?)")
-		args = append(args, "%"+params.Keyword+"%", "%"+params.Keyword+"%", params.Keyword)
+		qb.AddCondition("(title like ? OR path like ? OR code = ?)", "%"+params.Keyword+"%", "%"+params.Keyword+"%", params.Keyword)
 	}
 
-	if params.IsAuth != nil {
-		conditions = append(conditions, "is_auth = ?")
-		args = append(args, params.IsAuth)
-	}
-
+	qb.AddEq("is_auth", params.IsAuth)
 	if includeStatus && params.Status != nil && *params.Status != allStatus {
-		conditions = append(conditions, "status = ?")
-		args = append(args, params.Status)
+		qb.AddEq("status", params.Status)
 	}
 
-	return strings.Join(conditions, " AND "), args
+	return qb.Build()
 }
 
 // Delete 删除菜单
@@ -532,7 +568,7 @@ func (s *MenuService) Delete(id uint) error {
 	if err != nil {
 		return e.NewBusinessError(1, "删除菜单失败")
 	}
-	err = runInTransaction(db, func(tx *gorm.DB) error {
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		menu.SetDB(tx)
 
 		// 保存父级ID，用于后续更新 children_num
@@ -557,7 +593,7 @@ func (s *MenuService) Delete(id uint) error {
 		return e.NewBusinessError(1, "删除菜单失败")
 	}
 
-	return NewPermissionSyncCoordinator().SyncAll()
+	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByMenus([]uint{id})
 }
 
 // Detail 获取菜单详情

@@ -1,4 +1,4 @@
-package access
+package role
 
 import (
 	"testing"

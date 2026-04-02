@@ -41,12 +41,12 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	if err != nil {
 		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
 		s.RecordLoginFailLog(username, "生成Token失败", logInfo)
-		return nil, e.NewBusinessError(e.FAILURE, "生成Token失败")
+		return nil, e.NewBusinessError(e.TokenGenerateFailed)
 	}
 
 	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
 	if err := s.recordLoginLog(adminUser, claims, accessToken, "", logInfo, model.LoginTypeLogin); err != nil {
-		return nil, e.NewBusinessError(e.FAILURE, "登录失败，请稍后重试")
+		return nil, e.NewBusinessError(e.LoginFailed)
 	}
 
 	return &TokenResponse{
@@ -67,7 +67,7 @@ func (s *LoginService) validateUser(username, password string) (*model.AdminUser
 		return nil, e.NewBusinessError(e.UserDisable)
 	}
 	if !utils2.ComparePasswords(adminUser.Password, password) {
-		return nil, e.NewBusinessError(e.FAILURE, "用户密码错误")
+		return nil, e.NewBusinessError(e.UserPasswordWrong)
 	}
 	return adminUser, nil
 }
@@ -105,13 +105,13 @@ func (s *LoginService) Refresh(id uint, logInfo LoginLogInfo) (*TokenResponse, e
 
 	adminUserModel := model.NewAdminUsers()
 	if err := adminUserModel.GetById(id); err != nil {
-		return nil, e.NewBusinessError(e.FAILURE, "更新用户异常")
+		return nil, e.NewBusinessError(e.UpdateUserFailed)
 	}
 
 	claims := s.newAdminCustomClaims(adminUserModel)
 	accessToken, err := token.Refresh(claims)
 	if err != nil {
-		return nil, e.NewBusinessError(e.FAILURE, "生成Token失败")
+		return nil, e.NewBusinessError(e.TokenGenerateFailed)
 	}
 
 	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
