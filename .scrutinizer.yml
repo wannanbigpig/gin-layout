@@ -1,3 +1,0 @@
-build:
-    environment:
-        go: "go1.24"
