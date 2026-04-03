@@ -1,0 +1,167 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/spf13/viper"
+
+	utils2 "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+	"github.com/wannanbigpig/gin-layout/pkg/utils"
+)
+
+// InitConfig 初始化配置系统并加载首个生效快照。
+func InitConfig(configPath string) error {
+	once.Do(func() {
+		var loaded *Conf
+		loaded, initErr = load(configPath)
+		if initErr != nil {
+			return
+		}
+		setActiveConfig(loaded)
+		initErr = checkJwtSecretKey()
+	})
+	return initErr
+}
+
+func checkJwtSecretKey() error {
+	if Config.Jwt.SecretKey == "" {
+		Config.Jwt.SecretKey = utils2.RandString(64)
+		configValue.Store(Config)
+		fmt.Fprintf(
+			os.Stderr,
+			"warning: jwt.secret_key is empty, generated an in-memory secret for this process; set jwt.secret_key in config.yaml to persist it across restarts\n",
+		)
+	}
+	return nil
+}
+
+func load(configPath string) (*Conf, error) {
+	filePath, err := resolveConfigPath(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	V = viper.New()
+	V.SetConfigFile(filePath)
+	if err := V.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			return nil, fmt.Errorf("未找到配置: %w", err)
+		}
+		return nil, fmt.Errorf("读取配置出错: %w", err)
+	}
+
+	loaded := cloneDefaultConfig()
+	if err := V.Unmarshal(loaded); err != nil {
+		return nil, fmt.Errorf("映射配置出错: %w", err)
+	}
+
+	ensureCorsDefaults(loaded)
+	registerConfigWatcherIfNeeded(loaded)
+	return loaded, nil
+}
+
+func resolveConfigPath(configPath string) (string, error) {
+	if configPath != "" {
+		return configPath, nil
+	}
+
+	exampleConfig, targetConfig, err := resolveDefaultConfigFiles()
+	if err != nil {
+		return "", err
+	}
+	if err := copyConf(exampleConfig, targetConfig); err != nil {
+		return "", err
+	}
+	return targetConfig, nil
+}
+
+func resolveDefaultConfigFiles() (string, string, error) {
+	if os.Getenv("GO_ENV") == "development" {
+		return resolveDevelopmentConfigFiles()
+	}
+	runDirectory, err := utils.GetCurrentPath()
+	if err != nil {
+		return "", "", fmt.Errorf("获取执行文件目录失败: %w", err)
+	}
+	return filepath.Join(runDirectory, "config.yaml.example"), filepath.Join(runDirectory, "config.yaml"), nil
+}
+
+func resolveDevelopmentConfigFiles() (string, string, error) {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return "", "", fmt.Errorf("获取工作目录失败: %w", err)
+	}
+
+	exampleConfig := filepath.Join(workDir, "config", "config.yaml.example")
+	if _, err := os.Stat(exampleConfig); os.IsNotExist(err) {
+		exampleConfig = filepath.Join(workDir, "config.yaml.example")
+	}
+	return exampleConfig, filepath.Join(workDir, "config.yaml"), nil
+}
+
+func registerConfigWatcherIfNeeded(cfg *Conf) {
+	if !cfg.WatchConfig {
+		return
+	}
+
+	V.WatchConfig()
+	V.OnConfigChange(func(in fsnotify.Event) {
+		initErr = reloadConfigFromWatcher()
+	})
+}
+
+func ensureCorsDefaults(cfg *Conf) {
+	if cfg.CorsOrigins == nil {
+		cfg.CorsOrigins = []string{}
+	}
+	if cfg.CorsMethods == nil {
+		cfg.CorsMethods = []string{}
+	}
+	if cfg.CorsHeaders == nil {
+		cfg.CorsHeaders = []string{}
+	}
+	if cfg.CorsExposeHeaders == nil {
+		cfg.CorsExposeHeaders = []string{}
+	}
+	if cfg.TrustedProxies == nil {
+		cfg.TrustedProxies = []string{"127.0.0.1"}
+	}
+	if cfg.CorsMaxAge == 0 {
+		cfg.CorsMaxAge = 43200
+	}
+}
+
+func reloadConfigFromWatcher() error {
+	if err := V.ReadInConfig(); err != nil {
+		return fmt.Errorf("重新读取配置出错: %w", err)
+	}
+
+	next := cloneDefaultConfig()
+	if err := V.Unmarshal(next); err != nil {
+		return fmt.Errorf("重新映射配置出错: %w", err)
+	}
+	ensureCorsDefaults(next)
+
+	current := GetConfig()
+	diff := BuildConfigDiff(current, next)
+	applied := BuildAppliedConfig(current, next, diff)
+
+	reloadHandlersMu.RLock()
+	handlers := append([]ConfigReloadHandler(nil), reloadHandlers...)
+	reloadHandlersMu.RUnlock()
+
+	for _, handler := range handlers {
+		if handler.Handle == nil {
+			continue
+		}
+		if err := handler.Handle(current, applied, diff); err != nil {
+			return fmt.Errorf("配置热更新失败[%s]: %w", handler.Name, err)
+		}
+	}
+
+	setActiveConfig(applied)
+	return nil
+}
