@@ -12,6 +12,14 @@ func TestGetDBReturnsErrorWhenUninitialized(t *testing.T) {
 	}
 }
 
+func TestGetDBRejectsTypedNilModelArg(t *testing.T) {
+	var role *Role
+	_, err := GetDB(role)
+	if !errors.Is(err, ErrInvalidModelArg) {
+		t.Fatalf("expected ErrInvalidModelArg, got %v", err)
+	}
+}
+
 func TestListEReturnsErrorWhenUninitialized(t *testing.T) {
 	_, err := ListE(NewApi(), "", nil)
 	if err == nil {

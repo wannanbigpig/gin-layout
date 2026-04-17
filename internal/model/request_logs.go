@@ -33,3 +33,12 @@ func NewRequestLogs() *RequestLogs {
 func (m *RequestLogs) TableName() string {
 	return "request_logs"
 }
+
+// Create 创建单条请求日志记录。
+func (m *RequestLogs) Create() error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Create(m).Error
+}

@@ -54,6 +54,7 @@
 - 前端项目：[go-admin-ui](https://github.com/wannanbigpig/go-admin-ui)
 - 在线文档：[Apifox](https://wannanbigpig.apifox.cn/)
 - 演示地址：[在线演示](https://x-l-admin.wannanbigpig.com/)
+- 命令与任务文档：[docs/COMMANDS_AND_TASKS.md](./docs/COMMANDS_AND_TASKS.md)
 
 ## 快速开始
 

@@ -2,7 +2,6 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -10,20 +9,10 @@ import (
 	auditsvc "github.com/wannanbigpig/gin-layout/internal/service/audit"
 )
 
-func TestNewAuditLogJobPayload(t *testing.T) {
-	job, err := NewAuditLogJob(AuditLogKindRequest, &auditsvc.AuditLogSnapshot{RequestID: "req-1"})
+func TestNewAuditLogPayload(t *testing.T) {
+	payload, err := NewAuditLogPayload(AuditLogKindRequest, &auditsvc.AuditLogSnapshot{RequestID: "req-1"})
 	if err != nil {
-		t.Fatalf("NewAuditLogJob returned error: %v", err)
-	}
-
-	payloadBytes, err := job.Payload()
-	if err != nil {
-		t.Fatalf("Payload returned error: %v", err)
-	}
-
-	var payload AuditLogPayload
-	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		t.Fatalf("json.Unmarshal returned error: %v", err)
+		t.Fatalf("NewAuditLogPayload returned error: %v", err)
 	}
 	if payload.Kind != AuditLogKindRequest {
 		t.Fatalf("expected kind %q, got %q", AuditLogKindRequest, payload.Kind)
@@ -34,8 +23,15 @@ func TestNewAuditLogJobPayload(t *testing.T) {
 }
 
 func TestAuditLogHandlerReturnsSkipRetryForInvalidPayload(t *testing.T) {
-	handler := AuditLogHandler{}
-	err := handler.Handle(context.Background(), []byte(`{"kind":"invalid"}`))
+	registry := queue.NewRegistry()
+	RegisterAll(registry)
+
+	entries := registry.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 registry entry, got %d", len(entries))
+	}
+
+	err := entries[0].Handler(context.Background(), []byte(`{"kind":"invalid"}`))
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -59,15 +55,25 @@ func TestAuditLogHandlerPersistsSnapshot(t *testing.T) {
 		return nil
 	}
 
-	payload, err := json.Marshal(AuditLogPayload{
-		Kind:     AuditLogKindPanic,
-		Snapshot: &auditsvc.AuditLogSnapshot{RequestID: "req-2"},
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal returned error: %v", err)
+	registry := queue.NewRegistry()
+	RegisterAll(registry)
+	entries := registry.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 registry entry, got %d", len(entries))
 	}
 
-	if err := (AuditLogHandler{}).Handle(context.Background(), payload); err != nil {
+	payload, err := NewAuditLogPayload(AuditLogKindPanic, &auditsvc.AuditLogSnapshot{RequestID: "req-2"})
+	if err != nil {
+		t.Fatalf("NewAuditLogPayload returned error: %v", err)
+	}
+
+	job := queue.NewJSONJob(AuditLogTaskType, AuditQueueName, payload)
+	raw, err := job.Payload()
+	if err != nil {
+		t.Fatalf("Payload returned error: %v", err)
+	}
+
+	if err := entries[0].Handler(context.Background(), raw); err != nil {
 		t.Fatalf("Handle returned error: %v", err)
 	}
 	if !called {

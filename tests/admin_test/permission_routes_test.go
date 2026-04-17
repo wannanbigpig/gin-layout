@@ -10,7 +10,7 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
-func TestPermissionEdit(t *testing.T) {
+func TestPermissionEditRequiresLogin(t *testing.T) {
 	body := `{"id":10,"name":"ping","description":"服务心跳检测接口","method":"GET","route":"/ping","is_auth":0,"sort":100}`
 	resp := anonymousPostRequest("/admin/v1/permission/update", &body)
 
@@ -19,7 +19,7 @@ func TestPermissionEdit(t *testing.T) {
 	assert.Equal(t, e.NotLogin, result.Code)
 }
 
-func TestPermissionList(t *testing.T) {
+func TestPermissionListRequiresLogin(t *testing.T) {
 	queryParams := &url.Values{}
 	queryParams.Set("page", "1")
 	queryParams.Set("per_page", "1")

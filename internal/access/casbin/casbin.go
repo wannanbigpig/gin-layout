@@ -4,8 +4,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/casbin/casbin/v2"
-	"github.com/casbin/casbin/v2/model"
+	"github.com/casbin/casbin/v3"
+	"github.com/casbin/casbin/v3/model"
 	_ "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )

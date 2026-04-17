@@ -1,6 +1,7 @@
 package auth
 
 import (
+	stderrors "errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -61,7 +62,14 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 func (s *LoginService) validateUser(username, password string) (*model.AdminUser, error) {
 	adminUser := model.NewAdminUsers()
 	if err := adminUser.GetUserInfo(username); err != nil {
-		return nil, e.NewBusinessError(e.UserDoesNotExist)
+		switch {
+		case e.IsDependencyNotReady(err):
+			return nil, e.NewDependencyNotReadyError()
+		case stderrors.Is(err, gorm.ErrRecordNotFound):
+			return nil, e.NewBusinessError(e.UserDoesNotExist)
+		default:
+			return nil, err
+		}
 	}
 	if adminUser.Status != model.AdminUserStatusEnabled {
 		return nil, e.NewBusinessError(e.UserDisable)
@@ -74,14 +82,14 @@ func (s *LoginService) validateUser(username, password string) (*model.AdminUser
 
 // recordLoginLog 记录登录日志并更新用户信息。
 func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.AdminCustomClaims, accessToken, refreshToken string, logInfo LoginLogInfo, logType uint8) error {
-	db, err := model.GetDB()
+	db, err := model.NewAdminLoginLogs().GetDB()
 	if err != nil {
 		return err
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		loginLog := s.buildLoginLog(adminUser.ID, adminUser.Username, claims.ID, accessToken, refreshToken, claims.ExpiresAt.Time, logInfo, model.LoginStatusSuccess, "", logType)
 		loginLog.SetDB(tx)
-		if err := tx.Create(loginLog).Error; err != nil {
+		if err := loginLog.Create(); err != nil {
 			log.Logger.Error("记录登录日志失败", zap.Error(err), zap.Uint("user_id", adminUser.ID), zap.String("username", adminUser.Username))
 			return err
 		}

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -70,19 +71,22 @@ func (hr *HttpRequest) ParseJson(payload any) error {
 }
 
 // ParseBytes 读取并返回原始响应体字节。
-func (hr *HttpRequest) ParseBytes() ([]byte, error) {
+func (hr *HttpRequest) ParseBytes() (body []byte, err error) {
 	if hr.Error != nil {
 		return nil, hr.Error
 	}
+	if hr.Response == nil || hr.Response.Body == nil {
+		return nil, errors.New("http response body is nil")
+	}
 
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			panic(err.Error())
+	defer func() {
+		if closeErr := hr.Response.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
 		}
-	}(hr.Response.Body)
+	}()
 
-	return io.ReadAll(hr.Response.Body)
+	body, err = io.ReadAll(hr.Response.Body)
+	return body, err
 }
 
 // Raw 以字符串形式返回原始响应体。

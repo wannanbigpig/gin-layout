@@ -15,6 +15,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	req "github.com/wannanbigpig/gin-layout/internal/pkg/request"
 	authservice "github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 )
@@ -28,7 +29,7 @@ func TestExtractAccessToken(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/auth/check-token", nil)
 	ctx.Request.Header.Set("Authorization", "Bearer token-value")
 
-	accessToken, err := extractAccessToken(ctx)
+	accessToken, err := req.GetAccessToken(ctx)
 	if err != nil {
 		t.Fatalf("expected token to be extracted, got error %v", err)
 	}
@@ -119,7 +120,9 @@ func initControllerAuthTest(t *testing.T) {
 	if err := config.InitConfig(configPath); err != nil {
 		t.Fatalf("init config failed: %v", err)
 	}
-	logger.InitLogger()
+	if err := logger.InitLogger(); err != nil {
+		t.Fatalf("init logger failed: %v", err)
+	}
 	if err := validator.InitValidatorTrans("zh"); err != nil {
 		t.Fatalf("init validator failed: %v", err)
 	}

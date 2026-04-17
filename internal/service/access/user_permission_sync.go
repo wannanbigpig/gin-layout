@@ -81,21 +81,14 @@ func (s *UserPermissionSyncService) withSyncTransaction(tx []*gorm.DB, fn func(e
 	if existingTx := FirstTx(tx); existingTx != nil {
 		return fn(existingTx)
 	}
-	db, err := s.resolveDB(nil)
+	db, err := model.NewAdminUsers().GetDB()
 	if err != nil {
 		return err
 	}
 	if err := db.Transaction(fn); err != nil {
 		return err
 	}
-	return casbinx.ReloadPolicy()
-}
-
-func (s *UserPermissionSyncService) resolveDB(tx []*gorm.DB) (*gorm.DB, error) {
-	if db := FirstTx(tx); db != nil {
-		return db, nil
-	}
-	return model.GetDB()
+	return reloadPolicy()
 }
 
 func (s *UserPermissionSyncService) forEachUser(userIDs []uint, fn func(userID uint) error) error {

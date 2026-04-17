@@ -1,7 +1,6 @@
 package admin_v1
 
 import (
-	"mime/multipart"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -39,8 +38,11 @@ func (api CommonController) Upload(c *gin.Context) {
 	commonService := service.NewCommonService()
 	commonService.SetAdminUserId(uid)
 
-	// 获取上传路径参数
-	path := getUploadPath(form)
+	// 获取上传路径参数。
+	path := defaultUploadPath
+	if values := form.Value["path"]; len(values) > 0 && values[0] != "" {
+		path = values[0]
+	}
 
 	// 执行文件上传
 	result, err := commonService.UploadImages(form.File["files"], path)
@@ -96,12 +98,4 @@ func (api CommonController) GetFile(c *gin.Context) {
 
 	// 返回文件
 	c.File(filePath)
-}
-
-// getUploadPath 获取上传路径
-func getUploadPath(form *multipart.Form) string {
-	if len(form.Value["path"]) > 0 && form.Value["path"][0] != "" {
-		return form.Value["path"][0]
-	}
-	return defaultUploadPath
 }

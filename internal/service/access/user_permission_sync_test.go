@@ -4,6 +4,9 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestUserPermissionSyncForEachUserDeduplicatesInOrder(t *testing.T) {
@@ -50,5 +53,36 @@ func TestExpandRoleAncestorsSkipsDisabledRoles(t *testing.T) {
 	want := []uint{2, 1}
 	if !reflect.DeepEqual(got, want) && !reflect.DeepEqual(got, []uint{1, 2}) {
 		t.Fatalf("unexpected expanded roles: got %v want %v", got, want)
+	}
+}
+
+func TestPermissionSyncCoordinatorRunAfterCommitReloadsOnce(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+
+	coordinator := NewPermissionSyncCoordinator()
+	reloadCount := 0
+	originalReloadPolicy := reloadPolicy
+	t.Cleanup(func() {
+		reloadPolicy = originalReloadPolicy
+	})
+	reloadPolicy = func() error {
+		reloadCount++
+		return nil
+	}
+
+	err = coordinator.RunAfterCommit(db, "reload failed", func(tx *gorm.DB) error {
+		if tx == nil {
+			t.Fatal("expected transaction")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reloadCount != 1 {
+		t.Fatalf("expected reload once, got %d", reloadCount)
 	}
 }

@@ -19,36 +19,6 @@ func NewApiController() *ApiController {
 	return &ApiController{}
 }
 
-// Edit 编辑API权限
-func (api ApiController) Edit(c *gin.Context) {
-	params := form.NewUpdateApiForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	if err := api_permission.NewApiService().Edit(params); err != nil {
-		api.Err(c, err)
-		return
-	}
-
-	api.Success(c, nil)
-}
-
-// Create 新增API权限
-func (api ApiController) Create(c *gin.Context) {
-	params := form.NewCreateApiForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	if err := api_permission.NewApiService().Create(params); err != nil {
-		api.Err(c, err)
-		return
-	}
-
-	api.Success(c, nil)
-}
-
 // Update 更新API权限
 func (api ApiController) Update(c *gin.Context) {
 	params := form.NewUpdateApiForm()

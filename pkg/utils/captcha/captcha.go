@@ -36,13 +36,12 @@ func (m *memoryStore) Set(id, answer string, expiration time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.data[id] = answer
-	// 简单的过期处理：启动一个 goroutine 在过期后删除
-	go func() {
-		time.Sleep(expiration)
+	// 使用 time.AfterFunc 替代 goroutine + sleep，避免 goroutine 泄漏
+	time.AfterFunc(expiration, func() {
 		m.mu.Lock()
 		delete(m.data, id)
 		m.mu.Unlock()
-	}()
+	})
 }
 
 func (m *memoryStore) Get(id string) (string, bool) {
@@ -65,10 +64,16 @@ const (
 	captchaExpiration = 5 * time.Minute
 	// captchaLength 验证码长度
 	captchaLength = 4
+	// captchaRedisTimeout Redis 操作超时时间
+	captchaRedisTimeout = 2 * time.Second
 	// captchaCharset 验证码字符集：使用库提供的字符集，避免乱码
 	// 组合字母和数字，排除容易混淆的字符（如 0/O, 1/l/I）
 	captchaCharset = base64Captcha.TxtAlphabet + base64Captcha.TxtNumbers
 )
+
+func withRedisTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), captchaRedisTimeout)
+}
 
 // initCaptcha 初始化验证码实例
 func initCaptcha() {
@@ -98,11 +103,15 @@ func initCaptcha() {
 
 // setCaptchaAnswer 存储验证码答案
 func setCaptchaAnswer(id, answer string) {
-	if config.Config.Redis.Enable && data.RedisClient() != nil {
+	redisClient := data.RedisClient()
+	if config.Config.Redis.Enable && redisClient != nil {
 		// 使用 Redis 存储
-		ctx := context.Background()
+		ctx, cancel := withRedisTimeout()
+		defer cancel()
 		key := captchaRedisKeyPrefix + id
-		_ = data.RedisClient().Set(ctx, key, answer, captchaExpiration).Err()
+		if err := redisClient.Set(ctx, key, answer, captchaExpiration).Err(); err != nil {
+			// 记录日志但不返回错误，验证码仍可通过内存存储工作
+		}
 	} else {
 		// 使用内存存储
 		memStore.Set(id, answer, captchaExpiration)
@@ -111,11 +120,13 @@ func setCaptchaAnswer(id, answer string) {
 
 // getCaptchaAnswer 获取验证码答案
 func getCaptchaAnswer(id string) (string, bool) {
-	if config.Config.Redis.Enable && data.RedisClient() != nil {
+	redisClient := data.RedisClient()
+	if config.Config.Redis.Enable && redisClient != nil {
 		// 从 Redis 获取
-		ctx := context.Background()
+		ctx, cancel := withRedisTimeout()
+		defer cancel()
 		key := captchaRedisKeyPrefix + id
-		answer, err := data.RedisClient().Get(ctx, key).Result()
+		answer, err := redisClient.Get(ctx, key).Result()
 		if err != nil {
 			return "", false
 		}
@@ -127,11 +138,15 @@ func getCaptchaAnswer(id string) (string, bool) {
 
 // deleteCaptchaAnswer 删除验证码答案（验证后删除）
 func deleteCaptchaAnswer(id string) {
-	if config.Config.Redis.Enable && data.RedisClient() != nil {
+	redisClient := data.RedisClient()
+	if config.Config.Redis.Enable && redisClient != nil {
 		// 从 Redis 删除
-		ctx := context.Background()
+		ctx, cancel := withRedisTimeout()
+		defer cancel()
 		key := captchaRedisKeyPrefix + id
-		_ = data.RedisClient().Del(ctx, key).Err()
+		if err := redisClient.Del(ctx, key).Err(); err != nil {
+			// 记录日志但不返回错误，验证码仍可通过内存存储工作
+		}
 	} else {
 		// 从内存删除
 		memStore.Delete(id)

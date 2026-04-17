@@ -78,20 +78,15 @@ func reloadCasbin(oldConfig, newConfig *config.Conf, diff config.ConfigDiff) err
 }
 
 func logWarnings(oldConfig, newConfig *config.Conf, diff config.ConfigDiff) error {
-	logConfigDiff(diff)
+	if len(diff.ChangedFields) > 0 {
+		log.Logger.Info("Detected config changes",
+			zap.Strings("fields", diff.ChangedFields),
+		)
+	}
 	if len(diff.RestartRequiredFields) > 0 {
 		log.Logger.Warn("Detected config changes that require process restart",
 			zap.Strings("fields", diff.RestartRequiredFields),
 		)
 	}
 	return nil
-}
-
-func logConfigDiff(diff config.ConfigDiff) {
-	if len(diff.ChangedFields) == 0 {
-		return
-	}
-	log.Logger.Info("Detected config changes",
-		zap.Strings("fields", diff.ChangedFields),
-	)
 }

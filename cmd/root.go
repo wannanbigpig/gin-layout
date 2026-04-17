@@ -13,10 +13,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/cmd/service"
 	"github.com/wannanbigpig/gin-layout/cmd/version"
 	"github.com/wannanbigpig/gin-layout/cmd/worker"
-	"github.com/wannanbigpig/gin-layout/config"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
-	"github.com/wannanbigpig/gin-layout/internal/queue"
-	_ "github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
 	"github.com/wannanbigpig/gin-layout/internal/runtime"
 )
 
@@ -33,13 +30,15 @@ var (
 		Long: `Gin framework is used as the core of this project to build a scaffold,
 based on the project can be quickly completed business development, out of the box 📦`,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if shouldSkipBootstrap(cmd) {
+				return nil
+			}
 			if err := bootstrapx.InitializeConfig(configPath); err != nil {
 				return err
 			}
 			bootstrapx.InitializeTimezone()
-			bootstrapx.InitializeLogger()
-			if err := queue.InitPublisher(config.GetConfig()); err != nil {
-				log.Warn("Queue publisher initialization failed", zap.Error(err))
+			if err := bootstrapx.InitializeLogger(); err != nil {
+				return err
 			}
 			return nil
 		},
@@ -59,6 +58,21 @@ func init() {
 // registerFlags 注册命令行标志
 func registerFlags() {
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "", "The absolute path of the configuration file")
+}
+
+func shouldSkipBootstrap(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	if cmd.Name() == "help" {
+		return true
+	}
+	switch cmd.CommandPath() {
+	case "go-layout", "go-layout version", "go-layout help":
+		return true
+	default:
+		return false
+	}
 }
 
 // registerCommands 注册子命令

@@ -19,21 +19,6 @@ func NewMenuController() *MenuController {
 	return &MenuController{}
 }
 
-// Edit 编辑菜单
-func (api MenuController) Edit(c *gin.Context) {
-	params := form.NewUpdateMenuForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	if err := menu.NewMenuService().Edit(params); err != nil {
-		api.Err(c, err)
-		return
-	}
-
-	api.Success(c, nil)
-}
-
 // Create 新增菜单
 func (api MenuController) Create(c *gin.Context) {
 	params := form.NewCreateMenuForm()

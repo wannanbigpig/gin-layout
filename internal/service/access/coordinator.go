@@ -3,7 +3,6 @@ package access
 import (
 	"gorm.io/gorm"
 
-	casbinx "github.com/wannanbigpig/gin-layout/internal/access/casbin"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
@@ -88,7 +87,7 @@ func (c *PermissionSyncCoordinator) AccessibleMenuIDs(userID uint, includeParent
 
 // ReloadPolicyCache 在事务提交后刷新共享 Casbin Enforcer 的内存策略。
 func (c *PermissionSyncCoordinator) ReloadPolicyCache() error {
-	return casbinx.ReloadPolicy()
+	return reloadPolicy()
 }
 
 // ReloadPolicyCacheWithMessage 在事务提交后刷新共享策略，并统一包装业务错误。

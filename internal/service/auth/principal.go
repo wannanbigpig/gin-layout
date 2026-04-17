@@ -9,35 +9,60 @@ import (
 )
 
 // AuthPrincipal 表示一次请求中已验证的认证主体。
+//
+// 这里固定采用 claims-first 语义：中间件只保存 JWT claims 中已有的字段快照，
+// 不在请求上下文里缓存完整的 AdminUser 模型，避免每个请求默认回表。
 type AuthPrincipal struct {
 	Claims          *token.AdminCustomClaims
 	JWTID           string
-	User            *model.AdminUser
 	UserID          uint
 	Username        string
 	Nickname        string
 	Email           string
 	FullPhoneNumber string
+	PhoneNumber     string
+	CountryCode     string
+	IsSuperAdmin    uint8
 }
 
-func newAuthPrincipal(user *model.AdminUser, claims *token.AdminCustomClaims) *AuthPrincipal {
-	if user == nil {
+func newAuthPrincipalFromClaims(claims *token.AdminCustomClaims) *AuthPrincipal {
+	if claims == nil {
 		return nil
 	}
 
 	principal := &AuthPrincipal{
-		User:            user,
-		UserID:          user.ID,
-		Username:        user.Username,
-		Nickname:        user.Nickname,
-		Email:           user.Email,
-		FullPhoneNumber: user.FullPhoneNumber,
-	}
-	if claims != nil {
-		principal.Claims = claims
-		principal.JWTID = claims.ID
+		UserID:          claims.UserID,
+		Username:        claims.Username,
+		Nickname:        claims.Nickname,
+		Email:           claims.Email,
+		FullPhoneNumber: claims.FullPhoneNumber,
+		PhoneNumber:     claims.PhoneNumber,
+		CountryCode:     claims.CountryCode,
+		IsSuperAdmin:    claims.IsSuperAdmin,
+		Claims:          claims,
+		JWTID:           claims.ID,
 	}
 	return principal
+}
+
+// AdminUser 将认证主体转换为兼容旧逻辑的轻量用户对象。
+// 返回值只包含 claims 中已有字段，不保证数据库实时状态。
+func (p *AuthPrincipal) AdminUser() *model.AdminUser {
+	if p == nil {
+		return nil
+	}
+	return &model.AdminUser{
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+			BaseModel: model.BaseModel{ID: p.UserID},
+		},
+		Username:        p.Username,
+		Nickname:        p.Nickname,
+		Email:           p.Email,
+		FullPhoneNumber: p.FullPhoneNumber,
+		PhoneNumber:     p.PhoneNumber,
+		CountryCode:     p.CountryCode,
+		IsSuperAdmin:    p.IsSuperAdmin,
+	}
 }
 
 // StoreAuthPrincipal 将认证主体写入上下文。

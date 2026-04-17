@@ -30,21 +30,6 @@ func (api RoleController) List(c *gin.Context) {
 	api.Success(c, result)
 }
 
-// Edit 编辑角色
-func (api RoleController) Edit(c *gin.Context) {
-	params := form.NewUpdateRoleForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	if err := role.NewRoleService().Edit(params); err != nil {
-		api.Err(c, err)
-		return
-	}
-
-	api.Success(c, nil)
-}
-
 // Create 新增角色
 func (api RoleController) Create(c *gin.Context) {
 	params := form.NewCreateRoleForm()

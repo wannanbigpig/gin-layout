@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
-	utils2 "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
@@ -20,21 +20,49 @@ func InitConfig(configPath string) error {
 		if initErr != nil {
 			return
 		}
+		initErr = validateJWTSecretKey(loaded)
+		if initErr != nil {
+			return
+		}
 		setActiveConfig(loaded)
-		initErr = checkJwtSecretKey()
 	})
 	return initErr
 }
 
 func checkJwtSecretKey() error {
-	if Config.Jwt.SecretKey == "" {
-		Config.Jwt.SecretKey = utils2.RandString(64)
-		configValue.Store(Config)
-		fmt.Fprintf(
-			os.Stderr,
-			"warning: jwt.secret_key is empty, generated an in-memory secret for this process; set jwt.secret_key in config.yaml to persist it across restarts\n",
-		)
+	return validateJWTSecretKey(GetConfig())
+}
+
+func validateJWTSecretKey(cfg *Conf) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
 	}
+	secret := strings.TrimSpace(cfg.Jwt.SecretKey)
+	if secret == "" {
+		return fmt.Errorf("jwt.secret_key is empty, please set a non-empty secret key")
+	}
+
+	isProd := strings.EqualFold(cfg.AppEnv, "prod") || strings.EqualFold(cfg.AppEnv, "production")
+	if !isProd {
+		return nil
+	}
+
+	weakSecrets := map[string]struct{}{
+		"<your_secret_key>":    {},
+		"your-secret-key-here": {},
+		"default-secret-key":   {},
+		"change-me":            {},
+		"changeme":             {},
+		"secret":               {},
+		"123456":               {},
+	}
+	if _, ok := weakSecrets[strings.ToLower(secret)]; ok {
+		return fmt.Errorf("jwt.secret_key uses a weak placeholder value in production")
+	}
+	if len(secret) < 16 {
+		return fmt.Errorf("jwt.secret_key is too short in production, require at least 16 characters")
+	}
+
 	return nil
 }
 
@@ -57,6 +85,8 @@ func load(configPath string) (*Conf, error) {
 	if err := V.Unmarshal(loaded); err != nil {
 		return nil, fmt.Errorf("映射配置出错: %w", err)
 	}
+
+	resolveEnvVars(loaded)
 
 	ensureCorsDefaults(loaded)
 	registerConfigWatcherIfNeeded(loaded)
@@ -143,7 +173,11 @@ func reloadConfigFromWatcher() error {
 	if err := V.Unmarshal(next); err != nil {
 		return fmt.Errorf("重新映射配置出错: %w", err)
 	}
+	resolveEnvVars(next)
 	ensureCorsDefaults(next)
+	if err := validateJWTSecretKey(next); err != nil {
+		return fmt.Errorf("JWT 配置校验失败: %w", err)
+	}
 
 	current := GetConfig()
 	diff := BuildConfigDiff(current, next)
@@ -164,4 +198,26 @@ func reloadConfigFromWatcher() error {
 
 	setActiveConfig(applied)
 	return nil
+}
+
+func resolveEnvVars(cfg *Conf) {
+	cfg.Mysql.Username = resolveEnvVar(cfg.Mysql.Username)
+	cfg.Mysql.Password = resolveEnvVar(cfg.Mysql.Password)
+	cfg.Mysql.Host = resolveEnvVar(cfg.Mysql.Host)
+	cfg.Redis.Password = resolveEnvVar(cfg.Redis.Password)
+	cfg.Redis.Host = resolveEnvVar(cfg.Redis.Host)
+	cfg.Queue.Redis.Password = resolveEnvVar(cfg.Queue.Redis.Password)
+	cfg.Queue.Redis.Host = resolveEnvVar(cfg.Queue.Redis.Host)
+	cfg.Jwt.SecretKey = resolveEnvVar(cfg.Jwt.SecretKey)
+}
+
+func resolveEnvVar(val string) string {
+	if !strings.HasPrefix(val, "${") || !strings.HasSuffix(val, "}") {
+		return val
+	}
+	envKey := val[2 : len(val)-1]
+	if envVal := os.Getenv(envKey); envVal != "" {
+		return envVal
+	}
+	return val
 }

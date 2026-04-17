@@ -1,6 +1,8 @@
 package model
 
 import (
+	"time"
+
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model/modelDict"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
@@ -111,4 +113,52 @@ func (m *AdminLoginLogs) IsRevokedMap() string {
 // RevokedCodeMap 撤销原因码映射
 func (m *AdminLoginLogs) RevokedCodeMap() string {
 	return RevokedCodeDict.Map(m.RevokedCode)
+}
+
+// Create 创建单条登录日志记录。
+func (m *AdminLoginLogs) Create() error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Create(m).Error
+}
+
+// FindByJwtId 根据 jwtId 查找登录日志。
+func (m *AdminLoginLogs) FindByJwtId(jwtId string) error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Where("jwt_id = ? AND deleted_at = 0", jwtId).First(m).Error
+}
+
+// UpdateRevokedStatusByJwtIds 批量更新 token 撤销状态。
+func (m *AdminLoginLogs) UpdateRevokedStatusByJwtIds(jwtIds []string, revokedCode uint8, revokedReason string, revokedAt utils.FormatDate) error {
+	if len(jwtIds) == 0 {
+		return nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Where("jwt_id IN ? AND deleted_at = 0 AND is_revoked = ?", jwtIds, IsRevokedNo).
+		Updates(map[string]interface{}{
+			"is_revoked":     IsRevokedYes,
+			"revoked_code":   revokedCode,
+			"revoked_reason": revokedReason,
+			"revoked_at":     revokedAt,
+		}).Error
+}
+
+// FindActiveTokensByUserId 查询用户未过期的活跃 token 列表。
+func (m *AdminLoginLogs) FindActiveTokensByUserId(userId uint, now time.Time) ([]AdminLoginLogs, error) {
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var loginLogs []AdminLoginLogs
+	err = db.Where("uid = ? AND deleted_at = 0 AND is_revoked = ? AND login_status = ? AND token_expires IS NOT NULL AND token_expires > ?",
+		userId, IsRevokedNo, LoginStatusSuccess, now).Find(&loginLogs).Error
+	return loginLogs, err
 }

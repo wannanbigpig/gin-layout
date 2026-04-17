@@ -1,16 +1,15 @@
 module github.com/wannanbigpig/gin-layout
 
-go 1.25.7
+go 1.26
 
 require (
-	github.com/casbin/casbin/v2 v2.135.0
+	github.com/casbin/casbin/v3 v3.10.0
 	github.com/casbin/gorm-adapter/v3 v3.41.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.2
-	github.com/go-redis/redis/v8 v8.11.5
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -22,6 +21,7 @@ require (
 	github.com/mojocn/base64Captcha v1.3.8
 	github.com/mssola/useragent v1.0.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
+	github.com/redis/go-redis/v9 v9.18.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/samber/lo v1.53.0
 	github.com/spf13/cobra v1.10.2
@@ -31,19 +31,20 @@ require (
 	golang.org/x/crypto v0.49.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/driver/mysql v1.6.0
+	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 	gorm.io/plugin/soft_delete v1.2.1
 )
 
 require (
-	github.com/casbin/casbin/v3 v3.10.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
-	github.com/redis/go-redis/v9 v9.18.0 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/image v0.38.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.43.0 // indirect
 )
 
 require (
@@ -100,9 +101,8 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/arch v0.25.0 // indirect
-	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
 	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
@@ -110,38 +110,33 @@ require (
 	gorm.io/driver/postgres v1.6.0 // indirect
 	gorm.io/driver/sqlserver v1.6.3 // indirect
 	gorm.io/plugin/dbresolver v1.6.2 // indirect
-	// SQLite dependencies (GPL licensed) - indirect dependencies via casbin/gorm-adapter/v3
+	// SQLite dependencies (BSD-3-Clause licensed) - indirect dependencies via casbin/gorm-adapter/v3
 	// Note: Project only uses MySQL, these are pulled in by the adapter's SQLite support
-	modernc.org/libc v1.70.0 // indirect; GPL license
-	modernc.org/mathutil v1.7.1 // indirect; GPL license
-	modernc.org/memory v1.11.0 // indirect; GPL license
-	modernc.org/sqlite v1.48.0 // indirect; GPL-3.0-or-later
+	// All modernc.org packages use BSD-3-Clause license (compatible with MIT)
+	modernc.org/libc v1.70.0 // indirect; BSD-3-Clause
+	modernc.org/mathutil v1.7.1 // indirect; BSD-3-Clause
+	modernc.org/memory v1.11.0 // indirect; BSD-3-Clause
+	modernc.org/sqlite v1.48.0 // indirect; BSD-3-Clause
 )
 
 // License Compliance Notes:
 //
-// ⚠️ freetype (GPL-2.0-only) - INDIRECT DEPENDENCY:
-//    - Source: github.com/mojocn/base64Captcha (Apache-2.0) -> github.com/golang/freetype
+// 1. github.com/golang/freetype (FreeType License OR GPL-2.0) - ✅ COMPATIBLE:
+//    - Via: github.com/mojocn/base64Captcha (Apache-2.0) -> github.com/golang/freetype
 //    - Used for: Font rendering in captcha images (alphanumeric support)
-//    - Status: Indirect dependency, not directly imported by this project
-//    - Risk Level: MEDIUM (indirect GPL dependency)
-//    - Note: base64Captcha is used to support alphanumeric captcha (letters + numbers)
-//            which dchest/captcha does not support. If GPL-2.0 is a concern,
-//            consider using a different approach or accepting the indirect dependency.
+//    - Status: Uses FreeType License (not GPL) - compatible with MIT
+//    - Note: This package offers dual licensing; we use FreeType License
 //
-// 1. modernc.org/sqlite (GPL-3.0-or-later) - ⚠️ LOW RISK:
-//    - Source: casbin/gorm-adapter/v3 (SQLite support)
-//    - Status: NOT USED - Project only uses MySQL, code never executed at runtime
-//    - Risk Level: LOW (but not zero)
-//    - Action: Mark as "approved" in license scanner since it's never called at runtime
-//    - Rationale: Since the code is never called, it may be considered an "aggregation"
-//                rather than a "derivative work" under copyright law
+// 2. modernc.org/* packages (BSD-3-Clause) - ✅ COMPATIBLE:
+//    - Via: casbin/gorm-adapter/v3 -> SQLite support
+//    - Actual license: BSD-3-Clause (NOT GPL - see LICENSE files in mod cache)
+//    - Status: BSD-3-Clause is MIT-compatible
+//    - Note: Project uses MySQL, SQLite code is not executed at runtime
 //
-// 2. mysql driver (MPL-2.0) - ✅ NO RISK:
-//    - Source: github.com/go-sql-driver/mysql (direct dependency)
+// 3. github.com/go-sql-driver/mysql (MPL-2.0) - ✅ COMPATIBLE:
 //    - Used for: MySQL database connection
-//    - MPL-2.0 is compatible with MIT and generally acceptable for commercial use
+//    - Status: MPL-2.0 is MIT-compatible for library usage
+//    - Note: Only requires open source if you modify the driver itself
 //
-// For license scanning tools:
-// - Mark modernc.org/* packages as "approved" (unused transitive dependencies)
-// - All other dependencies are MIT-compatible
+// Summary: All dependencies are compatible with MIT license.
+//          This project can be safely released under MIT.

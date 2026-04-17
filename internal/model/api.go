@@ -63,3 +63,35 @@ func (m *Api) IsAuthMap() string {
 func (m *Api) IsEffectiveMap() string {
 	return modelDict.IsMap.Map(m.IsEffective)
 }
+
+// FindIdsByRouteAndMethod 根据路由和方法列表查询未删除接口的 ID 列表。
+func (m *Api) FindIdsByRouteAndMethod(routes []string, methods []string) ([]Api, error) {
+	if len(routes) == 0 || len(methods) == 0 {
+		return nil, nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var apis []Api
+	if err := db.Select("id", "route", "method").Where("route IN ? AND method IN ? AND deleted_at = 0", routes, methods).Find(&apis).Error; err != nil {
+		return nil, err
+	}
+	return apis, nil
+}
+
+// FindByIds 根据 ID 列表查询未删除的接口。
+func (m *Api) FindByIds(ids []uint) ([]Api, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var apis []Api
+	if err := db.Where("id IN ?", ids).Find(&apis).Error; err != nil {
+		return nil, err
+	}
+	return apis, nil
+}

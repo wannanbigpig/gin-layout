@@ -2,6 +2,7 @@ package token
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 type AdminUserInfo struct {
 	// 可根据需要自行添加字段
 	UserID          uint   `json:"user_id"`
+	Username        string `json:"username"`
 	FullPhoneNumber string `json:"full_phone_number"`
 	Email           string `json:"email"`
 	Nickname        string `json:"nickname"`
@@ -48,18 +50,20 @@ func Refresh(claims jwt.Claims) (string, error) {
 func Parse(accessToken string, claims jwt.Claims, options ...jwt.ParserOption) error {
 	cfg := c.GetConfig()
 	token, err := jwt.ParseWithClaims(accessToken, claims, func(token *jwt.Token) (i interface{}, err error) {
-		return []byte(cfg.Jwt.SecretKey), err
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(cfg.Jwt.SecretKey), nil
 	}, options...)
 	if err != nil {
 		return err
 	}
 
-	// 对token对象中的Claim进行类型断言
-	if token.Valid { // 校验token
-		return nil
+	if !token.Valid {
+		return e.NewBusinessError(1, "invalid token")
 	}
 
-	return e.NewBusinessError(1, "invalid token")
+	return nil
 }
 
 // GetAccessToken 获取jwt的Token
@@ -94,6 +98,7 @@ func NewAdminCustomClaims(user *model.AdminUser) AdminCustomClaims {
 	return AdminCustomClaims{
 		AdminUserInfo: AdminUserInfo{
 			UserID:          user.ID,
+			Username:        user.Username,
 			FullPhoneNumber: user.FullPhoneNumber, // phoneRule.Apply(user.Mobile),
 			PhoneNumber:     user.PhoneNumber,     // phoneRule.Apply(user.Mobile),
 			CountryCode:     user.CountryCode,     // phoneRule.Apply(user.Mobile),

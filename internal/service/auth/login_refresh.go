@@ -15,6 +15,8 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
 )
 
+const refreshLockRedisTimeout = 2 * time.Second
+
 // BuildLoginLogInfo 从请求上下文构建登录日志信息。
 func (s *LoginService) BuildLoginLogInfo(c *gin.Context) LoginLogInfo {
 	userAgentStr := c.Request.UserAgent()
@@ -30,13 +32,11 @@ func (s *LoginService) BuildLoginLogInfo(c *gin.Context) LoginLogInfo {
 	}
 }
 
-// buildRefreshLogInfo 构建刷新 token 日志信息。
-func (s *LoginService) buildRefreshLogInfo(c *gin.Context) LoginLogInfo {
-	return s.BuildLoginLogInfo(c)
-}
-
 // tryRefreshToken 尝试自动刷新 Token。
 func (s *LoginService) tryRefreshToken(principal *AuthPrincipal) {
+	if !mysqlReadyLookup() {
+		return
+	}
 	if !s.shouldRefreshToken(principal) {
 		return
 	}
@@ -74,17 +74,11 @@ func (s *LoginService) buildRefreshLockKey(claims *token.AdminCustomClaims) stri
 
 // acquireRefreshLock 获取刷新锁。
 func (s *LoginService) acquireRefreshLock(lockKey string, claims *token.AdminCustomClaims) func() {
-	if config.GetConfig().Redis.Enable && data.RedisClient() != nil {
-		return s.acquireRedisLock(lockKey, claims)
+	if !(config.GetConfig().Redis.Enable && data.RedisClient() != nil) {
+		return s.acquireMemoryLock(lockKey)
 	}
-	return s.acquireMemoryLock(lockKey)
-}
 
-// acquireRedisLock 获取 Redis 分布式锁。
-func (s *LoginService) acquireRedisLock(lockKey string, claims *token.AdminCustomClaims) func() {
-	ctx := context.Background()
-	redisClient := data.RedisClient()
-	locked, err := redisClient.SetNX(ctx, lockKey, "1", refreshLockTTL).Result()
+	unlock, locked, err := s.acquireRedisLock(lockKey)
 	if err != nil {
 		log.Logger.Warn("获取刷新token Redis锁失败，降级到内存锁", zap.Error(err), zap.Uint("user_id", claims.UserID), zap.String("jwt_id", claims.ID))
 		return s.acquireMemoryLock(lockKey)
@@ -92,9 +86,29 @@ func (s *LoginService) acquireRedisLock(lockKey string, claims *token.AdminCusto
 	if !locked {
 		return nil
 	}
-	return func() {
-		_ = redisClient.Del(ctx, lockKey).Err()
+	return unlock
+}
+
+// acquireRedisLock 获取 Redis 分布式锁。
+func (s *LoginService) acquireRedisLock(lockKey string) (func(), bool, error) {
+	redisClient := data.RedisClient()
+	lockCtx, lockCancel := context.WithTimeout(context.Background(), refreshLockRedisTimeout)
+	defer lockCancel()
+
+	locked, err := redisClient.SetNX(lockCtx, lockKey, "1", refreshLockTTL).Result()
+	if err != nil {
+		return nil, false, err
 	}
+	if !locked {
+		return nil, false, nil
+	}
+	return func() {
+		unlockCtx, unlockCancel := context.WithTimeout(context.Background(), refreshLockRedisTimeout)
+		defer unlockCancel()
+		if err := redisClient.Del(unlockCtx, lockKey).Err(); err != nil {
+			log.Logger.Warn("释放刷新 token Redis 锁失败", zap.Error(err), zap.String("lock_key", lockKey))
+		}
+	}, true, nil
 }
 
 // acquireMemoryLock 获取内存锁。
@@ -109,7 +123,7 @@ func (s *LoginService) doRefreshToken(principal *AuthPrincipal) {
 	if principal == nil || principal.Claims == nil {
 		return
 	}
-	logInfo := s.buildRefreshLogInfo(s.GetCtx())
+	logInfo := s.BuildLoginLogInfo(s.GetCtx())
 	tokenResponse, err := s.Refresh(principal.UserID, logInfo)
 	if err != nil {
 		log.Logger.Warn("自动刷新token失败", zap.Error(err), zap.Uint("user_id", principal.UserID), zap.String("jwt_id", principal.JWTID))

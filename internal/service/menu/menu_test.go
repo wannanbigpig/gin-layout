@@ -39,26 +39,12 @@ func TestAssembleFullPath(t *testing.T) {
 	}
 }
 
-func TestApplyDescendantMenuState(t *testing.T) {
+func TestBuildPids(t *testing.T) {
 	service := NewMenuService()
-	parent := &model.Menu{Pids: "0,1", Level: 3, FullPath: "/system"}
-	parent.ID = 10
-	child := &model.Menu{Path: "users", Type: model.MENU}
-
-	service.applyDescendantMenuState(parent, child)
-	if child.Pids != "0,1,10" {
-		t.Fatalf("unexpected child pids: %s", child.Pids)
+	if got := service.buildPids("0,1", 10); got != "0,1,10" {
+		t.Fatalf("unexpected pids: %s", got)
 	}
-	if child.Level != 4 {
-		t.Fatalf("unexpected child level: %d", child.Level)
-	}
-	if child.FullPath != "/system/users" {
-		t.Fatalf("unexpected child full path: %s", child.FullPath)
-	}
-
-	buttonChild := &model.Menu{Path: "submit", Type: model.BUTTON}
-	service.applyDescendantMenuState(parent, buttonChild)
-	if buttonChild.FullPath != "" {
-		t.Fatalf("expected empty full path for button child, got %s", buttonChild.FullPath)
+	if got := service.buildPids("", 10); got != "10" {
+		t.Fatalf("unexpected root pids: %s", got)
 	}
 }

@@ -1,5 +1,11 @@
 package model
 
+import (
+	"gorm.io/gorm"
+
+	"github.com/wannanbigpig/gin-layout/internal/global"
+)
+
 // Department 部门表
 type Department struct {
 	ContainsDeleteBaseModel
@@ -26,5 +32,42 @@ func (m *Department) TableName() string {
 }
 
 func (m *Department) IsSystemDepartment() bool {
-	return m.IsSystem == 1
+	return m.IsSystem == global.Yes
+}
+
+// FindByCode 根据 code 查找未删除的部门，结果写入自身。
+func (m *Department) FindByCode(code string) error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Where("code = ? AND deleted_at = 0", code).First(m).Error
+}
+
+// UpdateUserNumberByIds 批量更新指定部门的用户数量。
+func (m *Department) UpdateUserNumberByIds(deptIds []uint, updateExpr string) error {
+	if len(deptIds) == 0 {
+		return nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Model(m).
+		Where("id IN (?)", deptIds).
+		Update("user_number", gorm.Expr(updateExpr)).Error
+}
+
+// UpdateChildrenPidsByParent 批量更新指定父节点下所有子部门的 pids 和 level。
+func (m *Department) UpdateChildrenPidsByParent(parentID uint, updateExpr string) error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Model(m).
+		Where("FIND_IN_SET(?,pids)", parentID).
+		Updates(map[string]interface{}{
+			"pids":  gorm.Expr(updateExpr),
+			"level": gorm.Expr("length(pids) - length(replace(pids, ',', '')) + 1"),
+		}).Error
 }

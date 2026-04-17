@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -78,13 +77,22 @@ func (s *LoginService) RecordLoginFailLog(username, failReason string, logInfo L
 
 	loginLog := s.buildLoginLog(0, username, "", "", "", time.Time{}, logInfo, model.LoginStatusFail, failReason, model.LoginTypeLogin)
 	go func() {
-		db, err := model.GetDB()
-		if err != nil {
-			log.Logger.Error("数据库连接未初始化，无法记录登录失败日志")
-			return
-		}
-		if err := db.Create(loginLog).Error; err != nil {
-			log.Logger.Error("记录登录失败日志出错", zap.Error(err))
+		defer func() {
+			if r := recover(); r != nil {
+				logLoginAsyncError("记录登录失败日志 panic",
+					zap.String("operation", "record_login_fail_log"),
+					zap.String("username", username),
+					zap.String("fail_reason", failReason),
+					zap.Any("recover", r))
+			}
+		}()
+		if err := loginLog.Create(); err != nil {
+			logLoginAsyncError("记录登录失败日志出错",
+				zap.String("operation", "record_login_fail_log"),
+				zap.String("username", username),
+				zap.String("fail_reason", failReason),
+				zap.String("ip", logInfo.IP),
+				zap.Error(err))
 		}
 	}()
 }
@@ -95,15 +103,9 @@ func (s *LoginService) calculateTokenHash(accessToken string) string {
 	return hex.EncodeToString(hashBytes[:])
 }
 
-// getUserById 根据 ID 获取用户信息。
-func (s *LoginService) getUserById(userId uint) (*model.AdminUser, error) {
-	adminUser := model.NewAdminUsers()
-	err := adminUser.GetById(userId)
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Logger.Error("获取用户信息失败", zap.Error(err), zap.Uint("user_id", userId))
-		}
-		return nil, err
+func logLoginAsyncError(message string, fields ...zap.Field) {
+	if log.Logger == nil {
+		return
 	}
-	return adminUser, nil
+	log.Logger.Error(message, fields...)
 }

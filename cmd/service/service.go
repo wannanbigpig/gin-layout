@@ -15,6 +15,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/cmd/bootstrapx"
 	"github.com/wannanbigpig/gin-layout/data"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	_ "github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 )
 
@@ -32,7 +33,7 @@ var (
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run()
 		},
-	}, bootstrapx.Requirements{Data: true, Validator: true})
+	}, bootstrapx.Requirements{Data: true, Validator: true, Queue: true, AllowDegradedStartup: true})
 	host string
 	port int
 )
@@ -49,7 +50,10 @@ func registerFlags() {
 
 // run 运行服务器
 func run() error {
-	engine := routers.SetRouters()
+	engine, err := routers.SetRouters()
+	if err != nil {
+		return fmt.Errorf("build router failed: %w", err)
+	}
 	address := fmt.Sprintf("%s:%d", host, port)
 	server := &http.Server{
 		Addr:    address,

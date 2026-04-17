@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"os"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
+
+const defaultUploadSubDir = "default"
 
 func buildFileURL(uuid string) string {
 	if uuid == "" {
@@ -46,11 +49,41 @@ func storageBasePath(isPublic bool) string {
 	return filepath.Join(cfg.BasePath, "storage/private")
 }
 
-func normalizeUploadPath(path string) string {
-	if path == "" {
-		return "default"
+func normalizeUploadPath(path string) (string, error) {
+	normalized := strings.TrimSpace(path)
+	if normalized == "" {
+		return defaultUploadSubDir, nil
 	}
-	return path
+	normalized = strings.ReplaceAll(normalized, "\\", "/")
+	cleaned := filepath.Clean(normalized)
+	if cleaned == "." || cleaned == string(filepath.Separator) {
+		return defaultUploadSubDir, nil
+	}
+	if filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("upload path must be relative")
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("upload path escapes storage root")
+	}
+	return cleaned, nil
+}
+
+func resolveUploadDestination(basePath, uploadPath string) (string, error) {
+	absBase, err := filepath.Abs(basePath)
+	if err != nil {
+		return "", fmt.Errorf("resolve storage base path: %w", err)
+	}
+
+	targetPath := filepath.Join(absBase, uploadPath)
+	absTarget, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve upload target path: %w", err)
+	}
+
+	if absTarget != absBase && !strings.HasPrefix(absTarget, absBase+string(filepath.Separator)) {
+		return "", fmt.Errorf("upload target escapes storage root")
+	}
+	return absTarget, nil
 }
 
 func findReusableUploadFile(hash string, isPublic uint8) (*model.UploadFiles, error) {
@@ -62,7 +95,11 @@ func findReusableUploadFile(hash string, isPublic uint8) (*model.UploadFiles, er
 }
 
 func existingUploadFileExists(basePath, relativePath string) bool {
-	_, err := os.Stat(filepath.Join(basePath, relativePath))
+	absolutePath, err := resolveUploadDestination(basePath, relativePath)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(absolutePath)
 	return err == nil
 }
 
@@ -88,6 +125,13 @@ func fillFileInfoFromUploadResult(fileInfo *utils.FileInfo, result *utils.FileIn
 	fileInfo.MimeType = result.MimeType
 	fileInfo.URL = buildFileURL(result.UUID)
 	fileInfo.Status = global.SUCCESS
+}
+
+func cleanupStoredUpload(path string) {
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
 }
 
 func summarizeImageUploadResults(filesInfo []*utils.FileInfo) ([]*utils.FileInfo, error) {

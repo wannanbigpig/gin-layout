@@ -34,8 +34,10 @@ func CustomRecovery() gin.HandlerFunc {
 
 // handlePanic 处理 panic 恢复逻辑
 func handlePanic(c *gin.Context, err interface{}) {
-	// 格式化错误信息
-	errStr := formatError(err)
+	errStr := "服务器内部错误"
+	if config.Config.Debug {
+		errStr = fmt.Sprintf("%v", err)
+	}
 
 	// 记录错误日志
 	logPanicError(c, errStr)
@@ -45,15 +47,9 @@ func handlePanic(c *gin.Context, err interface{}) {
 	enqueueAuditLog(c, jobs.AuditLogKindPanic, snapshot)
 
 	// 返回错误响应
-	sendErrorResponse(c, errStr)
-}
-
-// formatError 格式化错误信息
-func formatError(err interface{}) string {
-	if !config.Config.Debug {
-		return ""
-	}
-	return fmt.Sprintf("%v", err)
+	response.Resp().
+		SetHttpCode(http.StatusInternalServerError).
+		FailCode(c, e.ServerErr, errStr)
 }
 
 // logPanicError 记录 panic 错误日志
@@ -95,13 +91,6 @@ func appendPanicDebugFields(c *gin.Context, logFields []zap.Field) []zap.Field {
 		logFields = append(logFields, zap.ByteString("body", requestBody))
 	}
 	return logFields
-}
-
-// sendErrorResponse 发送错误响应
-func sendErrorResponse(c *gin.Context, errStr string) {
-	response.Resp().
-		SetHttpCode(http.StatusInternalServerError).
-		FailCode(c, e.ServerErr, errStr)
 }
 
 // PanicExceptionRecord panic 异常记录器

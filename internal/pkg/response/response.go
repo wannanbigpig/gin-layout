@@ -2,7 +2,6 @@ package response
 
 import (
 	"net/http"
-	"reflect"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -160,17 +159,11 @@ func emptyObject() map[string]any {
 }
 
 func isScalarData(data any) bool {
-	value := reflect.ValueOf(data)
-	if !value.IsValid() {
-		return false
-	}
-
-	switch value.Kind() {
-	case reflect.Bool,
-		reflect.String,
-		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
-		reflect.Float32, reflect.Float64:
+	switch data.(type) {
+	case bool, string,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, uintptr,
+		float32, float64:
 		return true
 	default:
 		return false

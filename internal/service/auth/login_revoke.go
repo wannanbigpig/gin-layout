@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const revokeLogAsyncTimeout = 5 * time.Second
+
 // isTokenRevokedInLog 检查登录日志表中 token 是否被撤销。
 func (s *LoginService) isTokenRevokedInLog(jwtId string) bool {
 	if jwtId == "" {
@@ -19,14 +22,10 @@ func (s *LoginService) isTokenRevokedInLog(jwtId string) bool {
 	}
 
 	loginLog := model.NewAdminLoginLogs()
-	db, err := loginLog.GetDB()
-	if err != nil {
-		return false
-	}
-	err = db.Where("jwt_id = ? AND deleted_at = 0", jwtId).Select("is_revoked").First(loginLog).Error
+	err := loginLog.FindByJwtId(jwtId)
 	if err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Logger.Error("检查token撤销状态失败", zap.Error(err), zap.String("jwt_id", jwtId))
+			logRevokeError("检查token撤销状态失败", zap.Error(err), zap.String("jwt_id", jwtId))
 		}
 		return false
 	}
@@ -40,30 +39,39 @@ func (s *LoginService) revokeTokenInLogAsync(jwtIds []string, revokedCode uint8,
 	}
 
 	go func(ids []string) {
-		if err := s.markTokensRevoked(ids, revokedCode, revokedReason); err != nil {
-			log.Logger.Error("异步更新登录日志 token 撤销状态失败", zap.Error(err), zap.Strings("jwt_ids", ids))
+		defer func() {
+			if r := recover(); r != nil {
+				logRevokeError("异步更新 token 撤销状态 panic", zap.Any("recover", r))
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), revokeLogAsyncTimeout)
+		defer cancel()
+
+		if err := s.markTokensRevoked(ctx, ids, revokedCode, revokedReason); err != nil {
+			logRevokeError("异步更新登录日志 token 撤销状态失败", zap.Error(err), zap.Strings("jwt_ids", ids))
 		}
 	}(append([]string(nil), jwtIds...))
 }
 
-func (s *LoginService) markTokensRevoked(jwtIds []string, revokedCode uint8, revokedReason string) error {
+func (s *LoginService) markTokensRevoked(ctx context.Context, jwtIds []string, revokedCode uint8, revokedReason string) error {
 	now := time.Now()
 	revokedAt := utils.FormatDate{Time: now}
-	updates := map[string]interface{}{
-		"is_revoked":     model.IsRevokedYes,
-		"revoked_code":   revokedCode,
-		"revoked_reason": revokedReason,
-		"revoked_at":     revokedAt,
-		"updated_at":     now,
-	}
 
 	loginLog := model.NewAdminLoginLogs()
-	db, err := loginLog.GetDB(loginLog)
+	db, err := loginLog.GetDB()
 	if err != nil {
 		return err
 	}
+	if ctx != nil {
+		db = db.WithContext(ctx)
+	}
+	loginLog.SetDB(db)
+	return loginLog.UpdateRevokedStatusByJwtIds(jwtIds, revokedCode, revokedReason, revokedAt)
+}
 
-	return db.
-		Where("jwt_id IN ? AND deleted_at = 0 AND is_revoked = ?", jwtIds, model.IsRevokedNo).
-		Updates(updates).Error
+func logRevokeError(message string, fields ...zap.Field) {
+	if log.Logger == nil {
+		return
+	}
+	log.Logger.Error(message, fields...)
 }

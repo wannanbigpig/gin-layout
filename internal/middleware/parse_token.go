@@ -3,7 +3,7 @@ package middleware
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
+	req "github.com/wannanbigpig/gin-layout/internal/pkg/request"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
@@ -17,15 +17,16 @@ import (
 func ParseTokenHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 提前返回：如果没有token，直接继续执行
-		accessToken, err := extractAccessToken(c)
+		accessToken, err := req.GetAccessToken(c)
 		if err != nil || accessToken == "" {
 			c.Next()
 			return
 		}
 
-		// 验证 token 并在上下文中缓存认证主体
-		principal := validateToken(c, accessToken)
-		if principal == nil {
+		loginService := auth.NewLoginService()
+		loginService.SetCtx(c)
+		principal, ok := loginService.ResolvePrincipal(accessToken)
+		if !ok || principal == nil {
 			// token无效，静默继续（可选认证）
 			c.Next()
 			return
@@ -35,22 +36,4 @@ func ParseTokenHandler() gin.HandlerFunc {
 		auth.StoreAuthPrincipal(c, principal)
 		c.Next()
 	}
-}
-
-// extractAccessToken 从请求头中提取访问令牌
-// 返回：token字符串和错误信息（如果token不存在或格式错误）
-func extractAccessToken(c *gin.Context) (string, error) {
-	authorization := c.GetHeader("Authorization")
-	return token.GetAccessToken(authorization)
-}
-
-// validateToken 验证 Token 并返回认证主体。
-func validateToken(c *gin.Context, accessToken string) *auth.AuthPrincipal {
-	loginService := auth.NewLoginService()
-	loginService.SetCtx(c)
-	principal, ok := loginService.ResolvePrincipal(accessToken)
-	if !ok {
-		return nil
-	}
-	return principal
 }

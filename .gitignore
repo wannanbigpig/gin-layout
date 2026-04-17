@@ -29,3 +29,5 @@ go-layout
 PROJECT_ARCHITECTURE.md
 .gocache
 .go-test-cache
+memory
+CODE_OPTIMIZATION_REPORT.md

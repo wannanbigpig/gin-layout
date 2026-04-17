@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
@@ -110,17 +112,108 @@ func TestShouldRefreshToken(t *testing.T) {
 	}
 }
 
-// TestIsUserValid 验证用户状态优先检查。
-func TestIsUserValid(t *testing.T) {
+// TestIsPrincipalValidSkipsFallbackWhenMysqlUnavailable 验证降级模式下不会继续回表。
+func TestIsPrincipalValidSkipsFallbackWhenMysqlUnavailable(t *testing.T) {
 	service := NewLoginService()
-	user := &model.AdminUser{Status: model.AdminUserStatusDisabled}
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID: "jwt-id",
+		},
+	}
 
-	if service.isUserValid(user, "jwt-id") {
-		t.Fatal("expected disabled user to be invalid")
+	originalBlacklistLookup := blacklistLookup
+	originalTokenRevokedLookup := tokenRevokedLookup
+	originalMysqlReadyLookup := mysqlReadyLookup
+	t.Cleanup(func() {
+		blacklistLookup = originalBlacklistLookup
+		tokenRevokedLookup = originalTokenRevokedLookup
+		mysqlReadyLookup = originalMysqlReadyLookup
+	})
+
+	tokenRevokedCalled := false
+	blacklistLookup = func(_ *LoginService, _ string) (bool, error) {
+		return false, errRedisUnavailable
+	}
+	tokenRevokedLookup = func(_ *LoginService, _ string) bool {
+		tokenRevokedCalled = true
+		return false
+	}
+	mysqlReadyLookup = func() bool { return false }
+
+	if service.isPrincipalValid(claims) {
+		t.Fatal("expected principal to be rejected when redis and mysql are unavailable")
+	}
+	if tokenRevokedCalled {
+		t.Fatal("expected database revoke lookup to be skipped")
 	}
 }
 
-func TestValidateUserReturnsBusinessErrorWhenUserNotFound(t *testing.T) {
+func TestIsPrincipalValidFallsBackToDatabaseWhenMysqlReady(t *testing.T) {
+	service := NewLoginService()
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID: "jwt-id",
+		},
+	}
+
+	originalBlacklistLookup := blacklistLookup
+	originalTokenRevokedLookup := tokenRevokedLookup
+	originalMysqlReadyLookup := mysqlReadyLookup
+	t.Cleanup(func() {
+		blacklistLookup = originalBlacklistLookup
+		tokenRevokedLookup = originalTokenRevokedLookup
+		mysqlReadyLookup = originalMysqlReadyLookup
+	})
+
+	tokenRevokedCalled := false
+	blacklistLookup = func(_ *LoginService, _ string) (bool, error) {
+		return false, errRedisUnavailable
+	}
+	tokenRevokedLookup = func(_ *LoginService, jwtID string) bool {
+		tokenRevokedCalled = true
+		return jwtID == "revoked"
+	}
+	mysqlReadyLookup = func() bool { return true }
+
+	if !service.isPrincipalValid(claims) {
+		t.Fatal("expected principal to stay valid when mysql fallback is available")
+	}
+	if !tokenRevokedCalled {
+		t.Fatal("expected database revoke lookup to be used")
+	}
+}
+
+func TestIsPrincipalValidRejectsRevokedToken(t *testing.T) {
+	service := NewLoginService()
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID: "jwt-id",
+		},
+	}
+
+	originalBlacklistLookup := blacklistLookup
+	originalTokenRevokedLookup := tokenRevokedLookup
+	t.Cleanup(func() {
+		blacklistLookup = originalBlacklistLookup
+		tokenRevokedLookup = originalTokenRevokedLookup
+	})
+
+	blacklistLookup = func(_ *LoginService, _ string) (bool, error) {
+		return false, errors.New("redis unavailable")
+	}
+	tokenRevokedLookup = func(_ *LoginService, jwtID string) bool {
+		return jwtID == "jwt-id"
+	}
+
+	if service.isPrincipalValid(claims) {
+		t.Fatal("expected revoked token to be rejected")
+	}
+}
+
+func TestValidateUserReturnsDependencyErrorWhenDBUnavailable(t *testing.T) {
 	service := NewLoginService()
 
 	user, err := service.validateUser("missing-user", "password")
@@ -132,8 +225,122 @@ func TestValidateUserReturnsBusinessErrorWhenUserNotFound(t *testing.T) {
 	if !errors.As(err, &businessErr) {
 		t.Fatalf("expected business error, got %v", err)
 	}
-	if businessErr.GetCode() != e.UserDoesNotExist {
-		t.Fatalf("expected code %d, got %d", e.UserDoesNotExist, businessErr.GetCode())
+	if businessErr.GetCode() != e.ServiceDependencyNotReady {
+		t.Fatalf("expected code %d, got %d", e.ServiceDependencyNotReady, businessErr.GetCode())
+	}
+}
+
+func TestLogoutFallsBackToDatabaseRevocationWhenRedisUnavailable(t *testing.T) {
+	service := NewLoginService()
+
+	originalSecretKey := config.Config.Jwt.SecretKey
+	originalRedisEnable := config.Config.Redis.Enable
+	originalMarkTokensRevokedFunc := markTokensRevokedFunc
+	originalWriteTokenToBlacklistFunc := writeTokenToBlacklistFunc
+	t.Cleanup(func() {
+		config.Config.Jwt.SecretKey = originalSecretKey
+		config.Config.Redis.Enable = originalRedisEnable
+		markTokensRevokedFunc = originalMarkTokensRevokedFunc
+		writeTokenToBlacklistFunc = originalWriteTokenToBlacklistFunc
+	})
+
+	config.Config.Jwt.SecretKey = "test-secret-key-for-logout"
+	config.Config.Redis.Enable = false
+
+	revoked := false
+	markTokensRevokedFunc = func(_ *LoginService, _ context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
+		revoked = true
+		if len(jwtIDs) != 1 || jwtIDs[0] == "" {
+			t.Fatalf("unexpected jwt ids: %#v", jwtIDs)
+		}
+		if revokedCode != model.RevokedCodeUserLogout || revokedReason == "" {
+			t.Fatalf("unexpected revoke payload: code=%d reason=%s", revokedCode, revokedReason)
+		}
+		return nil
+	}
+
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 1, Username: "tester"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+			Issuer:    global.Issuer,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   global.PcAdminSubject,
+			NotBefore: jwt.NewNumericDate(time.Now()),
+			ID:        "jwt-logout-test",
+		},
+	}
+	accessToken, err := token.Generate(claims)
+	if err != nil {
+		t.Fatalf("generate token failed: %v", err)
+	}
+
+	if err := service.Logout(accessToken); err != nil {
+		t.Fatalf("expected logout to succeed without redis, got %v", err)
+	}
+	if !revoked {
+		t.Fatal("expected database revocation to be invoked")
+	}
+}
+
+func TestLogoutTreatsRedisWriteFailureAsSuccessAfterDatabaseRevocation(t *testing.T) {
+	service := NewLoginService()
+
+	originalSecretKey := config.Config.Jwt.SecretKey
+	originalMarkTokensRevokedFunc := markTokensRevokedFunc
+	originalWriteTokenToBlacklistFunc := writeTokenToBlacklistFunc
+	t.Cleanup(func() {
+		config.Config.Jwt.SecretKey = originalSecretKey
+		markTokensRevokedFunc = originalMarkTokensRevokedFunc
+		writeTokenToBlacklistFunc = originalWriteTokenToBlacklistFunc
+	})
+
+	config.Config.Jwt.SecretKey = "test-secret-key-for-logout"
+
+	revoked := false
+	blacklistWriteCalled := false
+	markTokensRevokedFunc = func(_ *LoginService, _ context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
+		revoked = true
+		if len(jwtIDs) != 1 || jwtIDs[0] == "" {
+			t.Fatalf("unexpected jwt ids: %#v", jwtIDs)
+		}
+		if revokedCode != model.RevokedCodeUserLogout || revokedReason == "" {
+			t.Fatalf("unexpected revoke payload: code=%d reason=%s", revokedCode, revokedReason)
+		}
+		return nil
+	}
+	writeTokenToBlacklistFunc = func(_ *LoginService, jwtID string, remainingTime time.Duration) error {
+		blacklistWriteCalled = true
+		if jwtID == "" || remainingTime <= 0 {
+			t.Fatalf("unexpected blacklist write args: jwtID=%q remaining=%v", jwtID, remainingTime)
+		}
+		return errors.New("redis write timeout")
+	}
+
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 1, Username: "tester"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+			Issuer:    global.Issuer,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   global.PcAdminSubject,
+			NotBefore: jwt.NewNumericDate(time.Now()),
+			ID:        "jwt-logout-blacklist-fail",
+		},
+	}
+	accessToken, err := token.Generate(claims)
+	if err != nil {
+		t.Fatalf("generate token failed: %v", err)
+	}
+
+	if err := service.Logout(accessToken); err != nil {
+		t.Fatalf("expected logout to degrade to success, got %v", err)
+	}
+	if !revoked {
+		t.Fatal("expected database revocation to be invoked")
+	}
+	if !blacklistWriteCalled {
+		t.Fatal("expected redis blacklist write to be attempted")
 	}
 }
 
@@ -145,4 +352,61 @@ func TestAcquireMemoryLock(t *testing.T) {
 		t.Fatal("expected unlock function")
 	}
 	unlock()
+}
+
+func TestAcquireRefreshLockFallsBackToMemoryWhenRedisDisabled(t *testing.T) {
+	service := NewLoginService()
+	originalRedisEnable := config.Config.Redis.Enable
+	config.Config.Redis.Enable = false
+	defer func() {
+		config.Config.Redis.Enable = originalRedisEnable
+	}()
+
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 42},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID: "jwt-id",
+		},
+	}
+
+	unlock := service.acquireRefreshLock("refresh-lock:test", claims)
+	if unlock == nil {
+		t.Fatal("expected memory lock fallback unlock function")
+	}
+	unlock()
+}
+
+func TestResolvePrincipalSkipsAutoRefreshWhenMysqlUnavailable(t *testing.T) {
+	service := NewLoginService()
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12, Username: "tester"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        "jwt-id",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+		},
+	}
+
+	originalBlacklistLookup := blacklistLookup
+	originalMysqlReadyLookup := mysqlReadyLookup
+	originalTryRefreshPrincipal := tryRefreshPrincipal
+	t.Cleanup(func() {
+		blacklistLookup = originalBlacklistLookup
+		mysqlReadyLookup = originalMysqlReadyLookup
+		tryRefreshPrincipal = originalTryRefreshPrincipal
+	})
+
+	refreshCalled := false
+	blacklistLookup = func(_ *LoginService, _ string) (bool, error) { return false, nil }
+	mysqlReadyLookup = func() bool { return false }
+	tryRefreshPrincipal = func(_ *LoginService, _ *AuthPrincipal) {
+		refreshCalled = true
+	}
+
+	principal, ok := service.resolvePrincipalFromClaims(claims)
+	if !ok || principal == nil {
+		t.Fatal("expected principal to be resolved")
+	}
+	if refreshCalled {
+		t.Fatal("expected auto refresh to be skipped when mysql is unavailable")
+	}
 }

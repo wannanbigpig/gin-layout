@@ -43,13 +43,11 @@ func logRequest(c *gin.Context, recorder *responseRecorder) {
 		return
 	}
 
-	// 解析响应数据
-	resp := parseResponse(c, recorder)
-
 	// 记录精简日志到文件（用于快速查看和调试）
 	logRequestToFile(c, recorder)
 
 	// 先提取不可变快照，再发布异步任务，避免请求链路内直接落库。
+	resp := parseResponse(c, recorder)
 	snapshot := buildRequestAuditLogSnapshot(c, recorder, resp)
 	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }

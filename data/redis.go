@@ -2,11 +2,12 @@ package data
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 
 	c "github.com/wannanbigpig/gin-layout/config"
 )
@@ -17,10 +18,19 @@ var (
 	redisInitError error
 	redisValue     atomic.Value
 	redisMu        sync.Mutex
+	redisHealth    = newRuntimeHealthCache(defaultRuntimeHealthTTL)
 )
 
 type redisSlot struct {
 	client *redis.Client
+}
+
+const redisProbeTimeout = 2 * time.Second
+
+var redisRuntimeProbe = func(client *redis.Client) error {
+	ctx, cancel := context.WithTimeout(context.Background(), redisProbeTimeout)
+	defer cancel()
+	return client.Ping(ctx).Err()
 }
 
 func initRedis() error {
@@ -39,6 +49,11 @@ func reloadRedis(cfg *c.Conf) error {
 	redisDb = next
 	redisValue.Store(redisSlot{client: next})
 	redisInitError = nil
+	if next != nil {
+		redisHealth.SeedReady()
+	} else {
+		redisHealth.Reset()
+	}
 	if old != nil {
 		_ = old.Close()
 	}
@@ -49,15 +64,22 @@ func openRedis(cfg *c.Conf) (*redis.Client, error) {
 	if cfg == nil || !cfg.Redis.Enable {
 		return nil, nil
 	}
-	// 创建带超时的上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	client := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Host + ":" + cfg.Redis.Port,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.Database,
-	})
+	opts := &redis.Options{
+		Addr:            cfg.Redis.Host + ":" + cfg.Redis.Port,
+		Password:        cfg.Redis.Password,
+		DB:              cfg.Redis.Database,
+		PoolSize:        cfg.Redis.PoolSize,
+		MinIdleConns:    cfg.Redis.MinIdleConns,
+		ConnMaxLifetime: cfg.Redis.ConnMaxLifetime,
+		ConnMaxIdleTime: cfg.Redis.ConnMaxIdle,
+		ReadTimeout:     cfg.Redis.ReadTimeout,
+		WriteTimeout:    cfg.Redis.WriteTimeout,
+	}
+
+	client := redis.NewClient(opts)
 
 	_, err := client.Ping(ctx).Result()
 	if err != nil {
@@ -85,6 +107,31 @@ func GetRedisInitError() error {
 	return redisInitError
 }
 
+// RedisRuntimeStatus 返回带缓存的 Redis 运行时健康探测结果。
+func RedisRuntimeStatus() RuntimeHealthStatus {
+	client := RedisClient()
+	if client == nil {
+		redisHealth.Reset()
+		return RuntimeHealthStatus{
+			Ready:     false,
+			Error:     redisUnavailableError(),
+			CheckedAt: time.Now(),
+		}
+	}
+	status := redisHealth.Check(func() error {
+		return redisRuntimeProbe(client)
+	})
+	if !status.Ready && status.Error == nil {
+		status.Error = redisUnavailableError()
+	}
+	return status
+}
+
+// RedisReady 判断 Redis 当前是否可用。
+func RedisReady() bool {
+	return RedisRuntimeStatus().Ready
+}
+
 // ReloadRedis 重新加载 Redis 客户端。
 func ReloadRedis(cfg *c.Conf) error {
 	return reloadRedis(cfg)
@@ -99,6 +146,7 @@ func CloseRedis() error {
 	redisDb = nil
 	redisValue.Store(redisSlot{})
 	redisInitError = nil
+	redisHealth.Reset()
 	if current == nil {
 		return nil
 	}
@@ -111,3 +159,13 @@ func currentRedis() *redis.Client {
 	}
 	return redisDb
 }
+
+func redisUnavailableError() error {
+	if redisInitError != nil {
+		return redisInitError
+	}
+	return ErrRedisUnavailable
+}
+
+// ErrRedisUnavailable 表示 Redis 客户端当前不可用。
+var ErrRedisUnavailable = errors.New("redis client is unavailable")

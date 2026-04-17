@@ -1,19 +1,19 @@
 package system_init
 
 import (
-	"bufio"
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
+	consolex "github.com/wannanbigpig/gin-layout/internal/console"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service/system"
 )
 
 var (
+	initSystemAssumeYes bool
+
 	// InitSystemCmd 手动执行初始化系统命令
 	InitSystemCmd = &cobra.Command{
 		Use:   "init-system",
@@ -31,10 +31,14 @@ This is the same task that runs automatically at 2:00 AM daily.`,
 	}
 )
 
+func init() {
+	InitSystemCmd.Flags().BoolVarP(&initSystemAssumeYes, "yes", "y", false, "Skip confirmation prompt")
+}
+
 // runInitSystem 执行初始化系统
 func runInitSystem() error {
 	// 用户确认
-	if !confirmOperation("此命令将执行系统初始化，包括回滚迁移、重新执行迁移、重新初始化 API 路由并重建用户最终 API 权限。此操作会清空现有数据，确定要继续吗？ [Y/N]: ") {
+	if !consolex.ConfirmOperation("此命令将执行系统初始化，包括回滚迁移、重新执行迁移、重新初始化 API 路由并重建用户最终 API 权限。此操作会清空现有数据，确定要继续吗？ [Y/N]: ", initSystemAssumeYes) {
 		fmt.Println("操作已取消。")
 		return nil
 	}
@@ -42,8 +46,7 @@ func runInitSystem() error {
 	fmt.Println("开始执行初始化系统任务...")
 	log.Logger.Info("手动执行初始化系统任务")
 
-	resetService := system.NewResetService()
-	if err := resetService.ReinitializeSystemData(); err != nil {
+	if err := system.ReinitializeSystemData(); err != nil {
 		log.Logger.Error("初始化系统任务执行失败", zap.Error(err))
 		fmt.Printf("初始化系统失败: %v\n", err)
 		return err
@@ -52,24 +55,4 @@ func runInitSystem() error {
 	fmt.Println("初始化系统任务执行完成！")
 	log.Logger.Info("手动执行初始化系统任务完成")
 	return nil
-}
-
-// confirmOperation 确认操作，返回用户是否确认
-func confirmOperation(prompt string) bool {
-	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Print(prompt)
-
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			log.Logger.Error("Failed to read user input", zap.Error(err))
-			_, err := fmt.Fprintln(os.Stderr, "reading standard input:", err)
-			if err != nil {
-				return false
-			}
-		}
-		return false
-	}
-
-	input := strings.TrimSpace(strings.ToLower(scanner.Text()))
-	return input == "y" || input == "yes"
 }

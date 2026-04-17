@@ -90,3 +90,109 @@ func NewMenu() *Menu {
 func (m *Menu) TableName() string {
 	return "menu"
 }
+
+// AllIds 查询所有未删除菜单的 ID 列表。
+func (m *Menu) AllIds() ([]uint, error) {
+	db, err := m.GetDB(m)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uint
+	if err := db.Where("deleted_at = 0").Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// EnabledIdsByIds 根据 ID 列表查询启用状态（status=1）且未删除的菜单 ID。
+func (m *Menu) EnabledIdsByIds(ids []uint) ([]uint, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	db, err := m.GetDB(m)
+	if err != nil {
+		return nil, err
+	}
+	var result []uint
+	if err := db.Where("id IN ? AND status = 1 AND deleted_at = 0", ids).Pluck("id", &result).Error; err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ExistsExcludeId 检查指定字段值的记录是否存在（排除指定 ID）。
+func (m *Menu) ExistsExcludeId(field string, value string, excludeId uint) (bool, error) {
+	db, err := m.GetDB()
+	if err != nil {
+		return false, err
+	}
+	var exists bool
+	if err := db.Model(m).
+		Select("1").
+		Where(field+" = ? AND id != ? AND deleted_at = 0", value, excludeId).
+		Limit(1).
+		Scan(&exists).Error; err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+// MenuTreeNode 菜单树节点，用于展开父级。
+type MenuTreeNode struct {
+	ID   uint
+	Pids string
+}
+
+// FindPidsByIds 根据 ID 列表查询未删除菜单的 id 和 pids 信息。
+func (m *Menu) FindPidsByIds(ids []uint) ([]MenuTreeNode, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var rows []MenuTreeNode
+	if err := db.Table(m.TableName()).Select("id,pids").Where("id IN ? AND deleted_at = 0", ids).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// FindIdsByCodes 根据代码列表查询未删除菜单的 ID 列表。
+func (m *Menu) FindIdsByCodes(codes []string) ([]Menu, error) {
+	if len(codes) == 0 {
+		return nil, nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var menus []Menu
+	if err := db.Select("id", "code").Where("code IN ? AND deleted_at = 0", codes).Find(&menus).Error; err != nil {
+		return nil, err
+	}
+	return menus, nil
+}
+
+// FindDescendantsById 查询指定菜单 ID 的所有后代菜单（用于更新子菜单层级）。
+func (m *Menu) FindDescendantsById(id uint) ([]Menu, error) {
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var menus []Menu
+	if err := db.Where("FIND_IN_SET(?,pids)", id).Order("level asc, id asc").Find(&menus).Error; err != nil {
+		return nil, err
+	}
+	return menus, nil
+}
+
+// UpdateById 根据 ID 更新菜单字段。
+func (m *Menu) UpdateById(id uint, data map[string]any) error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Model(m).Where("id = ?", id).Updates(data).Error
+}

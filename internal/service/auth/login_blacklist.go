@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -14,8 +15,21 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"go.uber.org/zap"
 )
+
+const redisOpTimeout = 3 * time.Second
+
+var errRedisUnavailable = errors.New("redis client is not available")
+
+var markTokensRevokedFunc = func(s *LoginService, ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
+	return s.markTokensRevoked(ctx, jwtIDs, revokedCode, revokedReason)
+}
+
+var writeTokenToBlacklistFunc = func(s *LoginService, jwtID string, remainingTime time.Duration) error {
+	return s.writeTokenToBlacklist(jwtID, remainingTime)
+}
 
 // Logout 退出登录。
 func (s *LoginService) Logout(accessToken string) error {
@@ -29,13 +43,19 @@ func (s *LoginService) Logout(accessToken string) error {
 		return err
 	}
 
-	remainingTime := time.Until(exp.Time)
-	blacklistKey := s.getBlacklistKey(claims.ID)
-	if err := data.RedisClient().Set(context.Background(), blacklistKey, "1", remainingTime).Err(); err != nil {
+	if err := markTokensRevokedFunc(s, context.Background(), []string{claims.ID}, model.RevokedCodeUserLogout, "用户主动登出（退出登录）"); err != nil {
 		return err
 	}
 
-	s.revokeTokenInLogAsync([]string{claims.ID}, model.RevokedCodeUserLogout, "用户主动登出（退出登录）")
+	remainingTime := time.Until(exp.Time)
+	if err := writeTokenToBlacklistFunc(s, claims.ID, remainingTime); err != nil {
+		log.Logger.Warn("Redis blacklist write failed after database revocation, treat logout as success",
+			zap.String("jwt_id", claims.ID),
+			zap.Bool("redis_unavailable", errors.Is(err, errRedisUnavailable)),
+			zap.Error(err))
+		return nil
+	}
+
 	return nil
 }
 
@@ -54,15 +74,36 @@ func (s *LoginService) IsInBlacklist(jwtId string) (bool, error) {
 	redisClient := data.RedisClient()
 	if redisClient == nil {
 		if err := data.GetRedisInitError(); err != nil {
-			return false, err
+			return false, fmt.Errorf("%w: %v", errRedisUnavailable, err)
 		}
-		return false, errors.New("redis client is not available")
+		return false, errRedisUnavailable
 	}
-	result, err := redisClient.Exists(context.Background(), s.getBlacklistKey(jwtId)).Result()
+
+	ctx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
+	defer cancel()
+	result, err := redisClient.Exists(ctx, s.getBlacklistKey(jwtId)).Result()
 	if err != nil {
 		return false, err
 	}
 	return result > 0, nil
+}
+
+func (s *LoginService) writeTokenToBlacklist(jwtID string, remainingTime time.Duration) error {
+	if jwtID == "" || remainingTime <= 0 {
+		return nil
+	}
+
+	redisClient := data.RedisClient()
+	if redisClient == nil {
+		if err := data.GetRedisInitError(); err != nil {
+			return fmt.Errorf("%w: %v", errRedisUnavailable, err)
+		}
+		return errRedisUnavailable
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
+	defer cancel()
+	return redisClient.Set(ctx, s.getBlacklistKey(jwtID), "1", remainingTime).Err()
 }
 
 // getBlacklistKey 获取 Redis 黑名单 key。
@@ -76,13 +117,16 @@ func (s *LoginService) addTokensToBlacklist(loginLogs []model.AdminLoginLogs) {
 		return
 	}
 
-	ctx := context.Background()
 	redisClient := data.RedisClient()
 	if redisClient == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
+	defer cancel()
+	pipe := redisClient.Pipeline()
 
 	now := time.Now()
+	queued := 0
 	for _, item := range loginLogs {
 		if item.JwtID == "" {
 			continue
@@ -92,9 +136,15 @@ func (s *LoginService) addTokensToBlacklist(loginLogs []model.AdminLoginLogs) {
 			continue
 		}
 		blacklistKey := s.getBlacklistKey(item.JwtID)
-		if err := redisClient.Set(ctx, blacklistKey, "1", remainingTime).Err(); err != nil {
-			log.Logger.Error("将token加入Redis黑名单失败", zap.Error(err), zap.String("jwt_id", item.JwtID))
-		}
+		pipe.Set(ctx, blacklistKey, "1", remainingTime)
+		queued++
+	}
+
+	if queued == 0 {
+		return
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Logger.Error("批量将 token 加入 Redis 黑名单失败", zap.Error(err), zap.Int("count", queued))
 	}
 }
 
@@ -117,12 +167,15 @@ func (s *LoginService) RevokeUserTokens(userId uint, revokedCode uint8, revokedR
 	}
 
 	loginLog := model.NewAdminLoginLogs()
-	db, err := s.loginLogDB(loginLog, tx...)
-	if err != nil {
-		return err
+	if existingTx := access.FirstTx(tx); existingTx != nil {
+		loginLog.SetDB(existingTx)
+	} else {
+		if _, err := loginLog.GetDB(); err != nil {
+			return err
+		}
 	}
 
-	loginLogs, err := s.activeLoginLogs(userId, db)
+	loginLogs, err := loginLog.FindActiveTokensByUserId(userId, time.Now())
 	if err != nil || len(loginLogs) == 0 {
 		return err
 	}
@@ -135,25 +188,6 @@ func (s *LoginService) RevokeUserTokens(userId uint, revokedCode uint8, revokedR
 	s.addTokensToBlacklist(loginLogs)
 	s.revokeTokenInLogAsync(jwtIds, revokedCode, revokedReason)
 	return nil
-}
-
-func (s *LoginService) loginLogDB(loginLog *model.AdminLoginLogs, tx ...*gorm.DB) (*gorm.DB, error) {
-	if len(tx) > 0 && tx[0] != nil {
-		loginLog.SetDB(tx[0])
-		return tx[0], nil
-	}
-	return loginLog.GetDB()
-}
-
-func (s *LoginService) activeLoginLogs(userId uint, db *gorm.DB) ([]model.AdminLoginLogs, error) {
-	var loginLogs []model.AdminLoginLogs
-	now := time.Now()
-	err := db.Where("uid = ? AND deleted_at = 0 AND is_revoked = ? AND login_status = ? AND token_expires IS NOT NULL AND token_expires > ?",
-		userId, model.IsRevokedNo, model.LoginStatusSuccess, now).Find(&loginLogs).Error
-	if err != nil {
-		log.Logger.Error("查询用户未过期token失败", zap.Error(err), zap.Uint("user_id", userId))
-	}
-	return loginLogs, err
 }
 
 func collectJWTIDs(loginLogs []model.AdminLoginLogs) []string {

@@ -1,6 +1,7 @@
 package data
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -8,23 +9,32 @@ import (
 )
 
 var once sync.Once
+var initErr error
 
 // InitData 按配置初始化 MySQL 和 Redis 数据源。
-func InitData() {
+func InitData() error {
 	once.Do(func() {
 		cfg := c.GetConfig()
+		var errs []error
+
 		if cfg.Mysql.Enable {
 			if err := initMysql(); err != nil {
-				panic(fmt.Sprintf("mysql init error: %v", err))
+				errs = append(errs, fmt.Errorf("mysql init error: %w", err))
 			}
 		}
 
 		if cfg.Redis.Enable {
 			if err := initRedis(); err != nil {
-				panic(fmt.Sprintf("redis init error: %v", err))
+				errs = append(errs, fmt.Errorf("redis init error: %w", err))
 			}
 		}
+
+		if len(errs) > 0 {
+			initErr = errors.Join(errs...)
+		}
 	})
+
+	return initErr
 }
 
 // Shutdown 关闭当前已初始化的数据源。

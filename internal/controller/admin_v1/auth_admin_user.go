@@ -61,21 +61,6 @@ func (api AdminUserController) GetUserMenuInfo(c *gin.Context) {
 	api.Success(c, result)
 }
 
-// Edit 编辑管理员信息
-func (api AdminUserController) Edit(c *gin.Context) {
-	params := form.NewCreateAdminUser()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	if err := admin.NewAdminUserService().Create(params); err != nil {
-		api.Err(c, err)
-		return
-	}
-
-	api.Success(c, nil)
-}
-
 // Create 新增管理员
 func (api AdminUserController) Create(c *gin.Context) {
 	params := form.NewCreateAdminUser()

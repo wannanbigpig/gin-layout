@@ -30,8 +30,13 @@ func TestStorageBasePath(t *testing.T) {
 }
 
 func TestNormalizeUploadPath(t *testing.T) {
-	assert.Equal(t, "default", normalizeUploadPath(""))
-	assert.Equal(t, "avatar", normalizeUploadPath("avatar"))
+	path, err := normalizeUploadPath("")
+	assert.NoError(t, err)
+	assert.Equal(t, "default", path)
+
+	path, err = normalizeUploadPath("avatar")
+	assert.NoError(t, err)
+	assert.Equal(t, "avatar", path)
 }
 
 func TestBuildFileURL(t *testing.T) {

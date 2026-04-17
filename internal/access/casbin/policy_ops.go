@@ -3,8 +3,7 @@ package casbinx
 import (
 	"errors"
 
-	"github.com/casbin/casbin/v2"
-	gormadapter "github.com/casbin/gorm-adapter/v3"
+	"github.com/casbin/casbin/v3"
 	"gorm.io/gorm"
 )
 
@@ -20,17 +19,10 @@ func (e *CasbinEnforcer) execute(tx *gorm.DB, fn func(enforcer casbin.IEnforcer)
 		return errors.New("请先通过 GORM 开启事务")
 	}
 
-	gormadapter.TurnOffAutoMigrate(tx)
-	txAdapter, err := gormadapter.NewAdapterByDB(tx)
+	txEnforcer, err := newEnforcerFromDB(e.model, tx)
 	if err != nil {
 		return err
 	}
-
-	txEnforcer, err := casbin.NewEnforcer(e.model, txAdapter)
-	if err != nil {
-		return err
-	}
-	txEnforcer.EnableAutoSave(true)
 	return fn(txEnforcer)
 }
 

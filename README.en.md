@@ -54,6 +54,7 @@ Most admin projects start with the same goal: get login, permissions, menus, upl
 - Frontend project: [go-admin-ui](https://github.com/wannanbigpig/go-admin-ui)
 - Online docs: [Apifox](https://wannanbigpig.apifox.cn/)
 - Demo: [Live Demo](https://x-l-admin.wannanbigpig.com/)
+- Commands and jobs guide: [docs/COMMANDS_AND_TASKS.en.md](./docs/COMMANDS_AND_TASKS.en.md)
 
 ## Quick Start
 

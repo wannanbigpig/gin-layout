@@ -16,7 +16,7 @@ import (
 
 // Create 新增菜单。
 func (s *MenuService) Create(params *form.CreateMenu) error {
-	return s.edit(&menuMutation{
+	return s.applyMenuMutation(&menuMutation{
 		Icon:            params.Icon,
 		Title:           params.Title,
 		Code:            params.Code,
@@ -42,7 +42,7 @@ func (s *MenuService) Create(params *form.CreateMenu) error {
 
 // Update 更新菜单。
 func (s *MenuService) Update(params *form.UpdateMenu) error {
-	return s.edit(&menuMutation{
+	return s.applyMenuMutation(&menuMutation{
 		Id:              params.Id,
 		Icon:            params.Icon,
 		Title:           params.Title,
@@ -65,11 +65,6 @@ func (s *MenuService) Update(params *form.UpdateMenu) error {
 		Redirect:        params.Redirect,
 		IsExternalLinks: params.IsExternalLinks,
 	})
-}
-
-// Edit 兼容旧编辑入口，等同于更新。
-func (s *MenuService) Edit(params *form.UpdateMenu) error {
-	return s.Update(params)
 }
 
 type menuMutation struct {
@@ -100,16 +95,27 @@ type menuEditContext struct {
 	originPids     string
 	originPid      uint
 	originFullPath string
-	excludeWhere   string
+	excludeId      uint
 }
 
-func (s *MenuService) edit(params *menuMutation) error {
+func (s *MenuService) applyMenuMutation(params *menuMutation) error {
 	menu := model.NewMenu()
-	editContext, err := s.prepareEditContext(menu, params)
-	if err != nil {
-		return err
+	editContext := &menuEditContext{
+		originPids:     menuRootPid,
+		originPid:      0,
+		originFullPath: "",
+		excludeId:      0,
 	}
-	if err := s.handleParentChange(menu, params); err != nil {
+	if params.Id > 0 {
+		if err := menu.GetById(params.Id); err != nil || menu.ID == 0 {
+			return e.NewBusinessError(1, "编辑的菜单不存在")
+		}
+		editContext.originPids = menu.Pids
+		editContext.originPid = menu.Pid
+		editContext.originFullPath = menu.FullPath
+		editContext.excludeId = params.Id
+	}
+	if err := s.resolveMenuHierarchy(menu, params); err != nil {
 		return err
 	}
 	if menu.Level > maxMenuLevel {
@@ -117,48 +123,35 @@ func (s *MenuService) edit(params *menuMutation) error {
 	}
 
 	s.assignMenuFields(menu, params)
-	if err := s.validateUniqueFields(menu, params, editContext.excludeWhere); err != nil {
+	if err := s.validateUniqueFields(menu, params, editContext.excludeId); err != nil {
 		return err
 	}
-	if err := s.validateAndFilterApiList(params); err != nil {
-		return err
+	if len(params.ApiList) > 0 {
+		apis, err := model.NewApi().FindByIds(params.ApiList)
+		if err != nil {
+			return err
+		}
+		params.ApiList = lo.Map(apis, func(api model.Api, _ int) uint {
+			return api.ID
+		})
 	}
 	return s.executeEditTransaction(menu, params.ApiList, editContext)
 }
 
-func (s *MenuService) prepareEditContext(menu *model.Menu, params *menuMutation) (*menuEditContext, error) {
-	ctx := &menuEditContext{
-		originPids:     menuRootPid,
-		originPid:      0,
-		originFullPath: "",
-		excludeWhere:   "",
-	}
-	if params.Id > 0 {
-		if err := menu.GetById(params.Id); err != nil || menu.ID == 0 {
-			return nil, e.NewBusinessError(1, "编辑的菜单不存在")
+// resolveMenuHierarchy 统一处理菜单层级、父级合法性和 full_path 计算，避免主流程在多个小函数间跳转。
+func (s *MenuService) resolveMenuHierarchy(menu *model.Menu, params *menuMutation) error {
+	needRefreshByParent := (params.Pid > 0 && params.Pid != menu.Pid) ||
+		(params.Pid > 0 && params.Path != menu.Path)
+	if !needRefreshByParent {
+		if params.Pid == 0 {
+			menu.Level = menuRootLevel
+			menu.Pids = menuRootPid
+			menu.FullPath = s.buildFullPath(params.Path, rootPath, params.Type)
 		}
-		ctx.originPids = menu.Pids
-		ctx.originPid = menu.Pid
-		ctx.originFullPath = menu.FullPath
-		ctx.excludeWhere = fmt.Sprintf(" AND id != %d", params.Id)
+		menu.Pid = params.Pid
+		return nil
 	}
-	return ctx, nil
-}
 
-func (s *MenuService) handleParentChange(menu *model.Menu, params *menuMutation) error {
-	needHandleParent := (params.Pid > 0 && params.Pid != menu.Pid) ||
-		(params.Path != menu.Path && params.Pid > 0)
-	if needHandleParent {
-		return s.updateMenuWithParent(menu, params)
-	}
-	if params.Pid == 0 {
-		s.setRootMenuFields(menu, params)
-	}
-	menu.Pid = params.Pid
-	return nil
-}
-
-func (s *MenuService) updateMenuWithParent(menu *model.Menu, params *menuMutation) error {
 	parentMenu := model.NewMenu()
 	if err := parentMenu.GetById(params.Pid); err != nil || parentMenu.ID == 0 {
 		return e.NewBusinessError(1, "上级菜单不存在")
@@ -177,13 +170,6 @@ func (s *MenuService) updateMenuWithParent(menu *model.Menu, params *menuMutatio
 	return nil
 }
 
-func (s *MenuService) setRootMenuFields(menu *model.Menu, params *menuMutation) {
-	menu.Level = menuRootLevel
-	menu.Pids = menuRootPid
-	menu.FullPath = s.buildFullPath(params.Path, rootPath, params.Type)
-	menu.Pid = 0
-}
-
 func (s *MenuService) buildPids(parentPids string, parentID uint) string {
 	return strings.TrimPrefix(fmt.Sprintf("%s,%d", parentPids, parentID), ",")
 }
@@ -192,10 +178,6 @@ func (s *MenuService) buildFullPath(path, parentPath string, menuType uint8) str
 	if menuType == model.BUTTON {
 		return ""
 	}
-	return s.assembleFullPath(path, parentPath)
-}
-
-func (s *MenuService) assembleFullPath(path, parentPath string) string {
 	if parentPath == "" {
 		parentPath = rootPath
 	}
@@ -235,8 +217,8 @@ func (s *MenuService) assignMenuFields(menu *model.Menu, params *menuMutation) {
 	}
 }
 
-func (s *MenuService) validateUniqueFields(menu *model.Menu, params *menuMutation, excludeWhere string) error {
-	codeExists, err := menu.Exists("code = ?"+excludeWhere, params.Code)
+func (s *MenuService) validateUniqueFields(menu *model.Menu, params *menuMutation, excludeId uint) error {
+	codeExists, err := menu.ExistsExcludeId("code", params.Code, excludeId)
 	if err != nil {
 		return err
 	}
@@ -244,7 +226,7 @@ func (s *MenuService) validateUniqueFields(menu *model.Menu, params *menuMutatio
 		return e.NewBusinessError(1, "权限标识已存在")
 	}
 
-	nameExists, err := menu.Exists("name = ?"+excludeWhere, params.Name)
+	nameExists, err := menu.ExistsExcludeId("name", params.Name, excludeId)
 	if err != nil {
 		return err
 	}
@@ -253,7 +235,7 @@ func (s *MenuService) validateUniqueFields(menu *model.Menu, params *menuMutatio
 	}
 
 	if params.Type != model.BUTTON && menu.Path != "" {
-		pathExists, err := menu.Exists("full_path = ?"+excludeWhere, menu.FullPath)
+		pathExists, err := menu.ExistsExcludeId("full_path", menu.FullPath, excludeId)
 		if err != nil {
 			return err
 		}
@@ -261,25 +243,6 @@ func (s *MenuService) validateUniqueFields(menu *model.Menu, params *menuMutatio
 			return e.NewBusinessError(1, "路由已存在")
 		}
 	}
-	return nil
-}
-
-func (s *MenuService) validateAndFilterApiList(params *menuMutation) error {
-	if len(params.ApiList) == 0 {
-		return nil
-	}
-
-	var apis []model.Api
-	apiDB, err := model.GetDB(model.NewApi())
-	if err != nil {
-		return err
-	}
-	if err := apiDB.Where("id IN ?", params.ApiList).Find(&apis).Error; err != nil {
-		return err
-	}
-	params.ApiList = lo.Map(apis, func(api model.Api, _ int) uint {
-		return api.ID
-	})
 	return nil
 }
 
@@ -297,8 +260,15 @@ func (s *MenuService) executeEditTransaction(menu *model.Menu, apiList []uint, e
 		if err := s.updateChildrenLevels(menu, editContext.originPids, editContext.originFullPath, tx); err != nil {
 			return err
 		}
-		if err := s.updateParentChildrenNum(menu, editContext.originPid, tx); err != nil {
-			return err
+		if editContext.originPid > 0 && editContext.originPid != menu.Pid {
+			if err := model.UpdateChildrenNum(model.NewMenu(), editContext.originPid, tx); err != nil {
+				return err
+			}
+		}
+		if menu.Pid > 0 && menu.Pid != editContext.originPid {
+			if err := model.UpdateChildrenNum(model.NewMenu(), menu.Pid, tx); err != nil {
+				return err
+			}
 		}
 		return s.updateMenuPermissions(menu, apiList, tx)
 	})
@@ -308,27 +278,15 @@ func (s *MenuService) executeEditTransaction(menu *model.Menu, apiList []uint, e
 	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByMenus([]uint{menu.ID})
 }
 
-func (s *MenuService) updateParentChildrenNum(menu *model.Menu, originPid uint, tx *gorm.DB) error {
-	if originPid > 0 && originPid != menu.Pid {
-		if err := model.UpdateChildrenNum(model.NewMenu(), originPid, tx); err != nil {
-			return err
-		}
-	}
-	if menu.Pid > 0 && menu.Pid != originPid {
-		if err := model.UpdateChildrenNum(model.NewMenu(), menu.Pid, tx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (s *MenuService) updateChildrenLevels(menu *model.Menu, originPids string, originFullPath string, tx *gorm.DB) error {
 	if menu.Pids == originPids && menu.FullPath == originFullPath {
 		return nil
 	}
 
-	var descendants []*model.Menu
-	if err := tx.Where("FIND_IN_SET(?,pids)", menu.ID).Order("level asc, id asc").Find(&descendants).Error; err != nil {
+	descendantModel := model.NewMenu()
+	descendantModel.SetDB(tx)
+	descendants, err := descendantModel.FindDescendantsById(menu.ID)
+	if err != nil {
 		return err
 	}
 	if len(descendants) == 0 {
@@ -337,21 +295,26 @@ func (s *MenuService) updateChildrenLevels(menu *model.Menu, originPids string, 
 
 	childrenByPID := make(map[uint][]*model.Menu, len(descendants))
 	for _, child := range descendants {
-		childrenByPID[child.Pid] = append(childrenByPID[child.Pid], child)
+		childrenByPID[child.Pid] = append(childrenByPID[child.Pid], &child)
 	}
 	return s.rebuildMenuDescendants(tx, menu, childrenByPID)
 }
 
 func (s *MenuService) rebuildMenuDescendants(tx *gorm.DB, parent *model.Menu, childrenByPID map[uint][]*model.Menu) error {
+	menuModel := model.NewMenu()
+	menuModel.SetDB(tx)
 	for _, child := range childrenByPID[parent.ID] {
-		s.applyDescendantMenuState(parent, child)
-		if err := tx.Model(model.NewMenu()).
-			Where("id = ?", child.ID).
-			Updates(map[string]any{
-				"pids":      child.Pids,
-				"level":     child.Level,
-				"full_path": child.FullPath,
-			}).Error; err != nil {
+		child.Pids = s.buildPids(parent.Pids, parent.ID)
+		child.Level = parent.Level + 1
+		child.FullPath = s.buildFullPath(child.Path, parent.FullPath, child.Type)
+		if child.Type == model.BUTTON {
+			child.FullPath = ""
+		}
+		if err := menuModel.UpdateById(child.ID, map[string]any{
+			"pids":      child.Pids,
+			"level":     child.Level,
+			"full_path": child.FullPath,
+		}); err != nil {
 			return err
 		}
 		if err := s.rebuildMenuDescendants(tx, child, childrenByPID); err != nil {
@@ -359,15 +322,6 @@ func (s *MenuService) rebuildMenuDescendants(tx *gorm.DB, parent *model.Menu, ch
 		}
 	}
 	return nil
-}
-
-func (s *MenuService) applyDescendantMenuState(parent *model.Menu, child *model.Menu) {
-	child.Pids = s.buildPids(parent.Pids, parent.ID)
-	child.Level = parent.Level + 1
-	child.FullPath = s.buildFullPath(child.Path, parent.FullPath, child.Type)
-	if child.Type == model.BUTTON {
-		child.FullPath = ""
-	}
 }
 
 func (s *MenuService) updateMenuPermissions(menu *model.Menu, apiList []uint, tx ...*gorm.DB) error {

@@ -6,39 +6,60 @@ import (
 
 // AppConfig 定义应用运行时基础配置。
 type AppConfig struct {
-	AppEnv      string  `mapstructure:"app_env"`
-	Debug       bool    `mapstructure:"debug"`
-	Language    string  `mapstructure:"language"`
-	WatchConfig bool    `mapstructure:"watch_config"`
-	BasePath    string  `mapstructure:"base_path"`
-	BaseURL     string  `mapstructure:"base_url"` // 文件访问的基础URL（如：https://example.com）
-	Timezone    *string `mapstructure:"timezone"`
-	// 受信任代理配置
-	TrustedProxies []string `mapstructure:"trusted_proxies"` // 允许解析 X-Forwarded-For/X-Real-IP 的代理地址或网段
-	// CORS 配置
-	CorsOrigins       []string `mapstructure:"cors_origins"`        // CORS允许的源列表（如：["http://localhost:3000", "https://example.com"]），空数组表示允许所有源
-	CorsMethods       []string `mapstructure:"cors_methods"`        // 允许的HTTP方法（如：["GET", "POST", "PUT", "DELETE"]），空数组使用默认值
-	CorsHeaders       []string `mapstructure:"cors_headers"`        // 允许的请求头（如：["Content-Type", "Authorization"]），空数组表示允许所有（使用 "*"）
-	CorsExposeHeaders []string `mapstructure:"cors_expose_headers"` // 暴露的响应头（如：["Content-Length", "X-Request-Id"]），空数组表示暴露所有（使用 "*"）
-	CorsMaxAge        int      `mapstructure:"cors_max_age"`        // 预检请求缓存时间（秒），默认 43200（12小时）
-	CorsCredentials   bool     `mapstructure:"cors_credentials"`    // 是否允许携带凭证（cookies等），默认 false
+	// AppEnv 应用环境标识，如：local（本地）、dev（开发）、prod（生产）
+	AppEnv string `mapstructure:"app_env"`
+	// Debug 是否开启调试模式，true 时输出详细调试信息
+	Debug bool `mapstructure:"debug"`
+	// Language 国际化语言，如：zh_CN（中文）、en_US（英文）
+	Language string `mapstructure:"language"`
+	// WatchConfig 是否开启配置热更新，true 时配置变更自动重载
+	WatchConfig bool `mapstructure:"watch_config"`
+	// BasePath 应用基础路径，用于拼接文件存储路径
+	BasePath string `mapstructure:"base_path"`
+	// BaseURL 文件访问的基础 URL（如：https://example.com），用于拼接文件访问地址
+	BaseURL string `mapstructure:"base_url"`
+	// Timezone 时区设置，nil 时使用系统默认时区
+	Timezone *string `mapstructure:"timezone"`
+	// TrustedProxies 受信任代理列表，仅这些代理转发的 X-Forwarded-For/X-Real-IP 会被信任
+	// 生产环境应配置为负载均衡或反向代理的 IP/网段
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+	// CorsOrigins CORS 允许的源列表，如：["http://localhost:3000", "https://example.com"]
+	// 使用 ["*"] 表示允许所有源（生产环境慎用）
+	CorsOrigins []string `mapstructure:"cors_origins"`
+	// CorsMethods 允许的 HTTP 方法，如：["GET", "POST", "PUT", "DELETE"]
+	// 使用 ["*"] 表示允许全部已支持方法，空数组使用默认值
+	CorsMethods []string `mapstructure:"cors_methods"`
+	// CorsHeaders 允许的请求头，如：["Content-Type", "Authorization"]
+	// 使用 ["*"] 表示允许全部请求头
+	CorsHeaders []string `mapstructure:"cors_headers"`
+	// CorsExposeHeaders 暴露的响应头，如：["Content-Length", "X-Request-Id"]
+	// 使用 ["*"] 表示暴露全部响应头
+	CorsExposeHeaders []string `mapstructure:"cors_expose_headers"`
+	// CorsMaxAge 预检请求（OPTIONS）缓存时间（秒），默认 43200（12 小时）
+	CorsMaxAge int `mapstructure:"cors_max_age"`
+	// CorsCredentials 是否允许携带凭证（cookies、Authorization 头等），默认 false
+	CorsCredentials bool `mapstructure:"cors_credentials"`
+	// AllowDegradedStartup 是否允许 service 在依赖初始化失败时降级启动。
+	// true 时仅 HTTP 服务会继续启动，由 readiness 与路由守卫体现未就绪状态。
+	AllowDegradedStartup bool `mapstructure:"allow_degraded_startup"`
 }
 
 var App = AppConfig{
-	AppEnv:            "local",
-	Debug:             true,
-	Language:          "zh_CN",
-	WatchConfig:       false,
-	BasePath:          getDefaultPath(),
-	BaseURL:           "", // 默认空，需要配置
-	Timezone:          nil,
-	TrustedProxies:    []string{"127.0.0.1"},
-	CorsOrigins:       []string{}, // 默认空数组，表示允许所有源（开发环境）
-	CorsMethods:       []string{}, // 默认空数组，使用默认方法列表
-	CorsHeaders:       []string{}, // 默认空数组，表示允许所有请求头（使用 "*"）
-	CorsExposeHeaders: []string{}, // 默认空数组，表示暴露所有响应头（使用 "*"）
-	CorsMaxAge:        43200,      // 默认 12 小时（43200 秒）
-	CorsCredentials:   false,      // 默认不允许携带凭证
+	AppEnv:               "local", // 默认本地环境
+	Debug:                true,    // 默认开启调试模式
+	Language:             "zh_CN", // 默认中文
+	WatchConfig:          false,   // 默认关闭配置热更新
+	BasePath:             getDefaultPath(),
+	BaseURL:              "",                    // 默认空，需要配置
+	Timezone:             nil,                   // 默认使用系统时区
+	TrustedProxies:       []string{"127.0.0.1"}, // 默认只信任本地
+	CorsOrigins:          []string{},            // 默认空数组，不放行跨域来源；使用 ["*"] 表示允许所有源
+	CorsMethods:          []string{},            // 默认空数组，使用默认方法列表；使用 ["*"] 表示允许全部已支持方法
+	CorsHeaders:          []string{},            // 默认空数组，按请求头自动放行预检头；使用 ["*"] 表示允许全部请求头
+	CorsExposeHeaders:    []string{},            // 默认空数组，默认暴露全部响应头；使用 ["*"] 明确表示暴露全部响应头
+	CorsMaxAge:           43200,                 // 默认 12 小时（43200 秒）
+	CorsCredentials:      false,                 // 默认不允许携带凭证
+	AllowDegradedStartup: false,                 // 默认关闭降级启动，依赖初始化失败时直接退出
 }
 
 func getDefaultPath() (path string) {

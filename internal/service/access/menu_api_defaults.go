@@ -68,13 +68,6 @@ func NewMenuAPIDefaultsService() *MenuAPIDefaultsService {
 // Sync 将默认菜单接口映射写入数据库。
 func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
 	execTx := FirstTx(tx)
-	if execTx == nil {
-		db, err := model.GetDB()
-		if err != nil {
-			return err
-		}
-		execTx = db
-	}
 
 	menuCodes := lo.Uniq(lo.Map(defaultMenuAPIBindings, func(item defaultMenuAPIBinding, _ int) string {
 		return item.MenuCode
@@ -86,10 +79,8 @@ func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
 		return item.Method
 	}))
 
-	var menus []*model.Menu
-	if err := execTx.Select("id", "code").
-		Where("code IN ? AND deleted_at = 0", menuCodes).
-		Find(&menus).Error; err != nil {
+	menus, err := model.NewMenu().FindIdsByCodes(menuCodes)
+	if err != nil {
 		return err
 	}
 	menuIDByCode := make(map[string]uint, len(menus))
@@ -97,10 +88,8 @@ func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
 		menuIDByCode[menu.Code] = menu.ID
 	}
 
-	var apis []*model.Api
-	if err := execTx.Select("id", "route", "method").
-		Where("route IN ? AND method IN ? AND deleted_at = 0", routes, methods).
-		Find(&apis).Error; err != nil {
+	apis, err := model.NewApi().FindIdsByRouteAndMethod(routes, methods)
+	if err != nil {
 		return err
 	}
 	apiIDByRouteMethod := make(map[string]uint, len(apis))
@@ -127,7 +116,14 @@ func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
 		return nil
 	}
 
-	return execTx.Clauses(clause.OnConflict{
+	db, err := model.NewMenuApiMap().GetDB()
+	if err != nil {
+		return err
+	}
+	if execTx != nil {
+		db = execTx
+	}
+	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "menu_id"}, {Name: "api_id"}},
 		DoNothing: true,
 	}).Create(&mappings).Error

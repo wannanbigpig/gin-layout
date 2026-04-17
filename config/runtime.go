@@ -26,7 +26,8 @@ func BuildConfigDiff(oldConfig, newConfig *Conf) ConfigDiff {
 		oldConfig.AppEnv != newConfig.AppEnv ||
 		oldConfig.Debug != newConfig.Debug ||
 		oldConfig.WatchConfig != newConfig.WatchConfig ||
-		oldConfig.Language != newConfig.Language
+		oldConfig.Language != newConfig.Language ||
+		oldConfig.AllowDegradedStartup != newConfig.AllowDegradedStartup
 
 	if diff.LoggerChanged {
 		diff.ChangedFields = append(diff.ChangedFields, "logger.*")
@@ -57,6 +58,10 @@ func BuildConfigDiff(oldConfig, newConfig *Conf) ConfigDiff {
 	if oldConfig.Language != newConfig.Language {
 		diff.RestartRequiredFields = append(diff.RestartRequiredFields, "app.language")
 	}
+	if oldConfig.AllowDegradedStartup != newConfig.AllowDegradedStartup {
+		diff.ChangedFields = append(diff.ChangedFields, "app.allow_degraded_startup")
+		diff.RestartRequiredFields = append(diff.RestartRequiredFields, "app.allow_degraded_startup")
+	}
 
 	return diff
 }
@@ -79,6 +84,9 @@ func BuildAppliedConfig(oldConfig, newConfig *Conf, diff ConfigDiff) *Conf {
 	}
 	if oldConfig.Language != newConfig.Language {
 		applied.Language = oldConfig.Language
+	}
+	if oldConfig.AllowDegradedStartup != newConfig.AllowDegradedStartup {
+		applied.AllowDegradedStartup = oldConfig.AllowDegradedStartup
 	}
 
 	return &applied

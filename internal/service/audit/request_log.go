@@ -1,8 +1,6 @@
 package audit
 
 import (
-	"strings"
-
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
@@ -24,71 +22,24 @@ func NewRequestLogService() *RequestLogService {
 
 // List 分页查询请求日志列表
 func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collection {
-	var conditions []string
-	var args []any
+	query := newLogListQuery().
+		addEq("operator_id", uintFilterValue(params.OperatorID)).
+		addLike("operator_account", params.OperatorAccount).
+		addEq("base_url", params.BaseURL).
+		addEq("method", params.Method).
+		addLike("operation_name", params.OperationName).
+		addLike("ip", params.IP).
+		addCreatedAtRange(params.StartTime, params.EndTime)
 
-	// 操作ID（用户ID）
-	if params.OperatorID != 0 {
-		conditions = append(conditions, "operator_id = ?")
-		args = append(args, params.OperatorID)
-	}
-
-	// 操作账号（模糊查询）
-	if params.OperatorAccount != "" {
-		conditions = append(conditions, "operator_account LIKE ?")
-		args = append(args, "%"+params.OperatorAccount+"%")
-	}
-
-	// 操作状态：0=成功（operation_status=0），1=失败（operation_status!=0）
 	if params.OperationStatus != nil {
 		switch *params.OperationStatus {
 		case 0:
-			// 查询成功的记录
-			conditions = append(conditions, "operation_status = ?")
-			args = append(args, 0)
+			query.addCondition("operation_status = ?", 0)
 		case 1:
-			// 查询失败的记录
-			conditions = append(conditions, "operation_status != ?")
-			args = append(args, 0)
+			query.addCondition("operation_status != ?", 0)
 		}
 	}
-
-	if params.BaseURL != "" {
-		conditions = append(conditions, "base_url = ?")
-		args = append(args, params.BaseURL)
-	}
-
-	// HTTP请求方法
-	if params.Method != "" {
-		conditions = append(conditions, "method = ?")
-		args = append(args, params.Method)
-	}
-
-	// 操作接口（模糊查询）
-	if params.OperationName != "" {
-		conditions = append(conditions, "operation_name LIKE ?")
-		args = append(args, "%"+params.OperationName+"%")
-	}
-
-	// 操作IP（模糊查询）
-	if params.IP != "" {
-		conditions = append(conditions, "ip LIKE ?")
-		args = append(args, "%"+params.IP+"%")
-	}
-
-	// 开始时间
-	if params.StartTime != "" {
-		conditions = append(conditions, "created_at >= ?")
-		args = append(args, params.StartTime)
-	}
-
-	// 结束时间
-	if params.EndTime != "" {
-		conditions = append(conditions, "created_at <= ?")
-		args = append(args, params.EndTime)
-	}
-
-	conditionStr := strings.Join(conditions, " AND ")
+	conditionStr, args := query.Build()
 	requestLogModel := model.NewRequestLogs()
 
 	// 构建查询参数，只查询列表需要的字段，排除大字段

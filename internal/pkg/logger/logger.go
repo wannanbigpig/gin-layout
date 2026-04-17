@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"fmt"
 	"io"
 	"path/filepath"
 	"sync"
@@ -16,22 +17,26 @@ import (
 )
 
 var (
-	Logger *zap.Logger
+	nopLogger = zap.NewNop()
+	Logger    = nopLogger
 
 	loggerOnce sync.Once
 	loggerVal  atomic.Value
 	loggerMu   sync.Mutex
+	initErr    error
 )
 
 // InitLogger 初始化全局日志实例。
-func InitLogger() {
+func InitLogger() error {
 	loggerOnce.Do(func() {
 		logger, err := buildLogger(config.GetConfig())
 		if err != nil {
-			panic("创建zap日志包失败，详情：" + err.Error())
+			initErr = fmt.Errorf("创建zap日志包失败: %w", err)
+			return
 		}
 		setLogger(logger)
 	})
+	return initErr
 }
 
 // ReloadLogger 根据新配置重建全局日志实例。
@@ -56,10 +61,16 @@ func current() *zap.Logger {
 	if logger, ok := loggerVal.Load().(*zap.Logger); ok && logger != nil {
 		return logger
 	}
-	return Logger
+	if Logger != nil {
+		return Logger
+	}
+	return nopLogger
 }
 
 func setLogger(logger *zap.Logger) {
+	if logger == nil {
+		logger = nopLogger
+	}
 	Logger = logger
 	loggerVal.Store(logger)
 }

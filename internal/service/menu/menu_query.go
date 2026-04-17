@@ -36,9 +36,12 @@ func (s *MenuService) List(params *form.ListMenu) any {
 
 // Delete 删除菜单
 func (s *MenuService) Delete(id uint) error {
-	menu, err := s.loadDeletableMenu(id)
-	if err != nil {
-		return err
+	menu := model.NewMenu()
+	if err := menu.GetById(id); err != nil || menu.ID == 0 {
+		return e.NewBusinessError(1, "菜单不存在")
+	}
+	if menu.ChildrenNum > 0 {
+		return e.NewBusinessError(1, "该菜单有子菜单，无法删除")
 	}
 
 	db, err := menu.GetDB()
@@ -81,15 +84,4 @@ func (s *MenuService) buildListCondition(params *form.ListMenu, includeStatus bo
 		qb.AddEq("status", params.Status)
 	}
 	return qb.Build()
-}
-
-func (s *MenuService) loadDeletableMenu(id uint) (*model.Menu, error) {
-	menu := model.NewMenu()
-	if err := menu.GetById(id); err != nil || menu.ID == 0 {
-		return nil, e.NewBusinessError(1, "菜单不存在")
-	}
-	if menu.ChildrenNum > 0 {
-		return nil, e.NewBusinessError(1, "该菜单有子菜单，无法删除")
-	}
-	return menu, nil
 }

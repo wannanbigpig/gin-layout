@@ -9,7 +9,7 @@ type adminUserEditableFields struct {
 	Email       *string `form:"email" json:"email" label:"邮箱" binding:"omitempty,email"`
 	Status      *uint8  `form:"status" json:"status" label:"状态" binding:"omitempty,oneof=0 1"`
 	Avatar      *string `form:"avatar" json:"avatar" label:"头像" binding:"omitempty"`
-	DeptIds     []uint  `form:"dept_ids" json:"dept_ids" label:"部门ID" binding:"omitempty"`
+	DeptIds     *[]uint `form:"dept_ids" json:"dept_ids" label:"部门ID" binding:"omitempty,dive,gt=0"`
 }
 
 type CreateAdminUser struct {

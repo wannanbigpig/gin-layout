@@ -30,21 +30,6 @@ func (api DeptController) List(c *gin.Context) {
 	api.Success(c, result)
 }
 
-// Edit 编辑部门
-func (api DeptController) Edit(c *gin.Context) {
-	params := form.NewUpdateDeptForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	if err := dept.NewDeptService().Edit(params); err != nil {
-		api.Err(c, err)
-		return
-	}
-
-	api.Success(c, nil)
-}
-
 // Create 新增部门
 func (api DeptController) Create(c *gin.Context) {
 	params := form.NewCreateDeptForm()

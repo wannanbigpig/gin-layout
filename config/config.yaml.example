@@ -3,6 +3,7 @@ app:
   app_env: local
   debug: true
   language: zh_CN
+#  allow_degraded_startup: false   # service 启动时依赖初始化失败是否继续启动；仅建议在需要“先起服务再排障”场景开启
 #  watch_config: false
 #  base_path: ""
 #  base_url: "https://example.com"  # 文件访问的基础URL，用于拼接本地文件访问地址
@@ -13,7 +14,7 @@ app:
 #    # - "172.16.0.0/12"
 #    # - "192.168.0.0/16"
 #  # CORS 跨域配置
-#  cors_origins:                    # CORS允许的源列表，空数组表示允许所有源（开发环境）
+#  cors_origins:                    # CORS允许的源列表，使用 ["*"] 表示允许所有源
 #    - "http://localhost:3000"
 #    - "http://localhost:8080"
 #    - "https://example.com"
@@ -21,7 +22,7 @@ app:
 #    - "https://*.wannanbigpig.com"  # 匹配所有 wannanbigpig.com 的子域名（如 https://x-l-admin.wannanbigpig.com）
 #    # 或者明确指定：
 #    - "https://x-l-admin.wannanbigpig.com"
-#  cors_methods:                    # 允许的HTTP方法，空数组使用默认值（GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS）
+#  cors_methods:                    # 允许的HTTP方法，使用 ["*"] 表示允许全部已支持方法，空数组使用默认值
 #    - "GET"
 #    - "POST"
 #    - "PUT"
@@ -29,11 +30,11 @@ app:
 #    - "DELETE"
 #    - "HEAD"
 #    - "OPTIONS"
-#  cors_headers:                    # 允许的请求头，空数组表示允许所有（使用 "*"）
+#  cors_headers:                    # 允许的请求头，使用 ["*"] 表示允许所有请求头
 #    - "Content-Type"
 #    - "Authorization"
 #    - "X-Requested-With"
-#  cors_expose_headers:             # 暴露的响应头，空数组表示暴露所有（使用 "*"）
+#  cors_expose_headers:             # 暴露的响应头，使用 ["*"] 表示暴露所有响应头
 #    - "Content-Length"
 #    - "X-Request-Id"
 #  cors_max_age: 43200              # 预检请求缓存时间（秒），默认 43200（12小时）
@@ -41,7 +42,7 @@ app:
 jwt:
   ttl: 7200
   refresh_ttl: 3600
-  secret_key: Wj7rctFCgio1UxDXQEQbr64S5Q4JNQQthee9PcAKxFnZXFcnUlMlj8uBTfSi9xGq
+  secret_key: <YOUR_SECRET_KEY>  # TODO: 生成一个随机密钥，例如使用 `openssl rand -hex 32`
 mysql:
   enable: false
   host: 127.0.0.1
@@ -62,6 +63,12 @@ redis:
   database: 0
 queue:
   enable: false
+  use_default_redis: true  # true=复用 redis.*；false=使用 queue.redis.* 独立连接
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    password:
+    database: 0
   namespace: go_layout
   concurrency: 8
   strict_priority: false

@@ -11,7 +11,6 @@ import (
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
-	"github.com/wannanbigpig/gin-layout/internal/queue"
 	"github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
 )
 
@@ -32,18 +31,19 @@ func run() error {
 	if !cfg.Queue.Enable {
 		return fmt.Errorf("queue.enable is false")
 	}
-	if !cfg.Redis.Enable {
-		return fmt.Errorf("redis.enable is false, worker cannot start")
-	}
-	if err := data.GetRedisInitError(); err != nil {
-		return fmt.Errorf("redis initialization failed: %w", err)
-	}
-	if data.RedisClient() == nil {
-		return fmt.Errorf("redis client is unavailable")
+	if cfg.Queue.UseDefaultRedis {
+		if !cfg.Redis.Enable {
+			return fmt.Errorf("queue uses default redis, but redis.enable is false")
+		}
+		if err := data.GetRedisInitError(); err != nil {
+			return fmt.Errorf("redis initialization failed: %w", err)
+		}
+		if data.RedisClient() == nil {
+			return fmt.Errorf("redis client is unavailable")
+		}
 	}
 
-	registry := queue.NewRegistry()
-	jobs.RegisterAll(registry)
+	registry := jobs.NewRegistry()
 
 	server, mux, err := asynqx.NewServer(cfg, registry)
 	if err != nil {

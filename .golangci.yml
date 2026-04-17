@@ -44,7 +44,6 @@ linters:
     - ineffassign       # 检查未使用的赋值
     - staticcheck       # 静态分析
     - unused            # 检查未使用的代码
-    - varcheck          # 检查未使用的变量
     
     # 代码风格
     - gofmt             # 代码格式检查

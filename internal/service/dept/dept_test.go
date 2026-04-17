@@ -1,20 +1,20 @@
 package dept
 
-import (
-	"testing"
+import "testing"
 
-	"gorm.io/gorm"
-)
-
-func TestDeptResolveDBReturnsProvidedTransaction(t *testing.T) {
-	db := &gorm.DB{}
-
+func TestGenerateDeptCodeUsesUniqueDefaultPrefix(t *testing.T) {
 	service := NewDeptService()
-	got, err := service.resolveDB(db)
-	if err != nil {
-		t.Fatalf("resolve db failed: %v", err)
+
+	first := service.generateDeptCode()
+	second := service.generateDeptCode()
+
+	if first == "" || second == "" {
+		t.Fatal("expected generated dept code")
 	}
-	if got != db {
-		t.Fatalf("expected provided transaction db to be returned")
+	if first == second {
+		t.Fatalf("expected different dept codes, got %s", first)
+	}
+	if first[:5] != "dept_" || second[:5] != "dept_" {
+		t.Fatalf("expected dept_ prefix, got %s and %s", first, second)
 	}
 }

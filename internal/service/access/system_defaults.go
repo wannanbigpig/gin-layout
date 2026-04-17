@@ -27,7 +27,7 @@ func (s *SystemDefaultsService) Ensure(tx ...*gorm.DB) error {
 		return s.ensureWithTx(existingTx)
 	}
 
-	db, err := model.GetDB()
+	db, err := model.NewAdminUsers().GetDB()
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,8 @@ func (s *SystemDefaultsService) ensureWithTx(tx *gorm.DB) error {
 
 func (s *SystemDefaultsService) ensureDefaultDepartment(tx *gorm.DB) (*model.Department, error) {
 	dept := model.NewDepartment()
-	if err := tx.Where("code = ? AND deleted_at = 0", global.DefaultDepartmentCode).First(dept).Error; err != nil {
+	dept.SetDB(tx)
+	if err := dept.FindByCode(global.DefaultDepartmentCode); err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
 		}
@@ -92,7 +93,7 @@ func (s *SystemDefaultsService) ensureDefaultDepartment(tx *gorm.DB) (*model.Dep
 		dept.Name = "默认部门"
 		dept.Description = "系统默认部门"
 		dept.Sort = 100
-		if err := tx.Create(dept).Error; err != nil {
+		if err := dept.Save(); err != nil {
 			return nil, err
 		}
 		return dept, nil
@@ -115,7 +116,7 @@ func (s *SystemDefaultsService) ensureDefaultDepartment(tx *gorm.DB) (*model.Dep
 		updates["code"] = global.DefaultDepartmentCode
 	}
 	if len(updates) > 0 {
-		if err := tx.Model(dept).Updates(updates).Error; err != nil {
+		if err := dept.UpdateById(dept.ID, updates); err != nil {
 			return nil, err
 		}
 	}
@@ -125,7 +126,8 @@ func (s *SystemDefaultsService) ensureDefaultDepartment(tx *gorm.DB) (*model.Dep
 
 func (s *SystemDefaultsService) ensureSuperAdminRole(tx *gorm.DB) (*model.Role, error) {
 	role := model.NewRole()
-	if err := tx.Where("code = ? AND deleted_at = 0", global.SuperAdminRoleCode).First(role).Error; err != nil {
+	role.SetDB(tx)
+	if err := role.FindByCode(global.SuperAdminRoleCode); err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
 		}
@@ -138,8 +140,8 @@ func (s *SystemDefaultsService) ensureSuperAdminRole(tx *gorm.DB) (*model.Role, 
 		role.Name = "超级管理员"
 		role.Description = "系统默认超级管理员角色"
 		role.Sort = 100
-		role.Status = 1
-		if err := tx.Create(role).Error; err != nil {
+		role.Status = global.Yes
+		if err := role.Save(); err != nil {
 			return nil, err
 		}
 		return role, nil
@@ -174,7 +176,7 @@ func (s *SystemDefaultsService) ensureSuperAdminRole(tx *gorm.DB) (*model.Role, 
 		updates["status"] = 1
 	}
 	if len(updates) > 0 {
-		if err := tx.Model(role).Updates(updates).Error; err != nil {
+		if err := role.UpdateById(role.ID, updates); err != nil {
 			return nil, err
 		}
 	}
@@ -184,7 +186,8 @@ func (s *SystemDefaultsService) ensureSuperAdminRole(tx *gorm.DB) (*model.Role, 
 
 func (s *SystemDefaultsService) ensureSuperAdminUser(tx *gorm.DB) error {
 	adminUser := model.NewAdminUsers()
-	if err := tx.Where("id = ? AND deleted_at = 0", global.SuperAdminId).First(adminUser).Error; err != nil {
+	adminUser.SetDB(tx)
+	if err := adminUser.GetById(global.SuperAdminId); err != nil {
 		return err
 	}
 
@@ -201,49 +204,44 @@ func (s *SystemDefaultsService) ensureSuperAdminUser(tx *gorm.DB) error {
 	if len(updates) == 0 {
 		return nil
 	}
-	return tx.Model(adminUser).Updates(updates).Error
+	return adminUser.UpdateById(adminUser.ID, updates)
 }
 
 func (s *SystemDefaultsService) ensureSuperAdminUserDept(tx *gorm.DB, deptID uint) error {
 	rel := model.NewAdminUserDeptMap()
-	var count int64
-	if err := tx.Model(rel).
-		Where("uid = ? AND dept_id = ?", global.SuperAdminId, deptID).
-		Count(&count).Error; err != nil {
+	rel.SetDB(tx)
+	count, err := rel.CountByCondition("uid = ? AND dept_id = ?", global.SuperAdminId, deptID)
+	if err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
-	return tx.Create(&model.AdminUserDeptMap{
-		Uid:    global.SuperAdminId,
-		DeptId: deptID,
-	}).Error
+	rel.Uid = global.SuperAdminId
+	rel.DeptId = deptID
+	return rel.CreateOne()
 }
 
 func (s *SystemDefaultsService) ensureSuperAdminUserRole(tx *gorm.DB, roleID uint) error {
 	rel := model.NewAdminUserRoleMap()
-	var count int64
-	if err := tx.Model(rel).
-		Where("uid = ? AND role_id = ?", global.SuperAdminId, roleID).
-		Count(&count).Error; err != nil {
+	rel.SetDB(tx)
+	count, err := rel.CountByCondition("uid = ? AND role_id = ?", global.SuperAdminId, roleID)
+	if err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
-	return tx.Create(&model.AdminUserRoleMap{
-		Uid:    global.SuperAdminId,
-		RoleId: roleID,
-	}).Error
+	rel.Uid = global.SuperAdminId
+	rel.RoleId = roleID
+	return rel.CreateOne()
 }
 
 func (s *SystemDefaultsService) ensureSuperAdminRoleMenusWithTx(tx *gorm.DB, roleID uint) error {
 	menuModel := model.NewMenu()
-	var allMenuIDs []uint
-	if err := tx.Model(menuModel).
-		Where("deleted_at = 0").
-		Pluck("id", &allMenuIDs).Error; err != nil {
+	menuModel.SetDB(tx)
+	allMenuIDs, err := menuModel.AllIds()
+	if err != nil {
 		return err
 	}
 	allMenuIDs = lo.Uniq(allMenuIDs)
@@ -277,13 +275,8 @@ func (s *SystemDefaultsService) RequireSuperAdminRoleForUser(uid uint, roleIDs [
 		return nil
 	}
 
-	db, err := model.GetDB()
-	if err != nil {
-		return err
-	}
-
 	role := model.NewRole()
-	if err := db.Where("code = ? AND deleted_at = 0", global.SuperAdminRoleCode).First(role).Error; err != nil {
+	if err := role.FindByCode(global.SuperAdminRoleCode); err != nil {
 		return err
 	}
 	if lo.Contains(roleIDs, role.ID) {

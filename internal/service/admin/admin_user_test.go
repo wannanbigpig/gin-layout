@@ -2,11 +2,16 @@ package admin
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestAdminUserBuildListCondition(t *testing.T) {
@@ -82,4 +87,66 @@ func TestAdminUserHandleMutationErrorWrapsPlainError(t *testing.T) {
 
 	err := service.handleMutationError(errors.New("plain"), "fallback")
 	assertBusinessErrorMessage(t, err, e.FAILURE, "fallback")
+}
+
+func TestAdminUserListOptionsDepartmentSelectFields(t *testing.T) {
+	service := NewAdminUserService()
+	options := service.adminUserListOptions()
+	scope, ok := options.Preload["Department"]
+	if !ok || scope == nil {
+		t.Fatal("expected Department preload scope")
+	}
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{DryRun: true})
+	if err != nil {
+		t.Fatalf("failed to create dry-run db: %v", err)
+	}
+
+	scopedDB := scope(db)
+	selects := strings.Join(scopedDB.Statement.Selects, ",")
+	for _, field := range []string{"id", "name", "pid"} {
+		if !strings.Contains(selects, field) {
+			t.Fatalf("expected preload select to include %q, got %q", field, selects)
+		}
+	}
+}
+
+func TestApplyUpdateFieldsDefaultsCountryCodeWhenPhoneChanges(t *testing.T) {
+	service := NewAdminUserService()
+	phoneNumber := "13800138000"
+	adminUserModel := &model.AdminUser{
+		CountryCode: "+1",
+	}
+
+	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
+		Id:          1,
+		PhoneNumber: &phoneNumber,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if adminUserModel.CountryCode != global.ChinaCountryCode {
+		t.Fatalf("expected default country code %q, got %q", global.ChinaCountryCode, adminUserModel.CountryCode)
+	}
+	if adminUserModel.FullPhoneNumber != global.ChinaCountryCode+phoneNumber {
+		t.Fatalf("unexpected full phone number: %q", adminUserModel.FullPhoneNumber)
+	}
+}
+
+func TestApplyUpdateFieldsRejectsSuperAdminPasswordChange(t *testing.T) {
+	service := NewAdminUserService()
+	password := "new-password"
+	adminUserModel := &model.AdminUser{
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+			BaseModel: model.BaseModel{ID: global.SuperAdminId},
+		},
+		Password: "hashed-password",
+	}
+
+	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
+		Id:       global.SuperAdminId,
+		Password: &password,
+	})
+
+	assertBusinessErrorMessage(t, err, e.SuperAdminCannotModify, "系统默认超级管理员不允许修改密码")
 }

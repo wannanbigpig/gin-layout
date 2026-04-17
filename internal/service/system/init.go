@@ -21,18 +21,10 @@ const (
 	defaultGroupCode = "other"
 )
 
-// InitService 初始化服务
-type InitService struct{}
-
-// NewInitService 创建初始化服务实例
-func NewInitService() *InitService {
-	return &InitService{}
-}
-
 // InitApiRoutes 初始化API路由
-func (s *InitService) InitApiRoutes() error {
+func InitApiRoutes() error {
 	// 检查数据库连接
-	if err := s.checkDatabaseConnection(); err != nil {
+	if err := checkDatabaseConnection(); err != nil {
 		return err
 	}
 
@@ -41,14 +33,18 @@ func (s *InitService) InitApiRoutes() error {
 		return fmt.Errorf("初始化验证器失败: %w", err)
 	}
 
-	engine := routers.SetRouters()
-	apiMap := routers.CollectAdminRouteMeta()
+	routeTree := routers.AppRouteTree()
+	engine, err := routers.SetRoutersWithTree(routeTree)
+	if err != nil {
+		return fmt.Errorf("初始化路由失败: %w", err)
+	}
+	apiMap := routers.CollectRouteMeta(routeTree)
 
 	// 构建API数据
-	apiData := s.buildApiData(engine, apiMap)
+	apiData := buildApiData(engine.Routes(), apiMap)
 
 	// 保存API数据
-	if err := s.saveApiData(apiData); err != nil {
+	if err := saveApiData(apiData); err != nil {
 		return fmt.Errorf("保存API数据失败: %w", err)
 	}
 	if err := access.NewMenuAPIDefaultsService().Sync(); err != nil {
@@ -59,9 +55,9 @@ func (s *InitService) InitApiRoutes() error {
 }
 
 // RebuildUserPermissions 按数据库关系全量重建用户最终 API 权限。
-func (s *InitService) RebuildUserPermissions() error {
+func RebuildUserPermissions() error {
 	// 检查数据库连接
-	if err := s.checkDatabaseConnection(); err != nil {
+	if err := checkDatabaseConnection(); err != nil {
 		return err
 	}
 
@@ -76,53 +72,46 @@ func (s *InitService) RebuildUserPermissions() error {
 }
 
 // buildApiData 构建API数据
-func (s *InitService) buildApiData(engine *gin.Engine, apiMap routers.RouteMetaMap) []map[string]any {
+func buildApiData(routes []gin.RouteInfo, apiMap routers.RouteMetaMap) []map[string]any {
 	date := time.Now().Format(time.DateTime)
-	apiData := make([]map[string]any, 0, len(engine.Routes()))
+	apiData := make([]map[string]any, 0, len(routes))
 
-	for _, route := range engine.Routes() {
-		apiInfo := s.extractApiInfo(route, apiMap, date)
-		apiData = append(apiData, apiInfo)
+	for _, route := range routes {
+		code := utils.MD5(route.Method + "_" + route.Path)
+		name := route.Path
+		isAuth := defaultIsAuth
+		desc := ""
+		groupCode := defaultGroupCode
+
+		if val, ok := apiMap[code]; ok {
+			name = val.Title
+			isAuth = int(val.Auth)
+			desc = val.Desc
+			groupCode = val.GroupCode
+		}
+
+		apiData = append(apiData, map[string]any{
+			"code":         code,
+			"name":         name,
+			"route":        route.Path,
+			"method":       route.Method,
+			"func":         extractHandlerName(route.Handler),
+			"func_path":    route.Handler,
+			"is_auth":      isAuth,
+			"description":  desc,
+			"sort":         defaultSort,
+			"is_effective": 1,
+			"created_at":   date,
+			"updated_at":   date,
+			"group_code":   groupCode,
+		})
 	}
 
 	return apiData
 }
 
-// extractApiInfo 提取API信息
-func (s *InitService) extractApiInfo(route gin.RouteInfo, apiMap routers.RouteMetaMap, date string) map[string]any {
-	code := utils.MD5(route.Method + "_" + route.Path)
-	name := route.Path
-	isAuth := defaultIsAuth
-	desc := ""
-	groupCode := defaultGroupCode
-
-	// 从 apiMap 中获取路由元信息
-	if val, ok := apiMap[code]; ok {
-		name = val.Title
-		isAuth = int(val.Auth)
-		desc = val.Desc
-		groupCode = val.GroupCode
-	}
-
-	return map[string]any{
-		"code":         code,
-		"name":         name,
-		"route":        route.Path,
-		"method":       route.Method,
-		"func":         s.extractHandlerName(route.Handler),
-		"func_path":    route.Handler,
-		"is_auth":      isAuth,
-		"description":  desc,
-		"sort":         defaultSort,
-		"is_effective": 1,
-		"created_at":   date,
-		"updated_at":   date,
-		"group_code":   groupCode,
-	}
-}
-
 // extractHandlerName 提取处理器名称
-func (s *InitService) extractHandlerName(handler string) string {
+func extractHandlerName(handler string) string {
 	parts := strings.Split(handler, ".")
 	if len(parts) == 0 {
 		return handler
@@ -133,7 +122,7 @@ func (s *InitService) extractHandlerName(handler string) string {
 }
 
 // saveApiData 保存API数据到数据库
-func (s *InitService) saveApiData(apiData []map[string]any) error {
+func saveApiData(apiData []map[string]any) error {
 	apiModel := model.NewApi()
 	date := time.Now().Format(time.DateTime)
 	if err := apiModel.InitRegisters(apiData, date); err != nil {
@@ -143,7 +132,7 @@ func (s *InitService) saveApiData(apiData []map[string]any) error {
 }
 
 // checkDatabaseConnection 检查数据库连接
-func (s *InitService) checkDatabaseConnection() error {
+func checkDatabaseConnection() error {
 	db := data.MysqlDB()
 	if db == nil {
 		return fmt.Errorf("数据库连接未初始化，请检查配置")

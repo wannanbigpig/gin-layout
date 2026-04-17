@@ -22,3 +22,12 @@ func NewUploadFiles() *UploadFiles {
 func (m *UploadFiles) TableName() string {
 	return "upload_files"
 }
+
+// Create 创建单条文件记录。
+func (m *UploadFiles) Create() error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Create(m).Error
+}

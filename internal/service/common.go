@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"mime/multipart"
 	"path/filepath"
 
@@ -47,63 +48,62 @@ func (s CommonService) UploadImage(fileHeader *multipart.FileHeader, isPublic bo
 	fileInfo := initUploadResult(fileHeader)
 	isPublicFlag := visibilityFlag(isPublic)
 	basePath := storageBasePath(isPublic)
-	uploadPath := normalizeUploadPath(path)
+	uploadPath, err := normalizeUploadPath(path)
+	if err != nil {
+		return setFileFailure(fileInfo, "上传目录不合法", err)
+	}
+	uploadDir, err := resolveUploadDestination(basePath, uploadPath)
+	if err != nil {
+		return setFileFailure(fileInfo, "上传目录不合法", err)
+	}
 
 	if fileHeader.Size > maxUploadFileSize {
 		return setFileFailure(fileInfo, "文件大小不能大于10M", nil)
 	}
 
-	file, err := fileHeader.Open()
+	result, err := utils.SaveUploadedImageWithUUID(fileHeader, uploadDir)
 	if err != nil {
-		return setFileFailure(fileInfo, "文件读取失败", err)
+		if errors.Is(err, utils.ErrInvalidImageType) {
+			return setFileFailure(fileInfo, "仅支持图片格式", err)
+		}
+		return setFileFailure(fileInfo, "文件保存失败", err)
 	}
-	defer file.Close()
+	savedPath := result.Path
+	fileInfo.Sha256 = result.Sha256
 
-	sha256, _, err := utils.GetFileSha256AndSizeFromHeader(file)
-	if err != nil {
-		return setFileFailure(fileInfo, "文件校验失败", err)
-	}
-	fileInfo.Sha256 = sha256
-
-	_, allowed, err := utils.IsAllowedImage(file)
-	if err != nil || !allowed {
-		return setFileFailure(fileInfo, "仅支持图片格式", err)
-	}
-
-	existingFile, err := findReusableUploadFile(sha256, isPublicFlag)
+	existingFile, err := findReusableUploadFile(result.Sha256, isPublicFlag)
 	if err == nil && existingUploadFileExists(basePath, existingFile.Path) {
+		cleanupStoredUpload(result.Path)
 		fillFileInfoFromModel(fileInfo, existingFile)
 		return fileInfo, nil
 	}
 
-	result, err := utils.UploadFile(fileHeader, filepath.Join(basePath, uploadPath))
+	absBasePath, err := filepath.Abs(basePath)
 	if err != nil {
-		return setFileFailure(fileInfo, "文件保存失败", err)
+		cleanupStoredUpload(result.Path)
+		return setFileFailure(fileInfo, "上传路径获取异常", err)
 	}
-
-	relPath, err := filepath.Rel(basePath, result.Path)
+	relPath, err := filepath.Rel(absBasePath, result.Path)
 	if err != nil {
+		cleanupStoredUpload(result.Path)
 		return setFileFailure(fileInfo, "上传路径获取异常", err)
 	}
 	result.Path = relPath
 
-	uploadFileModel := model.UploadFiles{
-		UID:        s.GetAdminUserId(),
-		OriginName: result.OriginName,
-		Name:       result.Name,
-		Path:       result.Path,
-		Size:       uint(result.Size),
-		Ext:        result.Ext,
-		Hash:       result.Sha256,
-		UUID:       result.UUID,
-		MimeType:   result.MimeType,
-		IsPublic:   isPublicFlag,
-	}
-	db, err := model.GetDB(model.NewUploadFiles())
-	if err == nil {
-		err = db.Create(&uploadFileModel).Error
-	}
-	if err != nil {
+	uploadFileModel := model.NewUploadFiles()
+	uploadFileModel.UID = s.GetAdminUserId()
+	uploadFileModel.OriginName = result.OriginName
+	uploadFileModel.Name = result.Name
+	uploadFileModel.Path = result.Path
+	uploadFileModel.Size = uint(result.Size)
+	uploadFileModel.Ext = result.Ext
+	uploadFileModel.Hash = result.Sha256
+	uploadFileModel.UUID = result.UUID
+	uploadFileModel.MimeType = result.MimeType
+	uploadFileModel.IsPublic = isPublicFlag
+
+	if err := uploadFileModel.Create(); err != nil {
+		cleanupStoredUpload(savedPath)
 		return setFileFailure(fileInfo, "保存文件信息失败", err)
 	}
 
@@ -136,5 +136,9 @@ func (s CommonService) GetFileAccessPath(fileUUID string, checkAuth bool, curren
 		}
 	}
 
-	return filepath.Join(storageBasePath(uploadFile.IsPublic == global.Yes), uploadFile.Path), nil
+	filePath, err := resolveUploadDestination(storageBasePath(uploadFile.IsPublic == global.Yes), uploadFile.Path)
+	if err != nil {
+		return "", e.NewBusinessError(e.FileAccessDenied, "文件路径异常，无法访问")
+	}
+	return filePath, nil
 }

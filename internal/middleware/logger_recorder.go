@@ -21,6 +21,7 @@ type requestBodyCache struct {
 // responseRecorder 响应记录器，用于记录响应内容。
 type responseRecorder struct {
 	gin.ResponseWriter
+	captureBody   bool
 	body          *bytes.Buffer
 	statusCode    int
 	responseBytes int
@@ -60,16 +61,14 @@ func cacheRequestBody(c *gin.Context) {
 		return
 	}
 
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	bodyBytes, totalBytes, truncated, err := snapshotRequestBody(c.Request)
 	if err != nil || len(bodyBytes) == 0 {
 		return
 	}
-
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	c.Set("requestBody", &requestBodyCache{
 		body:       truncateBytes(bodyBytes, maxRequestBodySize),
-		totalBytes: len(bodyBytes),
-		truncated:  len(bodyBytes) > maxRequestBodySize,
+		totalBytes: totalBytes,
+		truncated:  truncated,
 	})
 }
 
@@ -77,12 +76,16 @@ func cacheRequestBody(c *gin.Context) {
 func createResponseRecorder(c *gin.Context) *responseRecorder {
 	return &responseRecorder{
 		ResponseWriter: c.Writer,
+		captureBody:    shouldCaptureResponseBody(c),
 		body:           bytes.NewBuffer(nil),
 		statusCode:     defaultStatusCode,
 	}
 }
 
 func (r *responseRecorder) cacheBody(b []byte) {
+	if !r.captureBody {
+		return
+	}
 	r.responseBytes += len(b)
 	if r.truncated || len(b) == 0 {
 		return
@@ -104,6 +107,12 @@ func (r *responseRecorder) cacheBody(b []byte) {
 
 // parseResponse 解析响应数据。
 func parseResponse(c *gin.Context, recorder *responseRecorder) *response.Result {
+	if recorder == nil || !recorder.captureBody || recorder.body.Len() == 0 {
+		return nil
+	}
+	if !strings.Contains(strings.ToLower(recorder.Header().Get("Content-Type")), "json") {
+		return nil
+	}
 	var resp response.Result
 	if err := json.Unmarshal(recorder.body.Bytes(), &resp); err != nil {
 		return nil
@@ -113,6 +122,16 @@ func parseResponse(c *gin.Context, recorder *responseRecorder) *response.Result 
 		resp.Data = nil
 	}
 	return &resp
+}
+
+func shouldCaptureResponseBody(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return true
+	}
+	if c.Request.URL.Path == "/ping" {
+		return false
+	}
+	return c.Request.Method != http.MethodGet
 }
 
 // readRequestBody 读取请求体缓存。
@@ -130,16 +149,15 @@ func readRequestBody(c *gin.Context) []byte {
 		return nil
 	}
 
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	bodyBytes, totalBytes, truncated, err := snapshotRequestBody(c.Request)
 	if err != nil || len(bodyBytes) == 0 {
 		return nil
 	}
 
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	cached := &requestBodyCache{
 		body:       truncateBytes(bodyBytes, maxRequestBodySize),
-		totalBytes: len(bodyBytes),
-		truncated:  len(bodyBytes) > maxRequestBodySize,
+		totalBytes: totalBytes,
+		truncated:  truncated,
 	}
 	c.Set("requestBody", cached)
 	return cached.body
@@ -171,4 +189,36 @@ func shouldSkipRequestBodyCache(c *gin.Context) bool {
 	default:
 		return false
 	}
+}
+
+func snapshotRequestBody(req *http.Request) ([]byte, int, bool, error) {
+	if req == nil || req.Body == nil {
+		return nil, 0, false, nil
+	}
+
+	if req.ContentLength >= 0 && req.ContentLength <= maxRequestBodySize {
+		bodyBytes, err := io.ReadAll(req.Body)
+		if err != nil || len(bodyBytes) == 0 {
+			return nil, 0, false, err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		return bodyBytes, len(bodyBytes), false, nil
+	}
+
+	peekLimit := int64(maxRequestBodySize + 1)
+	bodyBytes, err := io.ReadAll(io.LimitReader(req.Body, peekLimit))
+	if err != nil || len(bodyBytes) == 0 {
+		return nil, 0, false, err
+	}
+
+	req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(bodyBytes), req.Body))
+
+	truncated := len(bodyBytes) > maxRequestBodySize
+	totalBytes := len(bodyBytes)
+	if req.ContentLength > int64(totalBytes) {
+		totalBytes = int(req.ContentLength)
+		truncated = true
+	}
+
+	return bodyBytes, totalBytes, truncated, nil
 }

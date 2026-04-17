@@ -56,9 +56,5 @@ func PersistAuditLog(snapshot *AuditLogSnapshot) error {
 	requestLog.ResponseHeader = snapshot.ResponseHeader
 	requestLog.ExecutionTime = snapshot.ExecutionTime
 
-	db, err := requestLog.GetDB()
-	if err != nil {
-		return err
-	}
-	return db.Create(requestLog).Error
+	return requestLog.Create()
 }

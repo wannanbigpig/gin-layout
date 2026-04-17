@@ -2,11 +2,6 @@ package routers
 
 import "github.com/wannanbigpig/gin-layout/pkg/utils"
 
-// CollectAdminRouteMeta 收集当前应用的全部路由元数据。
-func CollectAdminRouteMeta() RouteMetaMap {
-	return CollectRouteMeta(AppRouteTree())
-}
-
 // CollectRouteMeta 根据路由树递归收集路由元数据。
 func CollectRouteMeta(root RouteGroupDef) RouteMetaMap {
 	metaMap := make(RouteMetaMap)

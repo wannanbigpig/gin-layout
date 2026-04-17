@@ -32,7 +32,12 @@ func NewPublisher(cfg *config.Conf) (queue.Publisher, error) {
 		return nil, nil
 	}
 
-	client := asynq.NewClient(newRedisConnOpt(cfg))
+	redisOpt, err := newRedisConnOpt(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	client := asynq.NewClient(redisOpt)
 	return &publisher{
 		client:    client,
 		namespace: strings.TrimSpace(cfg.Queue.Namespace),
@@ -76,7 +81,12 @@ func NewServer(cfg *config.Conf, registry queue.Registry) (*asynq.Server, *asynq
 		return nil, nil, errors.New("queue registry is nil")
 	}
 
-	server := asynq.NewServer(newRedisConnOpt(cfg), asynq.Config{
+	redisOpt, err := newRedisConnOpt(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	server := asynq.NewServer(redisOpt, asynq.Config{
 		Concurrency:    cfg.Queue.Concurrency,
 		Queues:         prefixedQueues(cfg.Queue.Namespace, cfg.Queue.Queues),
 		StrictPriority: cfg.Queue.StrictPriority,
@@ -104,12 +114,37 @@ func NewServer(cfg *config.Conf, registry queue.Registry) (*asynq.Server, *asynq
 	return server, mux, nil
 }
 
-func newRedisConnOpt(cfg *config.Conf) asynq.RedisClientOpt {
-	return asynq.RedisClientOpt{
-		Addr:     cfg.Redis.Host + ":" + cfg.Redis.Port,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.Database,
+func newRedisConnOpt(cfg *config.Conf) (asynq.RedisClientOpt, error) {
+	if cfg == nil {
+		return asynq.RedisClientOpt{}, errors.New("queue config is nil")
 	}
+	if cfg.Queue.UseDefaultRedis {
+		if !cfg.Redis.Enable {
+			return asynq.RedisClientOpt{}, errors.New("queue uses default redis, but redis.enable is false")
+		}
+		host := strings.TrimSpace(cfg.Redis.Host)
+		port := strings.TrimSpace(cfg.Redis.Port)
+		if host == "" || port == "" {
+			return asynq.RedisClientOpt{}, errors.New("queue uses default redis, but redis host/port is empty")
+		}
+		return asynq.RedisClientOpt{
+			Addr:     host + ":" + port,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.Database,
+		}, nil
+	}
+
+	host := strings.TrimSpace(cfg.Queue.Redis.Host)
+	port := strings.TrimSpace(cfg.Queue.Redis.Port)
+	if host == "" || port == "" {
+		return asynq.RedisClientOpt{}, errors.New("queue.redis host/port is required when queue.use_default_redis is false")
+	}
+
+	return asynq.RedisClientOpt{
+		Addr:     host + ":" + port,
+		Password: cfg.Queue.Redis.Password,
+		DB:       cfg.Queue.Redis.Database,
+	}, nil
 }
 
 func mapOptions(namespace string, options []queue.JobOption) []asynq.Option {

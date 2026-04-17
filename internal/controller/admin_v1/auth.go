@@ -5,7 +5,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
+	req "github.com/wannanbigpig/gin-layout/internal/pkg/request"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -64,7 +64,7 @@ func (api LoginController) LoginCaptcha(c *gin.Context) {
 
 // Logout 管理员用户退出登录
 func (api LoginController) Logout(c *gin.Context) {
-	accessToken, err := extractAccessToken(c)
+	accessToken, err := req.GetAccessToken(c)
 	if err != nil {
 		// Token提取失败，视为已退出
 		api.Success(c, nil)
@@ -81,7 +81,7 @@ func (api LoginController) Logout(c *gin.Context) {
 
 // CheckToken 检查Token是否有效
 func (api LoginController) CheckToken(c *gin.Context) {
-	accessToken, err := extractAccessToken(c)
+	accessToken, err := req.GetAccessToken(c)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -92,10 +92,4 @@ func (api LoginController) CheckToken(c *gin.Context) {
 	_, ok := loginService.CheckToken(accessToken)
 
 	api.Success(c, ok)
-}
-
-// extractAccessToken 从请求头中提取访问令牌
-func extractAccessToken(c *gin.Context) (string, error) {
-	authorization := c.GetHeader("Authorization")
-	return token.GetAccessToken(authorization)
 }

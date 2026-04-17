@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -33,6 +32,11 @@ type FileInfo struct {
 	Status        string `json:"status"`         // 上传状态：SUCCESS、ERROR
 }
 
+const fileHeaderSampleSize = 261
+
+// ErrInvalidImageType 表示上传文件不是允许的图片类型。
+var ErrInvalidImageType = errors.New("uploaded file is not an allowed image")
+
 // UploadFile 接收上传文件并保存到目标目录。
 func UploadFile(fileHeader *multipart.FileHeader, path ...string) (fileInfo *FileInfo, err error) {
 	uploadSubDir := "default"
@@ -40,88 +44,21 @@ func UploadFile(fileHeader *multipart.FileHeader, path ...string) (fileInfo *Fil
 		uploadSubDir = path[0]
 	}
 
-	var absolutePath string
-	// 判断uploadSubDir是否绝对路径
-	if filepath.IsAbs(uploadSubDir) {
-		// 已经是绝对路径，直接使用
-		absolutePath = uploadSubDir
-	} else {
-		// 相对路径，基于二进制文件所在目录构建完整路径
-		baseDir, err := GetCurrentAbPathByExecutable()
-		if err != nil {
-			return nil, fmt.Errorf("获取执行文件目录失败: %w", err)
-		}
-		// 如果传入的是相对路径，默认放在 storage/default 目录下
-		absolutePath = filepath.Join(baseDir, "storage", uploadSubDir)
+	absolutePath, err := resolveUploadDir(uploadSubDir)
+	if err != nil {
+		return nil, err
 	}
-
-	// 确保目录存在
-	if err := os.MkdirAll(absolutePath, os.ModePerm); err != nil {
-		return nil, fmt.Errorf("创建上传目录失败: %w", err)
-	}
-
-	fileInfo, err = SaveUploadedFileWithUUID(fileHeader, absolutePath)
-
-	return
+	return SaveUploadedFileWithUUID(fileHeader, absolutePath)
 }
 
 // SaveUploadedFileWithUUID 保存文件、计算摘要并生成 UUID 文件名。
 func SaveUploadedFileWithUUID(fileHeader *multipart.FileHeader, uploadDir string) (*FileInfo, error) {
-	src, err := fileHeader.Open()
-	if err != nil {
-		return nil, fmt.Errorf("打开上传文件失败: %w", err)
-	}
-	defer src.Close()
+	return saveUploadedFile(fileHeader, uploadDir, false)
+}
 
-	// 读取内容到 buffer，同时计算 SHA256
-	buf := bytes.NewBuffer(nil)
-	hash := sha256.New()
-
-	size, err := io.Copy(io.MultiWriter(buf, hash), src)
-	if err != nil {
-		return nil, fmt.Errorf("读取文件失败: %w", err)
-	}
-
-	sum := hex.EncodeToString(hash.Sum(nil))
-	ext := filepath.Ext(fileHeader.Filename)
-	// 生成UUID（不带连字符，32位十六进制字符串）
-	fileUUID := uuid.New()
-	fileUUIDStr := strings.ReplaceAll(fileUUID.String(), "-", "")
-	newFilename := fileUUID.String() + ext
-	savePath := filepath.Join(uploadDir, newFilename)
-
-	// 检测MIME类型
-	var mimeType string
-	kind, err := filetype.Match(buf.Bytes())
-	if err == nil && kind != filetype.Unknown {
-		mimeType = kind.MIME.Value
-	} else {
-		// 如果无法检测，使用扩展名推断
-		mimeType = getMimeTypeByExt(ext)
-	}
-
-	// 写入临时文件再重命名
-	tempPath := savePath + ".tmp"
-	if err := os.WriteFile(tempPath, buf.Bytes(), 0644); err != nil {
-		return nil, fmt.Errorf("写入临时文件失败: %w", err)
-	}
-
-	if err := os.Rename(tempPath, savePath); err != nil {
-		_ = os.Remove(tempPath)
-		return nil, fmt.Errorf("重命名文件失败: %w", err)
-	}
-
-	return &FileInfo{
-		OriginName: fileHeader.Filename,
-		Name:       newFilename,
-		Path:       savePath,
-		Size:       size,
-		Sha256:     sum,
-		UUID:       fileUUIDStr,
-		Ext:        ext,
-		MimeType:   mimeType,
-		Status:     "SUCCESS",
-	}, nil
+// SaveUploadedImageWithUUID 保存图片文件，拒绝非允许图片类型。
+func SaveUploadedImageWithUUID(fileHeader *multipart.FileHeader, uploadDir string) (*FileInfo, error) {
+	return saveUploadedFile(fileHeader, uploadDir, true)
 }
 
 // EnsureAbsPath 将相对路径转换为绝对路径。
@@ -165,7 +102,7 @@ func GetFileSha256AndSizeFromHeader(file io.ReadSeeker) (string, int64, error) {
 
 // IsAllowedImage 判断文件头是否匹配允许的图片类型。
 func IsAllowedImage(file io.ReadSeeker) (string, bool, error) {
-	head := make([]byte, 261)
+	head := make([]byte, fileHeaderSampleSize)
 	n, err := file.Read(head)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", false, fmt.Errorf("读取文件头失败: %w", err)
@@ -177,27 +114,11 @@ func IsAllowedImage(file io.ReadSeeker) (string, bool, error) {
 		return "", false, nil
 	}
 
-	kind, err := filetype.Match(head[:n])
+	ext, allowed, _, err := detectAllowedImage(head[:n])
 	if err != nil {
 		return "", false, fmt.Errorf("检测文件类型失败: %w", err)
 	}
-	if kind == filetype.Unknown {
-		return "", false, nil
-	}
-
-	allowed := map[string]types.Type{
-		"jpg":  filetype.GetType("jpg"),
-		"jpeg": filetype.GetType("jpeg"),
-		"png":  filetype.GetType("png"),
-		"gif":  filetype.GetType("gif"),
-	}
-
-	for _, t := range allowed {
-		if kind.MIME.Value == t.MIME.Value {
-			return kind.Extension, true, nil
-		}
-	}
-	return kind.Extension, false, nil
+	return ext, allowed, nil
 }
 
 // getMimeTypeByExt 根据扩展名获取MIME类型
@@ -220,4 +141,188 @@ func getMimeTypeByExt(ext string) string {
 		return mime
 	}
 	return "application/octet-stream"
+}
+
+func resolveUploadDir(uploadSubDir string) (string, error) {
+	if filepath.IsAbs(uploadSubDir) {
+		if err := ensureUploadDir(uploadSubDir); err != nil {
+			return "", err
+		}
+		return uploadSubDir, nil
+	}
+
+	baseDir, err := GetCurrentAbPathByExecutable()
+	if err != nil {
+		return "", fmt.Errorf("获取执行文件目录失败: %w", err)
+	}
+	absolutePath := filepath.Join(baseDir, "storage", uploadSubDir)
+	if err := ensureUploadDir(absolutePath); err != nil {
+		return "", err
+	}
+	return absolutePath, nil
+}
+
+func ensureUploadDir(uploadDir string) error {
+	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
+		return fmt.Errorf("创建上传目录失败: %w", err)
+	}
+	return nil
+}
+
+func saveUploadedFile(fileHeader *multipart.FileHeader, uploadDir string, imagesOnly bool) (*FileInfo, error) {
+	if err := ensureUploadDir(uploadDir); err != nil {
+		return nil, err
+	}
+
+	src, err := fileHeader.Open()
+	if err != nil {
+		return nil, fmt.Errorf("打开上传文件失败: %w", err)
+	}
+	defer src.Close()
+
+	tempFile, err := os.CreateTemp(uploadDir, "upload-*")
+	if err != nil {
+		return nil, fmt.Errorf("创建临时文件失败: %w", err)
+	}
+	tempPath := tempFile.Name()
+	keepTemp := false
+	defer func() {
+		_ = tempFile.Close()
+		if !keepTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	headerBytes, size, sum, err := copyUploadedContent(tempFile, src)
+	if err != nil {
+		return nil, err
+	}
+
+	detectedExt, mimeType, err := detectMimeType(headerBytes)
+	if err != nil {
+		return nil, fmt.Errorf("检测文件类型失败: %w", err)
+	}
+	if imagesOnly {
+		if _, allowed, detectedMime, detectErr := detectAllowedImage(headerBytes); detectErr != nil {
+			return nil, fmt.Errorf("检测文件类型失败: %w", detectErr)
+		} else if !allowed {
+			return nil, ErrInvalidImageType
+		} else if detectedMime != "" {
+			mimeType = detectedMime
+		}
+	}
+
+	ext := filepath.Ext(fileHeader.Filename)
+	if detectedExt != "" {
+		ext = "." + detectedExt
+	}
+	if mimeType == "" {
+		mimeType = getMimeTypeByExt(ext)
+	}
+
+	fileUUID := uuid.New()
+	fileUUIDStr := strings.ReplaceAll(fileUUID.String(), "-", "")
+	newFilename := fileUUID.String() + ext
+	savePath := filepath.Join(uploadDir, newFilename)
+
+	if err := tempFile.Chmod(0644); err != nil {
+		return nil, fmt.Errorf("设置文件权限失败: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return nil, fmt.Errorf("关闭临时文件失败: %w", err)
+	}
+	if err := os.Rename(tempPath, savePath); err != nil {
+		return nil, fmt.Errorf("重命名文件失败: %w", err)
+	}
+	keepTemp = true
+
+	return &FileInfo{
+		OriginName: fileHeader.Filename,
+		Name:       newFilename,
+		Path:       savePath,
+		Size:       size,
+		Sha256:     sum,
+		UUID:       fileUUIDStr,
+		Ext:        ext,
+		MimeType:   mimeType,
+		Status:     "SUCCESS",
+	}, nil
+}
+
+func copyUploadedContent(dst io.Writer, src io.Reader) ([]byte, int64, string, error) {
+	hash := sha256.New()
+	writer := io.MultiWriter(dst, hash)
+	header := make([]byte, 0, fileHeaderSampleSize)
+	buffer := make([]byte, 32*1024)
+	var total int64
+
+	for {
+		n, err := src.Read(buffer)
+		if n > 0 {
+			chunk := buffer[:n]
+			if len(header) < fileHeaderSampleSize {
+				remaining := fileHeaderSampleSize - len(header)
+				if remaining > len(chunk) {
+					remaining = len(chunk)
+				}
+				header = append(header, chunk[:remaining]...)
+			}
+			written, writeErr := writer.Write(chunk)
+			if writeErr != nil {
+				return nil, 0, "", fmt.Errorf("写入临时文件失败: %w", writeErr)
+			}
+			total += int64(written)
+		}
+
+		switch {
+		case err == nil:
+			continue
+		case errors.Is(err, io.EOF):
+			return header, total, hex.EncodeToString(hash.Sum(nil)), nil
+		default:
+			return nil, 0, "", fmt.Errorf("读取文件失败: %w", err)
+		}
+	}
+}
+
+func detectMimeType(header []byte) (string, string, error) {
+	if len(header) == 0 {
+		return "", "", nil
+	}
+	kind, err := filetype.Match(header)
+	if err != nil {
+		return "", "", err
+	}
+	if kind == filetype.Unknown {
+		return "", "", nil
+	}
+	return kind.Extension, kind.MIME.Value, nil
+}
+
+func detectAllowedImage(header []byte) (string, bool, string, error) {
+	if len(header) == 0 {
+		return "", false, "", nil
+	}
+
+	kind, err := filetype.Match(header)
+	if err != nil {
+		return "", false, "", err
+	}
+	if kind == filetype.Unknown {
+		return "", false, "", nil
+	}
+
+	allowed := map[string]types.Type{
+		"jpg":  filetype.GetType("jpg"),
+		"jpeg": filetype.GetType("jpeg"),
+		"png":  filetype.GetType("png"),
+		"gif":  filetype.GetType("gif"),
+	}
+
+	for _, imageType := range allowed {
+		if kind.MIME.Value == imageType.MIME.Value {
+			return kind.Extension, true, kind.MIME.Value, nil
+		}
+	}
+	return kind.Extension, false, kind.MIME.Value, nil
 }

@@ -15,8 +15,8 @@ type AdminLoginLogController struct {
 }
 
 // NewAdminLoginLogController 创建登录日志控制器实例
-func NewAdminLoginLogController() AdminLoginLogController {
-	return AdminLoginLogController{}
+func NewAdminLoginLogController() *AdminLoginLogController {
+	return &AdminLoginLogController{}
 }
 
 // List 分页查询管理员登录日志列表

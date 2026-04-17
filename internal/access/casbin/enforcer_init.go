@@ -6,9 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/casbin/casbin/v2"
-	"github.com/casbin/casbin/v2/model"
-	gormadapter "github.com/casbin/gorm-adapter/v3"
+	"github.com/casbin/casbin/v3/model"
 	"gorm.io/gorm"
 
 	c "github.com/wannanbigpig/gin-layout/config"
@@ -55,20 +53,11 @@ func initEnforcerLocked() error {
 		return casbinManager.errInit
 	}
 
-	gormadapter.TurnOffAutoMigrate(db)
-	adapter, err := gormadapter.NewAdapterByDB(db)
-	if err != nil {
-		casbinManager.errInit = fmt.Errorf("创建适配器失败: %w", err)
-		return casbinManager.errInit
-	}
-
-	enforcer, err := casbin.NewEnforcer(m, adapter)
+	enforcer, err := newEnforcerFromDB(m, db)
 	if err != nil {
 		casbinManager.errInit = fmt.Errorf("创建 Enforcer 失败: %w", err)
 		return casbinManager.errInit
 	}
-
-	enforcer.EnableAutoSave(true)
 	next := &CasbinEnforcer{
 		Enforcer: enforcer,
 		model:    m,

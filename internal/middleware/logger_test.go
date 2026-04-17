@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -59,9 +60,10 @@ func TestParseResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/demo", nil)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/demo", nil)
 
 	respRecorder := createResponseRecorder(ctx)
+	respRecorder.Header().Set("Content-Type", "application/json")
 	respRecorder.body.WriteString(`{"code":0,"msg":"ok","data":{"name":"demo"}}`)
 
 	resp := parseResponse(ctx, respRecorder)
@@ -70,9 +72,6 @@ func TestParseResponse(t *testing.T) {
 	}
 	if resp.Code != 0 {
 		t.Fatalf("expected code 0, got %d", resp.Code)
-	}
-	if resp.Data != nil {
-		t.Fatal("expected get response data to be cleared")
 	}
 }
 
@@ -84,6 +83,7 @@ func TestParseResponseForNonJSON(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/demo", nil)
 
 	respRecorder := createResponseRecorder(ctx)
+	respRecorder.Header().Set("Content-Type", "text/plain")
 	respRecorder.body.WriteString("pong")
 	if resp := parseResponse(ctx, respRecorder); resp != nil {
 		t.Fatal("expected nil response for non-json body")
@@ -131,6 +131,30 @@ func TestBuildMaskedBodies(t *testing.T) {
 	}
 	if !bytes.Contains([]byte(responseBody), []byte("truncated")) {
 		t.Fatalf("expected truncated marker in response body, got %s", responseBody)
+	}
+}
+
+func TestReadRequestBodyPreservesLargeRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	originalBody := bytes.Repeat([]byte("x"), maxRequestBodySize+128)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/demo", bytes.NewReader(originalBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	cacheRequestBody(ctx)
+
+	cached := readRequestBody(ctx)
+	if len(cached) != maxRequestBodySize {
+		t.Fatalf("expected cached body length %d, got %d", maxRequestBodySize, len(cached))
+	}
+
+	remaining, err := io.ReadAll(ctx.Request.Body)
+	if err != nil {
+		t.Fatalf("unexpected read error: %v", err)
+	}
+	if !bytes.Equal(remaining, originalBody) {
+		t.Fatal("expected request body to remain readable after snapshot")
 	}
 }
 

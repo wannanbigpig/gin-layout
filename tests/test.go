@@ -28,15 +28,23 @@ func SetupRouter() *gin.Engine {
 	config.Config.BasePath = projectRootPath()
 	config.Config.Mysql.PrintSql = false
 	// 2、初始化zap日志
-	logger.InitLogger()
+	if err := logger.InitLogger(); err != nil {
+		panic(err)
+	}
 	// 初始化数据库
-	data.InitData()
+	if err := data.InitData(); err != nil {
+		panic(err)
+	}
 	// 初始化验证器
 	if err := validator.InitValidatorTrans("zh"); err != nil {
 		panic(err)
 	}
 
-	return routers.SetRouters()
+	engine, err := routers.SetRouters()
+	if err != nil {
+		panic(err)
+	}
+	return engine
 }
 
 // testConfigPath 返回测试运行使用的临时配置文件路径。

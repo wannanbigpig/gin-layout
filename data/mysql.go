@@ -1,12 +1,15 @@
 package data
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -15,6 +18,7 @@ import (
 
 	c "github.com/wannanbigpig/gin-layout/config"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"go.uber.org/zap"
 )
 
 var (
@@ -23,10 +27,23 @@ var (
 	mysqlInitError error
 	mysqlValue     atomic.Value
 	mysqlMu        sync.Mutex
+	mysqlHealth    = newRuntimeHealthCache(defaultRuntimeHealthTTL)
 )
 
 type mysqlSlot struct {
 	db *gorm.DB
+}
+
+const mysqlProbeTimeout = 2 * time.Second
+
+var mysqlRuntimeProbe = func(db *gorm.DB) error {
+	sqlDB := getSQLDB(db)
+	if sqlDB == nil {
+		return errors.New("mysql sql.DB is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mysqlProbeTimeout)
+	defer cancel()
+	return sqlDB.PingContext(ctx)
 }
 
 // Writer 定义 GORM 自定义日志写入接口。
@@ -103,8 +120,15 @@ func reloadMysql(cfg *c.Conf) error {
 	mysqlDB = next
 	mysqlValue.Store(mysqlSlot{db: next})
 	mysqlInitError = nil
+	if next != nil {
+		mysqlHealth.SeedReady()
+	} else {
+		mysqlHealth.Reset()
+	}
 	if oldSQLDB != nil {
-		_ = oldSQLDB.Close()
+		if err := oldSQLDB.Close(); err != nil {
+			log.Logger.Warn("关闭旧 MySQL 连接池失败", zap.Error(err))
+		}
 	}
 	return nil
 }
@@ -159,17 +183,7 @@ func openMysql(cfg *c.Conf) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to ping MySQL: %s", err.Error())
 	}
 
-	// Register callbacks if needed
-	registerCallbacks(db)
 	return db, nil
-}
-
-// registerCallbacks 预留 GORM 回调注册入口。
-func registerCallbacks(db *gorm.DB) {
-	// Uncomment and implement these functions if needed
-	// db.Callback().Create().After("gorm:create").Register("log_create_operation", logCreateOperation)
-	// db.Callback().Update().After("gorm:update").Register("log_update_operation", logUpdateOperation)
-	// db.Callback().Delete().After("gorm:delete").Register("log_delete_operation", logDeleteOperation)
 }
 
 // MysqlDB 返回当前生效的 MySQL 连接实例。
@@ -190,6 +204,31 @@ func MysqlInitError() error {
 	return mysqlInitError
 }
 
+// MysqlRuntimeStatus 返回带缓存的 MySQL 运行时健康探测结果。
+func MysqlRuntimeStatus() RuntimeHealthStatus {
+	db := MysqlDB()
+	if db == nil {
+		mysqlHealth.Reset()
+		return RuntimeHealthStatus{
+			Ready:     false,
+			Error:     mysqlUnavailableError(),
+			CheckedAt: time.Now(),
+		}
+	}
+	status := mysqlHealth.Check(func() error {
+		return mysqlRuntimeProbe(db)
+	})
+	if !status.Ready && status.Error == nil {
+		status.Error = mysqlUnavailableError()
+	}
+	return status
+}
+
+// MysqlReady 判断 MySQL 当前是否可用。
+func MysqlReady() bool {
+	return MysqlRuntimeStatus().Ready
+}
+
 // ReloadMysql 重新加载 MySQL 连接。
 func ReloadMysql(cfg *c.Conf) error {
 	return reloadMysql(cfg)
@@ -204,6 +243,7 @@ func CloseMysql() error {
 	mysqlDB = nil
 	mysqlValue.Store(mysqlSlot{})
 	mysqlInitError = nil
+	mysqlHealth.Reset()
 	if current == nil {
 		return nil
 	}
@@ -232,3 +272,13 @@ func getSQLDB(db *gorm.DB) *sql.DB {
 	}
 	return sqlDB
 }
+
+func mysqlUnavailableError() error {
+	if mysqlInitError != nil {
+		return mysqlInitError
+	}
+	return ErrDBUnavailable
+}
+
+// ErrDBUnavailable 表示 MySQL 连接当前不可用。
+var ErrDBUnavailable = errors.New("mysql connection is unavailable")

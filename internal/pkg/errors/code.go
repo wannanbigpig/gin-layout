@@ -1,17 +1,18 @@
 package errors
 
 const (
-	SUCCESS          = 0
-	FAILURE          = 1
-	AuthorizationErr = 403
-	NotFound         = 404
-	CaptchaErr       = 400
-	NotLogin         = 401
-	ServerErr        = 500
-	InvalidParameter = 10000
-	UserDoesNotExist = 10001
-	UserDisable      = 10002
-	TooManyRequests  = 10102
+	SUCCESS                   = 0
+	FAILURE                   = 1
+	AuthorizationErr          = 403
+	NotFound                  = 404
+	CaptchaErr                = 400
+	NotLogin                  = 401
+	ServerErr                 = 500
+	InvalidParameter          = 10000
+	UserDoesNotExist          = 10001
+	UserDisable               = 10002
+	ServiceDependencyNotReady = 10003
+	TooManyRequests           = 10102
 
 	// 业务错误码 20000-29999
 	UserPasswordWrong       = 20001

@@ -1,10 +1,13 @@
 package controller
 
 import (
+	stderrors "errors"
+
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
@@ -52,6 +55,13 @@ func (api Api) Err(c *gin.Context, err error) {
 	businessError, parseErr := api.AsBusinessError(err)
 	if parseErr != nil {
 		requestID := c.GetString(global.ContextKeyRequestID)
+		if errors.IsDependencyNotReady(parseErr) || stderrors.Is(parseErr, model.ErrDBUninitialized) {
+			log.Logger.Warn("Service dependency not ready",
+				zap.String("requestId", requestID),
+				zap.Error(parseErr))
+			api.FailCode(c, errors.ServiceDependencyNotReady)
+			return
+		}
 		log.Logger.Warn("Unknown error:", zap.String("requestId", requestID), zap.Error(parseErr))
 		api.FailCode(c, errors.ServerErr)
 		return
@@ -68,7 +78,7 @@ func (api Api) GetCurrentUserID(c *gin.Context) uint {
 // GetCurrentAdminUser 获取当前登录用户的完整信息
 func (api Api) GetCurrentAdminUser(c *gin.Context) interface{} {
 	if principal := auth.GetAuthPrincipal(c); principal != nil {
-		return principal.User
+		return principal.AdminUser()
 	}
 	return nil
 }
