@@ -122,12 +122,19 @@ func (s *DeptService) BindRole(params *form.BindRole) error {
 	return nil
 }
 
+// updateDeptRole 更新部门关联的角色，使用差分算法只变更差异部分。
+// 处理逻辑：
+// 1. 查询部门当前已关联的角色 ID 列表
+// 2. 计算差异：toDelete 需删除，toAdd 需新增
+// 3. 批量删除/新增角色关联
+// 4. 同步部门下所有用户的权限缓存
 func (s *DeptService) updateDeptRole(deptId uint, roleIds []uint, tx ...*gorm.DB) error {
 	deptRoleMap := model.NewDeptRoleMap()
 	if len(tx) > 0 {
 		deptRoleMap.SetDB(tx[0])
 	}
 
+	// 查询部门当前已关联的角色 ID 列表
 	existingIds, err := model.ExtractColumnsByCondition[model.DeptRoleMap, *model.DeptRoleMap, uint](
 		deptRoleMap,
 		"role_id",
@@ -138,13 +145,16 @@ func (s *DeptService) updateDeptRole(deptId uint, roleIds []uint, tx ...*gorm.DB
 		return err
 	}
 
+	// 计算差异
 	toDelete, toAdd, _ := utils.CalculateChanges(existingIds, roleIds)
+	// 批量删除差异角色关联
 	if len(toDelete) > 0 {
 		if err := deptRoleMap.DeleteWhere("dept_id = ? AND role_id IN (?)", []any{deptId, toDelete}...); err != nil {
 			return err
 		}
 	}
 
+	// 批量新增角色关联
 	if len(toAdd) > 0 {
 		newMappings := lo.Map(toAdd, func(roleId uint, _ int) *model.DeptRoleMap {
 			return &model.DeptRoleMap{RoleId: roleId, DeptId: deptId}
@@ -154,6 +164,7 @@ func (s *DeptService) updateDeptRole(deptId uint, roleIds []uint, tx ...*gorm.DB
 		}
 	}
 
+	// 同步部门下所有用户的权限缓存
 	userIDs, err := s.userIDsByDept(deptId, tx...)
 	if err != nil {
 		return err
@@ -161,6 +172,7 @@ func (s *DeptService) updateDeptRole(deptId uint, roleIds []uint, tx ...*gorm.DB
 	return access.NewPermissionSyncCoordinator().SyncUsers(userIDs, tx...)
 }
 
+// userIDsByDept 查询部门下的所有用户 ID 列表。
 func (s *DeptService) userIDsByDept(deptId uint, tx ...*gorm.DB) ([]uint, error) {
 	deptMapModel := model.NewAdminUserDeptMap()
 	if t := access.FirstTx(tx); t != nil {

@@ -13,6 +13,7 @@ func NewRoleListQuery() *RoleList {
 }
 
 type rolePayload struct {
+	Code        string `form:"code" json:"code" binding:"omitempty,max=60"`
 	Name        string `form:"name" json:"name" binding:"required"`
 	Description string `form:"description" json:"description" binding:"omitempty"`
 	Status      uint8  `form:"status" json:"status"  binding:"omitempty,oneof=0 1"`

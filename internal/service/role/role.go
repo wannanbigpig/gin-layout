@@ -58,6 +58,7 @@ func (s *RoleService) buildListCondition(params *form.RoleList) (string, []any) 
 // Create 新增角色。
 func (s *RoleService) Create(params *form.CreateRole) error {
 	return s.applyRoleMutation(&roleMutation{
+		Code:        params.Code,
 		Name:        params.Name,
 		Description: params.Description,
 		Status:      params.Status,
@@ -105,7 +106,8 @@ func (s *RoleService) Detail(id uint) (any, error) {
 	return resources.NewRoleTransformer().ToStruct(role), nil
 }
 
-// GetRoleMenus 获取角色的所有菜单。
+// GetRoleMenus 获取角色的所有菜单标识列表。
+// 调用跨包方法 access.UserPermissionSyncService.RoleMenuIDs 获取菜单 ID，再转换为字符串列表。
 func (s *RoleService) GetRoleMenus(roleId uint) ([]string, error) {
 	role := model.NewRole()
 	if err := role.GetById(roleId); err != nil || role.ID == 0 {

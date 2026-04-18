@@ -5,7 +5,6 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/global"
-	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service/admin"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -150,8 +149,14 @@ func (api AdminUserController) Detail(c *gin.Context) {
 
 // GetFullPhone 获取管理员完整手机号
 func (api AdminUserController) GetFullPhone(c *gin.Context) {
-	userInfo, err := api.getUserInfo(c)
+	query := form.NewIdForm()
+	if err := validator.CheckQueryParams(c, &query); err != nil {
+		return
+	}
+
+	userInfo, err := admin.NewAdminUserService().GetUserInfo(query.ID)
 	if err != nil {
+		api.Err(c, err)
 		return
 	}
 
@@ -162,28 +167,18 @@ func (api AdminUserController) GetFullPhone(c *gin.Context) {
 
 // GetFullEmail 获取管理员完整邮箱
 func (api AdminUserController) GetFullEmail(c *gin.Context) {
-	userInfo, err := api.getUserInfo(c)
+	query := form.NewIdForm()
+	if err := validator.CheckQueryParams(c, &query); err != nil {
+		return
+	}
+
+	userInfo, err := admin.NewAdminUserService().GetUserInfo(query.ID)
 	if err != nil {
+		api.Err(c, err)
 		return
 	}
 
 	api.Success(c, map[string]string{
 		"email": userInfo.Email,
 	})
-}
-
-// getUserInfo 获取用户信息（内部辅助方法）
-func (api AdminUserController) getUserInfo(c *gin.Context) (*resources.AdminUserResources, error) {
-	query := form.NewIdForm()
-	if err := validator.CheckQueryParams(c, &query); err != nil {
-		return nil, err
-	}
-
-	result, err := admin.NewAdminUserService().GetUserInfo(query.ID)
-	if err != nil {
-		api.Err(c, err)
-		return nil, err
-	}
-
-	return result, nil
 }

@@ -103,8 +103,9 @@ func (s *AdminUserService) List(params *form.AdminUserList) *resources.Collectio
 	return resources.NewAdminUserTransformer().ToCollection(params.Page, params.PerPage, total, collection)
 }
 
+// adminUserListOptions 返回管理员列表查询选项。
+// 列表页仅使用部门 id/name/pid，避免 Preload 全字段带来额外 IO。
 func (s *AdminUserService) adminUserListOptions() model.ListOptionalParams {
-	// 列表页仅使用部门 id/name/pid，避免 Preload 全字段带来额外 IO。
 	return model.ListOptionalParams{
 		OrderBy: "created_at desc, id desc",
 		Preload: map[string]func(db *gorm.DB) *gorm.DB{
@@ -115,6 +116,7 @@ func (s *AdminUserService) adminUserListOptions() model.ListOptionalParams {
 	}
 }
 
+// buildListCondition 构建管理员列表查询条件。
 func (s *AdminUserService) buildListCondition(params *form.AdminUserList) (string, []any) {
 	qb := query_builder.New().
 		AddLike("username", params.UserName).
@@ -124,6 +126,7 @@ func (s *AdminUserService) buildListCondition(params *form.AdminUserList) (strin
 		AddLike("full_phone_number", params.PhoneNumber).
 		AddEq("status", params.Status)
 
+	// 部门筛选：使用 EXISTS 子查询关联用户 - 部门映射表
 	if params.DeptId > 0 {
 		qb.AddCondition(
 			"EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND admin_user_department_map.dept_id = ?)",
@@ -134,6 +137,7 @@ func (s *AdminUserService) buildListCondition(params *form.AdminUserList) (strin
 	return qb.Build()
 }
 
+// zeroToNil 将 0 转换为 nil，用于查询条件构建时排除空值筛选。
 func zeroToNil(value uint) any {
 	if value == 0 {
 		return nil
@@ -141,6 +145,11 @@ func zeroToNil(value uint) any {
 	return value
 }
 
+// userMenuQuery 构建用户菜单查询条件。
+// 参数：
+//   - isSuperAdmin: 是否为超级管理员
+//   - menuIDs: 用户可访问的菜单 ID 列表
+// 返回：查询条件和参数
 func (s *AdminUserService) userMenuQuery(isSuperAdmin bool, menuIDs []uint) (string, []any) {
 	if isSuperAdmin {
 		return "status = ?", []any{1}
@@ -151,15 +160,16 @@ func (s *AdminUserService) userMenuQuery(isSuperAdmin bool, menuIDs []uint) (str
 	return "status = ? AND (is_auth = ? OR (is_auth = ? AND id IN (?)))", []any{1, 0, 1, menuIDs}
 }
 
+// adminUserEditParams 管理员用户编辑参数，字段使用指针支持部分更新。
 type adminUserEditParams struct {
-	Id          uint
-	Username    *string
-	Nickname    *string
-	Password    *string
-	PhoneNumber *string
-	CountryCode *string
-	Email       *string
-	Status      *uint8
-	Avatar      *string
-	DeptIds     *[]uint
+	Id          uint    // 用户 ID，0 表示新增
+	Username    *string // 用户名
+	Nickname    *string // 昵称
+	Password    *string // 密码
+	PhoneNumber *string // 手机号
+	CountryCode *string // 国家代码
+	Email       *string // 邮箱
+	Status      *uint8  // 状态
+	Avatar      *string // 头像
+	DeptIds     *[]uint // 关联的部门 ID 列表
 }

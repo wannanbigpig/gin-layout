@@ -2,7 +2,7 @@ package form
 
 type apiBasePayload struct {
 	Name        string `form:"name" json:"name" binding:"required,max=60"`          // 权限名称
-	Description string `form:"description" json:"desc" binding:"omitempty"`         // 描述
+	Description string `form:"description" json:"description" binding:"omitempty"`  // 描述
 	IsAuth      *int8  `form:"is_auth" json:"is_auth" binding:"required,oneof=0 1"` // 接口方法
 	Sort        int32  `form:"sort" json:"sort" binding:"required"`                 // 排序
 }

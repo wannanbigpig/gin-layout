@@ -1,12 +1,14 @@
 package audit
 
 import (
+	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"github.com/wannanbigpig/gin-layout/pkg/utils/crypto"
 	"go.uber.org/zap"
 )
 
@@ -70,7 +72,21 @@ func (s *AdminLoginLogService) Detail(id uint) (any, error) {
 	if err := loginLog.GetById(id); err != nil || loginLog.ID == 0 {
 		return nil, e.NewBusinessError(1, "登录日志不存在")
 	}
+	decryptKey := config.GetConfig().Jwt.SecretKey
+	loginLog.AccessToken = decryptLoginTokenIfNeeded(loginLog.AccessToken, decryptKey)
+	loginLog.RefreshToken = decryptLoginTokenIfNeeded(loginLog.RefreshToken, decryptKey)
 
 	transformer := resources.NewAdminLoginLogTransformer()
 	return transformer.ToStruct(loginLog), nil
+}
+
+func decryptLoginTokenIfNeeded(token, decryptKey string) string {
+	if token == "" || decryptKey == "" {
+		return token
+	}
+	decrypted, err := crypto.Decrypt(decryptKey, token)
+	if err != nil {
+		return token
+	}
+	return decrypted
 }

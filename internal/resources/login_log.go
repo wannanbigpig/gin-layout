@@ -38,8 +38,8 @@ type AdminLoginLogResources struct {
 	AdminLoginLogBaseResources
 	JwtID            string            `json:"jwt_id"`                  // JWT唯一标识(jti claim)
 	UserAgent        string            `json:"user_agent"`              // 用户代理（浏览器/设备信息）
-	AccessToken      string            `json:"access_token,omitempty"`  // 默认不返回明文访问令牌
-	RefreshToken     string            `json:"refresh_token,omitempty"` // 默认不返回明文刷新令牌
+	AccessToken      string            `json:"access_token,omitempty"`  // 访问令牌
+	RefreshToken     string            `json:"refresh_token,omitempty"` // 刷新令牌
 	TokenHash        string            `json:"token_hash"`              // Token的SHA256哈希值
 	RefreshTokenHash string            `json:"refresh_token_hash"`      // Refresh Token的哈希值
 	TokenExpires     *utils.FormatDate `json:"token_expires"`           // Token过期时间
@@ -95,6 +95,8 @@ func (r AdminLoginLogTransformer) ToStruct(data *model.AdminLoginLogs) *AdminLog
 		AdminLoginLogBaseResources: base,
 		JwtID:                      data.JwtID,
 		UserAgent:                  data.UserAgent,
+		AccessToken:                data.AccessToken,
+		RefreshToken:               data.RefreshToken,
 		TokenHash:                  data.TokenHash,
 		RefreshTokenHash:           data.RefreshTokenHash,
 		TokenExpires:               data.TokenExpires,

@@ -44,6 +44,13 @@ func (s *AdminUserService) Update(params *form.UpdateAdminUser) error {
 	})
 }
 
+// saveAdminUserMutation 执行管理员用户变更操作（新增/更新）。
+// 处理逻辑：
+// 1. 验证用户是否存在（更新时）
+// 2. 应用字段变更（创建/更新场景分别处理）
+// 3. 验证唯一字段（用户名、手机号、邮箱）
+// 4. 事务保存：用户数据、Token 撤销（密码变更/禁用时）、部门绑定
+// 5. 同步用户权限缓存
 func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) error {
 	title := "新增"
 	excludeID := uint(0)
@@ -112,6 +119,12 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithMessage(title + "用户后刷新权限缓存失败，请重试！")
 }
 
+// applyUpdateFields 应用更新场景的字段变更。
+// 只更新非 nil 指针字段，支持部分更新语义。
+// 特殊处理：
+// - 超级管理员不可修改密码
+// - 密码相同时拒绝更新
+// - 超级管理员不可禁用
 func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, params *adminUserEditParams) error {
 	if params.Username != nil {
 		adminUserModel.Username = *params.Username
@@ -126,11 +139,9 @@ func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, pa
 		if utils2.ComparePasswords(adminUserModel.Password, *params.Password) {
 			return e.NewBusinessError(e.SamePassword)
 		}
-		passwordHash, err := utils2.PasswordHash(*params.Password)
-		if err != nil {
-			return e.NewBusinessError(e.PasswordProcessFailed)
+		if err := setHashedPassword(adminUserModel, *params.Password); err != nil {
+			return err
 		}
-		adminUserModel.Password = passwordHash
 	}
 	if params.PhoneNumber != nil {
 		adminUserModel.PhoneNumber = *params.PhoneNumber
@@ -158,6 +169,9 @@ func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, pa
 	return nil
 }
 
+// applyCreateFields 应用新增场景的字段填充。
+// 必填字段：用户名、昵称
+// 默认值：国家代码默认为中国
 func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, params *adminUserEditParams) error {
 	if params.Username == nil || *params.Username == "" {
 		return e.NewBusinessError(e.UsernameRequired)
@@ -180,11 +194,9 @@ func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, pa
 		adminUserModel.Email = *params.Email
 	}
 	if params.Password != nil && *params.Password != "" {
-		passwordHash, err := utils2.PasswordHash(*params.Password)
-		if err != nil {
-			return e.NewBusinessError(e.PasswordProcessFailed)
+		if err := setHashedPassword(adminUserModel, *params.Password); err != nil {
+			return err
 		}
-		adminUserModel.Password = passwordHash
 	}
 	if params.Avatar != nil {
 		adminUserModel.Avatar = *params.Avatar
@@ -193,6 +205,16 @@ func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, pa
 		adminUserModel.Status = *params.Status
 	}
 	adminUserModel.FullPhoneNumber = adminUserModel.CountryCode + adminUserModel.PhoneNumber
+	return nil
+}
+
+// setHashedPassword 对用户密码进行哈希处理后设置到模型。
+func setHashedPassword(adminUserModel *model.AdminUser, plainPassword string) error {
+	passwordHash, err := utils2.PasswordHash(plainPassword)
+	if err != nil {
+		return e.NewBusinessError(e.PasswordProcessFailed)
+	}
+	adminUserModel.Password = passwordHash
 	return nil
 }
 
@@ -256,10 +278,16 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	}), "更新个人资料失败，请重试！")
 }
 
+// validateUniqueFieldsWithLock 验证唯一字段（用户名、手机号、邮箱），使用数据库锁防止并发冲突。
+// 参数：
+//   - tx: 事务实例
+//   - params: 待验证的字段值 map
+//   - excludeId: 排除的当前用户 ID（更新场景）
 func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[string]interface{}, excludeId uint) error {
 	checkModel := model.NewAdminUsers()
 	checkModel.SetDB(tx)
 
+	// 验证用户名唯一性
 	if usernameVal, ok := params["username"]; ok {
 		if username, ok := usernameVal.(*string); ok && username != nil && *username != "" {
 			exists, err := checkModel.ExistsWithLockExcludeId("username", *username, excludeId)
@@ -272,6 +300,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 		}
 	}
 
+	// 验证手机号唯一性（使用完整手机号：国家代码 + 手机号）
 	if phoneNumberVal, ok := params["phone_number"]; ok {
 		if phoneNumber, ok := phoneNumberVal.(*string); ok && phoneNumber != nil && *phoneNumber != "" {
 			countryCode := global.ChinaCountryCode
@@ -293,6 +322,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 		}
 	}
 
+	// 验证邮箱唯一性
 	if emailVal, ok := params["email"]; ok {
 		if email, ok := emailVal.(*string); ok && email != nil && *email != "" {
 			exists, err := checkModel.ExistsWithLockExcludeId("email", *email, excludeId)

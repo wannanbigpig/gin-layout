@@ -8,7 +8,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
 
-func TestAdminLoginLogTransformerDoesNotExposeTokens(t *testing.T) {
+func TestAdminLoginLogTransformerExposeTokensInDetail(t *testing.T) {
 	now := utils.FormatDate{Time: time.Now()}
 	resource := NewAdminLoginLogTransformer().ToStruct(&model.AdminLoginLogs{
 		JwtID:            "jwt-id",
@@ -21,11 +21,11 @@ func TestAdminLoginLogTransformerDoesNotExposeTokens(t *testing.T) {
 		RefreshExpires:   &now,
 	})
 
-	if resource.AccessToken != "" {
-		t.Fatalf("expected access token to be hidden, got %q", resource.AccessToken)
+	if resource.AccessToken != "plain-access-token" {
+		t.Fatalf("expected access token to be exposed in detail, got %q", resource.AccessToken)
 	}
-	if resource.RefreshToken != "" {
-		t.Fatalf("expected refresh token to be hidden, got %q", resource.RefreshToken)
+	if resource.RefreshToken != "plain-refresh-token" {
+		t.Fatalf("expected refresh token to be exposed in detail, got %q", resource.RefreshToken)
 	}
 	if resource.TokenHash != "access-hash" || resource.RefreshTokenHash != "refresh-hash" {
 		t.Fatal("expected token hashes to be preserved")

@@ -77,6 +77,7 @@ func (s *UserPermissionSyncService) AccessibleMenuIDs(userID uint, includeParent
 }
 
 // withSyncTransaction 使用现有事务或新事务执行权限同步，确保写入原子性。
+// 如果有现有事务则复用，否则创建新事务并在完成后刷新 Casbin 策略。
 func (s *UserPermissionSyncService) withSyncTransaction(tx []*gorm.DB, fn func(execTx *gorm.DB) error) error {
 	if existingTx := FirstTx(tx); existingTx != nil {
 		return fn(existingTx)
@@ -91,6 +92,7 @@ func (s *UserPermissionSyncService) withSyncTransaction(tx []*gorm.DB, fn func(e
 	return reloadPolicy()
 }
 
+// forEachUser 遍历用户 ID 列表并执行回调函数，遇到错误立即返回。
 func (s *UserPermissionSyncService) forEachUser(userIDs []uint, fn func(userID uint) error) error {
 	uniqueIDs := UniqueUintSlice(userIDs)
 	if len(uniqueIDs) == 0 {
@@ -105,17 +107,24 @@ func (s *UserPermissionSyncService) forEachUser(userIDs []uint, fn func(userID u
 }
 
 // batchSyncUsersWithEnforcer 批量同步多个用户的权限，使用同一个enforcer减少重复获取
+// batchSyncUsersWithEnforcer 批量同步多个用户的权限到 Casbin，使用同一个 enforcer 减少重复开销。
+// 参数：
+//   - userIDs: 用户 ID 列表
+//   - enforcer: Casbin Enforcer 实例
+//   - tx: 事务实例
 func (s *UserPermissionSyncService) batchSyncUsersWithEnforcer(userIDs []uint, enforcer *casbinx.CasbinEnforcer, tx *gorm.DB) error {
 	uniqueIDs := UniqueUintSlice(userIDs)
 	if len(uniqueIDs) == 0 {
 		return nil
 	}
 
+	// 收集所有用户的权限策略
 	policiesByUser, err := s.collectPoliciesForUsers(uniqueIDs, tx)
 	if err != nil {
 		return err
 	}
 
+	// 构建 subject -> policies 映射
 	subjectPolicies := make(map[string][][]string, len(uniqueIDs))
 	for _, userID := range uniqueIDs {
 		subjectPolicies[s.UserKey(userID)] = policiesByUser[userID]
@@ -124,13 +133,14 @@ func (s *UserPermissionSyncService) batchSyncUsersWithEnforcer(userIDs []uint, e
 	return enforcer.EditPolicyPermissionsBatch(subjectPolicies, tx)
 }
 
-// syncUserWithTx 在指定事务内同步单个用户的最终接口权限。
+// syncUserWithTx 在指定事务内同步单个用户的最终接口权限到 Casbin。
 func (s *UserPermissionSyncService) syncUserWithTx(userID uint, tx *gorm.DB) error {
 	enforcer, err := getPolicyEnforcer()
 	if err != nil {
 		return err
 	}
 
+	// 收集用户的所有权限策略
 	policies, err := s.collectUserPolicies(userID, tx)
 	if err != nil {
 		return err
