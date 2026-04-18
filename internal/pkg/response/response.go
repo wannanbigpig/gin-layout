@@ -2,6 +2,7 @@ package response
 
 import (
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -96,11 +97,11 @@ type defaultRes struct {
 
 // WithData 设置返回data数据
 func (r *Response) WithData(data any) *Response {
-	if data == nil {
+	if isNilData(data) {
 		r.result.Data = emptyObject()
 		return r
 	}
-	if isScalarData(data) {
+	if !isObjectData(data) {
 		r.result.Data = &defaultRes{Result: data}
 		return r
 	}
@@ -158,12 +159,33 @@ func emptyObject() map[string]any {
 	return map[string]any{}
 }
 
-func isScalarData(data any) bool {
-	switch data.(type) {
-	case bool, string,
-		int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64, uintptr,
-		float32, float64:
+func isNilData(data any) bool {
+	if data == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(data)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func isObjectData(data any) bool {
+	value := reflect.ValueOf(data)
+
+	// 解引用接口和指针，判断底层真实类型是否为对象形态。
+	for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return false
+		}
+		value = value.Elem()
+	}
+
+	switch value.Kind() {
+	case reflect.Struct, reflect.Map:
 		return true
 	default:
 		return false

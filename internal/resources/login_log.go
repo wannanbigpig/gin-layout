@@ -8,18 +8,18 @@ import (
 // AdminLoginLogBaseResources 表示登录日志的公共响应字段。
 type AdminLoginLogBaseResources struct {
 	ID              uint              `json:"id"`
-	UID             uint              `json:"uid"`               // 用户ID（登录失败时为0）
+	UID             uint              `json:"uid"`               // 用户 ID（登录失败时为 0）
 	Username        string            `json:"username"`          // 登录账号
-	IP              string            `json:"ip"`                // 登录IP(支持IPv6)
+	IP              string            `json:"ip"`                // 登录 IP(支持 IPv6)
 	OS              string            `json:"os"`                // 操作系统
 	Browser         string            `json:"browser"`           // 浏览器
 	ExecutionTime   int               `json:"execution_time"`    // 登录耗时（毫秒）
-	LoginStatus     uint8             `json:"login_status"`      // 登录状态：1=成功, 0=失败
+	LoginStatus     uint8             `json:"login_status"`      // 登录状态：1=成功，0=失败
 	LoginStatusName string            `json:"login_status_name"` // 登录状态名称
 	LoginFailReason string            `json:"login_fail_reason"` // 登录失败原因
-	Type            uint8             `json:"type"`              // 操作类型：1=登录操作, 2=刷新token
+	Type            uint8             `json:"type"`              // 操作类型：1=登录操作，2=刷新 token
 	TypeName        string            `json:"type_name"`         // 操作类型名称
-	IsRevoked       uint8             `json:"is_revoked"`        // 是否被撤销：0=否, 1=是
+	IsRevoked       uint8             `json:"is_revoked"`        // 是否被撤销：0=否，1=是
 	IsRevokedName   string            `json:"is_revoked_name"`   // 是否被撤销名称
 	RevokedCode     uint8             `json:"revoked_code"`      // 撤销原因码
 	RevokedCodeName string            `json:"revoked_code_name"` // 撤销原因码名称
@@ -36,14 +36,12 @@ type AdminLoginLogListResources struct {
 // AdminLoginLogResources 表示登录日志详情响应。
 type AdminLoginLogResources struct {
 	AdminLoginLogBaseResources
-	JwtID            string            `json:"jwt_id"`                  // JWT唯一标识(jti claim)
+	JwtID            string            `json:"jwt_id"`                  // JWT 唯一标识 (jti claim)
 	UserAgent        string            `json:"user_agent"`              // 用户代理（浏览器/设备信息）
-	AccessToken      string            `json:"access_token,omitempty"`  // 访问令牌
-	RefreshToken     string            `json:"refresh_token,omitempty"` // 刷新令牌
-	TokenHash        string            `json:"token_hash"`              // Token的SHA256哈希值
-	RefreshTokenHash string            `json:"refresh_token_hash"`      // Refresh Token的哈希值
-	TokenExpires     *utils.FormatDate `json:"token_expires"`           // Token过期时间
-	RefreshExpires   *utils.FormatDate `json:"refresh_expires"`         // Refresh Token过期时间
+	TokenHash        string            `json:"token_hash"`              // Token 的 SHA256 哈希值
+	RefreshTokenHash string            `json:"refresh_token_hash"`      // Refresh Token 的哈希值
+	TokenExpires     *utils.FormatDate `json:"token_expires"`           // Token 过期时间
+	RefreshExpires   *utils.FormatDate `json:"refresh_expires"`         // Refresh Token 过期时间
 	UpdatedAt        utils.FormatDate  `json:"updated_at"`              // 更新时间
 }
 
@@ -95,8 +93,6 @@ func (r AdminLoginLogTransformer) ToStruct(data *model.AdminLoginLogs) *AdminLog
 		AdminLoginLogBaseResources: base,
 		JwtID:                      data.JwtID,
 		UserAgent:                  data.UserAgent,
-		AccessToken:                data.AccessToken,
-		RefreshToken:               data.RefreshToken,
 		TokenHash:                  data.TokenHash,
 		RefreshTokenHash:           data.RefreshTokenHash,
 		TokenExpires:               data.TokenExpires,

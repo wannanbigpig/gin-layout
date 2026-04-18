@@ -93,7 +93,7 @@ func (api DeptController) Detail(c *gin.Context) {
 
 // BindRole 绑定角色到部门
 func (api DeptController) BindRole(c *gin.Context) {
-	params := form.NewBindRole()
+	params := form.NewDeptBindRole()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}

@@ -111,6 +111,7 @@ func (AdminUserTransformer) ToCollection(page, perPage int, total int64, data []
 			CreatedAt:        v.CreatedAt,
 			UpdatedAt:        v.UpdatedAt,
 			Departments:      deptSlice,
+			RoleList:         []uint{},
 		})
 	}
 

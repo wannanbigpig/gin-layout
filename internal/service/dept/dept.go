@@ -98,9 +98,9 @@ func (s *DeptService) Detail(id uint) (any, error) {
 }
 
 // BindRole 绑定角色到部门。
-func (s *DeptService) BindRole(params *form.BindRole) error {
+func (s *DeptService) BindRole(params *form.DeptBindRole) error {
 	deptModel := model.NewDepartment()
-	if err := deptModel.GetById(params.Id); err != nil || deptModel.ID == 0 {
+	if err := deptModel.GetById(params.DeptId); err != nil || deptModel.ID == 0 {
 		return e.NewBusinessError(e.FAILURE, "部门不存在")
 	}
 

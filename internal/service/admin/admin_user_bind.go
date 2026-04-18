@@ -79,7 +79,7 @@ func (s *AdminUserService) updateDeptUserNumber(deptIds []uint, delta int, tx *g
 // BindRole 绑定角色。
 func (s *AdminUserService) BindRole(params *form.BindRole) error {
 	adminUserModel := model.NewAdminUsers()
-	err := adminUserModel.GetById(params.Id)
+	err := adminUserModel.GetById(params.UserId)
 	if err != nil {
 		return e.NewBusinessError(e.FAILURE, "用户不存在")
 	}
