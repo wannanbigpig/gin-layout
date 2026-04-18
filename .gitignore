@@ -14,20 +14,39 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# IDE and editor files
 .idea
-*.DS_Store
-storage
-*.yaml
-*.ini
-gin-layout/
-logs/
 .vscode
-migrate
+*.DS_Store
+
+# Runtime directories
+storage
+logs/
 tmp
 build/
+
+# Local config and environment files
+*.yaml
+*.ini
+.env
+.env.local
+.env.*.local
+
+# Claude Code local settings (keep memory but ignore local configs)
+.claude
+
+# Application binaries
+gin-layout/
 go-layout
+migrate
+
+# Documentation (project-specific, not for version control)
 PROJECT_ARCHITECTURE.md
+CODE_OPTIMIZATION_REPORT.md
+
+# Go cache
 .gocache
 .go-test-cache
-memory
-CODE_OPTIMIZATION_REPORT.md
+
+# Memory (if you want to keep it local only)
+# memory/
