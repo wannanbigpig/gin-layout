@@ -1,5 +1,7 @@
 package model
 
+import "github.com/wannanbigpig/gin-layout/internal/global"
+
 // MenuApiMap 权限路由表
 type MenuApiMap struct {
 	BaseModel
@@ -59,7 +61,7 @@ func (m *MenuApiMap) ApiPermissionsByMenuIds(menuIds []uint) ([]ApiPermission, e
 	err = db.Table(m.TableName()+" m").
 		Select("DISTINCT a.route, a.method").
 		Joins("JOIN api a ON a.id = m.api_id").
-		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = 1 AND a.is_effective = 1", menuIds).
+		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = ? AND a.is_effective = 1", menuIds, global.ApiAuthModeAuthz).
 		Find(&permissions).Error
 	if err != nil {
 		return nil, err
@@ -87,7 +89,7 @@ func (m *MenuApiMap) MenuApiPermissionsByMenuIds(menuIds []uint) ([]MenuApiPermi
 	err = db.Table(m.TableName()+" m").
 		Select("m.menu_id, a.route, a.method").
 		Joins("JOIN api a ON a.id = m.api_id").
-		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = 1 AND a.is_effective = 1", menuIds).
+		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = ? AND a.is_effective = 1", menuIds, global.ApiAuthModeAuthz).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err

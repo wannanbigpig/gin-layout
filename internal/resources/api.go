@@ -14,9 +14,9 @@ type ApiResources struct {
 	Route           string  `json:"route"`             // 接口路由
 	Func            string  `json:"func"`              // 接口方法
 	FuncPath        string  `json:"func_path"`         // 接口方法
-	IsAuth          uint8   `json:"is_auth"`           // 是否授权
+	IsAuth          uint8   `json:"is_auth"`           // 接口鉴权模式
 	IsEffective     uint8   `json:"is_effective"`      // 是否有效
-	IsAuthName      *string `json:"is_auth_name"`      // 是否有效
+	IsAuthName      *string `json:"is_auth_name"`      // 接口鉴权模式名称
 	IsEffectiveName *string `json:"is_effective_name"` // 是否有效
 	Sort            int     `json:"sort"`              // 排序
 }

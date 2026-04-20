@@ -52,7 +52,33 @@ func initCustomRules(validate *validator.Validate) error {
 	if err != nil {
 		return errors.New("注册 regexp 校验规则失败")
 	}
+
+	err = validate.RegisterValidation("api_auth_mode", apiAuthModeValidator)
+	if err != nil {
+		return errors.New("注册 api_auth_mode 校验规则失败")
+	}
 	return nil
+}
+
+func apiAuthModeValidator(fl validator.FieldLevel) bool {
+	field := fl.Field()
+	for field.Kind() == reflect.Ptr {
+		if field.IsNil() {
+			return true
+		}
+		field = field.Elem()
+	}
+
+	switch field.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		value := field.Int()
+		return value >= 0 && value <= 2
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		value := field.Uint()
+		return value <= 2
+	default:
+		return false
+	}
 }
 
 // requiredIf 字段B存在时，字段A必填。

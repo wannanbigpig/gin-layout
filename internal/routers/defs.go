@@ -1,17 +1,21 @@
 package routers
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/gin-gonic/gin"
+
+	"github.com/wannanbigpig/gin-layout/internal/global"
+)
 
 // AuthMode 定义路由认证授权模式。
-type AuthMode uint8
+type AuthMode = global.ApiAuthMode
 
 const (
 	// AuthModeNone 无需登录，无需权限校验（如：登录、验证码、公开 API）
-	AuthModeNone AuthMode = iota
+	AuthModeNone = global.ApiAuthModeNone
 	// AuthModeLogin 需要登录，但无需菜单权限校验（如：获取当前用户信息、退出登录）
-	AuthModeLogin
-	// AuthModeAuthz 需要登录且需要菜单权限校验（如：增删改查业务数据）
-	AuthModeAuthz
+	AuthModeLogin = global.ApiAuthModeLogin
+	// AuthModeAuthz 需要登录且需要api权限校验（如：增删改查业务数据）
+	AuthModeAuthz = global.ApiAuthModeAuthz
 )
 
 // RouteDef 定义单条路由。

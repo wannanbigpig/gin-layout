@@ -11,7 +11,7 @@
 </div>
 
 <div align="center">
-  内置 JWT 认证、RBAC 权限、请求日志、文件上传、参数校验、声明式路由和 CLI 初始化命令。
+  内置 JWT 认证、RBAC 权限、请求/登录日志、文件上传、readiness 探针、参数校验、声明式路由和 CLI 初始化命令。
 </div>
 
 <br />
@@ -46,6 +46,7 @@
 | Route Metadata | 声明式路由树统一生成 Gin 路由和 API 元数据 |
 | Logs | 内置登录日志、请求日志、统一响应结构 |
 | File Access | 文件上传与公开 / 私有文件访问 |
+| Health Probes | 提供 `/ping` 与 `/health/readiness`，便于存活检测与依赖就绪检查 |
 | Tooling | 提供 CLI 初始化、路由同步、权限重建、迁移配套能力 |
 | Hot Reload | 支持部分配置热更新，失败时保留旧实例继续运行 |
 
@@ -80,17 +81,32 @@ migrate -database 'mysql://root:root@tcp(127.0.0.1:3306)/go_layout?charset=utf8m
   -path data/migrations up
 ```
 
+迁移执行完成后会写入一套默认基础数据，其中包含超级管理员账号 `super_admin / 123456`。仅建议用于本地初始化，首次登录后请立即修改密码。
+
 ### 4. 配置项目
 
-首次运行会自动从 `config/config.yaml.example` 复制出根目录 `config.yaml`。也可以先手动复制再修改。
+源码运行时建议带上 `GO_ENV=development`。未显式传入 `-c` 时：
+
+- 开发模式会把当前工作目录下的 `config/config.yaml.example` 自动复制为项目根目录 `config.yaml`
+- 构建后的二进制会在可执行文件同级查找 `config.yaml`，若不存在则尝试从同目录 `config.yaml.example` 复制
+
+也可以手动复制配置文件后再修改。
 
 最小配置示例：
 
 ```yaml
 app:
+  app_env: local
+  debug: true
   trusted_proxies:
     - 127.0.0.1
   watch_config: true
+  # allow_degraded_startup: false
+
+jwt:
+  ttl: 7200
+  refresh_ttl: 3600
+  secret_key: change-me-to-a-random-secret
 
 mysql:
   enable: true
@@ -109,6 +125,7 @@ redis:
 
 queue:
   enable: true
+  use_default_redis: true
   namespace: go_layout
   concurrency: 8
   strict_priority: false
@@ -121,10 +138,22 @@ queue:
   audit_timeout_seconds: 10
 ```
 
+注意：
+
+- `jwt.secret_key` 为必填项，不能为空
+- 如果只启动 API、不启用异步任务，可以把 `queue.enable` 设为 `false`
+- 如果 `queue.enable=true` 但不想复用 `redis.*`，请把 `queue.use_default_redis` 设为 `false`，并补齐 `queue.redis.*`
+
 ### 5. 启动服务
 
 ```bash
 GO_ENV=development go run main.go service
+```
+
+需要显式指定监听地址或端口时：
+
+```bash
+GO_ENV=development go run main.go service -H 127.0.0.1 -P 9001
 ```
 
 如果启用了 `queue.enable=true`，还需要单独启动 worker：
@@ -137,9 +166,11 @@ GO_ENV=development go run main.go worker
 
 ```bash
 curl http://127.0.0.1:9001/ping
+curl http://127.0.0.1:9001/health/readiness
 ```
 
-如果返回 `pong`，说明服务已正常启动。
+- `/ping` 返回 `pong`，说明 HTTP 进程已正常启动
+- `/health/readiness` 返回 `ready=true`，说明当前配置下需要的依赖已经就绪
 
 ## 设计思路
 
@@ -162,18 +193,22 @@ curl http://127.0.0.1:9001/ping
 ```bash
 go run main.go -h
 go run main.go command -h
+go run main.go service --help
 ```
 
 常用命令：
 
 | 命令 | 说明 |
 | --- | --- |
+| `go run main.go version` | 输出当前版本号 |
 | `go run main.go service` | 启动 API 服务 |
+| `go run main.go service -H 0.0.0.0 -P 9001` | 显式指定监听地址与端口 |
 | `go run main.go worker` | 启动 Asynq 异步任务消费进程 |
-| `go run main.go command api-route` | 扫描声明式路由树并重建 `api` 路由表 |
-| `go run main.go command rebuild-user-permissions` | 按数据库关系重建用户最终 API 权限 |
-| `go run main.go command init-system` | 回滚并重新执行迁移、重建 API 路由、重建用户权限 |
 | `go run main.go cron` | 启动定时任务 |
+| `go run main.go command demo` | 运行示例命令 |
+| `go run main.go command api-route -y` | 扫描声明式路由树并重建 `api` 路由表 |
+| `go run main.go command rebuild-user-permissions -y` | 按数据库关系重建用户最终 API 权限 |
+| `go run main.go command init-system -y` | 回滚并重新执行迁移、重建 API 路由、重建用户权限 |
 
 如果配置文件不在默认位置，可以显式指定：
 
@@ -182,6 +217,11 @@ go run main.go -c /path/to/config.yaml service
 go run main.go -c /path/to/config.yaml command init-system
 ```
 
+补充说明：
+
+- `api-route`、`rebuild-user-permissions`、`init-system` 默认会二次确认；自动化场景建议显式加 `-y`
+- `init-system` 会清空并重建系统数据，只适合本地初始化或明确允许重置的环境
+
 ## 配置说明
 
 ### 配置查找顺序
@@ -189,20 +229,25 @@ go run main.go -c /path/to/config.yaml command init-system
 配置文件查找顺序：
 
 1. 显式传入 `-c` / `--config`
-2. 开发模式下当前工作目录的 `config.yaml`
-3. 生产模式下可执行文件所在目录的 `config.yaml`
+2. `GO_ENV=development` 时，使用当前工作目录的 `config.yaml`
+3. 若第 2 步缺失，则尝试从当前工作目录的 `config/config.yaml.example` 复制生成
+4. 非开发模式下，使用可执行文件所在目录的 `config.yaml`
+5. 若第 4 步缺失，则尝试从可执行文件同级的 `config.yaml.example` 复制生成
 
 ### 主要配置项
 
 | 配置项 | 说明 |
 | --- | --- |
-| `app.base_path` | 日志、上传文件等本地路径的基础目录 |
+| `app.base_path` | 日志、上传文件等本地路径的基础目录，默认取可执行文件所在目录 |
+| `app.allow_degraded_startup` | 仅 `service` 命令生效；依赖初始化失败时允许 HTTP 服务先启动，并通过 readiness / 路由守卫暴露未就绪状态 |
 | `app.base_url` | 文件访问 URL 前缀，用于生成公开文件地址 |
 | `app.trusted_proxies` | 受信任代理地址或网段，影响 `ClientIP()` 与日志 IP |
-| `jwt` | Token 密钥、过期时间与自动刷新阈值 |
+| `jwt.secret_key` | 必填；生产环境不能使用弱占位值 |
+| `jwt.ttl` / `jwt.refresh_ttl` | Token 过期时间与自动刷新阈值 |
 | `mysql` | 数据库开关与连接信息 |
 | `redis` | 缓存、黑名单和分布式锁配置 |
-| `queue` | Asynq 异步任务开关、队列并发度、优先级和审计日志重试策略 |
+| `queue.use_default_redis` | `true` 复用 `redis.*`；`false` 时改用 `queue.redis.*` 独立连接 |
+| `queue` | Asynq 异步任务开关、队列命名空间、并发度、优先级和审计日志重试策略 |
 | `logger` | 日志输出、切割和保留策略 |
 
 如果通过 Nginx、Ingress 或负载均衡转发请求，需要同步配置 `app.trusted_proxies`，否则客户端 IP 可能记录不准确。
@@ -211,8 +256,11 @@ go run main.go -c /path/to/config.yaml command init-system
 
 - `service` 负责提供 HTTP API。
 - `worker` 负责消费 Asynq 异步任务。当前首版只接入请求审计日志异步落库。
-- `cron` 仍负责现有定时任务，本次没有迁移到 Asynq。
+- `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会退回同步写库。
+- `cron` 当前默认注册了 `demo`（每 5 秒打印一次日志）和 `reset-system-data`（每天 `02:00:00` 执行一次系统重建）。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
+
+注意：`reset-system-data` 当前调用的是 `system.ReinitializeSystemData()`，会回滚迁移并重建系统数据。直接启用 `cron` 前，请务必先检查 [cmd/cron/tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go) 是否符合你的环境预期。
 
 ### 热更新
 
@@ -237,6 +285,7 @@ app:
 
 - `app.trusted_proxies`
 - `app.language`
+- `app.allow_degraded_startup`
 - `jwt.secret_key`
 - 服务监听地址与端口
 - 路由结构
@@ -274,6 +323,8 @@ go test ./tests/admin_test
 go build -o go-layout main.go
 ./go-layout service
 ```
+
+如果没有显式传 `-c`，请把 `config.yaml` 放在二进制同级目录；若只有 `config.yaml.example`，首次启动会自动复制生成 `config.yaml`。
 
 ### Supervisor
 
@@ -314,6 +365,7 @@ gin-layout/
 ├── cmd/                    # 命令行入口
 ├── config/                 # 配置结构与示例配置
 ├── data/                   # MySQL / Redis 与迁移
+├── docs/                   # 补充文档与资源
 ├── internal/
 │   ├── access/             # 权限基础设施
 │   ├── controller/         # 控制器
@@ -325,6 +377,7 @@ gin-layout/
 │   └── validator/          # 参数验证
 ├── pkg/                    # 通用工具
 ├── storage/                # 文件存储
+├── tests/                  # 路由与集成测试
 └── README.md
 ```
 

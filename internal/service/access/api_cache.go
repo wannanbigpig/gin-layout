@@ -27,7 +27,7 @@ const (
 	apiCacheWriteBatch          = 500
 )
 
-// ApiRouteInfo 描述接口路由的鉴权属性和展示名称。
+// ApiRouteInfo 描述接口路由的鉴权模式和展示名称。
 type ApiRouteInfo struct {
 	IsAuth uint8  `json:"is_auth"`
 	Name   string `json:"name"`
@@ -347,7 +347,7 @@ func (s *ApiRouteCacheService) loadRouteInfoFromSource(route string, method stri
 	return cacheInfo, nil
 }
 
-// CheckoutRouteIsAuth 判断指定路由是否要求鉴权。
+// CheckoutRouteIsAuth 判断指定路由是否要求 API 权限校验。
 func (s *ApiRouteCacheService) CheckoutRouteIsAuth(route string, method string) bool {
 	cacheInfo, err := s.GetRouteInfo(route, method)
 	if err != nil {
@@ -356,7 +356,7 @@ func (s *ApiRouteCacheService) CheckoutRouteIsAuth(route string, method string) 
 		}
 		return true
 	}
-	return cacheInfo.IsAuth == global.Yes
+	return global.ApiAuthMode(cacheInfo.IsAuth).RequiresAPIPermission()
 }
 
 // GetApiName 返回指定路由的人类可读名称。

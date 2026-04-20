@@ -128,6 +128,38 @@ func TestApiRouteCacheServiceResetMetrics(t *testing.T) {
 	}
 }
 
+func TestApiRouteCacheServiceCheckoutRouteIsAuthUsesThreeStateMode(t *testing.T) {
+	service := NewApiRouteCacheService()
+	service.configProvider = func() *config.Conf {
+		return &config.Conf{
+			Redis: autoload.RedisConfig{Enable: false},
+		}
+	}
+
+	service.loadRouteInfo = func(route string, method string) (*ApiRouteInfo, error) {
+		switch route {
+		case "/public":
+			return &ApiRouteInfo{IsAuth: 0, Name: "public"}, nil
+		case "/login-only":
+			return &ApiRouteInfo{IsAuth: 1, Name: "login"}, nil
+		case "/authz":
+			return &ApiRouteInfo{IsAuth: 2, Name: "authz"}, nil
+		default:
+			return nil, fmt.Errorf("unexpected route: %s", route)
+		}
+	}
+
+	if service.CheckoutRouteIsAuth("/public", "GET") {
+		t.Fatal("expected public route to not require api permission")
+	}
+	if service.CheckoutRouteIsAuth("/login-only", "GET") {
+		t.Fatal("expected login-only route to not require api permission")
+	}
+	if !service.CheckoutRouteIsAuth("/authz", "GET") {
+		t.Fatal("expected authz route to require api permission")
+	}
+}
+
 func TestRedisContextWithTimeoutHonorsParentDeadline(t *testing.T) {
 	parent, cancelParent := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancelParent()

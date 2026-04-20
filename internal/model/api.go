@@ -4,6 +4,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model/modelDict"
 )
 
@@ -18,7 +19,7 @@ type Api struct {
 	Route       string `json:"route"`        // 接口路由
 	Func        string `json:"func"`         // 接口方法
 	FuncPath    string `json:"func_path"`    // 接口方法路径
-	IsAuth      uint8  `json:"is_auth"`      // 是否鉴权 0:否 1:是
+	IsAuth      uint8  `json:"is_auth"`      // 接口鉴权模式 0:无需登录 1:需要登录 2:需要登录且需要API权限
 	IsEffective uint8  `json:"is_effective"` // 是否有效 0:否 1:是
 	Sort        int    `json:"sort"`         // 排序，数字越大优先级越高
 }
@@ -54,9 +55,9 @@ func (m *Api) InitRegisters(data []map[string]any, date string) error {
 	})
 }
 
-// IsAuthMap 是否授权映射
+// IsAuthMap 接口鉴权模式映射
 func (m *Api) IsAuthMap() string {
-	return modelDict.IsMap.Map(m.IsAuth)
+	return global.ApiAuthMode(m.IsAuth).Label()
 }
 
 // IsEffectiveMap 是否有效映射

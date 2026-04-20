@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS `api`
     `route`        varchar(160) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '接口路由',
     `func`         varchar(80) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '接口方法',
     `func_path`    varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '接口方法路径',
-    `is_auth`      tinyint unsigned                                       NOT NULL DEFAULT '1' COMMENT '是否鉴权 1是 0否',
+    `is_auth`      tinyint unsigned                                       NOT NULL DEFAULT '1' COMMENT '接口鉴权模式 0无需登录 1需要登录 2需要登录且需要API权限',
     `is_effective` tinyint unsigned                                       NOT NULL DEFAULT '1' COMMENT '接口是否可用 1是 0否',
     `sort`         int unsigned                                           NOT NULL DEFAULT '0' COMMENT '排序',
     `created_at`   datetime                                                        DEFAULT NULL,
