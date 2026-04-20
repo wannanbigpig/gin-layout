@@ -94,7 +94,7 @@ func TestDepartmentWriteFlow(t *testing.T) {
 	updateResult := decodeResult(t, updateResp)
 	assert.Equal(t, e.SUCCESS, updateResult.Code)
 
-	bindBytes, _ := json.Marshal(map[string]any{"id": dept.ID, "role_ids": []uint{firstActiveRoleID(t)}})
+	bindBytes, _ := json.Marshal(map[string]any{"dept_id": dept.ID, "role_ids": []uint{firstActiveRoleID(t)}})
 	bindPayload := string(bindBytes)
 	bindResp := postRequest("/admin/v1/department/bind-role", &bindPayload)
 	bindResult := decodeResult(t, bindResp)
