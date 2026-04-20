@@ -14,16 +14,13 @@ import (
 func TestCorsHandlerAllowsWildcardOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	originalConfig := config.Config
-	t.Cleanup(func() {
-		config.Config = originalConfig
-	})
-	config.Config = &config.Conf{
+	restoreConfig := config.ReplaceConfigForTesting(&config.Conf{
 		AppConfig: autoload.AppConfig{
 			CorsOrigins:     []string{"*"},
 			CorsCredentials: false,
 		},
-	}
+	})
+	t.Cleanup(restoreConfig)
 
 	recorder := httptest.NewRecorder()
 	ctx, engine := gin.CreateTestContext(recorder)
@@ -49,16 +46,13 @@ func TestCorsHandlerAllowsWildcardOrigin(t *testing.T) {
 func TestCorsHandlerReflectsOriginWhenCredentialsEnabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	originalConfig := config.Config
-	t.Cleanup(func() {
-		config.Config = originalConfig
-	})
-	config.Config = &config.Conf{
+	restoreConfig := config.ReplaceConfigForTesting(&config.Conf{
 		AppConfig: autoload.AppConfig{
 			CorsOrigins:     []string{"*"},
 			CorsCredentials: true,
 		},
-	}
+	})
+	t.Cleanup(restoreConfig)
 
 	recorder := httptest.NewRecorder()
 	ctx, engine := gin.CreateTestContext(recorder)
@@ -87,15 +81,12 @@ func TestCorsHandlerReflectsOriginWhenCredentialsEnabled(t *testing.T) {
 func TestCorsHandlerRejectsUnknownOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	originalConfig := config.Config
-	t.Cleanup(func() {
-		config.Config = originalConfig
-	})
-	config.Config = &config.Conf{
+	restoreConfig := config.ReplaceConfigForTesting(&config.Conf{
 		AppConfig: autoload.AppConfig{
 			CorsOrigins: []string{"https://example.com"},
 		},
-	}
+	})
+	t.Cleanup(restoreConfig)
 
 	recorder := httptest.NewRecorder()
 	ctx, engine := gin.CreateTestContext(recorder)
@@ -118,17 +109,14 @@ func TestCorsHandlerRejectsUnknownOrigin(t *testing.T) {
 func TestCorsHandlerAllowsWildcardMethodsAndHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	originalConfig := config.Config
-	t.Cleanup(func() {
-		config.Config = originalConfig
-	})
-	config.Config = &config.Conf{
+	restoreConfig := config.ReplaceConfigForTesting(&config.Conf{
 		AppConfig: autoload.AppConfig{
 			CorsOrigins: []string{"*"},
 			CorsMethods: []string{"*"},
 			CorsHeaders: []string{"*"},
 		},
-	}
+	})
+	t.Cleanup(restoreConfig)
 
 	recorder := httptest.NewRecorder()
 	ctx, engine := gin.CreateTestContext(recorder)

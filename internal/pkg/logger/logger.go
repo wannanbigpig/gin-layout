@@ -75,6 +75,20 @@ func setLogger(logger *zap.Logger) {
 	loggerVal.Store(logger)
 }
 
+// ReplaceLoggerForTesting 临时替换全局 logger，并返回恢复函数。
+func ReplaceLoggerForTesting(logger *zap.Logger) func() {
+	loggerMu.Lock()
+	previous := current()
+	setLogger(logger)
+	loggerMu.Unlock()
+
+	return func() {
+		loggerMu.Lock()
+		setLogger(previous)
+		loggerMu.Unlock()
+	}
+}
+
 // Info 使用当前全局 logger 记录 info 日志。
 func Info(msg string, fields ...zap.Field) {
 	current().Info(msg, fields...)

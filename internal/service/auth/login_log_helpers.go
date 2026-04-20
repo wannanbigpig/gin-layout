@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
@@ -39,7 +38,7 @@ func (s *LoginService) buildLoginLog(uid uint, username, jwtId, accessToken, ref
 
 // encryptAndSetToken 加密并设置 token 到登录日志。
 func (s *LoginService) encryptAndSetToken(loginLog *model.AdminLoginLogs, accessToken, refreshToken string, uid uint) {
-	encryptKey := config.GetConfig().Jwt.SecretKey
+	encryptKey := s.currentConfig().Jwt.SecretKey
 	if accessToken != "" {
 		loginLog.AccessToken = s.encryptToken(encryptKey, accessToken, "access_token", uid)
 		loginLog.TokenHash = s.calculateTokenHash(accessToken)
@@ -71,7 +70,7 @@ func (s *LoginService) extractErrorMessage(err error) string {
 
 // RecordLoginFailLog 记录登录失败日志。
 func (s *LoginService) RecordLoginFailLog(username, failReason string, logInfo LoginLogInfo) {
-	if !config.GetConfig().Mysql.Enable {
+	if !s.currentConfig().Mysql.Enable {
 		return
 	}
 

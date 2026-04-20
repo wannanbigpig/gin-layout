@@ -1,12 +1,15 @@
 package auth
 
 import (
+	"context"
 	stderrors "errors"
 	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
@@ -19,11 +22,83 @@ import (
 // LoginService 登录授权服务。
 type LoginService struct {
 	service.Base
+	configProvider          func() *config.Conf
+	blacklistLookupFn       func(jwtID string) (bool, error)
+	tokenRevokedLookupFn    func(jwtID string) bool
+	mysqlReadyFn            func() bool
+	refreshLockStore        *refreshTokenLock
+	tryRefreshPrincipalFn   func(principal *AuthPrincipal)
+	markTokensRevokedFn     func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
+	writeTokenToBlacklistFn func(jwtID string, remainingTime time.Duration) error
+}
+
+// LoginServiceDeps 描述 LoginService 可注入依赖。
+type LoginServiceDeps struct {
+	ConfigProvider        func() *config.Conf
+	BlacklistLookup       func(jwtID string) (bool, error)
+	TokenRevokedLookup    func(jwtID string) bool
+	MySQLReady            func() bool
+	RefreshLockStore      *refreshTokenLock
+	TryRefreshPrincipal   func(principal *AuthPrincipal)
+	MarkTokensRevoked     func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
+	WriteTokenToBlacklist func(jwtID string, remainingTime time.Duration) error
 }
 
 // NewLoginService 创建登录服务实例。
 func NewLoginService() *LoginService {
-	return &LoginService{}
+	return NewLoginServiceWithDeps(LoginServiceDeps{})
+}
+
+// NewLoginServiceWithDeps 创建带依赖注入的登录服务实例。
+func NewLoginServiceWithDeps(deps LoginServiceDeps) *LoginService {
+	s := &LoginService{
+		configProvider:          deps.ConfigProvider,
+		blacklistLookupFn:       deps.BlacklistLookup,
+		tokenRevokedLookupFn:    deps.TokenRevokedLookup,
+		mysqlReadyFn:            deps.MySQLReady,
+		refreshLockStore:        deps.RefreshLockStore,
+		tryRefreshPrincipalFn:   deps.TryRefreshPrincipal,
+		markTokensRevokedFn:     deps.MarkTokensRevoked,
+		writeTokenToBlacklistFn: deps.WriteTokenToBlacklist,
+	}
+	s.ensureRuntimeDeps()
+	return s
+}
+
+func (s *LoginService) ensureRuntimeDeps() {
+	if s.configProvider == nil {
+		s.configProvider = config.GetConfig
+	}
+	if s.blacklistLookupFn == nil {
+		s.blacklistLookupFn = s.IsInBlacklist
+	}
+	if s.tokenRevokedLookupFn == nil {
+		s.tokenRevokedLookupFn = s.isTokenRevokedInLog
+	}
+	if s.mysqlReadyFn == nil {
+		s.mysqlReadyFn = data.MysqlReady
+	}
+	if s.refreshLockStore == nil {
+		s.refreshLockStore = defaultRefreshLockStore()
+	}
+	if s.tryRefreshPrincipalFn == nil {
+		s.tryRefreshPrincipalFn = s.tryRefreshToken
+	}
+	if s.markTokensRevokedFn == nil {
+		s.markTokensRevokedFn = func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
+			return s.markTokensRevoked(ctx, jwtIDs, revokedCode, revokedReason)
+		}
+	}
+	if s.writeTokenToBlacklistFn == nil {
+		s.writeTokenToBlacklistFn = func(jwtID string, remainingTime time.Duration) error {
+			return s.writeTokenToBlacklist(jwtID, remainingTime)
+		}
+	}
+}
+
+func (s *LoginService) currentConfig() *config.Conf {
+	s.ensureRuntimeDeps()
+	return config.GetConfigFrom(s.configProvider)
 }
 
 // Login 用户登录。

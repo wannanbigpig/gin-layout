@@ -20,65 +20,81 @@ import (
 )
 
 // SetupRouter 初始化测试用路由。
-func SetupRouter() *gin.Engine {
-	// 1、初始化配置
-	if err := config.InitConfig(testConfigPath()); err != nil {
-		panic(err)
+func SetupRouter() (*gin.Engine, error) {
+	rootPath, err := projectRootPath()
+	if err != nil {
+		return nil, err
 	}
-	config.Config.BasePath = projectRootPath()
-	config.Config.Mysql.PrintSql = false
+
+	configPath, err := testConfigPath()
+	if err != nil {
+		return nil, err
+	}
+
+	// 1、初始化配置
+	if err := config.InitConfig(configPath); err != nil {
+		return nil, err
+	}
+	cfg := config.GetConfig()
+	if cfg != nil {
+		cfg.BasePath = rootPath
+		cfg.Mysql.PrintSql = false
+	}
 	// 2、初始化zap日志
 	if err := logger.InitLogger(); err != nil {
-		panic(err)
+		return nil, err
 	}
 	// 初始化数据库
 	if err := data.InitData(); err != nil {
-		panic(err)
+		return nil, err
 	}
 	// 初始化验证器
 	if err := validator.InitValidatorTrans("zh"); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	engine, err := routers.SetRouters()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return engine
+	return engine, nil
 }
 
 // testConfigPath 返回测试运行使用的临时配置文件路径。
-func testConfigPath() string {
-	projectRoot := projectRootPath()
+func testConfigPath() (string, error) {
+	projectRoot, err := projectRootPath()
+	if err != nil {
+		return "", err
+	}
 	projectConfigPath := filepath.Join(projectRoot, "config.yaml")
 	if fileInfo, err := os.Stat(projectConfigPath); err == nil {
 		if fileInfo.IsDir() {
-			panic("项目根目录 config.yaml 是目录，无法作为测试配置文件")
+			return "", fmt.Errorf("项目根目录 config.yaml 是目录，无法作为测试配置文件")
 		}
 		if isProjectConfigUsable(projectConfigPath) {
-			return projectConfigPath
+			return projectConfigPath, nil
 		}
 	}
 
 	examplePath := filepath.Join(projectRoot, "config", "config.yaml.example")
 	content, err := os.ReadFile(examplePath)
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	tempPath := filepath.Join(os.TempDir(), "go-layout-test-config.yaml")
 	if err := os.WriteFile(tempPath, content, 0o600); err != nil {
-		panic(err)
+		return "", err
 	}
-	return tempPath
+	return tempPath, nil
 }
 
 // projectRootPath 返回项目根目录路径。
-func projectRootPath() string {
+func projectRootPath() (string, error) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		panic("failed to resolve project root path")
+		return "", fmt.Errorf("failed to resolve project root path")
 	}
-	return filepath.Dir(filepath.Dir(file))
+	return filepath.Dir(filepath.Dir(file)), nil
 }
 
 // isProjectConfigUsable 判断根目录配置是否适合当前测试环境直接使用。

@@ -96,14 +96,15 @@ func TestOptionalDatabaseReadyGuardBlocksAuthenticatedRequests(t *testing.T) {
 func disableMysqlForGuardTest(t *testing.T) func() {
 	t.Helper()
 
-	originalMysqlEnable := config.Config.Mysql.Enable
-	config.Config.Mysql.Enable = false
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Mysql.Enable = false
+	})
 	if err := data.CloseMysql(); err != nil {
 		t.Fatalf("close mysql: %v", err)
 	}
 
 	return func() {
-		config.Config.Mysql.Enable = originalMysqlEnable
+		restoreConfig()
 		if err := data.CloseMysql(); err != nil {
 			t.Fatalf("close mysql: %v", err)
 		}

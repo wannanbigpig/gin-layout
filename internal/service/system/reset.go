@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -18,36 +19,65 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 )
 
+const migrationsPathEnvKey = "GO_LAYOUT_MIGRATIONS_PATH"
+
 // ResetService 保留历史入口，对外统一暴露系统维护能力。
 // 当前不持有状态，仅为兼容旧调用保留。
-type ResetService struct{}
+type ResetService struct {
+	configProvider func() *config.Conf
+}
 
 // NewResetService 创建兼容旧调用的系统维护服务。
 func NewResetService() *ResetService {
-	return &ResetService{}
+	return NewResetServiceWithDeps(ResetServiceDeps{})
+}
+
+// ResetServiceDeps 描述 ResetService 可注入依赖。
+type ResetServiceDeps struct {
+	ConfigProvider func() *config.Conf
+}
+
+// NewResetServiceWithDeps 创建带依赖注入的系统维护服务实例。
+func NewResetServiceWithDeps(deps ResetServiceDeps) *ResetService {
+	s := &ResetService{
+		configProvider: deps.ConfigProvider,
+	}
+	s.ensureRuntimeDeps()
+	return s
+}
+
+func (s *ResetService) ensureRuntimeDeps() {
+	if s.configProvider == nil {
+		s.configProvider = config.GetConfig
+	}
+}
+
+func (s *ResetService) currentConfig() *config.Conf {
+	s.ensureRuntimeDeps()
+	return config.GetConfigFrom(s.configProvider)
 }
 
 // ResetSystemData 兼容旧入口，实际执行日常清理任务。
 func (s *ResetService) ResetSystemData() error {
-	return ResetSystemData()
+	return s.cleanupExpiredSystemData()
 }
 
 // ReinitializeSystemData 兼容旧入口，实际执行系统重建任务。
 func (s *ResetService) ReinitializeSystemData() error {
-	return ReinitializeSystemData()
+	return s.reinitializeSystemData()
 }
 
 // ResetSystemData 清理过期日志与已撤销 token 记录。
 func ResetSystemData() error {
-	return cleanupExpiredSystemData()
+	return NewResetService().ResetSystemData()
 }
 
 // ReinitializeSystemData 重新初始化系统数据。
 func ReinitializeSystemData() error {
-	return reinitializeSystemData()
+	return NewResetService().ReinitializeSystemData()
 }
 
-func cleanupExpiredSystemData() error {
+func (s *ResetService) cleanupExpiredSystemData() error {
 	db := data.MysqlDB()
 	if db == nil {
 		err := model.ErrDBUninitialized
@@ -103,16 +133,16 @@ func cleanupExpiredSystemData() error {
 	return nil
 }
 
-func reinitializeSystemData() error {
+func (s *ResetService) reinitializeSystemData() error {
 	log.Logger.Info("开始重新初始化系统数据")
 
-	if err := rollbackMigrations(); err != nil {
+	if err := s.rollbackMigrations(); err != nil {
 		log.Logger.Error("回滚迁移失败", zap.Error(err))
 		return fmt.Errorf("回滚迁移失败: %w", err)
 	}
 	log.Logger.Info("回滚迁移完成")
 
-	if err := runMigrations(); err != nil {
+	if err := s.runMigrations(); err != nil {
 		log.Logger.Error("执行迁移失败", zap.Error(err))
 		return fmt.Errorf("执行迁移失败: %w", err)
 	}
@@ -134,8 +164,8 @@ func reinitializeSystemData() error {
 	return nil
 }
 
-func rollbackMigrations() error {
-	m, err := createMigrateInstance()
+func (s *ResetService) rollbackMigrations() error {
+	m, err := s.createMigrateInstance()
 	if err != nil {
 		return err
 	}
@@ -147,8 +177,8 @@ func rollbackMigrations() error {
 	return nil
 }
 
-func runMigrations() error {
-	m, err := createMigrateInstance()
+func (s *ResetService) runMigrations() error {
+	m, err := s.createMigrateInstance()
 	if err != nil {
 		return err
 	}
@@ -160,13 +190,13 @@ func runMigrations() error {
 	return nil
 }
 
-func createMigrateInstance() (*migrate.Migrate, error) {
+func (s *ResetService) createMigrateInstance() (*migrate.Migrate, error) {
 	migrationsPath, err := getMigrationsPath()
 	if err != nil {
 		return nil, fmt.Errorf("获取迁移文件路径失败: %w", err)
 	}
 
-	dbURL := buildDatabaseURL()
+	dbURL := s.buildDatabaseURL()
 	m, err := migrate.New(
 		fmt.Sprintf("file://%s", migrationsPath),
 		dbURL,
@@ -178,22 +208,30 @@ func createMigrateInstance() (*migrate.Migrate, error) {
 }
 
 func getMigrationsPath() (string, error) {
-	possiblePaths := []string{
-		"data/migrations",
-		"./data/migrations",
-		"../data/migrations",
-		"../../data/migrations",
+	possiblePaths := []string{}
+
+	if envPath := strings.TrimSpace(os.Getenv(migrationsPathEnvKey)); envPath != "" {
+		possiblePaths = append(possiblePaths, strings.TrimPrefix(envPath, "file://"))
 	}
 
 	if config.V != nil {
 		configPath := strings.TrimSpace(config.V.ConfigFileUsed())
 		if configPath != "" {
-			possiblePaths = append([]string{filepath.Join(filepath.Dir(configPath), "data", "migrations")}, possiblePaths...)
+			possiblePaths = append(possiblePaths, filepath.Join(filepath.Dir(configPath), "data", "migrations"))
 		}
 	}
 	if executablePath, err := os.Executable(); err == nil {
-		possiblePaths = append([]string{filepath.Join(filepath.Dir(executablePath), "data", "migrations")}, possiblePaths...)
+		possiblePaths = append(possiblePaths, filepath.Join(filepath.Dir(executablePath), "data", "migrations"))
 	}
+	if _, currentFile, _, ok := runtime.Caller(0); ok {
+		possiblePaths = append(possiblePaths, filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "data", "migrations"))
+	}
+	possiblePaths = append(possiblePaths,
+		"data/migrations",
+		"./data/migrations",
+		"../data/migrations",
+		"../../data/migrations",
+	)
 
 	seen := make(map[string]struct{}, len(possiblePaths))
 	for _, path := range possiblePaths {
@@ -211,11 +249,11 @@ func getMigrationsPath() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("未找到迁移文件目录，请确保 data/migrations 目录存在")
+	return "", fmt.Errorf("未找到迁移文件目录，请确保 data/migrations 目录存在，或通过环境变量 %s 指定路径", migrationsPathEnvKey)
 }
 
-func buildDatabaseURL() string {
-	cfg := config.Config.Mysql
+func (s *ResetService) buildDatabaseURL() string {
+	cfg := s.currentConfig().Mysql
 	return fmt.Sprintf("mysql://%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		cfg.Username,
 		cfg.Password,

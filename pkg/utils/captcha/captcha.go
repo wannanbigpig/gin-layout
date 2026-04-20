@@ -31,6 +31,7 @@ var memStore = &memoryStore{
 // captchaInstance 验证码实例
 var captchaInstance *base64Captcha.Captcha
 var captchaOnce sync.Once
+var captchaBaseContext = context.Background
 
 func (m *memoryStore) Set(id, answer string, expiration time.Duration) {
 	m.mu.Lock()
@@ -72,7 +73,7 @@ const (
 )
 
 func withRedisTimeout() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), captchaRedisTimeout)
+	return context.WithTimeout(captchaBaseContext(), captchaRedisTimeout)
 }
 
 // initCaptcha 初始化验证码实例
@@ -103,8 +104,9 @@ func initCaptcha() {
 
 // setCaptchaAnswer 存储验证码答案
 func setCaptchaAnswer(id, answer string) {
+	cfg := config.GetConfig()
 	redisClient := data.RedisClient()
-	if config.Config.Redis.Enable && redisClient != nil {
+	if cfg != nil && cfg.Redis.Enable && redisClient != nil {
 		// 使用 Redis 存储
 		ctx, cancel := withRedisTimeout()
 		defer cancel()
@@ -120,8 +122,9 @@ func setCaptchaAnswer(id, answer string) {
 
 // getCaptchaAnswer 获取验证码答案
 func getCaptchaAnswer(id string) (string, bool) {
+	cfg := config.GetConfig()
 	redisClient := data.RedisClient()
-	if config.Config.Redis.Enable && redisClient != nil {
+	if cfg != nil && cfg.Redis.Enable && redisClient != nil {
 		// 从 Redis 获取
 		ctx, cancel := withRedisTimeout()
 		defer cancel()
@@ -138,8 +141,9 @@ func getCaptchaAnswer(id string) (string, bool) {
 
 // deleteCaptchaAnswer 删除验证码答案（验证后删除）
 func deleteCaptchaAnswer(id string) {
+	cfg := config.GetConfig()
 	redisClient := data.RedisClient()
-	if config.Config.Redis.Enable && redisClient != nil {
+	if cfg != nil && cfg.Redis.Enable && redisClient != nil {
 		// 从 Redis 删除
 		ctx, cancel := withRedisTimeout()
 		defer cancel()
@@ -182,7 +186,8 @@ func Generate() (item *Item, err error) {
 
 	// 获取验证码答案（仅用于本地/测试环境）
 	var answerForClient string
-	if config.Config.AppEnv == "local" || config.Config.AppEnv == "test" {
+	cfg := config.GetConfig()
+	if cfg != nil && (cfg.AppEnv == "local" || cfg.AppEnv == "test") {
 		answerForClient = answer
 	}
 

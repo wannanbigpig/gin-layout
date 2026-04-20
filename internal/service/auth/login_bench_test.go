@@ -28,17 +28,10 @@ func BenchmarkResolvePrincipal(b *testing.B) {
 		},
 	}
 
-	originalBlacklistLookup := blacklistLookup
-	originalTokenRevokedLookup := tokenRevokedLookup
-	defer func() {
-		blacklistLookup = originalBlacklistLookup
-		tokenRevokedLookup = originalTokenRevokedLookup
-	}()
-
-	blacklistLookup = func(_ *LoginService, _ string) (bool, error) {
+	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, nil
 	}
-	tokenRevokedLookup = func(_ *LoginService, _ string) bool {
+	service.tokenRevokedLookupFn = func(_ string) bool {
 		return false
 	}
 

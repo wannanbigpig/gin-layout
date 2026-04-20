@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -39,13 +40,8 @@ type sensitiveFieldsManager struct {
 }
 
 var (
-	fieldsManager = &sensitiveFieldsManager{
-		commonFields:         make(map[string]bool),
-		requestHeaderFields:  make(map[string]bool),
-		requestBodyFields:    make(map[string]bool),
-		responseHeaderFields: make(map[string]bool),
-		responseBodyFields:   make(map[string]bool),
-	}
+	defaultFieldsManagerOnce sync.Once
+	defaultFieldsManagerVal  atomic.Pointer[sensitiveFieldsManager]
 
 	phoneRegex    = regexp.MustCompile(`1[3-9]\d{9}`)
 	emailRegex    = regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
@@ -53,8 +49,40 @@ var (
 	bankCardRegex = regexp.MustCompile(`\d{16,19}`)
 )
 
-func init() {
-	LoadSensitiveFieldsConfig(defaultSensitiveFieldsConfig())
+func currentFieldsManager() *sensitiveFieldsManager {
+	defaultFieldsManagerOnce.Do(func() {
+		defaultFieldsManagerVal.Store(newSensitiveFieldsManager(defaultSensitiveFieldsConfig()))
+	})
+
+	manager := defaultFieldsManagerVal.Load()
+	if manager != nil {
+		return manager
+	}
+
+	// 防御性兜底，确保任何情况下都返回可用 manager。
+	manager = newSensitiveFieldsManager(defaultSensitiveFieldsConfig())
+	defaultFieldsManagerVal.Store(manager)
+	return manager
+}
+
+func newSensitiveFieldsManager(config SensitiveFieldsConfig) *sensitiveFieldsManager {
+	manager := &sensitiveFieldsManager{
+		commonFields:         make(map[string]bool),
+		requestHeaderFields:  make(map[string]bool),
+		requestBodyFields:    make(map[string]bool),
+		responseHeaderFields: make(map[string]bool),
+		responseBodyFields:   make(map[string]bool),
+	}
+	manager.applyConfig(config)
+	return manager
+}
+
+func (m *sensitiveFieldsManager) applyConfig(config SensitiveFieldsConfig) {
+	m.commonFields = sliceToMap(config.Common)
+	m.requestHeaderFields = sliceToMap(config.RequestHeader)
+	m.requestBodyFields = sliceToMap(config.RequestBody)
+	m.responseHeaderFields = sliceToMap(config.ResponseHeader)
+	m.responseBodyFields = sliceToMap(config.ResponseBody)
 }
 
 func defaultSensitiveFieldsConfig() SensitiveFieldsConfig {
@@ -107,14 +135,10 @@ func defaultSensitiveFieldsConfig() SensitiveFieldsConfig {
 
 // LoadSensitiveFieldsConfig 加载敏感字段配置（未来可从配置文件调用）
 func LoadSensitiveFieldsConfig(config SensitiveFieldsConfig) {
-	fieldsManager.mu.Lock()
-	defer fieldsManager.mu.Unlock()
-
-	fieldsManager.commonFields = sliceToMap(config.Common)
-	fieldsManager.requestHeaderFields = sliceToMap(config.RequestHeader)
-	fieldsManager.requestBodyFields = sliceToMap(config.RequestBody)
-	fieldsManager.responseHeaderFields = sliceToMap(config.ResponseHeader)
-	fieldsManager.responseBodyFields = sliceToMap(config.ResponseBody)
+	manager := currentFieldsManager()
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	manager.applyConfig(config)
 }
 
 func sliceToMap(slice []string) map[string]bool {
@@ -131,28 +155,33 @@ func sliceToMap(slice []string) map[string]bool {
 }
 
 func getCommonFields() map[string]bool {
-	return cloneFieldSet(fieldsManager.commonFields)
+	manager := currentFieldsManager()
+	return manager.cloneFieldSet(manager.commonFields)
 }
 
 func getRequestHeaderFields() map[string]bool {
-	return cloneFieldSet(fieldsManager.requestHeaderFields)
+	manager := currentFieldsManager()
+	return manager.cloneFieldSet(manager.requestHeaderFields)
 }
 
 func getRequestBodyFields() map[string]bool {
-	return cloneFieldSet(fieldsManager.requestBodyFields)
+	manager := currentFieldsManager()
+	return manager.cloneFieldSet(manager.requestBodyFields)
 }
 
 func getResponseHeaderFields() map[string]bool {
-	return cloneFieldSet(fieldsManager.responseHeaderFields)
+	manager := currentFieldsManager()
+	return manager.cloneFieldSet(manager.responseHeaderFields)
 }
 
 func getResponseBodyFields() map[string]bool {
-	return cloneFieldSet(fieldsManager.responseBodyFields)
+	manager := currentFieldsManager()
+	return manager.cloneFieldSet(manager.responseBodyFields)
 }
 
-func cloneFieldSet(source map[string]bool) map[string]bool {
-	fieldsManager.mu.RLock()
-	defer fieldsManager.mu.RUnlock()
+func (m *sensitiveFieldsManager) cloneFieldSet(source map[string]bool) map[string]bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	result := make(map[string]bool, len(source))
 	for k, v := range source {

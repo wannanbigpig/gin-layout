@@ -8,11 +8,34 @@ import (
 )
 
 // UserPermissionSyncService 负责把数据库关系展开为用户最终接口权限。
-type UserPermissionSyncService struct{}
+type UserPermissionSyncService struct {
+	reloadPolicyFn func() error
+}
+
+// UserPermissionSyncServiceDeps 描述 UserPermissionSyncService 可注入依赖。
+type UserPermissionSyncServiceDeps struct {
+	ReloadPolicy func() error
+}
 
 // NewUserPermissionSyncService 创建用户权限同步服务实例。
 func NewUserPermissionSyncService() *UserPermissionSyncService {
-	return &UserPermissionSyncService{}
+	return NewUserPermissionSyncServiceWithDeps(UserPermissionSyncServiceDeps{})
+}
+
+// NewUserPermissionSyncServiceWithDeps 创建带依赖注入的用户权限同步服务实例。
+func NewUserPermissionSyncServiceWithDeps(deps UserPermissionSyncServiceDeps) *UserPermissionSyncService {
+	s := &UserPermissionSyncService{
+		reloadPolicyFn: deps.ReloadPolicy,
+	}
+	if s.reloadPolicyFn == nil {
+		s.reloadPolicyFn = defaultReloadPolicy
+	}
+	return s
+}
+
+// ReloadPolicyCache 刷新共享 Casbin Enforcer 策略缓存。
+func (s *UserPermissionSyncService) ReloadPolicyCache() error {
+	return s.reloadPolicyFn()
 }
 
 // SyncUser 重建单个用户的最终接口权限并同步到 Casbin。
@@ -89,7 +112,7 @@ func (s *UserPermissionSyncService) withSyncTransaction(tx []*gorm.DB, fn func(e
 	if err := db.Transaction(fn); err != nil {
 		return err
 	}
-	return reloadPolicy()
+	return s.ReloadPolicyCache()
 }
 
 // forEachUser 遍历用户 ID 列表并执行回调函数，遇到错误立即返回。

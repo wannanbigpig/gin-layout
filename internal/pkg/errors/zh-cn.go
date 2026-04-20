@@ -13,10 +13,12 @@ var zhCNText = map[int]string{
 	AuthorizationErr:          "暂无权限",
 	NotLogin:                  "请先登录",
 	CaptchaErr:                "验证码错误",
-	FileIdentifierInvalid:     "文件标识错误",
-	FilePrivateAuthNeeded:     "访问私有文件需要登录认证",
-	FileAccessDenied:          "无权访问该文件",
-	FileUploadPartialFail:     "部分图片上传失败",
+
+	// 文件相关错误消息 11000-11999
+	FileIdentifierInvalid: "文件标识错误",
+	FilePrivateAuthNeeded: "访问私有文件需要登录认证",
+	FileAccessDenied:      "无权访问该文件",
+	FileUploadPartialFail: "部分图片上传失败",
 
 	// 业务错误消息 20000-29999
 	UserPasswordWrong:       "用户密码错误",

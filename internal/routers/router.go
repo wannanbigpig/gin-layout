@@ -45,8 +45,9 @@ func SetRoutersWithTree(routeTree RouteGroupDef) (*gin.Engine, error) {
 // createEngine 创建 gin 引擎并设置相关中间件
 func createEngine() (*gin.Engine, error) {
 	var engine *gin.Engine
+	cfg := config.GetConfig()
 
-	if config.Config.Debug {
+	if cfg != nil && cfg.Debug {
 		// 开发调试模式
 		engine = gin.New()
 		engine.Use(
@@ -70,7 +71,11 @@ func createEngine() (*gin.Engine, error) {
 		)
 	}
 	// 配置受信任代理，决定是否信任 X-Forwarded-For / X-Real-IP 等代理头。
-	if err := engine.SetTrustedProxies(config.Config.TrustedProxies); err != nil {
+	trustedProxies := []string(nil)
+	if cfg != nil {
+		trustedProxies = cfg.TrustedProxies
+	}
+	if err := engine.SetTrustedProxies(trustedProxies); err != nil {
 		return nil, fmt.Errorf("set trusted proxies failed: %w", err)
 	}
 

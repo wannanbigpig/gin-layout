@@ -7,7 +7,10 @@ import (
 )
 
 func TestPingRoute(t *testing.T) {
-	router := SetupRouter()
+	router, err := SetupRouter()
+	if err != nil {
+		t.Fatalf("setup router failed: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	recorder := httptest.NewRecorder()
 

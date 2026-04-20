@@ -23,6 +23,12 @@ type AdminUserService struct {
 	service.Base
 }
 
+const (
+	menuQuerySuperAdmin = "status = ?"
+	menuQueryNoAuth     = "status = ? AND is_auth = ?"
+	menuQueryWithAuth   = "status = ? AND (is_auth = ? OR (is_auth = ? AND id IN (?)))"
+)
+
 // NewAdminUserService 创建管理员用户服务实例。
 func NewAdminUserService() *AdminUserService {
 	return &AdminUserService{}
@@ -149,15 +155,16 @@ func zeroToNil(value uint) any {
 // 参数：
 //   - isSuperAdmin: 是否为超级管理员
 //   - menuIDs: 用户可访问的菜单 ID 列表
+//
 // 返回：查询条件和参数
 func (s *AdminUserService) userMenuQuery(isSuperAdmin bool, menuIDs []uint) (string, []any) {
 	if isSuperAdmin {
-		return "status = ?", []any{1}
+		return menuQuerySuperAdmin, []any{1}
 	}
 	if len(menuIDs) == 0 {
-		return "status = ? AND is_auth = ?", []any{1, 0}
+		return menuQueryNoAuth, []any{1, 0}
 	}
-	return "status = ? AND (is_auth = ? OR (is_auth = ? AND id IN (?)))", []any{1, 0, 1, menuIDs}
+	return menuQueryWithAuth, []any{1, 0, 1, menuIDs}
 }
 
 // adminUserEditParams 管理员用户编辑参数，字段使用指针支持部分更新。

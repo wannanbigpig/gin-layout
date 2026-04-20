@@ -168,14 +168,15 @@ type routeResult struct {
 func disableMysqlForRouterTest(t *testing.T) func() {
 	t.Helper()
 
-	originalMysqlEnable := config.Config.Mysql.Enable
-	config.Config.Mysql.Enable = false
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Mysql.Enable = false
+	})
 	if err := data.CloseMysql(); err != nil {
 		t.Fatalf("close mysql: %v", err)
 	}
 
 	return func() {
-		config.Config.Mysql.Enable = originalMysqlEnable
+		restoreConfig()
 		if err := data.CloseMysql(); err != nil {
 			t.Fatalf("close mysql: %v", err)
 		}
@@ -185,21 +186,25 @@ func disableMysqlForRouterTest(t *testing.T) func() {
 func disableDependenciesForReadinessTest(t *testing.T) func() {
 	t.Helper()
 
-	restoreMysql := disableMysqlForRouterTest(t)
-	originalRedisEnable := config.Config.Redis.Enable
-	originalQueueEnable := config.Config.Queue.Enable
-	config.Config.Redis.Enable = false
-	config.Config.Queue.Enable = false
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Mysql.Enable = false
+		cfg.Redis.Enable = false
+		cfg.Queue.Enable = false
+	})
+	if err := data.CloseMysql(); err != nil {
+		t.Fatalf("close mysql: %v", err)
+	}
 	if err := data.CloseRedis(); err != nil {
 		t.Fatalf("close redis: %v", err)
 	}
 
 	return func() {
-		config.Config.Redis.Enable = originalRedisEnable
-		config.Config.Queue.Enable = originalQueueEnable
+		restoreConfig()
 		if err := data.CloseRedis(); err != nil {
 			t.Fatalf("close redis: %v", err)
 		}
-		restoreMysql()
+		if err := data.CloseMysql(); err != nil {
+			t.Fatalf("close mysql: %v", err)
+		}
 	}
 }

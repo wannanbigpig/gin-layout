@@ -15,10 +15,35 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
-var apiRouteCache = accesssvc.NewApiRouteCacheService()
+type routeAuthChecker interface {
+	CheckoutRouteIsAuth(route string, method string) bool
+}
+
+type permissionDeps struct {
+	loadEnforcer func() (*casbinx.CasbinEnforcer, error)
+	routeChecker routeAuthChecker
+}
+
+func newDefaultPermissionDeps() permissionDeps {
+	return permissionDeps{
+		loadEnforcer: casbinx.GetEnforcer,
+		routeChecker: accesssvc.NewApiRouteCacheService(),
+	}
+}
 
 // AdminAuthHandler 依赖 ParseTokenHandler 预先写入用户上下文。
 func AdminAuthHandler() gin.HandlerFunc {
+	return AdminAuthHandlerWithDeps(newDefaultPermissionDeps())
+}
+
+// AdminAuthHandlerWithDeps 支持注入依赖，便于测试隔离。
+func AdminAuthHandlerWithDeps(deps permissionDeps) gin.HandlerFunc {
+	if deps.loadEnforcer == nil {
+		deps.loadEnforcer = casbinx.GetEnforcer
+	}
+	if deps.routeChecker == nil {
+		deps.routeChecker = accesssvc.NewApiRouteCacheService()
+	}
 	return func(c *gin.Context) {
 		uid := c.GetUint(global.ContextKeyUID)
 		if uid == 0 {
@@ -35,7 +60,7 @@ func AdminAuthHandler() gin.HandlerFunc {
 		}
 
 		if !isSuperAdmin(principal) {
-			if err := checkPermission(c, principal.UserID); err != nil {
+			if err := checkPermission(c, principal.UserID, deps); err != nil {
 				if businessErr, ok := err.(*e.BusinessError); ok {
 					response.Fail(c, businessErr.GetCode(), businessErr.GetMessage())
 				} else {
@@ -56,13 +81,24 @@ func isSuperAdmin(principal *auth.AuthPrincipal) bool {
 }
 
 // checkPermission 检查接口权限
-func checkPermission(c *gin.Context, userID uint) error {
-	enforcer, err := casbinx.GetEnforcer()
+func checkPermission(c *gin.Context, userID uint, deps permissionDeps) error {
+	enforcer, err := loadEnforcer(deps)
+	if err != nil {
+		return err
+	}
+	return enforcePermission(enforcer, c, userID, deps)
+}
+
+func loadEnforcer(deps permissionDeps) (*casbinx.CasbinEnforcer, error) {
+	enforcer, err := deps.loadEnforcer()
 	if err != nil {
 		log.Logger.Error("权限验证初始化失败", zap.Error(err))
-		return e.NewBusinessError(e.ServerErr, "权限验证初始化失败")
+		return nil, e.NewBusinessError(e.ServerErr, "权限验证初始化失败")
 	}
+	return enforcer, nil
+}
 
+func enforcePermission(enforcer *casbinx.CasbinEnforcer, c *gin.Context, userID uint, deps permissionDeps) error {
 	userKey := fmt.Sprintf("%s%s%d", global.CasbinAdminUserPrefix, global.CasbinSeparator, userID)
 	path := c.Request.URL.Path
 	method := c.Request.Method
@@ -74,7 +110,7 @@ func checkPermission(c *gin.Context, userID uint) error {
 	}
 
 	if !ok {
-		if apiRouteCache.CheckoutRouteIsAuth(path, method) {
+		if deps.routeChecker.CheckoutRouteIsAuth(path, method) {
 			return e.NewBusinessError(e.AuthorizationErr, "暂无接口操作权限")
 		}
 	}

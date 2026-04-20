@@ -11,9 +11,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/config/autoload"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/testkit"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
 )
@@ -86,13 +88,15 @@ func TestBuildRefreshLockKey(t *testing.T) {
 // TestShouldRefreshToken 验证刷新条件判断。
 func TestShouldRefreshToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	service := NewLoginService()
-	originalRefreshTTL := config.Config.Jwt.RefreshTTL
-	defer func() {
-		config.Config.Jwt.RefreshTTL = originalRefreshTTL
-	}()
+	cfg := &config.Conf{
+		Jwt: autoload.JwtConfig{
+			RefreshTTL: 30,
+		},
+	}
+	service := NewLoginServiceWithDeps(LoginServiceDeps{
+		ConfigProvider: func() *config.Conf { return cfg },
+	})
 
-	config.Config.Jwt.RefreshTTL = 30
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	service.SetCtx(ctx)
@@ -122,24 +126,15 @@ func TestIsPrincipalValidSkipsFallbackWhenMysqlUnavailable(t *testing.T) {
 		},
 	}
 
-	originalBlacklistLookup := blacklistLookup
-	originalTokenRevokedLookup := tokenRevokedLookup
-	originalMysqlReadyLookup := mysqlReadyLookup
-	t.Cleanup(func() {
-		blacklistLookup = originalBlacklistLookup
-		tokenRevokedLookup = originalTokenRevokedLookup
-		mysqlReadyLookup = originalMysqlReadyLookup
-	})
-
 	tokenRevokedCalled := false
-	blacklistLookup = func(_ *LoginService, _ string) (bool, error) {
+	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, errRedisUnavailable
 	}
-	tokenRevokedLookup = func(_ *LoginService, _ string) bool {
+	service.tokenRevokedLookupFn = func(_ string) bool {
 		tokenRevokedCalled = true
 		return false
 	}
-	mysqlReadyLookup = func() bool { return false }
+	service.mysqlReadyFn = func() bool { return false }
 
 	if service.isPrincipalValid(claims) {
 		t.Fatal("expected principal to be rejected when redis and mysql are unavailable")
@@ -158,24 +153,15 @@ func TestIsPrincipalValidFallsBackToDatabaseWhenMysqlReady(t *testing.T) {
 		},
 	}
 
-	originalBlacklistLookup := blacklistLookup
-	originalTokenRevokedLookup := tokenRevokedLookup
-	originalMysqlReadyLookup := mysqlReadyLookup
-	t.Cleanup(func() {
-		blacklistLookup = originalBlacklistLookup
-		tokenRevokedLookup = originalTokenRevokedLookup
-		mysqlReadyLookup = originalMysqlReadyLookup
-	})
-
 	tokenRevokedCalled := false
-	blacklistLookup = func(_ *LoginService, _ string) (bool, error) {
+	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, errRedisUnavailable
 	}
-	tokenRevokedLookup = func(_ *LoginService, jwtID string) bool {
+	service.tokenRevokedLookupFn = func(jwtID string) bool {
 		tokenRevokedCalled = true
 		return jwtID == "revoked"
 	}
-	mysqlReadyLookup = func() bool { return true }
+	service.mysqlReadyFn = func() bool { return true }
 
 	if !service.isPrincipalValid(claims) {
 		t.Fatal("expected principal to stay valid when mysql fallback is available")
@@ -194,17 +180,10 @@ func TestIsPrincipalValidRejectsRevokedToken(t *testing.T) {
 		},
 	}
 
-	originalBlacklistLookup := blacklistLookup
-	originalTokenRevokedLookup := tokenRevokedLookup
-	t.Cleanup(func() {
-		blacklistLookup = originalBlacklistLookup
-		tokenRevokedLookup = originalTokenRevokedLookup
-	})
-
-	blacklistLookup = func(_ *LoginService, _ string) (bool, error) {
+	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, errors.New("redis unavailable")
 	}
-	tokenRevokedLookup = func(_ *LoginService, jwtID string) bool {
+	service.tokenRevokedLookupFn = func(jwtID string) bool {
 		return jwtID == "jwt-id"
 	}
 
@@ -231,24 +210,19 @@ func TestValidateUserReturnsDependencyErrorWhenDBUnavailable(t *testing.T) {
 }
 
 func TestLogoutFallsBackToDatabaseRevocationWhenRedisUnavailable(t *testing.T) {
-	service := NewLoginService()
-
-	originalSecretKey := config.Config.Jwt.SecretKey
-	originalRedisEnable := config.Config.Redis.Enable
-	originalMarkTokensRevokedFunc := markTokensRevokedFunc
-	originalWriteTokenToBlacklistFunc := writeTokenToBlacklistFunc
-	t.Cleanup(func() {
-		config.Config.Jwt.SecretKey = originalSecretKey
-		config.Config.Redis.Enable = originalRedisEnable
-		markTokensRevokedFunc = originalMarkTokensRevokedFunc
-		writeTokenToBlacklistFunc = originalWriteTokenToBlacklistFunc
+	secretKey := testkit.SecretKey("auth-logout")
+	service := NewLoginServiceWithDeps(LoginServiceDeps{
+		ConfigProvider: func() *config.Conf {
+			return &config.Conf{
+				Jwt: autoload.JwtConfig{
+					SecretKey: secretKey,
+				},
+			}
+		},
 	})
 
-	config.Config.Jwt.SecretKey = "test-secret-key-for-logout"
-	config.Config.Redis.Enable = false
-
 	revoked := false
-	markTokensRevokedFunc = func(_ *LoginService, _ context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
+	service.markTokensRevokedFn = func(_ context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
 		revoked = true
 		if len(jwtIDs) != 1 || jwtIDs[0] == "" {
 			t.Fatalf("unexpected jwt ids: %#v", jwtIDs)
@@ -270,7 +244,7 @@ func TestLogoutFallsBackToDatabaseRevocationWhenRedisUnavailable(t *testing.T) {
 			ID:        "jwt-logout-test",
 		},
 	}
-	accessToken, err := token.Generate(claims)
+	accessToken, err := signTokenForTest(claims, secretKey)
 	if err != nil {
 		t.Fatalf("generate token failed: %v", err)
 	}
@@ -284,22 +258,20 @@ func TestLogoutFallsBackToDatabaseRevocationWhenRedisUnavailable(t *testing.T) {
 }
 
 func TestLogoutTreatsRedisWriteFailureAsSuccessAfterDatabaseRevocation(t *testing.T) {
-	service := NewLoginService()
-
-	originalSecretKey := config.Config.Jwt.SecretKey
-	originalMarkTokensRevokedFunc := markTokensRevokedFunc
-	originalWriteTokenToBlacklistFunc := writeTokenToBlacklistFunc
-	t.Cleanup(func() {
-		config.Config.Jwt.SecretKey = originalSecretKey
-		markTokensRevokedFunc = originalMarkTokensRevokedFunc
-		writeTokenToBlacklistFunc = originalWriteTokenToBlacklistFunc
+	secretKey := testkit.SecretKey("auth-logout")
+	service := NewLoginServiceWithDeps(LoginServiceDeps{
+		ConfigProvider: func() *config.Conf {
+			return &config.Conf{
+				Jwt: autoload.JwtConfig{
+					SecretKey: secretKey,
+				},
+			}
+		},
 	})
-
-	config.Config.Jwt.SecretKey = "test-secret-key-for-logout"
 
 	revoked := false
 	blacklistWriteCalled := false
-	markTokensRevokedFunc = func(_ *LoginService, _ context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
+	service.markTokensRevokedFn = func(_ context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
 		revoked = true
 		if len(jwtIDs) != 1 || jwtIDs[0] == "" {
 			t.Fatalf("unexpected jwt ids: %#v", jwtIDs)
@@ -309,7 +281,7 @@ func TestLogoutTreatsRedisWriteFailureAsSuccessAfterDatabaseRevocation(t *testin
 		}
 		return nil
 	}
-	writeTokenToBlacklistFunc = func(_ *LoginService, jwtID string, remainingTime time.Duration) error {
+	service.writeTokenToBlacklistFn = func(jwtID string, remainingTime time.Duration) error {
 		blacklistWriteCalled = true
 		if jwtID == "" || remainingTime <= 0 {
 			t.Fatalf("unexpected blacklist write args: jwtID=%q remaining=%v", jwtID, remainingTime)
@@ -328,7 +300,7 @@ func TestLogoutTreatsRedisWriteFailureAsSuccessAfterDatabaseRevocation(t *testin
 			ID:        "jwt-logout-blacklist-fail",
 		},
 	}
-	accessToken, err := token.Generate(claims)
+	accessToken, err := signTokenForTest(claims, secretKey)
 	if err != nil {
 		t.Fatalf("generate token failed: %v", err)
 	}
@@ -354,13 +326,37 @@ func TestAcquireMemoryLock(t *testing.T) {
 	unlock()
 }
 
+func TestNewLoginServiceSharesDefaultRefreshLockStore(t *testing.T) {
+	first := NewLoginService()
+	second := NewLoginService()
+	if first.refreshLockStore == nil || second.refreshLockStore == nil {
+		t.Fatal("expected refresh lock store to be initialized")
+	}
+	if first.refreshLockStore != second.refreshLockStore {
+		t.Fatal("expected default refresh lock store to be shared across service instances")
+	}
+}
+
+func TestNewLoginServiceWithDepsUsesCustomRefreshLockStore(t *testing.T) {
+	customStore := newRefreshTokenLock(100*time.Millisecond, 20*time.Millisecond)
+	service := NewLoginServiceWithDeps(LoginServiceDeps{
+		RefreshLockStore: customStore,
+	})
+
+	if service.refreshLockStore != customStore {
+		t.Fatal("expected custom refresh lock store to be used")
+	}
+}
+
 func TestAcquireRefreshLockFallsBackToMemoryWhenRedisDisabled(t *testing.T) {
-	service := NewLoginService()
-	originalRedisEnable := config.Config.Redis.Enable
-	config.Config.Redis.Enable = false
-	defer func() {
-		config.Config.Redis.Enable = originalRedisEnable
-	}()
+	cfg := &config.Conf{
+		Redis: autoload.RedisConfig{
+			Enable: false,
+		},
+	}
+	service := NewLoginServiceWithDeps(LoginServiceDeps{
+		ConfigProvider: func() *config.Conf { return cfg },
+	})
 
 	claims := &token.AdminCustomClaims{
 		AdminUserInfo: token.AdminUserInfo{UserID: 42},
@@ -386,19 +382,10 @@ func TestResolvePrincipalSkipsAutoRefreshWhenMysqlUnavailable(t *testing.T) {
 		},
 	}
 
-	originalBlacklistLookup := blacklistLookup
-	originalMysqlReadyLookup := mysqlReadyLookup
-	originalTryRefreshPrincipal := tryRefreshPrincipal
-	t.Cleanup(func() {
-		blacklistLookup = originalBlacklistLookup
-		mysqlReadyLookup = originalMysqlReadyLookup
-		tryRefreshPrincipal = originalTryRefreshPrincipal
-	})
-
 	refreshCalled := false
-	blacklistLookup = func(_ *LoginService, _ string) (bool, error) { return false, nil }
-	mysqlReadyLookup = func() bool { return false }
-	tryRefreshPrincipal = func(_ *LoginService, _ *AuthPrincipal) {
+	service.blacklistLookupFn = func(_ string) (bool, error) { return false, nil }
+	service.mysqlReadyFn = func() bool { return false }
+	service.tryRefreshPrincipalFn = func(_ *AuthPrincipal) {
 		refreshCalled = true
 	}
 
@@ -409,4 +396,9 @@ func TestResolvePrincipalSkipsAutoRefreshWhenMysqlUnavailable(t *testing.T) {
 	if refreshCalled {
 		t.Fatal("expected auto refresh to be skipped when mysql is unavailable")
 	}
+}
+
+func signTokenForTest(claims jwt.Claims, secret string) (string, error) {
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return jwtToken.SignedString([]byte(secret))
 }

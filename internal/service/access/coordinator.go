@@ -12,12 +12,30 @@ type PermissionSyncCoordinator struct {
 	resolver *AffectedUsersResolver
 }
 
+// PermissionSyncCoordinatorDeps 描述 PermissionSyncCoordinator 可注入依赖。
+type PermissionSyncCoordinatorDeps struct {
+	Syncer   *UserPermissionSyncService
+	Resolver *AffectedUsersResolver
+}
+
 // NewPermissionSyncCoordinator 创建权限同步协调器。
 func NewPermissionSyncCoordinator() *PermissionSyncCoordinator {
-	return &PermissionSyncCoordinator{
-		syncer:   NewUserPermissionSyncService(),
-		resolver: NewAffectedUsersResolver(),
+	return NewPermissionSyncCoordinatorWithDeps(PermissionSyncCoordinatorDeps{})
+}
+
+// NewPermissionSyncCoordinatorWithDeps 创建带依赖注入的权限同步协调器。
+func NewPermissionSyncCoordinatorWithDeps(deps PermissionSyncCoordinatorDeps) *PermissionSyncCoordinator {
+	coordinator := &PermissionSyncCoordinator{
+		syncer:   deps.Syncer,
+		resolver: deps.Resolver,
 	}
+	if coordinator.syncer == nil {
+		coordinator.syncer = NewUserPermissionSyncService()
+	}
+	if coordinator.resolver == nil {
+		coordinator.resolver = NewAffectedUsersResolver()
+	}
+	return coordinator
 }
 
 // SyncAll 重建全部用户最终 API 权限。
@@ -87,7 +105,7 @@ func (c *PermissionSyncCoordinator) AccessibleMenuIDs(userID uint, includeParent
 
 // ReloadPolicyCache 在事务提交后刷新共享 Casbin Enforcer 的内存策略。
 func (c *PermissionSyncCoordinator) ReloadPolicyCache() error {
-	return reloadPolicy()
+	return c.syncer.ReloadPolicyCache()
 }
 
 // ReloadPolicyCacheWithMessage 在事务提交后刷新共享策略，并统一包装业务错误。

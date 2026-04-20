@@ -6,6 +6,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const passwordHashCost = 12
+
 // MaskSensitiveInfo 对于字符串脱敏
 // s 需要脱敏的字符串
 // start 从第几位开始脱敏
@@ -14,12 +16,18 @@ import (
 func MaskSensitiveInfo(s string, start int, maskNumber int, maskChars ...string) string {
 	// 将字符串s的[start, end)区间用maskChar替换，并返回替换后的结果。
 	maskChar := "*"
-	if maskChars != nil {
+	if len(maskChars) > 0 && maskChars[0] != "" {
 		maskChar = maskChars[0]
+	}
+	if maskNumber <= 0 || len(s) == 0 {
+		return s
 	}
 	// 处理起始位置超出边界的情况
 	if start < 0 {
 		start = 0
+	}
+	if start > len(s) {
+		start = len(s)
 	}
 	// 处理结束位置超出边界的情况
 	end := start + maskNumber
@@ -31,7 +39,7 @@ func MaskSensitiveInfo(s string, start int, maskNumber int, maskChars ...string)
 
 // PasswordHash 密码hash并自动加盐
 func PasswordHash(pwd string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), passwordHashCost)
 	return string(hash), err
 }
 

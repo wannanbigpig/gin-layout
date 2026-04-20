@@ -12,6 +12,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
@@ -23,16 +24,9 @@ const redisOpTimeout = 3 * time.Second
 
 var errRedisUnavailable = errors.New("redis client is not available")
 
-var markTokensRevokedFunc = func(s *LoginService, ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
-	return s.markTokensRevoked(ctx, jwtIDs, revokedCode, revokedReason)
-}
-
-var writeTokenToBlacklistFunc = func(s *LoginService, jwtID string, remainingTime time.Duration) error {
-	return s.writeTokenToBlacklist(jwtID, remainingTime)
-}
-
 // Logout 退出登录。
 func (s *LoginService) Logout(accessToken string) error {
+	s.ensureRuntimeDeps()
 	claims, err := s.parseToken(accessToken)
 	if err != nil {
 		return err
@@ -43,12 +37,12 @@ func (s *LoginService) Logout(accessToken string) error {
 		return err
 	}
 
-	if err := markTokensRevokedFunc(s, context.Background(), []string{claims.ID}, model.RevokedCodeUserLogout, "用户主动登出（退出登录）"); err != nil {
+	if err := s.markTokensRevokedFn(context.Background(), []string{claims.ID}, model.RevokedCodeUserLogout, "用户主动登出（退出登录）"); err != nil {
 		return err
 	}
 
 	remainingTime := time.Until(exp.Time)
-	if err := writeTokenToBlacklistFunc(s, claims.ID, remainingTime); err != nil {
+	if err := s.writeTokenToBlacklistFn(claims.ID, remainingTime); err != nil {
 		log.Logger.Warn("Redis blacklist write failed after database revocation, treat logout as success",
 			zap.String("jwt_id", claims.ID),
 			zap.Bool("redis_unavailable", errors.Is(err, errRedisUnavailable)),
@@ -62,9 +56,18 @@ func (s *LoginService) Logout(accessToken string) error {
 // parseToken 解析 Token。
 func (s *LoginService) parseToken(accessToken string) (*token.AdminCustomClaims, error) {
 	claims := new(token.AdminCustomClaims)
-	err := token.Parse(accessToken, claims, jwt.WithSubject(global.PcAdminSubject), jwt.WithIssuer(global.Issuer))
+	secret := []byte(s.currentConfig().Jwt.SecretKey)
+	parsedToken, err := jwt.ParseWithClaims(accessToken, claims, func(jwtToken *jwt.Token) (interface{}, error) {
+		if _, ok := jwtToken.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", jwtToken.Header["alg"])
+		}
+		return secret, nil
+	}, jwt.WithSubject(global.PcAdminSubject), jwt.WithIssuer(global.Issuer))
 	if err != nil {
 		return nil, err
+	}
+	if !parsedToken.Valid {
+		return nil, e.NewBusinessError(1, "invalid token")
 	}
 	return claims, nil
 }

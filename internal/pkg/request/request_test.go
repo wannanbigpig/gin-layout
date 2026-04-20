@@ -30,3 +30,10 @@ func TestGetAccessTokenNilContext(t *testing.T) {
 		t.Fatal("expected nil context to return error")
 	}
 }
+
+func TestGetQueryParamsNilContext(t *testing.T) {
+	params := GetQueryParams(nil)
+	if len(params) != 0 {
+		t.Fatalf("expected empty map, got %#v", params)
+	}
+}

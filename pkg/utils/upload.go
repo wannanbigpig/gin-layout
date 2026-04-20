@@ -33,6 +33,7 @@ type FileInfo struct {
 }
 
 const fileHeaderSampleSize = 261
+const uploadBufferSize = 32 * 1024
 
 // ErrInvalidImageType 表示上传文件不是允许的图片类型。
 var ErrInvalidImageType = errors.New("uploaded file is not an allowed image")
@@ -253,36 +254,59 @@ func copyUploadedContent(dst io.Writer, src io.Reader) ([]byte, int64, string, e
 	hash := sha256.New()
 	writer := io.MultiWriter(dst, hash)
 	header := make([]byte, 0, fileHeaderSampleSize)
-	buffer := make([]byte, 32*1024)
+	buffer := make([]byte, uploadBufferSize)
 	var total int64
 
 	for {
-		n, err := src.Read(buffer)
+		n, readErr := src.Read(buffer)
 		if n > 0 {
 			chunk := buffer[:n]
-			if len(header) < fileHeaderSampleSize {
-				remaining := fileHeaderSampleSize - len(header)
-				if remaining > len(chunk) {
-					remaining = len(chunk)
-				}
-				header = append(header, chunk[:remaining]...)
-			}
-			written, writeErr := writer.Write(chunk)
-			if writeErr != nil {
-				return nil, 0, "", fmt.Errorf("写入临时文件失败: %w", writeErr)
+			header = appendHeaderSample(header, chunk)
+			written, err := writeUploadChunk(writer, chunk)
+			if err != nil {
+				return nil, 0, "", err
 			}
 			total += int64(written)
 		}
 
-		switch {
-		case err == nil:
+		done, err := shouldStopUploadRead(readErr)
+		if !done {
 			continue
-		case errors.Is(err, io.EOF):
-			return header, total, hex.EncodeToString(hash.Sum(nil)), nil
-		default:
-			return nil, 0, "", fmt.Errorf("读取文件失败: %w", err)
 		}
+		if err == nil {
+			return header, total, hex.EncodeToString(hash.Sum(nil)), nil
+		}
+		return nil, 0, "", fmt.Errorf("读取文件失败: %w", err)
 	}
+}
+
+func appendHeaderSample(header []byte, chunk []byte) []byte {
+	if len(header) >= fileHeaderSampleSize {
+		return header
+	}
+	remaining := fileHeaderSampleSize - len(header)
+	if remaining > len(chunk) {
+		remaining = len(chunk)
+	}
+	return append(header, chunk[:remaining]...)
+}
+
+func writeUploadChunk(dst io.Writer, chunk []byte) (int, error) {
+	written, err := dst.Write(chunk)
+	if err != nil {
+		return 0, fmt.Errorf("写入临时文件失败: %w", err)
+	}
+	return written, nil
+}
+
+func shouldStopUploadRead(err error) (bool, error) {
+	if err == nil {
+		return false, nil
+	}
+	if errors.Is(err, io.EOF) {
+		return true, nil
+	}
+	return true, err
 }
 
 func detectMimeType(header []byte) (string, string, error) {

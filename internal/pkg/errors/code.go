@@ -14,6 +14,12 @@ const (
 	ServiceDependencyNotReady = 10003
 	TooManyRequests           = 10102
 
+	// 文件相关错误码 11000-11999
+	FileIdentifierInvalid = 11001
+	FilePrivateAuthNeeded = 11002
+	FileAccessDenied      = 11003
+	FileUploadPartialFail = 11004
+
 	// 业务错误码 20000-29999
 	UserPasswordWrong       = 20001
 	UserExists              = 20002

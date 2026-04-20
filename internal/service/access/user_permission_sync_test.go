@@ -62,16 +62,15 @@ func TestPermissionSyncCoordinatorRunAfterCommitReloadsOnce(t *testing.T) {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
 
-	coordinator := NewPermissionSyncCoordinator()
 	reloadCount := 0
-	originalReloadPolicy := reloadPolicy
-	t.Cleanup(func() {
-		reloadPolicy = originalReloadPolicy
+	coordinator := NewPermissionSyncCoordinatorWithDeps(PermissionSyncCoordinatorDeps{
+		Syncer: NewUserPermissionSyncServiceWithDeps(UserPermissionSyncServiceDeps{
+			ReloadPolicy: func() error {
+				reloadCount++
+				return nil
+			},
+		}),
 	})
-	reloadPolicy = func() error {
-		reloadCount++
-		return nil
-	}
 
 	err = coordinator.RunAfterCommit(db, "reload failed", func(tx *gorm.DB) error {
 		if tx == nil {

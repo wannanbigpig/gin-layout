@@ -9,7 +9,6 @@ import (
 	"github.com/mssola/useragent"
 	"go.uber.org/zap"
 
-	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
@@ -34,7 +33,8 @@ func (s *LoginService) BuildLoginLogInfo(c *gin.Context) LoginLogInfo {
 
 // tryRefreshToken 尝试自动刷新 Token。
 func (s *LoginService) tryRefreshToken(principal *AuthPrincipal) {
-	if !mysqlReadyLookup() {
+	s.ensureRuntimeDeps()
+	if !s.mysqlReadyFn() {
 		return
 	}
 	if !s.shouldRefreshToken(principal) {
@@ -53,7 +53,7 @@ func (s *LoginService) tryRefreshToken(principal *AuthPrincipal) {
 
 // shouldRefreshToken 判断是否需要刷新 token。
 func (s *LoginService) shouldRefreshToken(principal *AuthPrincipal) bool {
-	cfg := config.GetConfig()
+	cfg := s.currentConfig()
 	if cfg.Jwt.RefreshTTL <= 0 || s.GetCtx() == nil || principal == nil || principal.Claims == nil {
 		return false
 	}
@@ -74,7 +74,8 @@ func (s *LoginService) buildRefreshLockKey(claims *token.AdminCustomClaims) stri
 
 // acquireRefreshLock 获取刷新锁。
 func (s *LoginService) acquireRefreshLock(lockKey string, claims *token.AdminCustomClaims) func() {
-	if !(config.GetConfig().Redis.Enable && data.RedisClient() != nil) {
+	cfg := s.currentConfig()
+	if !(cfg.Redis.Enable && data.RedisClient() != nil) {
 		return s.acquireMemoryLock(lockKey)
 	}
 
@@ -113,7 +114,8 @@ func (s *LoginService) acquireRedisLock(lockKey string) (func(), bool, error) {
 
 // acquireMemoryLock 获取内存锁。
 func (s *LoginService) acquireMemoryLock(lockKey string) func() {
-	memLock := memoryRefreshLock.getLock(lockKey)
+	s.ensureRuntimeDeps()
+	memLock := s.refreshLockStore.getLock(lockKey)
 	memLock.Lock()
 	return memLock.Unlock
 }

@@ -15,11 +15,37 @@ import (
 // LoginLogService 登录日志服务
 type AdminLoginLogService struct {
 	service.Base
+	configProvider func() *config.Conf
+}
+
+// AdminLoginLogServiceDeps 描述 AdminLoginLogService 可注入依赖。
+type AdminLoginLogServiceDeps struct {
+	ConfigProvider func() *config.Conf
 }
 
 // NewAdminLoginLogService 创建登录日志服务实例
 func NewAdminLoginLogService() *AdminLoginLogService {
-	return &AdminLoginLogService{}
+	return NewAdminLoginLogServiceWithDeps(AdminLoginLogServiceDeps{})
+}
+
+// NewAdminLoginLogServiceWithDeps 创建带依赖注入的登录日志服务实例。
+func NewAdminLoginLogServiceWithDeps(deps AdminLoginLogServiceDeps) *AdminLoginLogService {
+	s := &AdminLoginLogService{
+		configProvider: deps.ConfigProvider,
+	}
+	s.ensureRuntimeDeps()
+	return s
+}
+
+func (s *AdminLoginLogService) ensureRuntimeDeps() {
+	if s.configProvider == nil {
+		s.configProvider = config.GetConfig
+	}
+}
+
+func (s *AdminLoginLogService) currentConfig() *config.Conf {
+	s.ensureRuntimeDeps()
+	return config.GetConfigFrom(s.configProvider)
 }
 
 // List 分页查询登录日志列表
@@ -72,7 +98,7 @@ func (s *AdminLoginLogService) Detail(id uint) (any, error) {
 	if err := loginLog.GetById(id); err != nil || loginLog.ID == 0 {
 		return nil, e.NewBusinessError(1, "登录日志不存在")
 	}
-	decryptKey := config.GetConfig().Jwt.SecretKey
+	decryptKey := s.currentConfig().Jwt.SecretKey
 	loginLog.AccessToken = decryptLoginTokenIfNeeded(loginLog.AccessToken, decryptKey)
 	loginLog.RefreshToken = decryptLoginTokenIfNeeded(loginLog.RefreshToken, decryptKey)
 

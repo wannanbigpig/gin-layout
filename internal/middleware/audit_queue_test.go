@@ -21,30 +21,29 @@ import (
 )
 
 func TestEnqueueAuditLogDelegatesToPublisher(t *testing.T) {
-	original := enqueueAuditLogFunc
-	defer func() {
-		enqueueAuditLogFunc = original
-	}()
-
 	called := false
-	enqueueAuditLogFunc = func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
-		called = true
-		if kind != "request" {
-			t.Fatalf("unexpected kind: %s", kind)
-		}
-		if snapshot == nil || snapshot.RequestID != "req-1" {
-			t.Fatalf("unexpected snapshot: %#v", snapshot)
-		}
-		return nil
-	}
+	dispatcher := newAuditQueueDispatcher(auditQueueDispatcherDeps{
+		Enqueue: func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
+			called = true
+			if kind != "request" {
+				t.Fatalf("unexpected kind: %s", kind)
+			}
+			if snapshot == nil || snapshot.RequestID != "req-1" {
+				t.Fatalf("unexpected snapshot: %#v", snapshot)
+			}
+			return nil
+		},
+	})
+	restoreDispatcher := replaceDefaultAuditQueueDispatcherForTesting(dispatcher)
+	defer restoreDispatcher()
 
-	originalQueueEnable := config.Config.Queue.Enable
-	config.Config.Queue.Enable = true
-	defer func() {
-		config.Config.Queue.Enable = originalQueueEnable
-	}()
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.Enable = true
+	})
+	defer restoreConfig()
 
-	log.Logger = zap.NewNop()
+	restoreLogger := log.ReplaceLoggerForTesting(zap.NewNop())
+	defer restoreLogger()
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -59,95 +58,88 @@ func TestEnqueueAuditLogDelegatesToPublisher(t *testing.T) {
 
 	logRequest(ctx, respRecorder)
 	if !called {
-		t.Fatal("expected enqueueAuditLogFunc to be called")
+		t.Fatal("expected dispatcher enqueue to be called")
 	}
 }
 
 func TestEnqueueAuditLogFailureDoesNotPanic(t *testing.T) {
-	original := enqueueAuditLogFunc
-	defer func() {
-		enqueueAuditLogFunc = original
-	}()
-
-	enqueueAuditLogFunc = func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
-		return errors.New("enqueue failed")
-	}
+	dispatcher := newAuditQueueDispatcher(auditQueueDispatcherDeps{
+		Enqueue: func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
+			return errors.New("enqueue failed")
+		},
+	})
+	restoreDispatcher := replaceDefaultAuditQueueDispatcherForTesting(dispatcher)
+	defer restoreDispatcher()
 
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "req-2"})
 }
 
 func TestEnqueueAuditLogResetsUnavailableFlagAfterSuccess(t *testing.T) {
-	original := enqueueAuditLogFunc
-	defer func() {
-		enqueueAuditLogFunc = original
-	}()
+	dispatcher := newAuditQueueDispatcher(auditQueueDispatcherDeps{
+		Enqueue: func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
+			return nil
+		},
+	})
+	restoreDispatcher := replaceDefaultAuditQueueDispatcherForTesting(dispatcher)
+	defer restoreDispatcher()
 
-	enqueueAuditLogFunc = func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
-		return nil
-	}
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.Enable = true
+	})
+	defer restoreConfig()
 
-	originalQueueEnable := config.Config.Queue.Enable
-	config.Config.Queue.Enable = true
-	defer func() {
-		config.Config.Queue.Enable = originalQueueEnable
-	}()
-
-	auditQueueUnavailableLogged.Store(true)
+	dispatcher.queueUnavailableLogged.Store(true)
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "req-3"})
 
-	if auditQueueUnavailableLogged.Load() {
+	if dispatcher.queueUnavailableLogged.Load() {
 		t.Fatal("expected unavailable flag to be reset after successful enqueue")
 	}
 }
 
 func TestEnqueueAuditLogMarksUnavailableWhenPublisherUnavailable(t *testing.T) {
-	original := enqueueAuditLogFunc
-	defer func() {
-		enqueueAuditLogFunc = original
-	}()
+	dispatcher := newAuditQueueDispatcher(auditQueueDispatcherDeps{
+		Enqueue: func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
+			return queue.ErrPublisherUnavailable
+		},
+	})
+	restoreDispatcher := replaceDefaultAuditQueueDispatcherForTesting(dispatcher)
+	defer restoreDispatcher()
 
-	enqueueAuditLogFunc = func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
-		return queue.ErrPublisherUnavailable
-	}
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.Enable = true
+	})
+	defer restoreConfig()
 
-	originalQueueEnable := config.Config.Queue.Enable
-	config.Config.Queue.Enable = true
-	defer func() {
-		config.Config.Queue.Enable = originalQueueEnable
-	}()
-
-	auditQueueUnavailableLogged.Store(false)
+	dispatcher.queueUnavailableLogged.Store(false)
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "req-4"})
 
-	if !auditQueueUnavailableLogged.Load() {
+	if !dispatcher.queueUnavailableLogged.Load() {
 		t.Fatal("expected unavailable flag to be set when publisher unavailable")
 	}
 }
 
 func TestEnqueueAuditLogUsesLocalAsyncWriterWhenQueueDisabled(t *testing.T) {
-	originalLocalEnqueue := enqueueLocalAuditLogFunc
-	defer func() {
-		enqueueLocalAuditLogFunc = originalLocalEnqueue
-	}()
-
 	called := false
-	enqueueLocalAuditLogFunc = func(kind string, snapshot *auditsvc.AuditLogSnapshot) {
-		called = true
-		if kind != "request" {
-			t.Fatalf("unexpected kind: %s", kind)
-		}
-		if snapshot == nil || snapshot.RequestID != "req-db-unavailable" {
-			t.Fatalf("unexpected snapshot: %#v", snapshot)
-		}
-	}
+	dispatcher := newAuditQueueDispatcher(auditQueueDispatcherDeps{
+		EnqueueLocal: func(kind string, snapshot *auditsvc.AuditLogSnapshot) {
+			called = true
+			if kind != "request" {
+				t.Fatalf("unexpected kind: %s", kind)
+			}
+			if snapshot == nil || snapshot.RequestID != "req-db-unavailable" {
+				t.Fatalf("unexpected snapshot: %#v", snapshot)
+			}
+		},
+	})
+	restoreDispatcher := replaceDefaultAuditQueueDispatcherForTesting(dispatcher)
+	defer restoreDispatcher()
 
-	originalQueueEnable := config.Config.Queue.Enable
-	config.Config.Queue.Enable = false
-	defer func() {
-		config.Config.Queue.Enable = originalQueueEnable
-	}()
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.Enable = false
+	})
+	defer restoreConfig()
 
-	auditStorageUnavailableLogged.Store(false)
+	dispatcher.storageUnavailable.Store(false)
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "req-db-unavailable"})
 
 	if !called {
@@ -156,37 +148,35 @@ func TestEnqueueAuditLogUsesLocalAsyncWriterWhenQueueDisabled(t *testing.T) {
 }
 
 func TestReportAuditPersistenceResultMarksStorageUnavailable(t *testing.T) {
-	originalPersist := persistAuditLogFunc
-	defer func() {
-		persistAuditLogFunc = originalPersist
-	}()
+	dispatcher := newAuditQueueDispatcher(auditQueueDispatcherDeps{
+		Persist: func(snapshot *auditsvc.AuditLogSnapshot) error {
+			return model.ErrDBUninitialized
+		},
+	})
+	restoreDispatcher := replaceDefaultAuditQueueDispatcherForTesting(dispatcher)
+	defer restoreDispatcher()
 
-	persistAuditLogFunc = func(snapshot *auditsvc.AuditLogSnapshot) error {
-		return model.ErrDBUninitialized
-	}
-
-	auditStorageUnavailableLogged.Store(false)
+	dispatcher.storageUnavailable.Store(false)
 	reportAuditPersistenceResult("request", &auditsvc.AuditLogSnapshot{RequestID: "req-db-unavailable"}, "local_async")
 
-	if !auditStorageUnavailableLogged.Load() {
+	if !dispatcher.storageUnavailable.Load() {
 		t.Fatal("expected storage unavailable flag to be set when db is unavailable")
 	}
 }
 
 func TestReportAuditPersistenceResultResetsStorageUnavailableAfterSuccess(t *testing.T) {
-	originalPersist := persistAuditLogFunc
-	defer func() {
-		persistAuditLogFunc = originalPersist
-	}()
+	dispatcher := newAuditQueueDispatcher(auditQueueDispatcherDeps{
+		Persist: func(snapshot *auditsvc.AuditLogSnapshot) error {
+			return nil
+		},
+	})
+	restoreDispatcher := replaceDefaultAuditQueueDispatcherForTesting(dispatcher)
+	defer restoreDispatcher()
 
-	persistAuditLogFunc = func(snapshot *auditsvc.AuditLogSnapshot) error {
-		return nil
-	}
-
-	auditStorageUnavailableLogged.Store(true)
+	dispatcher.storageUnavailable.Store(true)
 	reportAuditPersistenceResult("request", &auditsvc.AuditLogSnapshot{RequestID: "req-db-ok"}, "local_async")
 
-	if auditStorageUnavailableLogged.Load() {
+	if dispatcher.storageUnavailable.Load() {
 		t.Fatal("expected storage unavailable flag to be reset after successful persistence")
 	}
 }

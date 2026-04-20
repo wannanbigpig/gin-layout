@@ -9,11 +9,9 @@ import (
 	"github.com/wannanbigpig/gin-layout/config"
 )
 
-var (
-	defaultMethods = []string{
-		"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
-	}
-)
+var builtInDefaultMethods = [...]string{
+	"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
+}
 
 func CorsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -65,11 +63,17 @@ func resolveAllowOrigin(origin string, cfg *config.Conf) (string, bool) {
 func getAllowedMethods(cfg *config.Conf) []string {
 	if len(cfg.CorsMethods) > 0 {
 		if hasWildcardValue(cfg.CorsMethods) {
-			return defaultMethods
+			return defaultMethods()
 		}
 		return cfg.CorsMethods
 	}
-	return defaultMethods
+	return defaultMethods()
+}
+
+func defaultMethods() []string {
+	methods := make([]string, len(builtInDefaultMethods))
+	copy(methods, builtInDefaultMethods[:])
+	return methods
 }
 
 func getAllowedHeaders(c *gin.Context, cfg *config.Conf) string {

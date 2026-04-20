@@ -17,7 +17,7 @@ const (
 
 // refreshTokenLock 内存锁存储（当Redis未启用时使用）。
 type refreshTokenLock struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	ttl   time.Duration
 	locks *gocache.Cache
 }
@@ -31,9 +31,12 @@ func newRefreshTokenLock(ttl, cleanupInterval time.Duration) *refreshTokenLock {
 
 // getLock 获取或创建指定 key 的锁。
 func (r *refreshTokenLock) getLock(key string) *sync.Mutex {
+	r.mu.RLock()
 	if lock, ok := r.locks.Get(key); ok {
+		r.mu.RUnlock()
 		return lock.(*sync.Mutex)
 	}
+	r.mu.RUnlock()
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -49,7 +52,17 @@ func (r *refreshTokenLock) getLock(key string) *sync.Mutex {
 	return newLock
 }
 
-var memoryRefreshLock = newRefreshTokenLock(refreshLockTTL, refreshLockTTL)
+var (
+	defaultRefreshLockStoreOnce sync.Once
+	defaultRefreshLockStoreInst *refreshTokenLock
+)
+
+func defaultRefreshLockStore() *refreshTokenLock {
+	defaultRefreshLockStoreOnce.Do(func() {
+		defaultRefreshLockStoreInst = newRefreshTokenLock(refreshLockTTL, refreshLockTTL)
+	})
+	return defaultRefreshLockStoreInst
+}
 
 // TokenResponse Token响应体。
 type TokenResponse struct {

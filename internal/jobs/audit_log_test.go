@@ -41,22 +41,19 @@ func TestAuditLogHandlerReturnsSkipRetryForInvalidPayload(t *testing.T) {
 }
 
 func TestAuditLogHandlerPersistsSnapshot(t *testing.T) {
-	original := persistAuditLogFunc
-	defer func() {
-		persistAuditLogFunc = original
-	}()
-
 	called := false
-	persistAuditLogFunc = func(snapshot *auditsvc.AuditLogSnapshot) error {
-		called = true
-		if snapshot == nil || snapshot.RequestID != "req-2" {
-			t.Fatalf("unexpected snapshot: %#v", snapshot)
-		}
-		return nil
+	deps := AuditLogHandlerDeps{
+		Persist: func(snapshot *auditsvc.AuditLogSnapshot) error {
+			called = true
+			if snapshot == nil || snapshot.RequestID != "req-2" {
+				t.Fatalf("unexpected snapshot: %#v", snapshot)
+			}
+			return nil
+		},
 	}
 
 	registry := queue.NewRegistry()
-	RegisterAll(registry)
+	RegisterAllWithDeps(registry, deps)
 	entries := registry.Entries()
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 registry entry, got %d", len(entries))

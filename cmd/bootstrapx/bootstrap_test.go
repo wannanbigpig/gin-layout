@@ -150,15 +150,14 @@ func stubBootstrapInitializers(dataFn, validatorFn, queueFn func() error) func()
 func setAllowDegradedStartup(t *testing.T, enabled bool) func() {
 	t.Helper()
 
-	originalConfig := config.Config
 	originalLogger := log.Logger
-	cloned := *config.Config
-	cloned.AllowDegradedStartup = enabled
-	config.Config = &cloned
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.AllowDegradedStartup = enabled
+	})
 	log.Logger = zap.NewNop()
 
 	return func() {
-		config.Config = originalConfig
+		restoreConfig()
 		log.Logger = originalLogger
 	}
 }

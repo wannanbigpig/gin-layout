@@ -29,7 +29,12 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	router = tests.SetupRouter()
+	var err error
+	router, err = tests.SetupRouter()
+	if err != nil {
+		_, _ = os.Stderr.WriteString("初始化测试路由失败: " + err.Error() + "\n")
+		os.Exit(1)
+	}
 	now := time.Now().UTC()
 	expiresAt := now.Add(time.Second * c.Config.Jwt.TTL)
 	claims := token.AdminCustomClaims{
@@ -49,7 +54,8 @@ func TestMain(m *testing.M) {
 	}
 	accessToken, err := token.Generate(claims)
 	if err != nil {
-		panic("创建管理员Token失败")
+		_, _ = os.Stderr.WriteString("创建管理员Token失败: " + err.Error() + "\n")
+		os.Exit(1)
 	}
 	authorization = "Bearer " + accessToken
 	mysqlEnabled = c.Config.Mysql.Enable

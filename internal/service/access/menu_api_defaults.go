@@ -15,7 +15,7 @@ type defaultMenuAPIBinding struct {
 	Method   string
 }
 
-var defaultMenuAPIBindings = []defaultMenuAPIBinding{
+var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "adminUser:update", Route: "/admin/v1/admin-user/update", Method: "POST"},
 	{MenuCode: "adminUser:add", Route: "/admin/v1/admin-user/create", Method: "POST"},
 	{MenuCode: "adminUser:bindRole", Route: "/admin/v1/admin-user/bind-role", Method: "POST"},
@@ -58,24 +58,56 @@ var defaultMenuAPIBindings = []defaultMenuAPIBinding{
 }
 
 // MenuAPIDefaultsService 负责初始化默认菜单与接口映射关系。
-type MenuAPIDefaultsService struct{}
+type MenuAPIDefaultsService struct {
+	bindings []defaultMenuAPIBinding
+}
+
+// MenuAPIDefaultsServiceDeps 描述 MenuAPIDefaultsService 可注入依赖。
+type MenuAPIDefaultsServiceDeps struct {
+	Bindings []defaultMenuAPIBinding
+}
 
 // NewMenuAPIDefaultsService 创建默认菜单接口映射服务实例。
 func NewMenuAPIDefaultsService() *MenuAPIDefaultsService {
-	return &MenuAPIDefaultsService{}
+	return NewMenuAPIDefaultsServiceWithDeps(MenuAPIDefaultsServiceDeps{})
+}
+
+// NewMenuAPIDefaultsServiceWithDeps 创建带依赖注入的默认菜单接口映射服务实例。
+func NewMenuAPIDefaultsServiceWithDeps(deps MenuAPIDefaultsServiceDeps) *MenuAPIDefaultsService {
+	s := &MenuAPIDefaultsService{}
+	if deps.Bindings != nil {
+		s.bindings = cloneMenuAPIBindings(deps.Bindings)
+	} else {
+		s.bindings = defaultMenuAPIBindings()
+	}
+	return s
+}
+
+func defaultMenuAPIBindings() []defaultMenuAPIBinding {
+	return cloneMenuAPIBindings(builtInDefaultMenuAPIBindings[:])
+}
+
+func cloneMenuAPIBindings(source []defaultMenuAPIBinding) []defaultMenuAPIBinding {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make([]defaultMenuAPIBinding, len(source))
+	copy(cloned, source)
+	return cloned
 }
 
 // Sync 将默认菜单接口映射写入数据库。
 func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
 	execTx := FirstTx(tx)
+	bindings := s.bindings
 
-	menuCodes := lo.Uniq(lo.Map(defaultMenuAPIBindings, func(item defaultMenuAPIBinding, _ int) string {
+	menuCodes := lo.Uniq(lo.Map(bindings, func(item defaultMenuAPIBinding, _ int) string {
 		return item.MenuCode
 	}))
-	routes := lo.Uniq(lo.Map(defaultMenuAPIBindings, func(item defaultMenuAPIBinding, _ int) string {
+	routes := lo.Uniq(lo.Map(bindings, func(item defaultMenuAPIBinding, _ int) string {
 		return item.Route
 	}))
-	methods := lo.Uniq(lo.Map(defaultMenuAPIBindings, func(item defaultMenuAPIBinding, _ int) string {
+	methods := lo.Uniq(lo.Map(bindings, func(item defaultMenuAPIBinding, _ int) string {
 		return item.Method
 	}))
 
@@ -97,8 +129,8 @@ func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
 		apiIDByRouteMethod[api.Method+":"+api.Route] = api.ID
 	}
 
-	mappings := make([]*model.MenuApiMap, 0, len(defaultMenuAPIBindings))
-	for _, item := range defaultMenuAPIBindings {
+	mappings := make([]*model.MenuApiMap, 0, len(bindings))
+	for _, item := range bindings {
 		menuID, ok := menuIDByCode[item.MenuCode]
 		if !ok {
 			continue

@@ -9,7 +9,13 @@ import (
 )
 
 // GetQueryParams 提取当前请求的查询参数。
+// 说明：
+//   - 不做字段白名单过滤，调用方需自行约束参数使用范围；
+//   - 仅保留每个 key 的首个值（与 c.Query 行为一致）。
 func GetQueryParams(c *gin.Context) map[string]any {
+	if c == nil {
+		return map[string]any{}
+	}
 	query := c.Request.URL.Query()
 	var queryMap = make(map[string]any, len(query))
 	for k := range query {

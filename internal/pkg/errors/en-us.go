@@ -13,10 +13,12 @@ var enUSText = map[int]string{
 	AuthorizationErr:          "You have no permission",
 	NotLogin:                  "Please login first",
 	CaptchaErr:                "Captcha error",
-	FileIdentifierInvalid:     "invalid file identifier",
-	FilePrivateAuthNeeded:     "login required for private file access",
-	FileAccessDenied:          "no permission to access this file",
-	FileUploadPartialFail:     "partial image upload failure",
+
+	// File-related error messages 11000-11999
+	FileIdentifierInvalid: "invalid file identifier",
+	FilePrivateAuthNeeded: "login required for private file access",
+	FileAccessDenied:      "no permission to access this file",
+	FileUploadPartialFail: "partial image upload failure",
 
 	// Business error messages 20000-29999
 	UserPasswordWrong:       "Incorrect password",

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/config/autoload"
 )
 
 func TestApiRouteCacheServiceDefaultsWithoutDatabase(t *testing.T) {
@@ -33,14 +34,13 @@ func TestApiRouteCacheServiceCacheKey(t *testing.T) {
 }
 
 func TestApiRouteCacheServiceGetRouteInfoSingleflightDeduplicates(t *testing.T) {
-	originalRedisEnable := config.Config.Redis.Enable
-	config.Config.Redis.Enable = false
-	defer func() {
-		config.Config.Redis.Enable = originalRedisEnable
-	}()
-
 	service := NewApiRouteCacheService()
 	service.ResetMetrics()
+	service.configProvider = func() *config.Conf {
+		return &config.Conf{
+			Redis: autoload.RedisConfig{Enable: false},
+		}
+	}
 	var loadCalls int32
 	service.loadRouteInfo = func(route string, method string) (*ApiRouteInfo, error) {
 		atomic.AddInt32(&loadCalls, 1)
@@ -105,13 +105,13 @@ func TestApiRouteCacheServiceResetMetrics(t *testing.T) {
 	service := NewApiRouteCacheService()
 	service.ResetMetrics()
 
-	routeCacheMetrics.requestTotal.Store(3)
-	routeCacheMetrics.cacheHitTotal.Store(2)
-	routeCacheMetrics.cacheMissTotal.Store(1)
-	routeCacheMetrics.sourceLoadTotal.Store(1)
-	routeCacheMetrics.singleflightShared.Store(1)
-	routeCacheMetrics.refreshBatchTotal.Store(2)
-	routeCacheMetrics.refreshWriteTotal.Store(9)
+	service.metrics.requestTotal.Store(3)
+	service.metrics.cacheHitTotal.Store(2)
+	service.metrics.cacheMissTotal.Store(1)
+	service.metrics.sourceLoadTotal.Store(1)
+	service.metrics.singleflightShared.Store(1)
+	service.metrics.refreshBatchTotal.Store(2)
+	service.metrics.refreshWriteTotal.Store(9)
 
 	service.ResetMetrics()
 	snapshot := service.MetricsSnapshot()

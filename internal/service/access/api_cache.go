@@ -27,9 +27,6 @@ const (
 	apiCacheWriteBatch          = 500
 )
 
-var routeInfoSingleflight singleflight.Group
-var routeCacheMetrics apiRouteCacheMetrics
-
 // ApiRouteInfo 描述接口路由的鉴权属性和展示名称。
 type ApiRouteInfo struct {
 	IsAuth uint8  `json:"is_auth"`
@@ -65,19 +62,45 @@ type ApiRouteCacheMetricsSnapshot struct {
 
 // ApiRouteCacheService 负责缓存 API 路由元数据。
 type ApiRouteCacheService struct {
-	loadRouteInfo func(route string, method string) (*ApiRouteInfo, error)
+	loadRouteInfo     func(route string, method string) (*ApiRouteInfo, error)
+	singleflightGroup *singleflight.Group
+	metrics           *apiRouteCacheMetrics
+	configProvider    func() *config.Conf
 }
 
 // NewApiRouteCacheService 创建 API 路由缓存服务实例。
 func NewApiRouteCacheService() *ApiRouteCacheService {
-	return &ApiRouteCacheService{}
+	return &ApiRouteCacheService{
+		singleflightGroup: &singleflight.Group{},
+		metrics:           &apiRouteCacheMetrics{},
+		configProvider:    config.GetConfig,
+	}
+}
+
+func (s *ApiRouteCacheService) ensureRuntimeDeps() {
+	if s.singleflightGroup == nil {
+		s.singleflightGroup = &singleflight.Group{}
+	}
+	if s.metrics == nil {
+		s.metrics = &apiRouteCacheMetrics{}
+	}
+	if s.configProvider == nil {
+		s.configProvider = config.GetConfig
+	}
+}
+
+func (s *ApiRouteCacheService) currentConfig() *config.Conf {
+	s.ensureRuntimeDeps()
+	return config.GetConfigFrom(s.configProvider)
 }
 
 // MetricsSnapshot 返回当前 API 路由缓存指标快照。
 func (s *ApiRouteCacheService) MetricsSnapshot() ApiRouteCacheMetricsSnapshot {
-	requestTotal := routeCacheMetrics.requestTotal.Load()
-	cacheHitTotal := routeCacheMetrics.cacheHitTotal.Load()
-	cacheMissTotal := routeCacheMetrics.cacheMissTotal.Load()
+	s.ensureRuntimeDeps()
+
+	requestTotal := s.metrics.requestTotal.Load()
+	cacheHitTotal := s.metrics.cacheHitTotal.Load()
+	cacheMissTotal := s.metrics.cacheMissTotal.Load()
 
 	hitRate := 0.0
 	if requestTotal > 0 {
@@ -89,22 +112,24 @@ func (s *ApiRouteCacheService) MetricsSnapshot() ApiRouteCacheMetricsSnapshot {
 		CacheHitTotal:      cacheHitTotal,
 		CacheMissTotal:     cacheMissTotal,
 		HitRate:            hitRate,
-		SourceLoadTotal:    routeCacheMetrics.sourceLoadTotal.Load(),
-		SingleflightShared: routeCacheMetrics.singleflightShared.Load(),
-		RefreshBatchTotal:  routeCacheMetrics.refreshBatchTotal.Load(),
-		RefreshWriteTotal:  routeCacheMetrics.refreshWriteTotal.Load(),
+		SourceLoadTotal:    s.metrics.sourceLoadTotal.Load(),
+		SingleflightShared: s.metrics.singleflightShared.Load(),
+		RefreshBatchTotal:  s.metrics.refreshBatchTotal.Load(),
+		RefreshWriteTotal:  s.metrics.refreshWriteTotal.Load(),
 	}
 }
 
 // ResetMetrics 清空 API 路由缓存指标。
 func (s *ApiRouteCacheService) ResetMetrics() {
-	routeCacheMetrics.requestTotal.Store(0)
-	routeCacheMetrics.cacheHitTotal.Store(0)
-	routeCacheMetrics.cacheMissTotal.Store(0)
-	routeCacheMetrics.sourceLoadTotal.Store(0)
-	routeCacheMetrics.singleflightShared.Store(0)
-	routeCacheMetrics.refreshBatchTotal.Store(0)
-	routeCacheMetrics.refreshWriteTotal.Store(0)
+	s.ensureRuntimeDeps()
+
+	s.metrics.requestTotal.Store(0)
+	s.metrics.cacheHitTotal.Store(0)
+	s.metrics.cacheMissTotal.Store(0)
+	s.metrics.sourceLoadTotal.Store(0)
+	s.metrics.singleflightShared.Store(0)
+	s.metrics.refreshBatchTotal.Store(0)
+	s.metrics.refreshWriteTotal.Store(0)
 }
 
 func (s *ApiRouteCacheService) cacheKey(route string, method string) string {
@@ -155,7 +180,9 @@ func (s *ApiRouteCacheService) writeRouteCacheBatch(parent context.Context, clie
 
 // RefreshCache 重建 Redis 中的 API 路由缓存。
 func (s *ApiRouteCacheService) RefreshCache() error {
-	cfg := config.GetConfig()
+	s.ensureRuntimeDeps()
+
+	cfg := s.currentConfig()
 	if !cfg.Redis.Enable {
 		return nil
 	}
@@ -239,16 +266,17 @@ func (s *ApiRouteCacheService) RefreshCache() error {
 	}
 	shouldCleanupTempKey = false
 
-	routeCacheMetrics.refreshBatchTotal.Add(uint64(batchCount))
-	routeCacheMetrics.refreshWriteTotal.Add(uint64(writeCount))
+	s.metrics.refreshBatchTotal.Add(uint64(batchCount))
+	s.metrics.refreshWriteTotal.Add(uint64(writeCount))
 	return nil
 }
 
 // GetRouteInfo 返回指定路由的方法元数据。
 func (s *ApiRouteCacheService) GetRouteInfo(route string, method string) (*ApiRouteInfo, error) {
-	routeCacheMetrics.requestTotal.Add(1)
+	s.ensureRuntimeDeps()
+	s.metrics.requestTotal.Add(1)
 
-	cfg := config.GetConfig()
+	cfg := s.currentConfig()
 	cacheKey := s.cacheKey(route, method)
 
 	client := data.RedisClient()
@@ -260,7 +288,7 @@ func (s *ApiRouteCacheService) GetRouteInfo(route string, method string) (*ApiRo
 			var cacheInfo ApiRouteInfo
 			unmarshalErr := json.Unmarshal([]byte(val), &cacheInfo)
 			if unmarshalErr == nil {
-				routeCacheMetrics.cacheHitTotal.Add(1)
+				s.metrics.cacheHitTotal.Add(1)
 				return &cacheInfo, nil
 			}
 			logError("api 路由缓存反序列化失败", unmarshalErr, route, method)
@@ -272,12 +300,12 @@ func (s *ApiRouteCacheService) GetRouteInfo(route string, method string) (*ApiRo
 		}
 	}
 
-	routeCacheMetrics.cacheMissTotal.Add(1)
-	value, err, shared := routeInfoSingleflight.Do(cacheKey, func() (interface{}, error) {
+	s.metrics.cacheMissTotal.Add(1)
+	value, err, shared := s.singleflightGroup.Do(cacheKey, func() (interface{}, error) {
 		return s.loadRouteInfoFromSource(route, method)
 	})
 	if shared {
-		routeCacheMetrics.singleflightShared.Add(1)
+		s.metrics.singleflightShared.Add(1)
 	}
 	if err != nil {
 		return nil, err
@@ -290,7 +318,8 @@ func (s *ApiRouteCacheService) GetRouteInfo(route string, method string) (*ApiRo
 }
 
 func (s *ApiRouteCacheService) loadRouteInfoFromSource(route string, method string) (*ApiRouteInfo, error) {
-	routeCacheMetrics.sourceLoadTotal.Add(1)
+	s.ensureRuntimeDeps()
+	s.metrics.sourceLoadTotal.Add(1)
 
 	if s.loadRouteInfo != nil {
 		return s.loadRouteInfo(route, method)
@@ -302,7 +331,7 @@ func (s *ApiRouteCacheService) loadRouteInfoFromSource(route string, method stri
 	}
 
 	cacheInfo := &ApiRouteInfo{IsAuth: api.IsAuth, Name: api.Name}
-	cfg := config.GetConfig()
+	cfg := s.currentConfig()
 	client := data.RedisClient()
 	if cfg.Redis.Enable && client != nil {
 		if cacheInfoBytes, err := json.Marshal(cacheInfo); err == nil {
