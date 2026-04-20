@@ -22,25 +22,41 @@ import (
 // LoginService 登录授权服务。
 type LoginService struct {
 	service.Base
-	configProvider          func() *config.Conf
-	blacklistLookupFn       func(jwtID string) (bool, error)
-	tokenRevokedLookupFn    func(jwtID string) bool
-	mysqlReadyFn            func() bool
-	refreshLockStore        *refreshTokenLock
-	tryRefreshPrincipalFn   func(principal *AuthPrincipal)
-	markTokensRevokedFn     func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
+	// configProvider 提供运行时配置读取入口。
+	configProvider func() *config.Conf
+	// blacklistLookupFn 查询 token 是否在 Redis 黑名单中。
+	blacklistLookupFn func(jwtID string) (bool, error)
+	// tokenRevokedLookupFn 查询 token 是否在登录日志中已标记撤销。
+	tokenRevokedLookupFn func(jwtID string) bool
+	// mysqlReadyFn 判断 MySQL 依赖是否可用。
+	mysqlReadyFn func() bool
+	// refreshLockStore 在 Redis 不可用时提供进程内刷新锁。
+	refreshLockStore *refreshTokenLock
+	// tryRefreshPrincipalFn 执行 principal 自动刷新逻辑。
+	tryRefreshPrincipalFn func(principal *AuthPrincipal)
+	// markTokensRevokedFn 批量标记 token 为撤销状态。
+	markTokensRevokedFn func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
+	// writeTokenToBlacklistFn 将 token 写入 Redis 黑名单。
 	writeTokenToBlacklistFn func(jwtID string, remainingTime time.Duration) error
 }
 
 // LoginServiceDeps 描述 LoginService 可注入依赖。
 type LoginServiceDeps struct {
-	ConfigProvider        func() *config.Conf
-	BlacklistLookup       func(jwtID string) (bool, error)
-	TokenRevokedLookup    func(jwtID string) bool
-	MySQLReady            func() bool
-	RefreshLockStore      *refreshTokenLock
-	TryRefreshPrincipal   func(principal *AuthPrincipal)
-	MarkTokensRevoked     func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
+	// ConfigProvider 自定义配置读取函数。
+	ConfigProvider func() *config.Conf
+	// BlacklistLookup 自定义 Redis 黑名单查询实现。
+	BlacklistLookup func(jwtID string) (bool, error)
+	// TokenRevokedLookup 自定义登录日志撤销状态查询实现。
+	TokenRevokedLookup func(jwtID string) bool
+	// MySQLReady 自定义 MySQL 可用性判断逻辑。
+	MySQLReady func() bool
+	// RefreshLockStore 自定义内存刷新锁存储实现。
+	RefreshLockStore *refreshTokenLock
+	// TryRefreshPrincipal 自定义自动刷新 principal 的执行入口。
+	TryRefreshPrincipal func(principal *AuthPrincipal)
+	// MarkTokensRevoked 自定义 token 撤销标记逻辑。
+	MarkTokensRevoked func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
+	// WriteTokenToBlacklist 自定义写 Redis 黑名单逻辑。
 	WriteTokenToBlacklist func(jwtID string, remainingTime time.Duration) error
 }
 

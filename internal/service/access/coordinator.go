@@ -8,13 +8,17 @@ import (
 
 // PermissionSyncCoordinator 统一协调权限重建触发逻辑。
 type PermissionSyncCoordinator struct {
-	syncer   *UserPermissionSyncService
+	// syncer 执行用户权限重建与清理。
+	syncer *UserPermissionSyncService
+	// resolver 解析资源变更对应的受影响用户集合。
 	resolver *AffectedUsersResolver
 }
 
 // PermissionSyncCoordinatorDeps 描述 PermissionSyncCoordinator 可注入依赖。
 type PermissionSyncCoordinatorDeps struct {
-	Syncer   *UserPermissionSyncService
+	// Syncer 自定义权限同步服务实现。
+	Syncer *UserPermissionSyncService
+	// Resolver 自定义受影响用户解析实现。
 	Resolver *AffectedUsersResolver
 }
 

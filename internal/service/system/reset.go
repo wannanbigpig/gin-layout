@@ -24,6 +24,7 @@ const migrationsPathEnvKey = "GO_LAYOUT_MIGRATIONS_PATH"
 // ResetService 保留历史入口，对外统一暴露系统维护能力。
 // 当前不持有状态，仅为兼容旧调用保留。
 type ResetService struct {
+	// configProvider 提供运行时配置读取入口。
 	configProvider func() *config.Conf
 }
 
@@ -34,6 +35,7 @@ func NewResetService() *ResetService {
 
 // ResetServiceDeps 描述 ResetService 可注入依赖。
 type ResetServiceDeps struct {
+	// ConfigProvider 自定义配置读取函数。
 	ConfigProvider func() *config.Conf
 }
 

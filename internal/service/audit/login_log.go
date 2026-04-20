@@ -15,11 +15,13 @@ import (
 // LoginLogService 登录日志服务
 type AdminLoginLogService struct {
 	service.Base
+	// configProvider 提供运行时配置读取入口。
 	configProvider func() *config.Conf
 }
 
 // AdminLoginLogServiceDeps 描述 AdminLoginLogService 可注入依赖。
 type AdminLoginLogServiceDeps struct {
+	// ConfigProvider 自定义配置读取函数。
 	ConfigProvider func() *config.Conf
 }
 

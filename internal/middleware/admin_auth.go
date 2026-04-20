@@ -20,7 +20,9 @@ type routeAuthChecker interface {
 }
 
 type permissionDeps struct {
+	// loadEnforcer 加载 Casbin enforcer。
 	loadEnforcer func() (*casbinx.CasbinEnforcer, error)
+	// routeChecker 判断路由是否需要权限拦截。
 	routeChecker routeAuthChecker
 }
 

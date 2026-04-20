@@ -9,11 +9,13 @@ import (
 
 // UserPermissionSyncService 负责把数据库关系展开为用户最终接口权限。
 type UserPermissionSyncService struct {
+	// reloadPolicyFn 刷新 Casbin 内存策略缓存。
 	reloadPolicyFn func() error
 }
 
 // UserPermissionSyncServiceDeps 描述 UserPermissionSyncService 可注入依赖。
 type UserPermissionSyncServiceDeps struct {
+	// ReloadPolicy 自定义策略刷新实现（测试场景常用）。
 	ReloadPolicy func() error
 }
 

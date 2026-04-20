@@ -24,26 +24,39 @@ const (
 )
 
 type auditPersistTask struct {
-	kind     string
+	// kind 审计日志类别（request/panic 等）。
+	kind string
+	// snapshot 审计日志不可变快照。
 	snapshot *audit.AuditLogSnapshot
 }
 
 type auditQueueDispatcherDeps struct {
-	Enqueue      func(ctx context.Context, kind string, snapshot *audit.AuditLogSnapshot) error
+	// Enqueue 发送审计任务到消息队列。
+	Enqueue func(ctx context.Context, kind string, snapshot *audit.AuditLogSnapshot) error
+	// EnqueueLocal 本地异步降级入队实现。
 	EnqueueLocal func(kind string, snapshot *audit.AuditLogSnapshot)
-	Persist      func(snapshot *audit.AuditLogSnapshot) error
+	// Persist 落库存储实现。
+	Persist func(snapshot *audit.AuditLogSnapshot) error
 }
 
 type auditQueueDispatcher struct {
-	enqueueFn      func(ctx context.Context, kind string, snapshot *audit.AuditLogSnapshot) error
+	// enqueueFn 队列发送函数。
+	enqueueFn func(ctx context.Context, kind string, snapshot *audit.AuditLogSnapshot) error
+	// enqueueLocalFn 本地异步缓冲入队函数。
 	enqueueLocalFn func(kind string, snapshot *audit.AuditLogSnapshot)
-	persistFn      func(snapshot *audit.AuditLogSnapshot) error
+	// persistFn 审计日志落库函数。
+	persistFn func(snapshot *audit.AuditLogSnapshot) error
 
+	// queueUnavailableLogged 避免重复打印队列不可用告警。
 	queueUnavailableLogged atomic.Bool
-	storageUnavailable     atomic.Bool
-	localBufferFullLogged  atomic.Bool
-	localWriterOnce        sync.Once
-	localWriterChan        chan auditPersistTask
+	// storageUnavailable 避免重复打印存储不可用告警。
+	storageUnavailable atomic.Bool
+	// localBufferFullLogged 避免重复打印本地缓冲区满告警。
+	localBufferFullLogged atomic.Bool
+	// localWriterOnce 确保本地写协程只初始化一次。
+	localWriterOnce sync.Once
+	// localWriterChan 本地异步持久化任务通道。
+	localWriterChan chan auditPersistTask
 }
 
 func newAuditQueueDispatcher(deps auditQueueDispatcherDeps) *auditQueueDispatcher {

@@ -142,7 +142,7 @@ func (m *AdminLoginLogs) UpdateRevokedStatusByJwtIds(jwtIds []string, revokedCod
 	if err != nil {
 		return err
 	}
-	return db.Where("jwt_id IN ? AND deleted_at = 0 AND is_revoked = ?", jwtIds, IsRevokedNo).
+	return db.Model(&AdminLoginLogs{}).Where("jwt_id IN ? AND deleted_at = 0 AND is_revoked = ?", jwtIds, IsRevokedNo).
 		Updates(map[string]interface{}{
 			"is_revoked":     IsRevokedYes,
 			"revoked_code":   revokedCode,

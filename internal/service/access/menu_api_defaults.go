@@ -10,9 +10,12 @@ import (
 )
 
 type defaultMenuAPIBinding struct {
+	// MenuCode 菜单编码。
 	MenuCode string
-	Route    string
-	Method   string
+	// Route 绑定的接口路由。
+	Route string
+	// Method 绑定的 HTTP 方法。
+	Method string
 }
 
 var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
@@ -59,11 +62,13 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 
 // MenuAPIDefaultsService 负责初始化默认菜单与接口映射关系。
 type MenuAPIDefaultsService struct {
+	// bindings 默认菜单与接口绑定配置。
 	bindings []defaultMenuAPIBinding
 }
 
 // MenuAPIDefaultsServiceDeps 描述 MenuAPIDefaultsService 可注入依赖。
 type MenuAPIDefaultsServiceDeps struct {
+	// Bindings 自定义默认菜单接口绑定。
 	Bindings []defaultMenuAPIBinding
 }
 
