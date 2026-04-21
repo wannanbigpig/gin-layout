@@ -185,9 +185,8 @@ CREATE TABLE IF NOT EXISTS `admin_user_department_map`
     `created_at` datetime              DEFAULT NULL,
     `updated_at` datetime              DEFAULT NULL,
     PRIMARY KEY (`id`) USING BTREE,
-    KEY `idx_uid` (`uid`),
-    KEY `idx_dept_id` (`dept_id`),
-    KEY `idx_uid_dept_id` (`uid`, `dept_id`)
+    UNIQUE KEY `idx_uid_dept_id` (`uid`, `dept_id`),
+    KEY `idx_dept_id_uid` (`dept_id`, `uid`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
@@ -203,8 +202,7 @@ CREATE TABLE IF NOT EXISTS `menu_api_map`
     `updated_at` datetime              DEFAULT NULL,
     PRIMARY KEY (`id`) USING BTREE,
     UNIQUE KEY `idx_menu_id_api_id` (`menu_id`, `api_id`),
-    KEY `idx_menu_id` (`menu_id`),
-    KEY `idx_api_id` (`api_id`)
+    KEY `idx_api_id_menu_id` (`api_id`, `menu_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
@@ -223,9 +221,8 @@ CREATE TABLE IF NOT EXISTS `role_menu_map`
     `created_at` datetime              DEFAULT NULL,
     `updated_at` datetime              DEFAULT NULL,
     PRIMARY KEY (`id`) USING BTREE,
-    KEY `idx_role_id` (`role_id`),
-    KEY `idx_menu_id` (`menu_id`),
-    KEY `idx_role_id_menu_id` (`role_id`, `menu_id`)
+    UNIQUE KEY `idx_role_id_menu_id` (`role_id`, `menu_id`),
+    KEY `idx_menu_id_role_id` (`menu_id`, `role_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
@@ -240,9 +237,8 @@ CREATE TABLE IF NOT EXISTS `admin_user_menu_map`
     `created_at` datetime              DEFAULT NULL,
     `updated_at` datetime              DEFAULT NULL,
     PRIMARY KEY (`id`) USING BTREE,
-    KEY `idx_uid` (`uid`),
-    KEY `idx_menu_id` (`menu_id`),
-    KEY `idx_uid_menu_id` (`uid`, `menu_id`)
+    UNIQUE KEY `idx_uid_menu_id` (`uid`, `menu_id`),
+    KEY `idx_menu_id_uid` (`menu_id`, `uid`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
@@ -257,9 +253,8 @@ CREATE TABLE IF NOT EXISTS `department_role_map`
     `created_at` datetime              DEFAULT NULL,
     `updated_at` datetime              DEFAULT NULL,
     PRIMARY KEY (`id`) USING BTREE,
-    KEY `idx_dept_id` (`dept_id`),
-    KEY `idx_role_id` (`role_id`),
-    KEY `idx_dept_id_role_id` (`dept_id`, `role_id`)
+    UNIQUE KEY `idx_dept_id_role_id` (`dept_id`, `role_id`),
+    KEY `idx_role_id_dept_id` (`role_id`, `dept_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
@@ -274,9 +269,8 @@ CREATE TABLE IF NOT EXISTS `admin_user_role_map`
     `created_at` datetime              DEFAULT NULL,
     `updated_at` datetime              DEFAULT NULL,
     PRIMARY KEY (`id`) USING BTREE,
-    KEY `idx_uid` (`uid`),
-    KEY `idx_role_id` (`role_id`),
-    KEY `idx_uid_role_id` (`uid`, `role_id`)
+    UNIQUE KEY `idx_uid_role_id` (`uid`, `role_id`),
+    KEY `idx_role_id_uid` (`role_id`, `uid`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
@@ -294,7 +288,7 @@ CREATE TABLE IF NOT EXISTS `admin_login_logs`
     `token_hash`         char(64)         NOT NULL DEFAULT '' COMMENT 'Token的SHA256哈希值',
     `refresh_token_hash` char(64)         NOT NULL DEFAULT '' COMMENT 'Refresh Token的哈希值',
     `ip`                 varchar(45)      NOT NULL DEFAULT '' COMMENT '登录IP(支持IPv6)',
-    `user_agent`         varchar(255)     NOT NULL DEFAULT '' COMMENT '用户代理（浏览器/设备信息）',
+    `user_agent`         varchar(1024)    NOT NULL DEFAULT '' COMMENT '用户代理（浏览器/设备信息）',
     `os`                 varchar(50)      NOT NULL DEFAULT '' COMMENT '操作系统',
     `browser`            varchar(50)      NOT NULL DEFAULT '' COMMENT '浏览器',
     `execution_time`     int(11)          NOT NULL DEFAULT '0' COMMENT '登录耗时（毫秒）',
@@ -311,14 +305,11 @@ CREATE TABLE IF NOT EXISTS `admin_login_logs`
     `updated_at`         datetime                  DEFAULT NULL,
     `deleted_at`         int              NOT NULL DEFAULT '0' COMMENT '删除时间戳',
     PRIMARY KEY (`id`),
-    KEY `aall_jwt_id` (`jwt_id`),
-    KEY `aall_uid_deleted_at_is_revoked_created_at` (`uid`, `deleted_at`, `is_revoked`, `created_at`),
-    KEY `aall_username_deleted_at_created_at` (`username`, `deleted_at`, `created_at`),
-    KEY `aall_type_deleted_at_created_at` (`type`, `deleted_at`, `created_at`),
+    KEY `aall_deleted_at_created_at` (`deleted_at`, `created_at`),
     KEY `aall_login_status_deleted_at_created_at` (`login_status`, `deleted_at`, `created_at`),
-    KEY `aall_token_hash_deleted_at` (`token_hash`, `deleted_at`),
-    KEY `aall_refresh_token_hash_deleted_at` (`refresh_token_hash`, `deleted_at`),
-    KEY `aall_token_expires_deleted_at` (`token_expires`, `deleted_at`)
+    KEY `aall_is_revoked_deleted_at_revoked_at` (`is_revoked`, `deleted_at`, `revoked_at`),
+    KEY `aall_uid_deleted_at_is_revoked_login_status_token_expires` (`uid`, `deleted_at`, `is_revoked`, `login_status`, `token_expires`),
+    KEY `aall_jwt_id_deleted_at_is_revoked` (`jwt_id`, `deleted_at`, `is_revoked`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='管理员登录日志表';
@@ -331,7 +322,7 @@ CREATE TABLE IF NOT EXISTS `request_logs`
     `jwt_id`          varchar(36)  NOT NULL DEFAULT '' COMMENT '请求授权的jwtId',
     `operator_id`     bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT '操作ID（用户ID）',
     `ip`              varchar(45)  NOT NULL DEFAULT '' COMMENT '客户端IP地址',
-    `user_agent`      varchar(255) NOT NULL DEFAULT '' COMMENT '用户代理（浏览器/设备信息）',
+    `user_agent`      varchar(1024) NOT NULL DEFAULT '' COMMENT '用户代理（浏览器/设备信息）',
     `os`             varchar(50)  NOT NULL DEFAULT '' COMMENT '操作系统',
     `browser`        varchar(50)  NOT NULL DEFAULT '' COMMENT '浏览器',
     `method`          varchar(10)  NOT NULL DEFAULT '' COMMENT 'HTTP请求方法（GET/POST等）',
@@ -352,7 +343,8 @@ CREATE TABLE IF NOT EXISTS `request_logs`
     PRIMARY KEY (`id`),
     KEY `rl_request_id` (`request_id`),
     KEY `rl_operator_id_created_at` (`operator_id`, `created_at`),
-    KEY `rl_base_url_method` (`base_url`, `method`),
+    KEY `rl_base_url_method_created_at` (`base_url`, `method`, `created_at`),
+    KEY `rl_operation_status_created_at` (`operation_status`, `created_at`),
     KEY `rl_response_status_operator_id_created_at` (`response_status`, `operator_id`, `created_at`),
     KEY `rl_operator_account_created_at` (`operator_account`, `created_at`),
     KEY `rl_created_at` (`created_at`),
@@ -395,8 +387,8 @@ CREATE TABLE IF NOT EXISTS `upload_files`
     `updated_at`  datetime              DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_uid_created_at` (`uid`, `created_at`),
-    KEY `idx_hash` (`hash`),
-    KEY `idx_uuid` (`uuid`),
+    KEY `idx_hash_is_public` (`hash`, `is_public`),
+    UNIQUE KEY `idx_uuid` (`uuid`),
     KEY `idx_is_public_uuid` (`is_public`, `uuid`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
