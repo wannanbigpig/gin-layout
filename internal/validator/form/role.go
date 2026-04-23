@@ -19,7 +19,7 @@ type rolePayload struct {
 	Status      uint8  `form:"status" json:"status"  binding:"omitempty,oneof=0 1"`
 	Pid         uint   `form:"pid" json:"pid" binding:"omitempty"`
 	Sort        uint   `form:"sort" json:"sort" binding:"omitempty"`
-	MenuList    []uint `form:"menu_ids" json:"menu_list" binding:"omitempty"`
+	MenuList    []uint `form:"menu_ids" json:"menu_list" binding:"omitempty,dive,gt=0"`
 }
 
 type CreateRole struct {

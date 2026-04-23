@@ -11,7 +11,7 @@
 </div>
 
 <div align="center">
-  内置 JWT 认证、RBAC 权限、请求/登录日志、文件上传、readiness 探针、参数校验、声明式路由和 CLI 初始化命令。
+  内置 JWT 认证、RBAC 权限、请求/登录日志、文件上传、readiness 探针、参数校验、请求语言国际化、声明式路由和 CLI 初始化命令。
 </div>
 
 <br />
@@ -46,6 +46,7 @@
 | Route Metadata | 声明式路由树统一生成 Gin 路由和 API 元数据 |
 | Logs | 内置登录日志、请求日志、统一响应结构 |
 | File Access | 文件上传与公开 / 私有文件访问 |
+| I18n | 基于 `Accept-Language` 返回错误文案与菜单标题（支持 `zh-CN` / `en-US`） |
 | Health Probes | 提供 `/ping` 与 `/health/readiness`，便于存活检测与依赖就绪检查 |
 | Tooling | 提供 CLI 初始化、路由同步、权限重建、迁移配套能力 |
 | Hot Reload | 支持部分配置热更新，失败时保留旧实例继续运行 |
@@ -99,6 +100,7 @@ migrate -database 'mysql://root:root@tcp(127.0.0.1:3306)/go_layout?charset=utf8m
 app:
   app_env: local
   debug: true
+  language: zh_CN
   trusted_proxies:
     - 127.0.0.1
   watch_config: true
@@ -186,6 +188,15 @@ curl http://127.0.0.1:9001/health/readiness
 ### 配置热更新是分级的
 
 项目支持配置热更新，但不是所有配置都会在运行中立即生效。支持热更新的资源会尝试重建；如果重建失败，会继续保留旧实例运行，避免把服务直接打挂。
+
+### 请求语言驱动文案
+
+项目会在请求链路读取 `Accept-Language`（当前支持 `zh-CN` / `en-US`），并做归一化与降级处理：
+
+- 错误码文案：按请求语言返回；无法识别时降级到默认语言（`zh-CN`）。
+- 菜单列表/用户菜单树：仅返回 `title`，由后端按请求语言解析后返回。
+- 菜单详情：返回 `title_i18n`（用于前端编辑回填），不返回 `title`。
+- 菜单新增/编辑：写接口使用 `title_i18n`，目前支持 `zh-CN` 与 `en-US`，两者至少一种非空。
 
 ## 常用命令
 
@@ -306,6 +317,12 @@ app:
 3. 在 `internal/validator/form/` 定义请求参数
 4. 在 `AdminRouteTree()` 中声明路由
 5. 需要更新 API 路由表时执行 `go run main.go command api-route`
+
+### 参数校验约定
+
+- 枚举字段（如 `status`、`is_auth`、`method`）建议使用 `oneof` 显式约束。
+- ID 数组字段（如 `role_ids`、`menu_list`、`api_list`）建议统一使用 `dive,gt=0`，避免无效 ID（如 `0`）进入业务层。
+- 新增/修改校验规则时，建议同时补充正反例单测，避免后续回归。
 
 ### 测试
 

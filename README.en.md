@@ -11,7 +11,7 @@
 </div>
 
 <div align="center">
-  Built with JWT auth, RBAC, request logging, file upload, validation, declarative routing, and CLI initialization commands.
+  Built with JWT auth, RBAC, request/login logging, file upload, readiness probes, validation, request-locale i18n, declarative routing, and CLI initialization commands.
 </div>
 
 <br />
@@ -46,6 +46,8 @@ Most admin projects start with the same goal: get login, permissions, menus, upl
 | Route Metadata | Declarative route tree generates both Gin routes and API metadata |
 | Logs | Built-in login logs, request logs, and unified response structure |
 | File Access | File upload and public / private file access |
+| I18n | Error messages and menu titles are resolved by `Accept-Language` (`zh-CN` / `en-US`) |
+| Health Probes | Built-in `/ping` and `/health/readiness` for liveness and dependency-readiness checks |
 | Tooling | CLI commands for initialization, route sync, permission rebuild, and migrations |
 | Hot Reload | Partial config hot reload with fallback to previous live instances on failure |
 
@@ -88,9 +90,17 @@ Minimal example:
 
 ```yaml
 app:
+  app_env: local
+  debug: true
+  language: zh_CN
   trusted_proxies:
     - 127.0.0.1
   watch_config: true
+
+jwt:
+  ttl: 7200
+  refresh_ttl: 3600
+  secret_key: change-me-to-a-random-secret
 
 mysql:
   enable: true
@@ -109,6 +119,7 @@ redis:
 
 queue:
   enable: true
+  use_default_redis: true
   namespace: go_layout
   concurrency: 8
   strict_priority: false
@@ -137,9 +148,11 @@ GO_ENV=development go run main.go worker
 
 ```bash
 curl http://127.0.0.1:9001/ping
+curl http://127.0.0.1:9001/health/readiness
 ```
 
-If the response is `pong`, the service is up.
+- `/ping` returns `pong` when the HTTP process is alive.
+- `/health/readiness` returns `ready=true` when required dependencies are ready for the current runtime mode.
 
 ## Core Ideas
 
@@ -154,6 +167,15 @@ The current permission model treats database relations as the source of truth, w
 ### Hot Reload Is Tiered
 
 The project supports config hot reload, but not every setting can be applied live. Supported resources are rebuilt when possible. If a rebuild fails, the previous live instance is kept so the service can continue running.
+
+### Request-Locale Driven Texts
+
+The request pipeline parses `Accept-Language` (currently `zh-CN` / `en-US`) and applies normalized fallback behavior:
+
+- Error messages are resolved by request locale, with fallback to default locale (`zh-CN`).
+- Menu list / user menu tree returns localized `title` only.
+- Menu detail returns `title_i18n` for edit backfill, not `title`.
+- Menu create/update writes `title_i18n`; at least one of `zh-CN` / `en-US` must be non-empty.
 
 ## Commands
 
@@ -256,6 +278,12 @@ Notes:
 3. Define request params in `internal/validator/form/`
 4. Declare the route in `AdminRouteTree()`
 5. Run `go run main.go command api-route` if the API route table needs to be refreshed
+
+### Validation Conventions
+
+- For enum-like fields (for example `status`, `is_auth`, `method`), prefer explicit `oneof` constraints.
+- For ID arrays (for example `role_ids`, `menu_list`, `api_list`), prefer `dive,gt=0` so invalid IDs such as `0` are rejected at validation stage.
+- When adding/changing validation rules, add both positive and negative tests to prevent regressions.
 
 ### Test
 

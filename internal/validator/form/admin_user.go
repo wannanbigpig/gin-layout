@@ -58,8 +58,8 @@ func NewUpdateProfile() *UpdateProfile {
 }
 
 type BindRole struct {
-	UserId  uint   `form:"user_id" json:"user_id" label:"用户ID" binding:"required"`   //  验证规则：必填
-	RoleIds []uint `form:"role_ids" json:"role_ids" label:"角色ID" binding:"required"` //  验证规则：必填
+	UserId  uint   `form:"user_id" json:"user_id" label:"用户ID" binding:"required"`             //  验证规则：必填
+	RoleIds []uint `form:"role_ids" json:"role_ids" label:"角色ID" binding:"required,dive,gt=0"` //  验证规则：必填
 }
 
 // NewBindRole 绑定角色

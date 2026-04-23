@@ -41,8 +41,8 @@ func NewDeptListQuery() *ListDept {
 
 // DeptBindRole 部门绑定角色表单
 type DeptBindRole struct {
-	DeptId  uint   `form:"dept_id" json:"dept_id" label:"部门 ID" binding:"required"`   //  验证规则：必填
-	RoleIds []uint `form:"role_ids" json:"role_ids" label:"角色 ID" binding:"required"` //  验证规则：必填
+	DeptId  uint   `form:"dept_id" json:"dept_id" label:"部门 ID" binding:"required"`             //  验证规则：必填
+	RoleIds []uint `form:"role_ids" json:"role_ids" label:"角色 ID" binding:"required,dive,gt=0"` //  验证规则：必填
 }
 
 // NewDeptBindRole 部门绑定角色
