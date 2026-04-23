@@ -182,15 +182,16 @@ The project now recommends defining jobs in `defineSchedule`:
 
 ```go
 func defineSchedule(schedule *Scheduler) {
-	resetService := system.NewResetService()
-
 	schedule.Call("demo", runTask).
 		EveryFiveSeconds().
 		WithoutOverlapping()
 
-	schedule.CallE("reset-system-data", resetService.ReinitializeSystemData).
-		DailyAt("02:00:00").
-		WithoutOverlapping()
+	cfg := config.GetConfig()
+	if cfg != nil && cfg.EnableResetSystemCron {
+		schedule.CallE("reset-system-data", system.ReinitializeSystemData).
+			DailyAt("02:00:00").
+			WithoutOverlapping()
+	}
 }
 ```
 
@@ -198,6 +199,7 @@ Why this is simpler:
 
 - all jobs are declared in one place
 - name, schedule, and overlap behavior are visible at a glance
+- risky jobs can be explicitly enabled instead of being registered by default
 - no need to repeat `AddJob`, `Chain`, and `Recover` manually
 
 ### Available Methods

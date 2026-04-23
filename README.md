@@ -56,6 +56,7 @@
 - 在线文档：[Apifox](https://wannanbigpig.apifox.cn/)
 - 演示地址：[在线演示](https://x-l-admin.wannanbigpig.com/)
 - 命令与任务文档：[docs/COMMANDS_AND_TASKS.md](./docs/COMMANDS_AND_TASKS.md)
+- 代码扫描与优化建议：[docs/OPTIMIZATION_NOTES_20260422.md](./docs/OPTIMIZATION_NOTES_20260422.md)
 
 ## 快速开始
 
@@ -256,11 +257,11 @@ go run main.go -c /path/to/config.yaml command init-system
 
 - `service` 负责提供 HTTP API。
 - `worker` 负责消费 Asynq 异步任务。当前首版只接入请求审计日志异步落库。
-- `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会退回同步写库。
-- `cron` 当前默认注册了 `demo`（每 5 秒打印一次日志）和 `reset-system-data`（每天 `02:00:00` 执行一次系统重建）。
+- `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会在当前请求链路同步落库。
+- `cron` 默认只注册 `demo`（每 5 秒打印一次日志）；`reset-system-data` 需要显式配置 `app.enable_reset_system_cron=true` 才会注册，并在启动时输出高风险告警。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
 
-注意：`reset-system-data` 当前调用的是 `system.ReinitializeSystemData()`，会回滚迁移并重建系统数据。直接启用 `cron` 前，请务必先检查 [cmd/cron/tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go) 是否符合你的环境预期。
+注意：`reset-system-data` 当前调用的是 `system.ReinitializeSystemData()`，会回滚迁移并重建系统数据。生产环境建议保持 `app.enable_reset_system_cron=false`，只有在明确需要重建系统数据时才临时开启。
 
 ### 热更新
 

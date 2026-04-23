@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/wannanbigpig/gin-layout/config"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service/system"
 )
@@ -18,6 +19,15 @@ func defineSchedule(schedule *Scheduler) {
 		EveryFiveSeconds().
 		WithoutOverlapping()
 
+	cfg := config.GetConfig()
+	if cfg == nil || !cfg.EnableResetSystemCron {
+		return
+	}
+
+	log.Logger.Warn("高风险定时任务已启用",
+		zap.String("name", "reset-system-data"),
+		zap.String("schedule", "02:00:00"),
+	)
 	schedule.CallE("reset-system-data", system.ReinitializeSystemData).
 		DailyAt("02:00:00").
 		WithoutOverlapping()

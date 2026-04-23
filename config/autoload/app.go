@@ -42,24 +42,28 @@ type AppConfig struct {
 	// AllowDegradedStartup 是否允许 service 在依赖初始化失败时降级启动。
 	// true 时仅 HTTP 服务会继续启动，由 readiness 与路由守卫体现未就绪状态。
 	AllowDegradedStartup bool `mapstructure:"allow_degraded_startup"`
+	// EnableResetSystemCron 是否启用高风险的系统重建定时任务。
+	// 默认 false，避免在非预期环境触发系统数据重建。
+	EnableResetSystemCron bool `mapstructure:"enable_reset_system_cron"`
 }
 
 var App = AppConfig{
-	AppEnv:               "local", // 默认本地环境
-	Debug:                true,    // 默认开启调试模式
-	Language:             "zh_CN", // 默认中文
-	WatchConfig:          false,   // 默认关闭配置热更新
-	BasePath:             getDefaultPath(),
-	BaseURL:              "",                    // 默认空，需要配置
-	Timezone:             nil,                   // 默认使用系统时区
-	TrustedProxies:       []string{"127.0.0.1"}, // 默认只信任本地
-	CorsOrigins:          []string{},            // 默认空数组，不放行跨域来源；使用 ["*"] 表示允许所有源
-	CorsMethods:          []string{},            // 默认空数组，使用默认方法列表；使用 ["*"] 表示允许全部已支持方法
-	CorsHeaders:          []string{},            // 默认空数组，按请求头自动放行预检头；使用 ["*"] 表示允许全部请求头
-	CorsExposeHeaders:    []string{},            // 默认空数组，默认暴露全部响应头；使用 ["*"] 明确表示暴露全部响应头
-	CorsMaxAge:           43200,                 // 默认 12 小时（43200 秒）
-	CorsCredentials:      false,                 // 默认不允许携带凭证
-	AllowDegradedStartup: false,                 // 默认关闭降级启动，依赖初始化失败时直接退出
+	AppEnv:                "local", // 默认本地环境
+	Debug:                 true,    // 默认开启调试模式
+	Language:              "zh_CN", // 默认中文
+	WatchConfig:           false,   // 默认关闭配置热更新
+	BasePath:              getDefaultPath(),
+	BaseURL:               "",                    // 默认空，需要配置
+	Timezone:              nil,                   // 默认使用系统时区
+	TrustedProxies:        []string{"127.0.0.1"}, // 默认只信任本地
+	CorsOrigins:           []string{},            // 默认空数组，不放行跨域来源；使用 ["*"] 表示允许所有源
+	CorsMethods:           []string{},            // 默认空数组，使用默认方法列表；使用 ["*"] 表示允许全部已支持方法
+	CorsHeaders:           []string{},            // 默认空数组，按请求头自动放行预检头；使用 ["*"] 表示允许全部请求头
+	CorsExposeHeaders:     []string{},            // 默认空数组，默认暴露全部响应头；使用 ["*"] 明确表示暴露全部响应头
+	CorsMaxAge:            43200,                 // 默认 12 小时（43200 秒）
+	CorsCredentials:       false,                 // 默认不允许携带凭证
+	AllowDegradedStartup:  false,                 // 默认关闭降级启动，依赖初始化失败时直接退出
+	EnableResetSystemCron: false,                 // 默认关闭高风险系统重建定时任务
 }
 
 func getDefaultPath() (path string) {

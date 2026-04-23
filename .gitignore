@@ -36,6 +36,7 @@ build/
 .claude
 
 # Application binaries
+gin-layout
 gin-layout/
 go-layout
 migrate

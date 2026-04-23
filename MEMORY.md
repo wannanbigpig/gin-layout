@@ -117,7 +117,7 @@
 一个新的 AI 会话，建议按这个顺序看代码：
 
 1. [README.md](/Users/liuml/data/go/src/go-layout/README.md:1)
-2. [AI_DEPLOYMENT.md](/Users/liuml/data/go/src/go-layout/AI_DEPLOYMENT.md:1)
+2. [docs/COMMANDS_AND_TASKS.md](/Users/liuml/data/go/src/go-layout/docs/COMMANDS_AND_TASKS.md:1)
 3. [cmd/root.go](/Users/liuml/data/go/src/go-layout/cmd/root.go:1)
 4. [cmd/service/service.go](/Users/liuml/data/go/src/go-layout/cmd/service/service.go:1)
 5. [internal/routers](/Users/liuml/data/go/src/go-layout/internal/routers)
@@ -218,10 +218,12 @@ GORM 模型层和基础数据访问层。
 
 当前已按职责拆分为：
 
+- `api_cache`
 - `scope_resolver`
 - `graph_loader`
-- `policy_builder`
 - `coordinator`
+- `menu_api_defaults`
+- `system_defaults`
 - `user_permission_sync`
 
 外层统一从 `PermissionSyncCoordinator` 进入，不要把业务层直接散落地接 Casbin 写权限。
@@ -481,8 +483,8 @@ go test ./internal/middleware ./internal/service/access ./internal/service/auth
 - [README.md](/Users/liuml/data/go/src/go-layout/README.md:1)
   - 对外项目介绍、基础使用说明
 
-- [AI_DEPLOYMENT.md](/Users/liuml/data/go/src/go-layout/AI_DEPLOYMENT.md:1)
-  - 部署、启动、验证、排障
+- [docs/COMMANDS_AND_TASKS.md](/Users/liuml/data/go/src/go-layout/docs/COMMANDS_AND_TASKS.md:1)
+  - 命令说明、定时任务与操作约束
 
 - 本文档
   - 给下一位 AI 的“当前状态 + 接手约束 + 写码风格”说明
@@ -495,15 +497,3 @@ go test ./internal/middleware ./internal/service/access ./internal/service/auth
 ## 11. 一句话接手策略
 
 先读入口和当前链路，再读与你任务相关的 service；优先复用现有结构，保持命名和接口稳定，用小步修改把需求做完，不要把项目写成另一套风格。
-
-## 12. 最近优化记录
-
-2026-04-16 完成一轮 OPTIMIZATION_REPORT.md 优化修复：
-
-- JWT Secret 为空现在会 Fatal 退出（不再静默生成随机值）
-- Redis/DB 关闭失败现在记录日志（不再忽略错误）
-- policy_builder.go Slice 预分配容量优化
-- api_cache.go Redis 客户端复用优化
-- 清理 request_cost.go 注释代码
-
-详见 [memory/optimization_20260416.md](memory/optimization_20260416.md)

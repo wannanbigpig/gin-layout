@@ -182,15 +182,16 @@ go run main.go cron
 
 ```go
 func defineSchedule(schedule *Scheduler) {
-	resetService := system.NewResetService()
-
 	schedule.Call("demo", runTask).
 		EveryFiveSeconds().
 		WithoutOverlapping()
 
-	schedule.CallE("reset-system-data", resetService.ReinitializeSystemData).
-		DailyAt("02:00:00").
-		WithoutOverlapping()
+	cfg := config.GetConfig()
+	if cfg != nil && cfg.EnableResetSystemCron {
+		schedule.CallE("reset-system-data", system.ReinitializeSystemData).
+			DailyAt("02:00:00").
+			WithoutOverlapping()
+	}
 }
 ```
 
@@ -198,6 +199,7 @@ func defineSchedule(schedule *Scheduler) {
 
 - 新任务统一在一个地方声明
 - 名称、时间规则、是否允许重入一眼能看出来
+- 高风险任务可以显式配置启用，默认不注册
 - 不需要每次手写 `AddJob`、`Chain`、`Recover`
 
 ### 可用方法

@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
@@ -215,4 +218,74 @@ func TestBuildRequestAuditLogSnapshotUsesPrincipal(t *testing.T) {
 	if snapshot.OperatorAccount != "tester" || snapshot.OperatorName != "Tester" {
 		t.Fatalf("unexpected operator names: %#v", snapshot)
 	}
+}
+
+func TestLogRequestToFileSkipsSuccessRequest(t *testing.T) {
+	core, observed := observer.New(zap.InfoLevel)
+	restoreLogger := log.ReplaceLoggerForTesting(zap.New(core))
+	defer restoreLogger()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/demo", nil)
+	ctx.Set(global.ContextKeyRequestID, "req-success")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+
+	respRecorder := createResponseRecorder(ctx)
+	respRecorder.statusCode = http.StatusOK
+
+	logRequestToFile(ctx, respRecorder)
+	if observed.Len() != 0 {
+		t.Fatalf("expected no log for success request, got %d", observed.Len())
+	}
+}
+
+func TestLogRequestToFileLogsServerError(t *testing.T) {
+	core, observed := observer.New(zap.InfoLevel)
+	restoreLogger := log.ReplaceLoggerForTesting(zap.New(core))
+	defer restoreLogger()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/demo", nil)
+	ctx.Set(global.ContextKeyRequestID, "req-500")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+
+	respRecorder := createResponseRecorder(ctx)
+	respRecorder.statusCode = http.StatusInternalServerError
+
+	logRequestToFile(ctx, respRecorder)
+	if observed.Len() != 1 {
+		t.Fatalf("expected one log for error request, got %d", observed.Len())
+	}
+}
+
+func TestLogRequestToFileLogsPrivateError(t *testing.T) {
+	core, observed := observer.New(zap.InfoLevel)
+	restoreLogger := log.ReplaceLoggerForTesting(zap.New(core))
+	defer restoreLogger()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/demo", nil)
+	ctx.Set(global.ContextKeyRequestID, "req-private")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+	ctx.Error(assertionError("private boom"))
+
+	respRecorder := createResponseRecorder(ctx)
+	respRecorder.statusCode = http.StatusOK
+
+	logRequestToFile(ctx, respRecorder)
+	if observed.Len() != 1 {
+		t.Fatalf("expected one log for private error request, got %d", observed.Len())
+	}
+}
+
+type assertionError string
+
+func (e assertionError) Error() string {
+	return string(e)
 }

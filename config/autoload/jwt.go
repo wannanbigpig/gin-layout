@@ -12,12 +12,13 @@ type JwtConfig struct {
 	// 推荐设置为 TTL/2，例如 TTL=7200 时，RefreshTTL=3600
 	RefreshTTL time.Duration `mapstructure:"refresh_ttl"`
 	// SecretKey JWT 签名密钥，用于生成和验证 Token
-	// TODO: 生产环境必须使用随机密钥，例如：openssl rand -hex 32
+	// 启动时会校验非空；生产环境还会拒绝弱占位值和长度不足的密钥
+	// 建议使用随机密钥，例如：openssl rand -hex 32
 	SecretKey string `mapstructure:"secret_key"`
 }
 
 var Jwt = JwtConfig{
-	TTL:        7200,        // Token 有效期 2 小时
-	RefreshTTL: 0,           // 0 表示不主动刷新 Token
-	SecretKey:  "",          // TODO: 生产环境必须配置随机密钥
+	TTL:        7200, // Token 有效期 2 小时
+	RefreshTTL: 0,    // 0 表示不主动刷新 Token
+	SecretKey:  "",   // 默认空，启动时必须由配置提供有效密钥
 }
