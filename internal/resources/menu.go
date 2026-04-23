@@ -9,7 +9,7 @@ import (
 type MenuBaseResources struct {
 	ID              uint             `json:"id"`
 	Icon            string           `json:"icon"`                  // 图标
-	Title           string           `json:"title"`                 // 中文标题
+	Title           string           `json:"title,omitempty"`       // 当前请求语言标题
 	Name            string           `json:"name"`                  // 路由名称
 	Code            string           `json:"code"`                  // 前端权限标识
 	Path            string           `json:"path"`                  // 前端路由地址
@@ -35,16 +35,17 @@ type MenuBaseResources struct {
 // MenuResources 表示菜单详情响应。
 type MenuResources struct {
 	MenuBaseResources
-	IsExternalLinksName string           `json:"is_external_links_name,omitempty"`
-	IsAuthName          string           `json:"is_auth_name,omitempty"`
-	IsShowName          string           `json:"is_show_name,omitempty"`
-	ISNewWindowName     string           `json:"is_new_window_name,omitempty"`
-	Level               uint8            `json:"level"`            // 层级
-	AnimateEnter        string           `json:"animate_enter"`    // 进入动画
-	AnimateLeave        string           `json:"animate_leave"`    // 离开动画
-	AnimateDuration     float32          `json:"animate_duration"` // 动画时长
-	Children            []*MenuResources `json:"children,omitempty"`
-	ApiList             []uint           `json:"api_list"`
+	TitleI18n           map[string]string `json:"title_i18n,omitempty"` // 多语言标题（仅详情返回）
+	IsExternalLinksName string            `json:"is_external_links_name,omitempty"`
+	IsAuthName          string            `json:"is_auth_name,omitempty"`
+	IsShowName          string            `json:"is_show_name,omitempty"`
+	ISNewWindowName     string            `json:"is_new_window_name,omitempty"`
+	Level               uint8             `json:"level"`            // 层级
+	AnimateEnter        string            `json:"animate_enter"`    // 进入动画
+	AnimateLeave        string            `json:"animate_leave"`    // 离开动画
+	AnimateDuration     float32           `json:"animate_duration"` // 动画时长
+	Children            []*MenuResources  `json:"children,omitempty"`
+	ApiList             []uint            `json:"api_list"`
 }
 
 // MenuTransformer 负责菜单详情资源转换。
@@ -65,24 +66,34 @@ func NewMenuTransformer() MenuTransformer {
 
 // ToStruct 将菜单模型转换为详情响应。
 func (m MenuTransformer) ToStruct(data *model.Menu) *MenuResources {
-	return buildMenuResource(data)
+	return m.ToStructWithTitles(data, "", nil)
+}
+
+// ToStructWithTitles 将菜单模型转换为详情响应，并显式注入标题信息。
+func (m MenuTransformer) ToStructWithTitles(data *model.Menu, title string, titleI18n map[string]string) *MenuResources {
+	return buildMenuResource(data, title, titleI18n)
 }
 
 // ToCollection 将菜单模型集合转换为分页响应。
 func (m MenuTransformer) ToCollection(page, perPage int, total int64, data []*model.Menu) *Collection {
+	return m.ToCollectionWithTitles(page, perPage, total, data, nil)
+}
+
+// ToCollectionWithTitles 将菜单模型集合转换为分页响应，并显式注入标题信息。
+func (m MenuTransformer) ToCollectionWithTitles(page, perPage int, total int64, data []*model.Menu, titleByMenuID map[uint]string) *Collection {
 	response := make([]any, 0, len(data))
 	for _, v := range data {
-		response = append(response, buildListMenuResource(v))
+		response = append(response, buildListMenuResource(v, resolveTitleByMenuID(v.ID, titleByMenuID)))
 	}
 	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
 }
 
 // buildMenuBaseResources 提取菜单响应的公共字段。
-func buildMenuBaseResources(v *model.Menu) MenuBaseResources {
+func buildMenuBaseResources(v *model.Menu, title string) MenuBaseResources {
 	return MenuBaseResources{
 		ID:              v.ID,
 		Icon:            v.Icon,
-		Title:           v.Title,
+		Title:           title,
 		Name:            v.Name,
 		Component:       v.Component,
 		Code:            v.Code,
@@ -107,10 +118,11 @@ func buildMenuBaseResources(v *model.Menu) MenuBaseResources {
 }
 
 // buildMenuResource 构建菜单详情响应。
-func buildMenuResource(v *model.Menu) *MenuResources {
-	base := buildMenuBaseResources(v)
+func buildMenuResource(v *model.Menu, title string, titleI18n map[string]string) *MenuResources {
+	base := buildMenuBaseResources(v, title)
 	return &MenuResources{
 		MenuBaseResources:   base,
+		TitleI18n:           titleI18n,
 		IsExternalLinksName: v.IsExternalLinksMap(),
 		IsAuthName:          v.IsAuthMap(),
 		IsShowName:          v.IsShowMap(),
@@ -144,32 +156,53 @@ func (r *MenuCollectionResources) GetPID() uint {
 	return r.Pid
 }
 
-// MenuTreeTransformer 负责菜单树资源转换。
-type MenuTreeTransformer struct {
-	TreeResource[*model.Menu, *MenuCollectionResources]
-}
-
-// NewMenuTreeTransformer 创建菜单树转换器。
-func NewMenuTreeTransformer() MenuTreeTransformer {
-	return MenuTreeTransformer{
-		TreeResource: TreeResource[*model.Menu, *MenuCollectionResources]{
-			NewResource: func() *MenuCollectionResources {
-				return &MenuCollectionResources{}
-			},
-		},
-	}
-}
-
 // SetCustomFields 填充菜单树节点的扩展字段。
 func (r *MenuCollectionResources) SetCustomFields(data *model.Menu) {
 	r.TypeName = data.MenuTypeMap()
 }
 
 // buildListMenuResource 构建菜单树节点响应。
-func buildListMenuResource(v *model.Menu) *MenuCollectionResources {
-	base := buildMenuBaseResources(v)
+func buildListMenuResource(v *model.Menu, title string) *MenuCollectionResources {
+	base := buildMenuBaseResources(v, title)
 	return &MenuCollectionResources{
 		MenuBaseResources: base,
 		Children:          []*MenuCollectionResources{},
 	}
+}
+
+// BuildMenuTree 构建菜单树，并显式注入本地化标题。
+func BuildMenuTree(data []*model.Menu, rootID uint, titleByMenuID map[uint]string) []*MenuCollectionResources {
+	if len(data) == 0 {
+		return []*MenuCollectionResources{}
+	}
+
+	parentMap := make(map[uint][]*model.Menu)
+	for _, item := range data {
+		if item == nil {
+			continue
+		}
+		parentMap[item.Pid] = append(parentMap[item.Pid], item)
+	}
+
+	var build func(parentID uint) []*MenuCollectionResources
+	build = func(parentID uint) []*MenuCollectionResources {
+		children := parentMap[parentID]
+		tree := make([]*MenuCollectionResources, 0, len(children))
+		for _, menu := range children {
+			node := buildListMenuResource(menu, resolveTitleByMenuID(menu.ID, titleByMenuID))
+			node.TypeName = menu.MenuTypeMap()
+			node.Children = build(menu.ID)
+			tree = append(tree, node)
+		}
+		return tree
+	}
+
+	return build(rootID)
+}
+
+func resolveTitleByMenuID(menuID uint, titleByMenuID map[uint]string) string {
+	if len(titleByMenuID) == 0 {
+		return ""
+	}
+	return titleByMenuID[menuID]
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 )
 
 // Result API响应结果结构
@@ -36,6 +37,8 @@ func NewResult() *Result {
 type Response struct {
 	httpCode int
 	result   *Result
+	msgKey   string
+	msgArgs  []any
 }
 
 // Resp 创建响应处理器实例
@@ -62,6 +65,13 @@ func (r *Response) FailCode(c *gin.Context, code int, msg ...string) {
 	if len(msg) > 0 && msg[0] != "" {
 		r.SetMessage(msg[0])
 	}
+	r.json(c)
+}
+
+// FailCodeByKey 自定义错误码返回（按文案 key 国际化）。
+func (r *Response) FailCodeByKey(c *gin.Context, code int, key string, args ...any) {
+	r.SetCode(code)
+	r.SetMessageKey(key, args...)
 	r.json(c)
 }
 
@@ -112,6 +122,15 @@ func (r *Response) WithData(data any) *Response {
 // SetMessage 设置返回自定义错误消息
 func (r *Response) SetMessage(message string) *Response {
 	r.result.Msg = message
+	r.msgKey = ""
+	r.msgArgs = nil
+	return r
+}
+
+// SetMessageKey 设置返回错误文案 key（供国际化解析）。
+func (r *Response) SetMessageKey(key string, args ...any) *Response {
+	r.msgKey = key
+	r.msgArgs = append([]any(nil), args...)
 	return r
 }
 
@@ -119,7 +138,23 @@ func (r *Response) SetMessage(message string) *Response {
 func (r *Response) json(c *gin.Context) {
 	// 如果消息为空，使用错误码对应的默认消息
 	if r.result.Msg == "" {
-		r.result.Msg = errors.NewErrorText(config.GetConfig().Language).Text(r.result.Code)
+		language := config.GetConfig().Language
+		if c != nil {
+			if locale, exists := c.Get(global.ContextKeyLocale); exists {
+				if localeText, ok := locale.(string); ok {
+					language = i18n.ToErrorLanguage(localeText)
+				}
+			}
+		}
+		errorText := errors.NewErrorText(language)
+		if r.msgKey != "" {
+			if msg, ok := errorText.TextByKey(r.msgKey, r.msgArgs...); ok && msg != "" {
+				r.result.Msg = msg
+			}
+		}
+		if r.result.Msg == "" {
+			r.result.Msg = errorText.Text(r.result.Code)
+		}
 	}
 
 	// 计算请求耗时
@@ -144,6 +179,11 @@ func FailCode(c *gin.Context, code int, data ...any) {
 		return
 	}
 	Resp().FailCode(c, code)
+}
+
+// FailCodeByKey 业务失败响应（按 key 解析多语言文案）。
+func FailCodeByKey(c *gin.Context, code int, key string, args ...any) {
+	Resp().FailCodeByKey(c, code, key, args...)
 }
 
 // Fail 业务失败响应（便捷方法）

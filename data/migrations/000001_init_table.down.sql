@@ -6,6 +6,8 @@ DROP TABLE IF EXISTS `admin_user`;
 DROP TABLE IF EXISTS `api`;
 -- 删除路由分组表
 DROP TABLE IF EXISTS `api_group`;
+-- 删除菜单多语言标题表
+DROP TABLE IF EXISTS `menu_i18n`;
 -- 删除菜单表
 DROP TABLE IF EXISTS `menu`;
 -- 删除部门表

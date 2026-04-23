@@ -282,5 +282,5 @@ func (s *SystemDefaultsService) RequireSuperAdminRoleForUser(uid uint, roleIDs [
 	if lo.Contains(roleIDs, role.ID) {
 		return nil
 	}
-	return e.NewBusinessError(e.FAILURE, "系统默认超级管理员必须保留超级管理员角色")
+	return e.NewBusinessError(e.SuperAdminMustKeepRole)
 }

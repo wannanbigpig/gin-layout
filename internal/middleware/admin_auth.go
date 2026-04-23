@@ -49,14 +49,14 @@ func AdminAuthHandlerWithDeps(deps permissionDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uid := c.GetUint(global.ContextKeyUID)
 		if uid == 0 {
-			response.Fail(c, e.NotLogin, "请先登录")
+			response.FailCode(c, e.NotLogin)
 			c.Abort()
 			return
 		}
 
 		principal := auth.GetAuthPrincipal(c)
 		if principal == nil {
-			response.Fail(c, e.NotLogin, "登录已失效，请重新登录")
+			response.FailCodeByKey(c, e.NotLogin, e.MsgKeyAuthSessionExpired)
 			c.Abort()
 			return
 		}
@@ -64,9 +64,13 @@ func AdminAuthHandlerWithDeps(deps permissionDeps) gin.HandlerFunc {
 		if !isSuperAdmin(principal) {
 			if err := checkPermission(c, principal.UserID, deps); err != nil {
 				if businessErr, ok := err.(*e.BusinessError); ok {
-					response.Fail(c, businessErr.GetCode(), businessErr.GetMessage())
+					if businessErr.HasMessageKey() {
+						response.FailCodeByKey(c, businessErr.GetCode(), businessErr.GetMessageKey(), businessErr.GetMessageArgs()...)
+					} else {
+						response.FailCode(c, businessErr.GetCode())
+					}
 				} else {
-					response.Fail(c, e.ServerErr, "权限验证失败")
+					response.FailCode(c, e.ServerErr)
 				}
 				c.Abort()
 				return
@@ -95,7 +99,7 @@ func loadEnforcer(deps permissionDeps) (*casbinx.CasbinEnforcer, error) {
 	enforcer, err := deps.loadEnforcer()
 	if err != nil {
 		log.Logger.Error("权限验证初始化失败", zap.Error(err))
-		return nil, e.NewBusinessError(e.ServerErr, "权限验证初始化失败")
+		return nil, e.NewBusinessErrorWithKey(e.ServerErr, e.MsgKeyAuthPermissionInitFailed)
 	}
 	return enforcer, nil
 }
@@ -108,12 +112,12 @@ func enforcePermission(enforcer *casbinx.CasbinEnforcer, c *gin.Context, userID 
 	ok, err := enforcer.Enforce(userKey, path, method)
 	if err != nil {
 		log.Logger.Error("权限验证失败", zap.Error(err))
-		return e.NewBusinessError(e.ServerErr, "权限验证失败")
+		return e.NewBusinessErrorWithKey(e.ServerErr, e.MsgKeyAuthPermissionCheckFailed)
 	}
 
 	if !ok {
 		if deps.routeChecker.CheckoutRouteIsAuth(path, method) {
-			return e.NewBusinessError(e.AuthorizationErr, "暂无接口操作权限")
+			return e.NewBusinessErrorWithKey(e.AuthorizationErr, e.MsgKeyAuthAPIOperationDenied)
 		}
 	}
 

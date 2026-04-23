@@ -42,63 +42,117 @@ func buildPanicAuditLogSnapshot(c *gin.Context, panicMessage string) *auditsvc.A
 	return buildAuditLogSnapshot(c, nil, http.StatusInternalServerError, string(responseBody), "")
 }
 
+type auditRequestMeta struct {
+	requestID      string
+	method         string
+	path           string
+	ip             string
+	userAgent      string
+	os             string
+	browser        string
+	operationName  string
+	requestHeaders string
+	requestQuery   string
+	requestBody    string
+	executionTime  float64
+}
+
+type auditOperatorMeta struct {
+	operatorID      uint
+	jwtID           string
+	operatorAccount string
+	operatorName    string
+}
+
+// buildAuditLogSnapshot 组装审计快照（仅负责编排，不包含具体字段提取细节）。
 func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operationStatus int, responseBody string, responseHeader string) *auditsvc.AuditLogSnapshot {
+	requestMeta := collectAuditRequestMeta(c)
+	if requestMeta == nil {
+		return nil
+	}
+
+	operatorMeta := collectAuditOperatorMeta(c)
+
+	return &auditsvc.AuditLogSnapshot{
+		RequestID:       requestMeta.requestID,
+		JwtID:           operatorMeta.jwtID,
+		OperatorID:      operatorMeta.operatorID,
+		OperatorAccount: operatorMeta.operatorAccount,
+		OperatorName:    operatorMeta.operatorName,
+		IP:              requestMeta.ip,
+		UserAgent:       requestMeta.userAgent,
+		OS:              requestMeta.os,
+		Browser:         requestMeta.browser,
+		Method:          requestMeta.method,
+		BaseURL:         requestMeta.path,
+		OperationName:   requestMeta.operationName,
+		OperationStatus: operationStatus,
+		RequestHeaders:  requestMeta.requestHeaders,
+		RequestQuery:    requestMeta.requestQuery,
+		RequestBody:     requestMeta.requestBody,
+		ResponseStatus:  resolveAuditResponseStatus(recorder),
+		ResponseBody:    responseBody,
+		ResponseHeader:  responseHeader,
+		ExecutionTime:   requestMeta.executionTime,
+	}
+}
+
+// collectAuditRequestMeta 提取请求侧审计信息（请求标识、UA、请求体、耗时等）。
+func collectAuditRequestMeta(c *gin.Context) *auditRequestMeta {
 	requestID := c.GetString(global.ContextKeyRequestID)
 	if requestID == "" {
 		return nil
 	}
 
-	duration := time.Since(c.GetTime(global.ContextKeyRequestStartTime))
-	executionTime := float64(duration.Nanoseconds()) / 1000000.0
-	executionTime = float64(int(executionTime*10000+0.5)) / 10000.0
-
+	method := c.Request.Method
+	path := c.Request.URL.Path
 	userAgentStr := c.Request.UserAgent()
 	ua := useragent.New(userAgentStr)
-	os := ua.OS()
 	browser, _ := ua.Browser()
 
-	var (
-		operatorID      uint
-		jwtID           string
-		operatorAccount string
-		operatorName    string
-	)
+	return &auditRequestMeta{
+		requestID:      requestID,
+		method:         method,
+		path:           path,
+		ip:             c.ClientIP(),
+		userAgent:      userAgentStr,
+		os:             ua.OS(),
+		browser:        browser,
+		operationName:  getOperationName(path, method, c.GetHeader("X-Operation-Name")),
+		requestHeaders: sensitive.GetMaskedRequestHeaders(c.Request.Header),
+		requestQuery:   sensitive.MaskQueryString(c.Request.URL.RawQuery),
+		requestBody:    buildMaskedRequestBody(c),
+		executionTime:  calculateExecutionTimeMs(c),
+	}
+}
+
+// collectAuditOperatorMeta 提取操作者信息（优先 principal，回退到上下文 uid）。
+func collectAuditOperatorMeta(c *gin.Context) auditOperatorMeta {
 	if principal := auth.GetAuthPrincipal(c); principal != nil {
-		operatorID = principal.UserID
-		jwtID = principal.JWTID
-		operatorAccount = principal.Username
-		operatorName = principal.Nickname
-	} else {
-		operatorID = c.GetUint(global.ContextKeyUID)
+		return auditOperatorMeta{
+			operatorID:      principal.UserID,
+			jwtID:           principal.JWTID,
+			operatorAccount: principal.Username,
+			operatorName:    principal.Nickname,
+		}
 	}
 
-	responseStatus := http.StatusOK
-	if recorder != nil {
-		responseStatus = recorder.statusCode
+	return auditOperatorMeta{
+		operatorID: c.GetUint(global.ContextKeyUID),
 	}
+}
 
-	return &auditsvc.AuditLogSnapshot{
-		RequestID:       requestID,
-		JwtID:           jwtID,
-		OperatorID:      operatorID,
-		OperatorAccount: operatorAccount,
-		OperatorName:    operatorName,
-		IP:              c.ClientIP(),
-		UserAgent:       userAgentStr,
-		OS:              os,
-		Browser:         browser,
-		Method:          c.Request.Method,
-		BaseURL:         c.Request.URL.Path,
-		OperationName:   getOperationName(c.Request.URL.Path, c.Request.Method, c.GetHeader("X-Operation-Name")),
-		OperationStatus: operationStatus,
-		RequestHeaders:  sensitive.GetMaskedRequestHeaders(c.Request.Header),
-		RequestQuery:    sensitive.MaskQueryString(c.Request.URL.RawQuery),
-		RequestBody:     buildMaskedRequestBody(c),
-		ResponseStatus:  responseStatus,
-		ResponseBody:    responseBody,
-		ResponseHeader:  responseHeader,
-		ExecutionTime:   executionTime,
+func calculateExecutionTimeMs(c *gin.Context) float64 {
+	duration := time.Since(c.GetTime(global.ContextKeyRequestStartTime))
+	executionTime := float64(duration.Nanoseconds()) / 1000000.0
+	return float64(int(executionTime*10000+0.5)) / 10000.0
+}
+
+func resolveAuditResponseStatus(recorder *responseRecorder) int {
+	if recorder == nil {
+		return http.StatusOK
 	}
+	return recorder.statusCode
 }
 
 func buildMaskedRequestBody(c *gin.Context) string {

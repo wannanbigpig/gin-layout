@@ -8,7 +8,6 @@ import (
 type Menu struct {
 	ContainsDeleteBaseModel
 	Icon            string       `json:"icon"`              // 图标
-	Title           string       `json:"title"`             // 中文标题
 	Code            string       `json:"code"`              // 前端权限标识
 	Path            string       `json:"path"`              // 前端路由
 	FullPath        string       `json:"full_path"`         // 完整前端路由

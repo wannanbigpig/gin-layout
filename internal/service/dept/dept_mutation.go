@@ -35,7 +35,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 	// 更新场景：加载现有部门数据，记录原始 pids 用于后续级联判断
 	if params.Id > 0 {
 		if err := dept.GetById(params.Id); err != nil || dept.ID == 0 {
-			return e.NewBusinessError(1, "编辑的部门不存在")
+			return e.NewBusinessError(e.DepartmentNotFound)
 		}
 		originPids = dept.Pids
 		originPid = dept.Pid
@@ -43,7 +43,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 	// 检查是否为受保护部门（系统默认部门只允许修改名称和描述）
 	if params.Id > 0 && access.NewSystemDefaultsService().IsProtectedDepartment(dept) {
 		if params.Pid != dept.Pid || params.Sort != dept.Sort {
-			return e.NewBusinessError(e.FAILURE, "默认部门只允许修改名称和描述")
+			return e.NewBusinessError(e.FAILURE)
 		}
 	}
 
@@ -51,12 +51,12 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 	if params.Pid > 0 && params.Pid != dept.Pid {
 		parentDept := model.NewDepartment()
 		if err := parentDept.GetById(params.Pid); err != nil || parentDept.ID == 0 {
-			return e.NewBusinessError(1, "上级部门不存在")
+			return e.NewBusinessError(e.ParentDeptNotExists)
 		}
 
 		// 环路检测：当前部门若已在父部门的祖先路径上，选择该父部门会形成环
 		if dept.ID > 0 && utils2.WouldCauseCycle(dept.ID, params.Pid, parentDept.Pids) {
-			return e.NewBusinessError(1, "上级部门不能是当前部门自身或其子部门")
+			return e.NewBusinessError(e.ParentDeptInvalid)
 		}
 
 		// 构建新的层级和路径：父层级 +1，pids = 父 pids + 父 ID
@@ -78,7 +78,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 	}
 	// 检查部门层级深度是否超限
 	if dept.Level > maxDeptLevel {
-		return e.NewBusinessError(1, "最多只能创建 5 级部门")
+		return e.NewBusinessError(e.MaxDeptDepth)
 	}
 
 	// 生成部门 code（为空时）
@@ -137,6 +137,7 @@ func (s *DeptService) generateDeptCode() string {
 // 参数：
 //   - originPids: 原始路径
 //   - newPids: 新路径
+//
 // 返回：SQL CASE 表达式字符串
 // 示例：originPids="1,2", newPids="1,8" 时，子部门 "1,2,3" → "1,8,3"
 func (s *DeptService) buildPidsUpdateExpr(originPids, newPids string) string {
@@ -163,9 +164,9 @@ func (s *DeptService) buildPidsUpdateExpr(originPids, newPids string) string {
 func (s *DeptService) executeDeleteTransaction(dept *model.Department, id uint) error {
 	db, err := dept.GetDB()
 	if err != nil {
-		return e.NewBusinessError(1, "删除部门失败")
+		return e.NewBusinessError(e.DepartmentCannotDelete)
 	}
-	err = access.NewPermissionSyncCoordinator().RunAfterCommit(db, "删除部门后刷新权限缓存失败", func(tx *gorm.DB) error {
+	err = access.NewPermissionSyncCoordinator().RunAfterCommitWithCode(db, e.DepartmentCannotDelete, func(tx *gorm.DB) error {
 		dept.SetDB(tx)
 
 		// 查询部门关联的所有用户 ID，用于后续权限同步
@@ -203,7 +204,7 @@ func (s *DeptService) executeDeleteTransaction(dept *model.Department, id uint) 
 		return access.NewPermissionSyncCoordinator().SyncUsers(affectedUserIDs, tx)
 	})
 	if err != nil {
-		return e.NewBusinessError(1, "删除部门失败")
+		return e.NewBusinessError(e.DepartmentCannotDelete)
 	}
 	return nil
 }

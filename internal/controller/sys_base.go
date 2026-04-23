@@ -39,6 +39,11 @@ func (api Api) FailCode(c *gin.Context, code int, data ...any) {
 	response.FailCode(c, code)
 }
 
+// FailCodeByKey 业务失败响应（使用错误码 + 文案 key）。
+func (api Api) FailCodeByKey(c *gin.Context, code int, key string, args ...any) {
+	r.Resp().FailCodeByKey(c, code, key, args...)
+}
+
 // Fail 业务失败响应（自定义错误消息）
 func (api Api) Fail(c *gin.Context, code int, message string, data ...any) {
 	response := r.Resp()
@@ -67,7 +72,15 @@ func (api Api) Err(c *gin.Context, err error) {
 		return
 	}
 
-	api.Fail(c, businessError.GetCode(), businessError.GetMessage())
+	if businessError.HasExplicitMessage() {
+		api.Fail(c, businessError.GetCode(), businessError.GetMessage())
+		return
+	}
+	if businessError.HasMessageKey() {
+		api.FailCodeByKey(c, businessError.GetCode(), businessError.GetMessageKey(), businessError.GetMessageArgs()...)
+		return
+	}
+	api.FailCode(c, businessError.GetCode())
 }
 
 // GetCurrentUserID 获取当前登录用户的ID

@@ -5,6 +5,9 @@ BEGIN;
 -- 删除角色菜单映射
 DELETE FROM `role_menu_map` WHERE `role_id` = 1;
 
+-- 删除菜单翻译数据
+DELETE FROM `menu_i18n` WHERE `menu_id` BETWEEN 1 AND 41
+
 -- 删除菜单数据
 DELETE FROM `menu` WHERE `id` BETWEEN 1 AND 41;
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -17,7 +18,7 @@ func TestMenuBuildListCondition(t *testing.T) {
 	}
 
 	condition, args := NewMenuService().buildListCondition(params, true)
-	expected := "(title like ? OR path like ? OR code = ?) AND is_auth = ? AND status = ?"
+	expected := "(id IN (SELECT menu_id FROM menu_i18n WHERE title like ?) OR path like ? OR code = ?) AND is_auth = ? AND status = ?"
 	if condition != expected {
 		t.Fatalf("unexpected condition: %s", condition)
 	}
@@ -46,5 +47,15 @@ func TestBuildPids(t *testing.T) {
 	}
 	if got := service.buildPids("", 10); got != "10" {
 		t.Fatalf("unexpected root pids: %s", got)
+	}
+}
+
+func TestMenuLocalePriority(t *testing.T) {
+	priorities := menuLocalePriority("ja-JP")
+	if len(priorities) != 3 {
+		t.Fatalf("unexpected priorities length: %d", len(priorities))
+	}
+	if priorities[0] != i18n.LocaleZhCN || priorities[2] != i18n.LocaleEnUS {
+		t.Fatalf("unexpected priorities: %+v", priorities)
 	}
 }

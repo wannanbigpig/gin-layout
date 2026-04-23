@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 )
 
 const testResourcePrefix = "test-auto-"
@@ -82,12 +83,16 @@ func findDepartmentByName(t *testing.T, name string) *model.Department {
 // findMenuByTitle 根据菜单标题查找菜单。
 func findMenuByTitle(t *testing.T, title string) *model.Menu {
 	t.Helper()
-	menu := model.NewMenu()
-	db, err := menu.GetDB()
+	db, err := model.GetDB()
 	if err != nil {
 		t.Fatalf("查询菜单失败: %v", err)
 	}
-	if err := db.Where("title = ?", title).First(menu).Error; err != nil {
+	translation := model.NewMenuI18n()
+	if err := db.Where("locale = ? AND title = ?", i18n.LocaleZhCN, title).First(translation).Error; err != nil {
+		t.Fatalf("查询菜单翻译失败: %v", err)
+	}
+	menu := model.NewMenu()
+	if err := db.Where("id = ?", translation.MenuID).First(menu).Error; err != nil {
 		t.Fatalf("查询菜单失败: %v", err)
 	}
 	return menu
@@ -162,20 +167,19 @@ func cleanupMenus(t *testing.T, titlePrefix string) {
 		return
 	}
 
-	var menus []model.Menu
-	if err := db.Where("title LIKE ?", titlePrefix+"%").Find(&menus).Error; err != nil {
+	var ids []uint
+	if err := db.Model(&model.MenuI18n{}).
+		Where("locale = ? AND title LIKE ?", i18n.LocaleZhCN, titlePrefix+"%").
+		Distinct().
+		Pluck("menu_id", &ids).Error; err != nil {
 		return
 	}
-	if len(menus) == 0 {
+	if len(ids) == 0 {
 		return
-	}
-
-	ids := make([]uint, 0, len(menus))
-	for _, menu := range menus {
-		ids = append(ids, menu.ID)
 	}
 	_ = db.Where("menu_id IN ?", ids).Delete(&model.MenuApiMap{}).Error
 	_ = db.Where("menu_id IN ?", ids).Delete(&model.RoleMenuMap{}).Error
+	_ = db.Where("menu_id IN ?", ids).Delete(&model.MenuI18n{}).Error
 	_ = db.Where("id IN ?", ids).Delete(&model.Menu{}).Error
 }
 
@@ -239,7 +243,6 @@ func createFallbackMenu(t *testing.T) uint {
 	t.Helper()
 	name := uniqueCompactTestName("menu")
 	menu := &model.Menu{
-		Title:     name,
 		Name:      name,
 		Path:      "/" + name,
 		FullPath:  "/" + name,
@@ -258,6 +261,12 @@ func createFallbackMenu(t *testing.T) uint {
 	}
 	if err := db.Create(menu).Error; err != nil {
 		t.Fatalf("创建兜底菜单失败: %v", err)
+	}
+	if err := model.NewMenuI18n().UpsertMenuTitles(menu.ID, map[string]string{
+		i18n.LocaleZhCN: name,
+		i18n.LocaleEnUS: name,
+	}, db); err != nil {
+		t.Fatalf("创建兜底菜单翻译失败: %v", err)
 	}
 	return menu.ID
 }

@@ -3,8 +3,6 @@ package validator
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"reflect"
 	"regexp"
 	"strings"
 
@@ -16,10 +14,8 @@ import (
 )
 
 const (
-	eofErrorPattern            = `^multipart:nextpart:eof$`
-	typeConvertErrorPattern    = `parsing .*?: invalid syntax`
-	errorMessageRequiredParams = "请根据要求填写必填项参数"
-	errorMessageTypeConvert    = "参数类型错误，请传入正确格式的数据"
+	eofErrorPattern         = `^multipart:nextpart:eof$`
+	typeConvertErrorPattern = `parsing .*?: invalid syntax`
 )
 
 var (
@@ -50,19 +46,18 @@ func handleBindingError(c *gin.Context, err error) {
 	var syntaxErr *json.SyntaxError
 	switch {
 	case errors.As(err, &typeErr):
-		errMsg := fmt.Sprintf("%s 应该是 %s 类型，传入的是 %s 类型", typeErr.Field, typeErr.Type.Name(), reflect.TypeOf(typeErr.Value).Name())
-		r.Resp().FailCode(c, errcode.InvalidParameter, errMsg)
+		r.Resp().FailCode(c, errcode.InvalidParameter)
 	case errors.As(err, &syntaxErr):
-		r.Resp().FailCode(c, errcode.InvalidParameter, "请求参数解析失败：请检查 JSON 格式是否正确")
+		r.Resp().FailCode(c, errcode.InvalidParameter)
 	default:
 		errStr := err.Error()
 		switch {
 		case isEOFError(errStr):
-			r.Resp().FailCode(c, errcode.InvalidParameter, errorMessageRequiredParams)
+			r.Resp().FailCode(c, errcode.InvalidParameter)
 		case isConvertError(errStr):
-			r.Resp().FailCode(c, errcode.InvalidParameter, errorMessageTypeConvert)
+			r.Resp().FailCode(c, errcode.InvalidParameter)
 		default:
-			r.Resp().FailCode(c, errcode.InvalidParameter, errStr)
+			r.Resp().FailCode(c, errcode.InvalidParameter)
 		}
 	}
 }

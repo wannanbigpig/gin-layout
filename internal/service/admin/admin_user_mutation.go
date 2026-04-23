@@ -1,8 +1,6 @@
 package admin
 
 import (
-	"fmt"
-
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
@@ -52,13 +50,13 @@ func (s *AdminUserService) Update(params *form.UpdateAdminUser) error {
 // 4. 事务保存：用户数据、Token 撤销（密码变更/禁用时）、部门绑定
 // 5. 同步用户权限缓存
 func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) error {
-	title := "新增"
+	mutationFailedCode := e.CreateUserFailed
 	excludeID := uint(0)
 	oldStatus := uint8(0)
 	adminUserModel := model.NewAdminUsers()
 
 	if params.Id > 0 {
-		title = "更新"
+		mutationFailedCode = e.UpdateUserFailed
 		if err := adminUserModel.GetById(params.Id); err != nil {
 			return e.NewBusinessError(e.UserDoesNotExist)
 		}
@@ -78,7 +76,7 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 
 	db, err := adminUserModel.GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, title+"用户失败，请重试！")
+		return e.NewBusinessError(mutationFailedCode)
 	}
 
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
@@ -113,10 +111,10 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 
 		return access.NewPermissionSyncCoordinator().SyncUser(adminUserModel.ID, tx)
 	})
-	if err := s.handleMutationError(err, title+"用户失败，请重试！"); err != nil {
+	if err := s.handleMutationError(err, mutationFailedCode); err != nil {
 		return err
 	}
-	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithMessage(title + "用户后刷新权限缓存失败，请重试！")
+	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithCode(mutationFailedCode)
 }
 
 // applyUpdateFields 应用更新场景的字段变更。
@@ -275,7 +273,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 			s.revokeUserTokens(tx, uid, model.RevokedCodePasswordChangeSelf, "用户自己修改密码")
 		}
 		return nil
-	}), "更新个人资料失败，请重试！")
+	}), e.UpdateUserFailed)
 }
 
 // validateUniqueFieldsWithLock 验证唯一字段（用户名、手机号、邮箱），使用数据库锁防止并发冲突。
@@ -295,7 +293,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 				return err
 			}
 			if exists {
-				return e.NewBusinessError(e.UserExists, fmt.Sprintf("用户名 %s 已存在", *username))
+				return e.NewBusinessError(e.UserExists)
 			}
 		}
 	}
@@ -316,7 +314,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 					return err
 				}
 				if exists {
-					return e.NewBusinessError(e.PhoneNumberExists, fmt.Sprintf("手机号 %s 已存在", fullPhoneNumber))
+					return e.NewBusinessError(e.PhoneNumberExists)
 				}
 			}
 		}
@@ -330,7 +328,7 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 				return err
 			}
 			if exists {
-				return e.NewBusinessError(e.EmailExists, fmt.Sprintf("邮箱 %s 已存在", *email))
+				return e.NewBusinessError(e.EmailExists)
 			}
 		}
 	}
@@ -374,5 +372,5 @@ func (s *AdminUserService) Delete(id uint) error {
 		return e.NewBusinessError(e.DeleteUserFailed)
 	}
 
-	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithMessage("删除用户后刷新权限缓存失败")
+	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithCode(e.DeleteUserFailed)
 }

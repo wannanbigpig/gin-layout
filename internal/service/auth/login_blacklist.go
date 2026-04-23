@@ -67,7 +67,7 @@ func (s *LoginService) parseToken(accessToken string) (*token.AdminCustomClaims,
 		return nil, err
 	}
 	if !parsedToken.Valid {
-		return nil, e.NewBusinessError(1, "invalid token")
+		return nil, e.NewBusinessError(e.NotLogin)
 	}
 	return claims, nil
 }

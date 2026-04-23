@@ -29,7 +29,7 @@ func NewCommonController() *CommonController {
 func (api CommonController) Upload(c *gin.Context) {
 	form, err := c.MultipartForm()
 	if err != nil {
-		api.FailCode(c, errors.InvalidParameter, "参数错误")
+		api.FailCode(c, errors.InvalidParameter)
 		return
 	}
 
@@ -48,7 +48,7 @@ func (api CommonController) Upload(c *gin.Context) {
 	result, err := commonService.UploadImages(form.File["files"], path)
 	if err != nil {
 		if service.IsPartialImageUploadError(err) {
-			api.Fail(c, errors.FileUploadPartialFail, err.Error(), result)
+			api.FailCode(c, errors.FileUploadPartialFail, result)
 			return
 		}
 		api.Err(c, err)
@@ -66,7 +66,7 @@ func (api CommonController) Upload(c *gin.Context) {
 func (api CommonController) GetFile(c *gin.Context) {
 	fileUUID := c.Param("uuid")
 	if fileUUID == "" {
-		api.FailCode(c, errors.InvalidParameter, "文件UUID不能为空")
+		api.FailCode(c, errors.InvalidParameter)
 		return
 	}
 
@@ -92,7 +92,7 @@ func (api CommonController) GetFile(c *gin.Context) {
 
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		api.FailCode(c, errors.NotFound, "文件不存在")
+		api.FailCode(c, errors.NotFound)
 		return
 	}
 

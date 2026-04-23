@@ -53,7 +53,8 @@ func createEngine() (*gin.Engine, error) {
 		engine.Use(
 			middleware.CorsHandler(),
 			middleware.RequestCostHandler(), // 请求耗时统计
-			middleware.ParseTokenHandler(),  // 全局token解析（所有路由都走）
+			middleware.RequestLocaleHandler(),
+			middleware.ParseTokenHandler(), // 全局token解析（所有路由都走）
 			gin.Logger(),
 			middleware.CustomRecovery(),
 			middleware.CustomLogger(),
@@ -65,7 +66,8 @@ func createEngine() (*gin.Engine, error) {
 		engine.Use(
 			middleware.CorsHandler(),
 			middleware.RequestCostHandler(), // 请求耗时统计
-			middleware.ParseTokenHandler(),  // 全局token解析（所有路由都走）
+			middleware.RequestLocaleHandler(),
+			middleware.ParseTokenHandler(), // 全局token解析（所有路由都走）
 			middleware.CustomRecovery(),
 			middleware.CustomLogger(),
 		)

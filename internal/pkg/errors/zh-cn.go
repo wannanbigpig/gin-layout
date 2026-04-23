@@ -39,7 +39,7 @@ var zhCNText = map[int]string{
 	ParentRoleNotExists:     "上级角色不存在",
 	ParentRoleInvalid:       "上级角色不能是当前角色自身或其子角色",
 	MaxRoleDepth:            "最多只能创建2层角色",
-	MaxChildRoles:           "每个顶级角色下最多只能创建%d个子角色",
+	MaxChildRoles:           "每个顶级角色下最多只能创建5个子角色",
 	MenuNotFound:            "菜单不存在",
 	MenuExists:              "菜单已存在",
 	MenuHasChildren:         "该菜单有子菜单，无法删除",
@@ -59,4 +59,18 @@ var zhCNText = map[int]string{
 	DeleteUserFailed:        "删除用户失败，请重试",
 	QueryUserDeptFailed:     "查询用户部门关联失败",
 	SuperAdminMustKeepRole:  "系统默认超级管理员必须保留超级管理员角色",
+	MaxMenuDepth:            "最多只能创建 4 层菜单",
+	ParentMenuNotExists:     "上级菜单不存在",
+	ParentMenuTypeInvalid:   "上级菜单不能是按钮类型",
+	ParentMenuInvalid:       "上级菜单不能是当前菜单自身或其子菜单",
+	MenuCodeExists:          "权限标识已存在",
+	MenuRouteNameExists:     "路由名称已存在",
+	MenuPathExists:          "路由已存在",
+}
+
+var zhCNTextKey = map[string]string{
+	MsgKeyAuthSessionExpired:        "登录已失效，请重新登录",
+	MsgKeyAuthPermissionInitFailed:  "权限验证初始化失败",
+	MsgKeyAuthPermissionCheckFailed: "权限验证失败",
+	MsgKeyAuthAPIOperationDenied:    "暂无接口操作权限",
 }

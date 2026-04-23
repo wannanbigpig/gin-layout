@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/menu"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -26,7 +27,7 @@ func (api MenuController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := menu.NewMenuService().Create(params); err != nil {
+	if err := menu.NewMenuService().Create(params, middleware.LocaleFromContext(c)); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -41,7 +42,7 @@ func (api MenuController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := menu.NewMenuService().Update(params); err != nil {
+	if err := menu.NewMenuService().Update(params, middleware.LocaleFromContext(c)); err != nil {
 		api.Err(c, err)
 		return
 	}
@@ -66,7 +67,7 @@ func (api MenuController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := menu.NewMenuService().Detail(query.ID)
+	detail, err := menu.NewMenuService().Detail(query.ID, middleware.LocaleFromContext(c))
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -81,7 +82,7 @@ func (api MenuController) List(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	result := menu.NewMenuService().List(params)
+	result := menu.NewMenuService().List(params, middleware.LocaleFromContext(c))
 	api.Success(c, result)
 }
 

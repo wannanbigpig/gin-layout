@@ -1,6 +1,7 @@
 package system
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -174,6 +175,17 @@ func (s *ResetService) rollbackMigrations() error {
 	defer m.Close()
 
 	if err := m.Down(); err != nil && err != migrate.ErrNoChange {
+		var dirtyErr migrate.ErrDirty
+		if errors.As(err, &dirtyErr) {
+			log.Logger.Warn("检测到 dirty 迁移状态，尝试自动修复并重试回滚", zap.Uint("version", uint(dirtyErr.Version)))
+			if forceErr := m.Force(int(dirtyErr.Version)); forceErr != nil {
+				return fmt.Errorf("自动修复 dirty 状态失败: %w", forceErr)
+			}
+			if retryErr := m.Down(); retryErr != nil && retryErr != migrate.ErrNoChange {
+				return retryErr
+			}
+			return nil
+		}
 		return err
 	}
 	return nil

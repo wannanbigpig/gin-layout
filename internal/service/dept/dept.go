@@ -76,13 +76,13 @@ func (s *DeptService) Update(params *form.UpdateDept) error {
 func (s *DeptService) Delete(id uint) error {
 	dept := model.NewDepartment()
 	if err := dept.GetById(id); err != nil || dept.ID == 0 {
-		return e.NewBusinessError(1, "部门不存在")
+		return e.NewBusinessError(e.DepartmentNotFound)
 	}
 	if access.NewSystemDefaultsService().IsProtectedDepartment(dept) {
-		return e.NewBusinessError(e.FAILURE, "默认部门不允许删除")
+		return e.NewBusinessError(e.FAILURE)
 	}
 	if dept.ChildrenNum > 0 {
-		return e.NewBusinessError(1, "该部门有子部门，无法删除")
+		return e.NewBusinessError(e.DepartmentHasChildren)
 	}
 
 	return s.executeDeleteTransaction(dept, id)
@@ -92,7 +92,7 @@ func (s *DeptService) Delete(id uint) error {
 func (s *DeptService) Detail(id uint) (any, error) {
 	dept := model.NewDepartment()
 	if err := dept.GetAllById(id); err != nil || dept.ID == 0 {
-		return nil, e.NewBusinessError(1, "部门不存在")
+		return nil, e.NewBusinessError(e.DepartmentNotFound)
 	}
 	return resources.NewDeptTreeTransformer().ToStruct(dept), nil
 }
@@ -101,23 +101,23 @@ func (s *DeptService) Detail(id uint) (any, error) {
 func (s *DeptService) BindRole(params *form.DeptBindRole) error {
 	deptModel := model.NewDepartment()
 	if err := deptModel.GetById(params.DeptId); err != nil || deptModel.ID == 0 {
-		return e.NewBusinessError(e.FAILURE, "部门不存在")
+		return e.NewBusinessError(e.DepartmentNotFound)
 	}
 
 	roleIds, err := model.VerifyExistingIDs(model.NewRole(), params.RoleIds)
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "判断角色是否存在失败")
+		return e.NewBusinessError(e.RoleNotFound)
 	}
 
 	db, err := model.NewDepartment().GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "绑定角色失败")
+		return e.NewBusinessError(e.FAILURE)
 	}
-	err = access.NewPermissionSyncCoordinator().RunAfterCommit(db, "绑定角色后刷新权限缓存失败", func(tx *gorm.DB) error {
+	err = access.NewPermissionSyncCoordinator().RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
 		return s.updateDeptRole(deptModel.ID, roleIds, tx)
 	})
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "绑定角色失败")
+		return e.NewBusinessError(e.FAILURE)
 	}
 	return nil
 }

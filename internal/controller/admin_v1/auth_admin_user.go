@@ -5,6 +5,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/admin"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -51,7 +52,7 @@ func (api AdminUserController) UpdateProfile(c *gin.Context) {
 // GetUserMenuInfo 获取当前登录用户权限信息
 func (api AdminUserController) GetUserMenuInfo(c *gin.Context) {
 	uid := c.GetUint(global.ContextKeyUID)
-	result, err := admin.NewAdminUserService().GetUserMenuInfo(uid)
+	result, err := admin.NewAdminUserService().GetUserMenuInfo(uid, middleware.LocaleFromContext(c))
 	if err != nil {
 		api.Err(c, err)
 		return

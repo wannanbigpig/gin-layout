@@ -98,7 +98,7 @@ func (s *AdminLoginLogService) List(params *form.AdminLoginLogList) *resources.C
 func (s *AdminLoginLogService) Detail(id uint) (any, error) {
 	loginLog := model.NewAdminLoginLogs()
 	if err := loginLog.GetById(id); err != nil || loginLog.ID == 0 {
-		return nil, e.NewBusinessError(1, "登录日志不存在")
+		return nil, e.NewBusinessError(e.NotFound)
 	}
 	decryptKey := s.currentConfig().Jwt.SecretKey
 	loginLog.AccessToken = decryptLoginTokenIfNeeded(loginLog.AccessToken, decryptKey)

@@ -9,6 +9,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
@@ -34,7 +35,7 @@ func NewAdminUserService() *AdminUserService {
 	return &AdminUserService{}
 }
 
-func (s *AdminUserService) handleMutationError(err error, fallback string) error {
+func (s *AdminUserService) handleMutationError(err error, fallbackCode int) error {
 	if err == nil {
 		return nil
 	}
@@ -44,7 +45,7 @@ func (s *AdminUserService) handleMutationError(err error, fallback string) error
 		return businessErr
 	}
 
-	return e.NewBusinessError(e.FAILURE, fallback)
+	return e.NewBusinessError(fallbackCode)
 }
 
 func (s *AdminUserService) revokeUserTokens(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) {
@@ -60,7 +61,7 @@ func (s *AdminUserService) GetUserInfo(id uint) (*resources.AdminUserResources, 
 	err := adminUsersModel.GetByIdWithPreload(id, "RoleList", "Department")
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, e.NewBusinessError(e.FAILURE, "用户不存在")
+			return nil, e.NewBusinessError(e.UserDoesNotExist)
 		}
 		return nil, err
 	}
@@ -69,12 +70,12 @@ func (s *AdminUserService) GetUserInfo(id uint) (*resources.AdminUserResources, 
 }
 
 // GetUserMenuInfo 获取用户权限信息。
-func (s *AdminUserService) GetUserMenuInfo(id uint) (any, error) {
+func (s *AdminUserService) GetUserMenuInfo(id uint, locale string) (any, error) {
 	adminUsersModel := model.NewAdminUsers()
 	err := adminUsersModel.GetById(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, e.NewBusinessError(e.FAILURE, "用户不存在")
+			return nil, e.NewBusinessError(e.UserDoesNotExist)
 		}
 		return nil, err
 	}
@@ -94,7 +95,22 @@ func (s *AdminUserService) GetUserMenuInfo(id uint) (any, error) {
 		return nil, err
 	}
 
-	return resources.NewMenuTreeTransformer().BuildTreeByNode(menus, 0), nil
+	menuIDs := make([]uint, 0, len(menus))
+	for _, menu := range menus {
+		if menu == nil {
+			continue
+		}
+		menuIDs = append(menuIDs, menu.ID)
+	}
+	titleMap, err := model.NewMenuI18n().LocalizedTitleMapByMenuIDs(menuIDs, []string{
+		i18n.NormalizeLocale(locale),
+		i18n.LocaleZhCN,
+		i18n.LocaleEnUS,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resources.BuildMenuTree(menus, 0, titleMap), nil
 }
 
 // List 返回管理员分页列表。

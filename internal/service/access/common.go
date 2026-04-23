@@ -14,7 +14,7 @@ func defaultReloadPolicy() error {
 func getPolicyEnforcer() (*casbinx.CasbinEnforcer, error) {
 	enforcer, err := casbinx.GetEnforcer()
 	if err != nil {
-		return nil, e.NewBusinessError(1, "casbin 初始化失败")
+		return nil, e.NewBusinessError(e.CasbinInitFailed)
 	}
 	return enforcer, nil
 }

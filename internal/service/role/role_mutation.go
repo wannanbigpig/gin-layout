@@ -16,14 +16,14 @@ import (
 
 // roleMutation 角色变更参数，用于封装新增/更新角色的请求数据。
 type roleMutation struct {
-	Id          uint    // 角色 ID，0 表示新增
-	Code        string  // 角色编码，新增时为空则自动生成
-	Name        string  // 角色名称
-	Description string  // 角色描述
-	Status      uint8   // 角色状态
-	Pid         uint    // 父角色 ID，0 表示顶级角色
-	Sort        uint    // 排序权重
-	MenuList    []uint  // 关联的菜单 ID 列表
+	Id          uint   // 角色 ID，0 表示新增
+	Code        string // 角色编码，新增时为空则自动生成
+	Name        string // 角色名称
+	Description string // 角色描述
+	Status      uint8  // 角色状态
+	Pid         uint   // 父角色 ID，0 表示顶级角色
+	Sort        uint   // 排序权重
+	MenuList    []uint // 关联的菜单 ID 列表
 }
 
 // applyRoleMutation 执行角色变更操作（新增/更新）。
@@ -66,7 +66,7 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 
 		// 限制顶级角色的子角色数量
 		if parentRole.Pid == 0 && (role.ID == 0 || role.Pid != params.Pid) && parentRole.ChildrenNum >= maxChildrenPerTop {
-			return e.NewBusinessError(e.MaxChildRoles, fmt.Sprintf("每个顶级角色下最多只能创建%d个子角色", maxChildrenPerTop))
+			return e.NewBusinessError(e.MaxChildRoles)
 		}
 
 		// 构建新的层级和路径：父层级 +1，pids = 父 pids + 父 ID
@@ -164,6 +164,7 @@ func (s *RoleService) generateRoleCode() string {
 // 参数：
 //   - originPids: 原始路径
 //   - newPids: 新路径
+//
 // 返回：SQL CASE 表达式字符串
 // 示例：originPids="1,2", newPids="1,8" 时，子角色 "1,2,3" → "1,8,3"
 func (s *RoleService) buildPidsUpdateExpr(originPids, newPids string) string {

@@ -19,7 +19,6 @@ type CommonService struct {
 }
 
 const maxUploadFileSize int64 = 10 * 1024 * 1024
-const partialImageUploadFailed = "部分图片上传失败"
 
 // NewCommonService 创建通用服务实例。
 func NewCommonService() *CommonService {
@@ -117,28 +116,28 @@ func (s CommonService) UploadImage(fileHeader *multipart.FileHeader, isPublic bo
 // currentUID: 当前用户ID（用于权限检查，0表示未登录）
 func (s CommonService) GetFileAccessPath(fileUUID string, checkAuth bool, currentUID uint) (string, error) {
 	if len(fileUUID) != 32 {
-		return "", e.NewBusinessError(e.FileIdentifierInvalid, "文件标识格式错误，应使用32位UUID")
+		return "", e.NewBusinessError(e.FileIdentifierInvalid)
 	}
 
 	uploadFile := model.NewUploadFiles()
 	// 通过UUID查询（更短，适合URL）
 	err := uploadFile.GetDetail("uuid = ?", fileUUID)
 	if err != nil {
-		return "", e.NewBusinessError(e.NotFound, "文件不存在")
+		return "", e.NewBusinessError(e.NotFound)
 	}
 
 	if uploadFile.IsPublic == global.No {
 		if !checkAuth || currentUID == 0 {
-			return "", e.NewBusinessError(e.FilePrivateAuthNeeded, "该文件为私有文件，需要登录认证")
+			return "", e.NewBusinessError(e.FilePrivateAuthNeeded)
 		}
 		if uploadFile.UID != currentUID {
-			return "", e.NewBusinessError(e.FileAccessDenied, "无权访问该文件")
+			return "", e.NewBusinessError(e.FileAccessDenied)
 		}
 	}
 
 	filePath, err := resolveUploadDestination(storageBasePath(uploadFile.IsPublic == global.Yes), uploadFile.Path)
 	if err != nil {
-		return "", e.NewBusinessError(e.FileAccessDenied, "文件路径异常，无法访问")
+		return "", e.NewBusinessError(e.FileAccessDenied)
 	}
 	return filePath, nil
 }

@@ -81,12 +81,12 @@ func (s *AdminUserService) BindRole(params *form.BindRole) error {
 	adminUserModel := model.NewAdminUsers()
 	err := adminUserModel.GetById(params.UserId)
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "用户不存在")
+		return e.NewBusinessError(e.UserDoesNotExist)
 	}
 
 	ids, err := model.VerifyExistingIDs(model.NewRole(), params.RoleIds)
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "判断角色是否存在失败")
+		return e.NewBusinessError(e.RoleNotFound)
 	}
 	if err := access.NewSystemDefaultsService().RequireSuperAdminRoleForUser(adminUserModel.ID, ids); err != nil {
 		return err
@@ -94,13 +94,13 @@ func (s *AdminUserService) BindRole(params *form.BindRole) error {
 
 	db, err := model.NewAdminUserRoleMap().GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "绑定角色失败")
+		return e.NewBusinessError(e.UpdateUserFailed)
 	}
-	err = access.NewPermissionSyncCoordinator().RunAfterCommit(db, "绑定角色后刷新权限缓存失败", func(tx *gorm.DB) error {
+	err = access.NewPermissionSyncCoordinator().RunAfterCommitWithCode(db, e.UpdateUserFailed, func(tx *gorm.DB) error {
 		return s.updateAdminUserRole(adminUserModel.ID, ids, tx)
 	})
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE, "绑定角色失败")
+		return e.NewBusinessError(e.UpdateUserFailed)
 	}
 	return nil
 }

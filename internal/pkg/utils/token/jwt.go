@@ -60,7 +60,7 @@ func Parse(accessToken string, claims jwt.Claims, options ...jwt.ParserOption) e
 	}
 
 	if !token.Valid {
-		return e.NewBusinessError(1, "invalid token")
+		return e.NewBusinessError(e.NotLogin)
 	}
 
 	return nil

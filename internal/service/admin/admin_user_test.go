@@ -76,7 +76,7 @@ func TestAdminUserHandleMutationErrorKeepsBusinessError(t *testing.T) {
 	service := NewAdminUserService()
 	businessErr := e.NewBusinessError(e.FAILURE, "business")
 
-	got := service.handleMutationError(businessErr, "fallback")
+	got := service.handleMutationError(businessErr, e.FAILURE)
 	if got != businessErr {
 		t.Fatalf("expected original business error, got %#v", got)
 	}
@@ -85,8 +85,8 @@ func TestAdminUserHandleMutationErrorKeepsBusinessError(t *testing.T) {
 func TestAdminUserHandleMutationErrorWrapsPlainError(t *testing.T) {
 	service := NewAdminUserService()
 
-	err := service.handleMutationError(errors.New("plain"), "fallback")
-	assertBusinessErrorMessage(t, err, e.FAILURE, "fallback")
+	err := service.handleMutationError(errors.New("plain"), e.CreateUserFailed)
+	assertBusinessErrorMessage(t, err, e.CreateUserFailed, "创建用户失败，请重试")
 }
 
 func TestAdminUserListOptionsDepartmentSelectFields(t *testing.T) {

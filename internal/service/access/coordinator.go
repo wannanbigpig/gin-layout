@@ -113,17 +113,27 @@ func (c *PermissionSyncCoordinator) ReloadPolicyCache() error {
 }
 
 // ReloadPolicyCacheWithMessage 在事务提交后刷新共享策略，并统一包装业务错误。
-func (c *PermissionSyncCoordinator) ReloadPolicyCacheWithMessage(message string) error {
+func (c *PermissionSyncCoordinator) ReloadPolicyCacheWithMessage(_ string) error {
+	return c.ReloadPolicyCacheWithCode(e.FAILURE)
+}
+
+// ReloadPolicyCacheWithCode 在事务提交后刷新共享策略，并按错误码包装业务错误。
+func (c *PermissionSyncCoordinator) ReloadPolicyCacheWithCode(code int) error {
 	if err := c.ReloadPolicyCache(); err != nil {
-		return e.NewBusinessError(e.FAILURE, message)
+		return e.NewBusinessError(code)
 	}
 	return nil
 }
 
 // RunAfterCommit 执行事务逻辑并在成功提交后刷新共享策略缓存。
-func (c *PermissionSyncCoordinator) RunAfterCommit(db *gorm.DB, message string, fn func(tx *gorm.DB) error) error {
+func (c *PermissionSyncCoordinator) RunAfterCommit(db *gorm.DB, _ string, fn func(tx *gorm.DB) error) error {
+	return c.RunAfterCommitWithCode(db, e.FAILURE, fn)
+}
+
+// RunAfterCommitWithCode 执行事务逻辑并在成功提交后刷新共享策略缓存，失败时返回指定错误码。
+func (c *PermissionSyncCoordinator) RunAfterCommitWithCode(db *gorm.DB, code int, fn func(tx *gorm.DB) error) error {
 	if err := RunInTransaction(db, fn); err != nil {
 		return err
 	}
-	return c.ReloadPolicyCacheWithMessage(message)
+	return c.ReloadPolicyCacheWithCode(code)
 }

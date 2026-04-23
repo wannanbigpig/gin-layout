@@ -97,6 +97,50 @@ func TestAdminAuthHandlerWithDepsReturnsServerErrWhenEnforcerLoadFails(t *testin
 	if result.Code != e.ServerErr {
 		t.Fatalf("expected code %d, got %d", e.ServerErr, result.Code)
 	}
+	if result.Msg != "权限验证初始化失败" {
+		t.Fatalf("expected localized msg, got %q", result.Msg)
+	}
+}
+
+func TestAdminAuthHandlerWithDepsReturnsAuthorizationMessageWhenDenied(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	enforcer := buildTestEnforcer(t)
+	deps := permissionDeps{
+		loadEnforcer: func() (*casbinx.CasbinEnforcer, error) {
+			return &casbinx.CasbinEnforcer{Enforcer: enforcer}, nil
+		},
+		routeChecker: stubRouteChecker{requiresAuth: true},
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.StoreAuthPrincipal(c, &auth.AuthPrincipal{
+			UserID:       2,
+			IsSuperAdmin: global.No,
+		})
+		c.Next()
+	})
+	router.Use(AdminAuthHandlerWithDeps(deps))
+	router.GET("/protected", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+
+	result := decodeResult(t, recorder.Body.Bytes())
+	if result.Code != e.AuthorizationErr {
+		t.Fatalf("expected code %d, got %d", e.AuthorizationErr, result.Code)
+	}
+	if result.Msg != "暂无接口操作权限" {
+		t.Fatalf("expected localized msg, got %q", result.Msg)
+	}
 }
 
 func buildTestEnforcer(t *testing.T) *casbin.Enforcer {

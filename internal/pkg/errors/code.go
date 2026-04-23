@@ -1,5 +1,10 @@
 package errors
 
+import (
+	"fmt"
+	"strings"
+)
+
 const (
 	SUCCESS                   = 0
 	FAILURE                   = 1
@@ -59,6 +64,20 @@ const (
 	DeleteUserFailed        = 20036
 	QueryUserDeptFailed     = 20037
 	SuperAdminMustKeepRole  = 20038
+	MaxMenuDepth            = 20039
+	ParentMenuNotExists     = 20040
+	ParentMenuTypeInvalid   = 20041
+	ParentMenuInvalid       = 20042
+	MenuCodeExists          = 20043
+	MenuRouteNameExists     = 20044
+	MenuPathExists          = 20045
+)
+
+const (
+	MsgKeyAuthSessionExpired        = "auth.session.expired"
+	MsgKeyAuthPermissionInitFailed  = "auth.permission.init_failed"
+	MsgKeyAuthPermissionCheckFailed = "auth.permission.check_failed"
+	MsgKeyAuthAPIOperationDenied    = "auth.api.operation_denied"
 )
 
 // ErrorText 根据语言返回业务错误文案。
@@ -88,4 +107,32 @@ func (et *ErrorText) Text(code int) (str string) {
 		return "unknown error"
 	}
 	return
+}
+
+// TextByKey 按语言和文案 key 返回错误消息。
+func (et *ErrorText) TextByKey(key string, args ...any) (string, bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", false
+	}
+
+	var (
+		template string
+		ok       bool
+	)
+	switch et.Language {
+	case "zh_CN":
+		template, ok = zhCNTextKey[key]
+	case "en":
+		template, ok = enUSTextKey[key]
+	default:
+		template, ok = zhCNTextKey[key]
+	}
+	if !ok {
+		return "", false
+	}
+	if len(args) == 0 {
+		return template, true
+	}
+	return fmt.Sprintf(template, args...), true
 }

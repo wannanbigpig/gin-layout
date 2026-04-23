@@ -78,7 +78,7 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 func (s *RequestLogService) Detail(id uint) (any, error) {
 	requestLog := model.NewRequestLogs()
 	if err := requestLog.GetById(id); err != nil || requestLog.ID == 0 {
-		return nil, e.NewBusinessError(1, "请求日志不存在")
+		return nil, e.NewBusinessError(e.NotFound)
 	}
 	// 使用资源类转换，详情包含所有字段
 	transformer := resources.NewRequestLogTransformer()

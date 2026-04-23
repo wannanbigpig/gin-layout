@@ -150,9 +150,9 @@ func summarizeImageUploadResults(filesInfo []*utils.FileInfo) ([]*utils.FileInfo
 	case successCount == len(filesInfo):
 		return filesInfo, nil
 	case successCount == 0:
-		return filesInfo, e.NewBusinessError(e.FAILURE, "图片上传失败")
+		return filesInfo, e.NewBusinessError(e.FAILURE)
 	default:
-		return filesInfo, e.NewBusinessError(e.FileUploadPartialFail, partialImageUploadFailed)
+		return filesInfo, e.NewBusinessError(e.FileUploadPartialFail)
 	}
 }
 

@@ -39,7 +39,7 @@ var enUSText = map[int]string{
 	ParentRoleNotExists:     "Parent role not exists",
 	ParentRoleInvalid:       "Parent role cannot be itself or its child role",
 	MaxRoleDepth:            "Can only create up to 2 levels of roles",
-	MaxChildRoles:           "Each top-level role can have up to %d child roles",
+	MaxChildRoles:           "Each top-level role can have up to 5 child roles",
 	MenuNotFound:            "Menu not found",
 	MenuExists:              "Menu already exists",
 	MenuHasChildren:         "Cannot delete menu with child menus",
@@ -59,4 +59,18 @@ var enUSText = map[int]string{
 	DeleteUserFailed:        "Failed to delete user, please try again",
 	QueryUserDeptFailed:     "Failed to query user department association",
 	SuperAdminMustKeepRole:  "Default super admin must keep super admin role",
+	MaxMenuDepth:            "Can only create up to 4 levels of menu",
+	ParentMenuNotExists:     "Parent menu not exists",
+	ParentMenuTypeInvalid:   "Parent menu cannot be a button",
+	ParentMenuInvalid:       "Parent menu cannot be itself or its child menu",
+	MenuCodeExists:          "Permission code already exists",
+	MenuRouteNameExists:     "Route name already exists",
+	MenuPathExists:          "Route already exists",
+}
+
+var enUSTextKey = map[string]string{
+	MsgKeyAuthSessionExpired:        "Session expired, please log in again",
+	MsgKeyAuthPermissionInitFailed:  "Permission engine initialization failed",
+	MsgKeyAuthPermissionCheckFailed: "Permission check failed",
+	MsgKeyAuthAPIOperationDenied:    "No permission to operate this API",
 }

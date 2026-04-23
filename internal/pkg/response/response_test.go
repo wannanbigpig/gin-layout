@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
 func TestSuccessDefaultsDataToEmptyObject(t *testing.T) {
@@ -172,5 +173,27 @@ func TestSliceDataWrappedAsObject(t *testing.T) {
 	}
 	if len(result.Data.Result) != 3 {
 		t.Fatalf("expected wrapped slice length=3, got %d", len(result.Data.Result))
+	}
+}
+
+func TestFailCodeByKeyResolvesMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+	ctx.Set(global.ContextKeyRequestID, "req-key")
+	ctx.Set(global.ContextKeyLocale, "zh-CN")
+
+	Resp().FailCodeByKey(ctx, errors.ServerErr, errors.MsgKeyAuthPermissionInitFailed)
+
+	var result Result
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal response failed: %v", err)
+	}
+	if result.Code != errors.ServerErr {
+		t.Fatalf("expected code %d, got %d", errors.ServerErr, result.Code)
+	}
+	if result.Msg != "权限验证初始化失败" {
+		t.Fatalf("expected translated key message, got %q", result.Msg)
 	}
 }

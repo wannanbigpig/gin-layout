@@ -80,7 +80,6 @@ CREATE TABLE IF NOT EXISTS `menu`
 (
     `id`                int                                                    NOT NULL AUTO_INCREMENT,
     `icon`              varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '图标',
-    `title`             varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '中文标题',
     `code`              varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '前端权限标识',
     `path`              varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '前端路由路径',
     `full_path`         varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '完整前端路由路径',
@@ -117,6 +116,23 @@ CREATE TABLE IF NOT EXISTS `menu`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
   ROW_FORMAT = DYNAMIC COMMENT ='菜单表';
+
+-- 创建菜单多语言标题表
+CREATE TABLE IF NOT EXISTS `menu_i18n`
+(
+    `id`         int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `menu_id`    int unsigned                                           NOT NULL DEFAULT '0' COMMENT '菜单ID',
+    `locale`     varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '语言代码，如 zh-CN、en-US',
+    `title`      varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '菜单标题',
+    `created_at` datetime                                                        DEFAULT NULL,
+    `updated_at` datetime                                                        DEFAULT NULL,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_menu_id_locale` (`menu_id`, `locale`) USING BTREE,
+    KEY `idx_locale_menu_id` (`locale`, `menu_id`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_bin
+  ROW_FORMAT = DYNAMIC COMMENT ='菜单多语言标题表';
 
 -- 创建组织表
 CREATE TABLE IF NOT EXISTS `department`

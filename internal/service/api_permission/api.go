@@ -28,7 +28,7 @@ func (s *ApiService) Update(params *form.UpdatePermission) error {
 		return err
 	}
 	if !exists {
-		return e.NewBusinessError(1, "编辑的权限不存在")
+		return e.NewBusinessError(e.NotFound)
 	}
 	data := map[string]any{
 		"name":        params.Name,
