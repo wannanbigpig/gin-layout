@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 
 	errcode "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -34,11 +35,27 @@ func ResponseError(c *gin.Context, err error) {
 }
 
 func handleValidationError(c *gin.Context, errs validator.ValidationErrors) {
-	fields := errs.Translate(validatorRuntime.trans)
-	for _, err := range fields {
-		r.Resp().FailCode(c, errcode.InvalidParameter, err)
+	primary := validatorRuntime.translatorForRequest(c)
+	fallback := validatorRuntime.fallbackTranslator(primary)
+	for _, fieldErr := range errs {
+		message := translateFieldError(fieldErr, primary, fallback)
+		r.Resp().FailCode(c, errcode.InvalidParameter, message)
 		return
 	}
+}
+
+func translateFieldError(fieldErr validator.FieldError, primary, fallback ut.Translator) string {
+	if primary != nil {
+		if translated := fieldErr.Translate(primary); translated != "" && translated != fieldErr.Error() {
+			return translated
+		}
+	}
+	if fallback != nil {
+		if translated := fieldErr.Translate(fallback); translated != "" && translated != fieldErr.Error() {
+			return translated
+		}
+	}
+	return fieldErr.Error()
 }
 
 func handleBindingError(c *gin.Context, err error) {

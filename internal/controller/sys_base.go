@@ -11,6 +11,8 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	"github.com/wannanbigpig/gin-layout/internal/resources"
+	"github.com/wannanbigpig/gin-layout/internal/service/admin"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
@@ -88,10 +90,19 @@ func (api Api) GetCurrentUserID(c *gin.Context) uint {
 	return c.GetUint(global.ContextKeyUID)
 }
 
-// GetCurrentAdminUser 获取当前登录用户的完整信息
-func (api Api) GetCurrentAdminUser(c *gin.Context) interface{} {
+// GetCurrentAdminUserSnapshot 获取当前登录用户的 claims 快照投影，不代表数据库最新状态。
+func (api Api) GetCurrentAdminUserSnapshot(c *gin.Context) *model.AdminUser {
 	if principal := auth.GetAuthPrincipal(c); principal != nil {
 		return principal.AdminUser()
 	}
 	return nil
+}
+
+// GetCurrentAdminUserDetail 获取当前登录用户的数据库最新详情。
+func (api Api) GetCurrentAdminUserDetail(c *gin.Context) (*resources.AdminUserResources, error) {
+	uid := api.GetCurrentUserID(c)
+	if uid == 0 {
+		return nil, errors.NewBusinessError(errors.NotLogin)
+	}
+	return admin.NewAdminUserService().GetUserInfo(uid)
 }

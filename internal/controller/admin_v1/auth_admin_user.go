@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/admin"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
@@ -23,8 +22,7 @@ func NewAdminUserController() *AdminUserController {
 
 // GetUserInfo 获取当前登录用户基本信息
 func (api AdminUserController) GetUserInfo(c *gin.Context) {
-	uid := c.GetUint(global.ContextKeyUID)
-	result, err := admin.NewAdminUserService().GetUserInfo(uid)
+	result, err := api.GetCurrentAdminUserDetail(c)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -35,7 +33,7 @@ func (api AdminUserController) GetUserInfo(c *gin.Context) {
 
 // UpdateProfile 更新个人资料（只能更新自己的手机号、邮箱、密码、昵称）
 func (api AdminUserController) UpdateProfile(c *gin.Context) {
-	uid := c.GetUint(global.ContextKeyUID)
+	uid := api.GetCurrentUserID(c)
 	params := form.NewUpdateProfile()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
@@ -51,7 +49,7 @@ func (api AdminUserController) UpdateProfile(c *gin.Context) {
 
 // GetUserMenuInfo 获取当前登录用户权限信息
 func (api AdminUserController) GetUserMenuInfo(c *gin.Context) {
-	uid := c.GetUint(global.ContextKeyUID)
+	uid := api.GetCurrentUserID(c)
 	result, err := admin.NewAdminUserService().GetUserMenuInfo(uid, middleware.LocaleFromContext(c))
 	if err != nil {
 		api.Err(c, err)

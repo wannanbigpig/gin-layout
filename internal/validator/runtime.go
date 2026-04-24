@@ -5,11 +5,14 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 	"go.uber.org/zap"
 
+	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 )
 
@@ -18,7 +21,7 @@ var validatorRuntime = newValidatorRuntime()
 type validatorRuntimeState struct {
 	once             sync.Once
 	validate         *validator.Validate
-	trans            ut.Translator
+	translators      map[string]ut.Translator
 	translatorLocale string
 	rulesReady       bool
 	tagNameReady     bool
@@ -57,12 +60,12 @@ func (s *validatorRuntimeState) init(locale string) error {
 	}
 	s.ensureTagNameFunc()
 
-	trans, err := initTranslator(s.validate, locale)
+	translators, err := initTranslators(s.validate)
 	if err != nil {
 		return err
 	}
-	s.trans = trans
-	s.translatorLocale = locale
+	s.translators = translators
+	s.translatorLocale = normalizeValidatorLocale(locale)
 	return nil
 }
 
@@ -107,4 +110,47 @@ func registerTagNameFunc(validate *validator.Validate) {
 		}
 		return field.Name
 	})
+}
+
+func (s *validatorRuntimeState) translatorForRequest(c *gin.Context) ut.Translator {
+	if s == nil {
+		return nil
+	}
+
+	locale := s.translatorLocale
+	if c != nil {
+		if localeValue, exists := c.Get(global.ContextKeyLocale); exists {
+			if localeText, ok := localeValue.(string); ok {
+				locale = normalizeValidatorLocale(i18n.ToErrorLanguage(localeText))
+			}
+		}
+	}
+
+	if trans := s.translators[locale]; trans != nil {
+		return trans
+	}
+	if trans := s.translators[s.translatorLocale]; trans != nil {
+		return trans
+	}
+	if trans := s.translators["zh"]; trans != nil {
+		return trans
+	}
+	return s.translators["en"]
+}
+
+func (s *validatorRuntimeState) fallbackTranslator(primary ut.Translator) ut.Translator {
+	if s == nil {
+		return nil
+	}
+	defaultTrans := s.translators[s.translatorLocale]
+	if primary != nil && defaultTrans != nil && primary != defaultTrans {
+		return defaultTrans
+	}
+	if primary != nil && s.translators["zh"] != nil && primary != s.translators["zh"] {
+		return s.translators["zh"]
+	}
+	if primary != nil && s.translators["en"] != nil && primary != s.translators["en"] {
+		return s.translators["en"]
+	}
+	return nil
 }
