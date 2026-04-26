@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -67,17 +68,20 @@ func shouldSkipBootstrap(cmd *cobra.Command) bool {
 	if cmd.Name() == "help" {
 		return true
 	}
-	switch cmd.CommandPath() {
+	commandPath := cmd.CommandPath()
+	switch commandPath {
 	case "go-layout", "go-layout version", "go-layout help":
 		return true
 	default:
-		return false
+		return strings.HasPrefix(commandPath, "go-layout completion") ||
+			strings.HasPrefix(commandPath, "go-layout __complete")
 	}
 }
 
 // registerCommands 注册子命令
 func registerCommands() {
 	rootCmd.AddCommand(version.Cmd) // 查看版本: go-layout version
+	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(service.Cmd) // 启动服务: go-layout service
 	rootCmd.AddCommand(command.Cmd) // 运行命令: go-layout command demo / go-layout command init api-route
 	rootCmd.AddCommand(cron.Cmd)    // 启动计划任务: go-layout cron

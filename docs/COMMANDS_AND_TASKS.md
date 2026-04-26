@@ -38,6 +38,17 @@
 
 项目根命令入口在 [cmd/root.go](/Users/liuml/data/go/src/go-layout/cmd/root.go)。
 
+### 0. 迁移命令
+
+常用入口：
+
+```bash
+go run main.go -c ./config.yaml command migrate check
+go run main.go -c ./config.yaml command migrate up
+```
+
+详细说明见：[docs/MIGRATE_COMMANDS.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.md)。
+
 ### 1. 查看帮助
 
 ```bash
@@ -105,6 +116,7 @@ go run main.go cron
 go run main.go command api-route
 go run main.go command rebuild-user-permissions
 go run main.go command init-system
+go run main.go -c ./config.yaml command migrate up
 ```
 
 入口文件：
@@ -121,6 +133,9 @@ go run main.go command init-system
   - 回滚迁移、重新执行迁移、初始化 API 路由、重建用户权限
 - `demo`
   - 示例命令
+- `migrate`
+  - 迁移管理子命令，支持 `create/check/up/down/goto/force/version`
+  - 详细说明见 [docs/MIGRATE_COMMANDS.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.md)
 
 ### 6. 查看版本
 

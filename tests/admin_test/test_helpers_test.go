@@ -270,3 +270,104 @@ func createFallbackMenu(t *testing.T) uint {
 	}
 	return menu.ID
 }
+
+// findSysConfigByKey 根据参数键名查找系统参数。
+func findSysConfigByKey(t *testing.T, key string) *model.SysConfig {
+	t.Helper()
+	config := model.NewSysConfig()
+	db, err := config.GetDB()
+	if err != nil {
+		t.Fatalf("查询系统参数失败: %v", err)
+	}
+	if err := db.Where("config_key = ? AND deleted_at = 0", key).First(config).Error; err != nil {
+		t.Fatalf("查询系统参数失败: %v", err)
+	}
+	return config
+}
+
+// findSysDictTypeByCode 根据字典类型编码查找字典类型。
+func findSysDictTypeByCode(t *testing.T, typeCode string) *model.SysDictType {
+	t.Helper()
+	dictType := model.NewSysDictType()
+	db, err := dictType.GetDB()
+	if err != nil {
+		t.Fatalf("查询字典类型失败: %v", err)
+	}
+	if err := db.Where("type_code = ? AND deleted_at = 0", typeCode).First(dictType).Error; err != nil {
+		t.Fatalf("查询字典类型失败: %v", err)
+	}
+	return dictType
+}
+
+// findSysDictItemByTypeAndValue 根据类型编码与字典值查找字典项。
+func findSysDictItemByTypeAndValue(t *testing.T, typeCode, value string) *model.SysDictItem {
+	t.Helper()
+	item := model.NewSysDictItem()
+	db, err := item.GetDB()
+	if err != nil {
+		t.Fatalf("查询字典项失败: %v", err)
+	}
+	if err := db.Where("type_code = ? AND value = ? AND deleted_at = 0", typeCode, value).First(item).Error; err != nil {
+		t.Fatalf("查询字典项失败: %v", err)
+	}
+	return item
+}
+
+// cleanupSysConfigsByKeyPrefix 清理指定参数键前缀的系统参数测试数据。
+func cleanupSysConfigsByKeyPrefix(t *testing.T, keyPrefix string) {
+	t.Helper()
+	db, err := model.GetDB()
+	if err != nil {
+		return
+	}
+	var configs []model.SysConfig
+	if err := db.Unscoped().Where("config_key LIKE ?", keyPrefix+"%").Find(&configs).Error; err != nil {
+		return
+	}
+	if len(configs) == 0 {
+		return
+	}
+	ids := make([]uint, 0, len(configs))
+	for _, config := range configs {
+		ids = append(ids, config.ID)
+	}
+	_ = db.Unscoped().Where("config_id IN ?", ids).Delete(&model.SysConfigI18n{}).Error
+	_ = db.Unscoped().Where("id IN ?", ids).Delete(&model.SysConfig{}).Error
+}
+
+// cleanupSysDictByTypeCodePrefix 清理指定字典类型编码前缀的测试数据。
+func cleanupSysDictByTypeCodePrefix(t *testing.T, typeCodePrefix string) {
+	t.Helper()
+	db, err := model.GetDB()
+	if err != nil {
+		return
+	}
+
+	var dictTypes []model.SysDictType
+	if err := db.Unscoped().Where("type_code LIKE ?", typeCodePrefix+"%").Find(&dictTypes).Error; err != nil {
+		return
+	}
+	if len(dictTypes) == 0 {
+		return
+	}
+
+	typeIDs := make([]uint, 0, len(dictTypes))
+	typeCodes := make([]string, 0, len(dictTypes))
+	for _, dictType := range dictTypes {
+		typeIDs = append(typeIDs, dictType.ID)
+		typeCodes = append(typeCodes, dictType.TypeCode)
+	}
+
+	var itemIDs []uint
+	_ = db.Unscoped().
+		Model(&model.SysDictItem{}).
+		Where("type_code IN ?", typeCodes).
+		Pluck("id", &itemIDs).Error
+
+	if len(itemIDs) > 0 {
+		_ = db.Unscoped().Where("dict_item_id IN ?", itemIDs).Delete(&model.SysDictItemI18n{}).Error
+	}
+	_ = db.Unscoped().Where("type_code IN ?", typeCodes).Delete(&model.SysDictItem{}).Error
+	_ = db.Unscoped().Where("dict_type_id IN ?", typeIDs).Delete(&model.SysDictTypeI18n{}).Error
+	_ = db.Unscoped().Where("id IN ?", typeIDs).Delete(&model.SysDictType{}).Error
+}

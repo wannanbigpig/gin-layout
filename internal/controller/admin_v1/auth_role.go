@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/role"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -37,11 +38,12 @@ func (api RoleController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := role.NewRoleService().Create(params); err != nil {
+	changeDiff, err := role.NewRoleService().CreateWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -52,11 +54,12 @@ func (api RoleController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := role.NewRoleService().Update(params); err != nil {
+	changeDiff, err := role.NewRoleService().UpdateWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -67,11 +70,12 @@ func (api RoleController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := role.NewRoleService().Delete(params.ID); err != nil {
+	changeDiff, err := role.NewRoleService().DeleteWithAuditDiff(params.ID)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 

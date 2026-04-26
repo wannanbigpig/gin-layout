@@ -14,11 +14,13 @@ type RequestLogs struct {
 	BaseURL         string  `json:"base_url"`         // 请求基础URL
 	OperationName   string  `json:"operation_name"`   // 操作名称
 	OperationStatus int     `json:"operation_status"` // 操作状态码（响应返回的code，0=成功，其他=失败）
+	IsHighRisk      uint8   `json:"is_high_risk"`     // 是否高危操作 1是 0否
 	OperatorAccount string  `json:"operator_account"` // 操作账号
 	OperatorName    string  `json:"operator_name"`    // 操作人员
 	RequestHeaders  string  `json:"request_headers"`  // 请求头（JSON格式）
 	RequestQuery    string  `json:"request_query"`    // 请求参数
 	RequestBody     string  `json:"request_body"`     // 请求体
+	ChangeDiff      string  `json:"change_diff"`      // 关键变更前后差异（JSON）
 	ResponseStatus  int     `json:"response_status"`  // 响应状态码
 	ResponseBody    string  `json:"response_body"`    // 响应体
 	ResponseHeader  string  `json:"response_header"`  // 响应头

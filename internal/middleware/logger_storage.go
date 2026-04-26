@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -72,6 +73,8 @@ func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operation
 	}
 
 	operatorMeta := collectAuditOperatorMeta(c)
+	isHighRisk := resolveAuditHighRisk(c, requestMeta.method)
+	changeDiff := resolveAuditChangeDiff(c, isHighRisk, requestMeta.requestBody, responseBody)
 
 	return &auditsvc.AuditLogSnapshot{
 		RequestID:       requestMeta.requestID,
@@ -87,9 +90,11 @@ func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operation
 		BaseURL:         requestMeta.path,
 		OperationName:   requestMeta.operationName,
 		OperationStatus: operationStatus,
+		IsHighRisk:      isHighRisk,
 		RequestHeaders:  requestMeta.requestHeaders,
 		RequestQuery:    requestMeta.requestQuery,
 		RequestBody:     requestMeta.requestBody,
+		ChangeDiff:      changeDiff,
 		ResponseStatus:  resolveAuditResponseStatus(recorder),
 		ResponseBody:    responseBody,
 		ResponseHeader:  responseHeader,
@@ -190,6 +195,76 @@ func buildMaskedResponseBody(recorder *responseRecorder) string {
 	}
 
 	return sensitive.GetMaskedResponseBody(bodyBytes) + "...(truncated,total_size=" + strconv.Itoa(recorder.responseBytes) + "B)"
+}
+
+func resolveAuditHighRisk(c *gin.Context, method string) uint8 {
+	if c != nil {
+		if raw, exists := c.Get(global.ContextKeyAuditHighRisk); exists {
+			switch value := raw.(type) {
+			case bool:
+				if value {
+					return 1
+				}
+				return 0
+			case uint8:
+				if value > 0 {
+					return 1
+				}
+				return 0
+			case int:
+				if value > 0 {
+					return 1
+				}
+				return 0
+			case string:
+				if strings.EqualFold(value, "1") || strings.EqualFold(value, "true") {
+					return 1
+				}
+				if strings.EqualFold(value, "0") || strings.EqualFold(value, "false") {
+					return 0
+				}
+			}
+		}
+	}
+
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return 0
+	default:
+		return 1
+	}
+}
+
+func resolveAuditChangeDiff(c *gin.Context, isHighRisk uint8, requestBody, responseBody string) string {
+	if c != nil {
+		if raw, exists := c.Get(global.ContextKeyAuditChangeDiff); exists {
+			switch value := raw.(type) {
+			case string:
+				if strings.TrimSpace(value) != "" {
+					return value
+				}
+			default:
+				bytes, err := json.Marshal(value)
+				if err == nil {
+					return string(bytes)
+				}
+			}
+		}
+	}
+
+	if isHighRisk == 0 || (requestBody == "" && responseBody == "") {
+		return ""
+	}
+
+	payload := map[string]any{
+		"request_body":  requestBody,
+		"response_body": responseBody,
+	}
+	bytes, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return string(bytes)
 }
 
 func operationStatusFromResponse(recorder *responseRecorder, resp *response.Result) int {

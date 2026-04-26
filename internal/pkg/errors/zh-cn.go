@@ -66,6 +66,7 @@ var zhCNText = map[int]string{
 	MenuCodeExists:          "权限标识已存在",
 	MenuRouteNameExists:     "路由名称已存在",
 	MenuPathExists:          "路由已存在",
+	LoginAccountLocked:      "账号已被锁定，请稍后重试",
 }
 
 var zhCNTextKey = map[string]string{
@@ -73,4 +74,5 @@ var zhCNTextKey = map[string]string{
 	MsgKeyAuthPermissionInitFailed:  "权限验证初始化失败",
 	MsgKeyAuthPermissionCheckFailed: "权限验证失败",
 	MsgKeyAuthAPIOperationDenied:    "暂无接口操作权限",
+	MsgKeyAuthAccountLocked:         "账号已被锁定，请在 %d 分钟后重试",
 }

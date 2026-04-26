@@ -22,23 +22,18 @@ func NewRequestLogService() *RequestLogService {
 
 // List 分页查询请求日志列表
 func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collection {
-	query := newLogListQuery().
-		addEq("operator_id", uintFilterValue(params.OperatorID)).
-		addLike("operator_account", params.OperatorAccount).
-		addEq("base_url", params.BaseURL).
-		addEq("method", params.Method).
-		addLike("operation_name", params.OperationName).
-		addLike("ip", params.IP).
-		addCreatedAtRange(params.StartTime, params.EndTime)
-
-	if params.OperationStatus != nil {
-		switch *params.OperationStatus {
-		case 0:
-			query.addCondition("operation_status = ?", 0)
-		case 1:
-			query.addCondition("operation_status != ?", 0)
-		}
-	}
+	query := buildRequestLogQuery(requestLogQueryInput{
+		OperatorID:      params.OperatorID,
+		OperatorAccount: params.OperatorAccount,
+		OperationStatus: params.OperationStatus,
+		IsHighRisk:      params.IsHighRisk,
+		Method:          params.Method,
+		BaseURL:         params.BaseURL,
+		OperationName:   params.OperationName,
+		IP:              params.IP,
+		StartTime:       params.StartTime,
+		EndTime:         params.EndTime,
+	})
 	conditionStr, args := query.Build()
 	requestLogModel := model.NewRequestLogs()
 
@@ -53,6 +48,7 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 			"base_url",
 			"operation_name",
 			"operation_status",
+			"is_high_risk",
 			"operator_account",
 			"operator_name",
 			"response_status",
@@ -83,4 +79,39 @@ func (s *RequestLogService) Detail(id uint) (any, error) {
 	// 使用资源类转换，详情包含所有字段
 	transformer := resources.NewRequestLogTransformer()
 	return transformer.ToStruct(requestLog), nil
+}
+
+type requestLogQueryInput struct {
+	OperatorID      uint
+	OperatorAccount string
+	OperationStatus *int
+	IsHighRisk      *uint8
+	Method          string
+	BaseURL         string
+	OperationName   string
+	IP              string
+	StartTime       string
+	EndTime         string
+}
+
+func buildRequestLogQuery(input requestLogQueryInput) *logListQuery {
+	query := newLogListQuery().
+		addEq("operator_id", uintFilterValue(input.OperatorID)).
+		addLike("operator_account", input.OperatorAccount).
+		addEq("base_url", input.BaseURL).
+		addEq("method", input.Method).
+		addLike("operation_name", input.OperationName).
+		addLike("ip", input.IP).
+		addEq("is_high_risk", input.IsHighRisk).
+		addCreatedAtRange(input.StartTime, input.EndTime)
+
+	if input.OperationStatus != nil {
+		switch *input.OperationStatus {
+		case 0:
+			query.addCondition("operation_status = ?", 0)
+		case 1:
+			query.addCondition("operation_status != ?", 0)
+		}
+	}
+	return query
 }

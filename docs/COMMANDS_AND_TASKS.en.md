@@ -38,6 +38,17 @@ In short:
 
 The root command entry is in [cmd/root.go](/Users/liuml/data/go/src/go-layout/cmd/root.go).
 
+### 0. Migration Commands
+
+Common entry points:
+
+```bash
+go run main.go -c ./config.yaml command migrate check
+go run main.go -c ./config.yaml command migrate up
+```
+
+See [docs/MIGRATE_COMMANDS.en.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.en.md) for full details.
+
 ### 1. Show Help
 
 ```bash
@@ -105,6 +116,7 @@ Used for:
 go run main.go command api-route
 go run main.go command rebuild-user-permissions
 go run main.go command init-system
+go run main.go -c ./config.yaml command migrate up
 ```
 
 Entry file:
@@ -121,6 +133,9 @@ Supported subcommands:
   - rolls back migrations, reruns migrations, initializes API routes, and rebuilds user permissions
 - `demo`
   - example command
+- `migrate`
+  - migration management subcommands: `create/check/up/down/goto/force/version`
+  - full guide: [docs/MIGRATE_COMMANDS.en.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.en.md)
 
 ### 6. Show Version
 

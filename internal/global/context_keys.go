@@ -7,4 +7,6 @@ const (
 	ContextKeyLocale           = "locale"
 	ContextKeyRequestID        = "requestId"
 	ContextKeyRequestStartTime = "requestStartTime"
+	ContextKeyAuditChangeDiff  = "auditChangeDiff"
+	ContextKeyAuditHighRisk    = "auditHighRisk"
 )

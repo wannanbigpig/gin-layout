@@ -120,11 +120,16 @@ func (s *LoginService) currentConfig() *config.Conf {
 // Login 用户登录。
 func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*TokenResponse, error) {
 	startTime := time.Now()
+	if err := s.ensureLoginAllowed(username); err != nil {
+		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
+		s.HandleLoginFailure(username, s.extractErrorMessage(err), logInfo, false)
+		return nil, err
+	}
 
 	adminUser, err := s.validateUser(username, password)
 	if err != nil {
 		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
-		s.RecordLoginFailLog(username, s.extractErrorMessage(err), logInfo)
+		s.HandleLoginFailure(username, s.extractErrorMessage(err), logInfo, s.shouldCountLockFailure(err))
 		return nil, err
 	}
 
@@ -132,13 +137,16 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	accessToken, err := token.Generate(claims)
 	if err != nil {
 		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
-		s.RecordLoginFailLog(username, "生成Token失败", logInfo)
+		s.HandleLoginFailure(username, "生成Token失败", logInfo, false)
 		return nil, e.NewBusinessError(e.TokenGenerateFailed)
 	}
 
 	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
 	if err := s.recordLoginLog(adminUser, claims, accessToken, "", logInfo, model.LoginTypeLogin); err != nil {
 		return nil, e.NewBusinessError(e.LoginFailed)
+	}
+	if err := s.clearLoginFailState(username); err != nil && !isTableNotFoundErr(err) {
+		log.Logger.Warn("清理登录失败计数失败", zap.String("username", username), zap.Error(err))
 	}
 
 	return &TokenResponse{

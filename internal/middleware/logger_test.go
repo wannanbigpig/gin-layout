@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -214,5 +215,64 @@ func TestBuildRequestAuditLogSnapshotUsesPrincipal(t *testing.T) {
 	}
 	if snapshot.OperatorAccount != "tester" || snapshot.OperatorName != "Tester" {
 		t.Fatalf("unexpected operator names: %#v", snapshot)
+	}
+}
+
+func TestBuildRequestAuditLogSnapshotMarksHighRiskAndDiff(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/demo", bytes.NewBufferString(`{"name":"after"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+	ctx.Set(global.ContextKeyRequestID, "req-2")
+	cacheRequestBody(ctx)
+
+	SetAuditHighRisk(ctx, true)
+	SetAuditChangeDiff(ctx, map[string]any{"name": "before"}, map[string]any{"name": "after"})
+
+	respRecorder := createResponseRecorder(ctx)
+	respRecorder.body.WriteString(`{"code":0,"msg":"ok"}`)
+
+	snapshot := buildRequestAuditLogSnapshot(ctx, respRecorder, &response.Result{Code: 0})
+	if snapshot == nil {
+		t.Fatal("expected audit snapshot")
+	}
+	if snapshot.IsHighRisk != 1 {
+		t.Fatalf("expected high risk audit snapshot, got %#v", snapshot.IsHighRisk)
+	}
+
+	diff := map[string]any{}
+	if err := json.Unmarshal([]byte(snapshot.ChangeDiff), &diff); err != nil {
+		t.Fatalf("expected valid change diff json, got err=%v raw=%s", err, snapshot.ChangeDiff)
+	}
+	if _, ok := diff["before"]; !ok {
+		t.Fatalf("expected before section in change diff, got %#v", diff)
+	}
+	if _, ok := diff["after"]; !ok {
+		t.Fatalf("expected after section in change diff, got %#v", diff)
+	}
+}
+
+func TestBuildRequestAuditLogSnapshotGetRequestIsNotHighRiskByDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/demo", nil)
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+	ctx.Set(global.ContextKeyRequestID, "req-3")
+
+	respRecorder := createResponseRecorder(ctx)
+	respRecorder.body.WriteString(`{"code":0,"msg":"ok"}`)
+
+	snapshot := buildRequestAuditLogSnapshot(ctx, respRecorder, &response.Result{Code: 0})
+	if snapshot == nil {
+		t.Fatal("expected audit snapshot")
+	}
+	if snapshot.IsHighRisk != 0 {
+		t.Fatalf("expected get request not high risk, got %#v", snapshot.IsHighRisk)
+	}
+	if snapshot.ChangeDiff != "" {
+		t.Fatalf("expected empty change diff for get request, got %s", snapshot.ChangeDiff)
 	}
 }

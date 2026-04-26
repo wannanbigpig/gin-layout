@@ -66,6 +66,7 @@ var enUSText = map[int]string{
 	MenuCodeExists:          "Permission code already exists",
 	MenuRouteNameExists:     "Route name already exists",
 	MenuPathExists:          "Route already exists",
+	LoginAccountLocked:      "Account is locked, please try again later",
 }
 
 var enUSTextKey = map[string]string{
@@ -73,4 +74,5 @@ var enUSTextKey = map[string]string{
 	MsgKeyAuthPermissionInitFailed:  "Permission engine initialization failed",
 	MsgKeyAuthPermissionCheckFailed: "Permission check failed",
 	MsgKeyAuthAPIOperationDenied:    "No permission to operate this API",
+	MsgKeyAuthAccountLocked:         "Account is locked, please try again in %d minutes",
 }

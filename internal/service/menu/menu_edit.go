@@ -17,7 +17,7 @@ import (
 
 // Create 新增菜单。
 func (s *MenuService) Create(params *form.CreateMenu, _ string) error {
-	return s.applyMenuMutation(&menuMutation{
+	_, err := s.applyMenuMutation(&menuMutation{
 		Icon:            params.Icon,
 		TitleI18n:       params.TitleI18n,
 		Code:            params.Code,
@@ -39,11 +39,12 @@ func (s *MenuService) Create(params *form.CreateMenu, _ string) error {
 		Redirect:        params.Redirect,
 		IsExternalLinks: params.IsExternalLinks,
 	})
+	return err
 }
 
 // Update 更新菜单。
 func (s *MenuService) Update(params *form.UpdateMenu, _ string) error {
-	return s.applyMenuMutation(&menuMutation{
+	_, err := s.applyMenuMutation(&menuMutation{
 		Id:              params.Id,
 		Icon:            params.Icon,
 		TitleI18n:       params.TitleI18n,
@@ -66,6 +67,7 @@ func (s *MenuService) Update(params *form.UpdateMenu, _ string) error {
 		Redirect:        params.Redirect,
 		IsExternalLinks: params.IsExternalLinks,
 	})
+	return err
 }
 
 // menuMutation 菜单变更参数，用于封装新增/更新菜单的请求数据。
@@ -110,38 +112,41 @@ type menuEditContext struct {
 // 5. 验证唯一字段（code, name, path）
 // 6. 验证 API 列表
 // 7. 事务保存：菜单数据、级联更新子菜单、更新子菜单数量、同步菜单权限
-func (s *MenuService) applyMenuMutation(params *menuMutation) error {
+func (s *MenuService) applyMenuMutation(params *menuMutation) (*model.Menu, error) {
 	menu, editContext, err := s.prepareMutationContext(params)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 1) 规范化标题输入
 	if err := s.normalizeMenuTitles(params); err != nil {
-		return err
+		return nil, err
 	}
 	// 2) 构建树形层级并验证合法性
 	if err := s.resolveMenuHierarchy(menu, params); err != nil {
-		return err
+		return nil, err
 	}
 	// 3) 检查层级深度
 	if menu.Level > maxMenuLevel {
-		return e.NewBusinessError(e.MaxMenuDepth)
+		return nil, e.NewBusinessError(e.MaxMenuDepth)
 	}
 
 	// 4) 填充字段并验证唯一性
 	s.assignMenuFields(menu, params)
 	if err := s.validateUniqueFields(menu, params, editContext.excludeId); err != nil {
-		return err
+		return nil, err
 	}
 
 	// 5) 规范化关联 API 列表（仅保留有效且去重后的 ID）
 	if err := s.normalizeMenuAPIList(params); err != nil {
-		return err
+		return nil, err
 	}
 
 	// 6) 持久化及事务后处理
-	return s.executeEditTransaction(menu, params.ApiList, params.TitleI18n, editContext)
+	if err := s.executeEditTransaction(menu, params.ApiList, params.TitleI18n, editContext); err != nil {
+		return nil, err
+	}
+	return menu, nil
 }
 
 // prepareMutationContext 根据新增/更新场景初始化菜单模型与编辑上下文。

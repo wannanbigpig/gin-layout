@@ -13,6 +13,9 @@ import (
 
 var (
 	ErrPublisherUnavailable = errors.New("queue publisher unavailable")
+	ErrInspectorUnavailable = errors.New("queue inspector unavailable")
+	ErrQueueNotFound        = errors.New("queue not found")
+	ErrTaskNotFound         = errors.New("queue task not found")
 	ErrSkipRetry            = errors.New("queue skip retry")
 )
 
@@ -36,6 +39,12 @@ type JobInfo struct {
 // Publisher 负责发布任务。
 type Publisher interface {
 	Enqueue(ctx context.Context, job Job) (JobInfo, error)
+}
+
+// Inspector 负责对已入队任务执行控制操作。
+type Inspector interface {
+	DeleteTask(ctx context.Context, queueName, taskID string) error
+	CancelProcessing(ctx context.Context, taskID string) error
 }
 
 // Handler 负责消费任务 payload。
@@ -195,12 +204,18 @@ func (e *skipRetryError) Is(target error) bool {
 }
 
 type publisherFactory func(cfg *config.Conf) (Publisher, error)
+type inspectorFactory func(cfg *config.Conf) (Inspector, error)
 
 var (
 	publisherMu      sync.RWMutex
 	activePublisher  Publisher
 	activePublisherF publisherFactory
 	activePublisherE error
+
+	inspectorMu      sync.RWMutex
+	activeInspector  Inspector
+	activeInspectorF inspectorFactory
+	activeInspectorE error
 )
 
 // RegisterPublisherFactory 注册默认的 publisher 构建器。
@@ -237,6 +252,40 @@ func InitPublisher(cfg *config.Conf) error {
 	return nil
 }
 
+// RegisterInspectorFactory 注册默认的 inspector 构建器。
+func RegisterInspectorFactory(factory func(cfg *config.Conf) (Inspector, error)) {
+	inspectorMu.Lock()
+	defer inspectorMu.Unlock()
+	activeInspectorF = factory
+}
+
+// InitInspector 根据当前配置初始化全局 inspector。
+func InitInspector(cfg *config.Conf) error {
+	inspectorMu.Lock()
+	defer inspectorMu.Unlock()
+
+	if cfg == nil || !cfg.Queue.Enable {
+		activeInspector = nil
+		activeInspectorE = nil
+		return nil
+	}
+	if activeInspectorF == nil {
+		activeInspector = nil
+		activeInspectorE = errors.New("queue inspector factory not registered")
+		return activeInspectorE
+	}
+
+	inspector, err := activeInspectorF(cfg)
+	if err != nil {
+		activeInspector = nil
+		activeInspectorE = err
+		return err
+	}
+	activeInspector = inspector
+	activeInspectorE = nil
+	return nil
+}
+
 // PublisherOrNil 返回当前全局 publisher；未启用时返回 nil。
 func PublisherOrNil() Publisher {
 	publisherMu.RLock()
@@ -249,6 +298,38 @@ func PublisherInitError() error {
 	publisherMu.RLock()
 	defer publisherMu.RUnlock()
 	return activePublisherE
+}
+
+// InspectorOrNil 返回当前全局 inspector；未启用时返回 nil。
+func InspectorOrNil() Inspector {
+	inspectorMu.RLock()
+	defer inspectorMu.RUnlock()
+	return activeInspector
+}
+
+// InspectorInitError 返回最近一次 inspector 初始化错误。
+func InspectorInitError() error {
+	inspectorMu.RLock()
+	defer inspectorMu.RUnlock()
+	return activeInspectorE
+}
+
+// DeleteTask 删除队列中的任务（pending/scheduled/retry/archived）。
+func DeleteTask(ctx context.Context, queueName, taskID string) error {
+	inspector := InspectorOrNil()
+	if inspector == nil {
+		return ErrInspectorUnavailable
+	}
+	return inspector.DeleteTask(ctx, queueName, taskID)
+}
+
+// CancelProcessing 发送取消正在执行任务的信号（best-effort）。
+func CancelProcessing(ctx context.Context, taskID string) error {
+	inspector := InspectorOrNil()
+	if inspector == nil {
+		return ErrInspectorUnavailable
+	}
+	return inspector.CancelProcessing(ctx, taskID)
 }
 
 // SetPublisherForTesting 仅用于测试时替换全局 publisher。
@@ -265,6 +346,23 @@ func SetPublisherForTesting(publisher Publisher) func() {
 		activePublisher = previous
 		activePublisherE = previousErr
 		publisherMu.Unlock()
+	}
+}
+
+// SetInspectorForTesting 仅用于测试时替换全局 inspector。
+func SetInspectorForTesting(inspector Inspector) func() {
+	inspectorMu.Lock()
+	previous := activeInspector
+	previousErr := activeInspectorE
+	activeInspector = inspector
+	activeInspectorE = nil
+	inspectorMu.Unlock()
+
+	return func() {
+		inspectorMu.Lock()
+		activeInspector = previous
+		activeInspectorE = previousErr
+		inspectorMu.Unlock()
 	}
 }
 

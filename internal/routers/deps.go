@@ -18,8 +18,11 @@ type ControllerDeps struct {
 	Menu       *admin_v1.MenuController
 	Role       *admin_v1.RoleController
 	Dept       *admin_v1.DeptController
+	SysConfig  *admin_v1.SysConfigController
+	SysDict    *admin_v1.SysDictController
 	RequestLog *admin_v1.RequestLogController
 	LoginLog   *admin_v1.AdminLoginLogController
+	TaskCenter *admin_v1.TaskCenterController
 }
 
 var defaultDepsOnce sync.Once
@@ -38,48 +41,67 @@ func DefaultControllerDeps() *ControllerDeps {
 			Menu:       admin_v1.NewMenuController(),
 			Role:       admin_v1.NewRoleController(),
 			Dept:       admin_v1.NewDeptController(),
+			SysConfig:  admin_v1.NewSysConfigController(),
+			SysDict:    admin_v1.NewSysDictController(),
 			RequestLog: admin_v1.NewRequestLogController(),
 			LoginLog:   admin_v1.NewAdminLoginLogController(),
+			TaskCenter: admin_v1.NewTaskCenterController(),
 		}
 	})
 	return defaultDeps
 }
 
-// MockControllerDeps 返回测试用控制器依赖（可传入 mock 实现）。
-func MockControllerDeps(deps *ControllerDeps) *ControllerDeps {
+func normalizeControllerDeps(deps *ControllerDeps) *ControllerDeps {
 	defaultDeps := DefaultControllerDeps()
 	if deps == nil {
 		return defaultDeps
 	}
-	if deps.Demo != nil {
-		defaultDeps.Demo = deps.Demo
+	if deps.Demo == nil {
+		deps.Demo = defaultDeps.Demo
 	}
-	if deps.Login != nil {
-		defaultDeps.Login = deps.Login
+	if deps.Login == nil {
+		deps.Login = defaultDeps.Login
 	}
-	if deps.Common != nil {
-		defaultDeps.Common = deps.Common
+	if deps.Common == nil {
+		deps.Common = defaultDeps.Common
 	}
-	if deps.AdminUser != nil {
-		defaultDeps.AdminUser = deps.AdminUser
+	if deps.AdminUser == nil {
+		deps.AdminUser = defaultDeps.AdminUser
 	}
-	if deps.Api != nil {
-		defaultDeps.Api = deps.Api
+	if deps.Api == nil {
+		deps.Api = defaultDeps.Api
 	}
-	if deps.Menu != nil {
-		defaultDeps.Menu = deps.Menu
+	if deps.Menu == nil {
+		deps.Menu = defaultDeps.Menu
 	}
-	if deps.Role != nil {
-		defaultDeps.Role = deps.Role
+	if deps.Role == nil {
+		deps.Role = defaultDeps.Role
 	}
-	if deps.Dept != nil {
-		defaultDeps.Dept = deps.Dept
+	if deps.Dept == nil {
+		deps.Dept = defaultDeps.Dept
 	}
-	if deps.RequestLog != nil {
-		defaultDeps.RequestLog = deps.RequestLog
+	if deps.SysConfig == nil {
+		deps.SysConfig = defaultDeps.SysConfig
 	}
-	if deps.LoginLog != nil {
-		defaultDeps.LoginLog = deps.LoginLog
+	if deps.SysDict == nil {
+		deps.SysDict = defaultDeps.SysDict
 	}
-	return defaultDeps
+	if deps.RequestLog == nil {
+		deps.RequestLog = defaultDeps.RequestLog
+	}
+	if deps.LoginLog == nil {
+		deps.LoginLog = defaultDeps.LoginLog
+	}
+	if deps.TaskCenter == nil {
+		deps.TaskCenter = defaultDeps.TaskCenter
+	}
+	return deps
+}
+
+// MockControllerDeps 返回测试用控制器依赖（可传入 mock 实现）。
+func MockControllerDeps(deps *ControllerDeps) *ControllerDeps {
+	if deps == nil {
+		return DefaultControllerDeps()
+	}
+	return normalizeControllerDeps(deps)
 }

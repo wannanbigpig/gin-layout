@@ -1,14 +1,18 @@
 package bootstrapx
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
+	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
+	"github.com/wannanbigpig/gin-layout/internal/service/sys_config"
+	"github.com/wannanbigpig/gin-layout/internal/service/system"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"go.uber.org/zap"
 )
@@ -59,7 +63,18 @@ func InitializeLogger() error {
 
 // InitializeData 初始化数据源依赖。
 func InitializeData() error {
-	return data.InitData()
+	if err := data.InitData(); err != nil {
+		return err
+	}
+	taskcron.RegisterHandler(taskcron.HandlerCronResetSystemData, func(ctx context.Context, payload map[string]any) error {
+		_ = ctx
+		_ = payload
+		return system.ReinitializeSystemData()
+	})
+	if err := sys_config.NewSysConfigService().WarmupRuntimeConfigIfAvailable(); err != nil {
+		return err
+	}
+	return taskcron.SyncBuiltinDefinitionsIfAvailable(config.GetConfig())
 }
 
 // InitializeValidator 初始化参数校验器。
@@ -113,7 +128,10 @@ func InitializeQueue() error {
 	if !cfg.Queue.Enable {
 		return nil
 	}
-	return queue.InitPublisher(cfg)
+	if err := queue.InitPublisher(cfg); err != nil {
+		return err
+	}
+	return queue.InitInspector(cfg)
 }
 
 func shouldAllowDegradedStartup(req Requirements) bool {

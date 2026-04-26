@@ -53,23 +53,25 @@ func (s *DeptService) buildListCondition(params *form.ListDept) (string, []any) 
 
 // Create 新增部门。
 func (s *DeptService) Create(params *form.CreateDept) error {
-	return s.applyDeptMutation(&deptMutation{
+	_, err := s.applyDeptMutation(&deptMutation{
 		Name:        params.Name,
 		Pid:         params.Pid,
 		Description: params.Description,
 		Sort:        params.Sort,
 	})
+	return err
 }
 
 // Update 更新部门。
 func (s *DeptService) Update(params *form.UpdateDept) error {
-	return s.applyDeptMutation(&deptMutation{
+	_, err := s.applyDeptMutation(&deptMutation{
 		Id:          params.Id,
 		Name:        params.Name,
 		Pid:         params.Pid,
 		Description: params.Description,
 		Sort:        params.Sort,
 	})
+	return err
 }
 
 // Delete 删除部门。

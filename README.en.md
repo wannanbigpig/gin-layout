@@ -57,6 +57,7 @@ Most admin projects start with the same goal: get login, permissions, menus, upl
 - Online docs: [Apifox](https://wannanbigpig.apifox.cn/)
 - Demo: [Live Demo](https://x-l-admin.wannanbigpig.com/)
 - Commands and jobs guide: [docs/COMMANDS_AND_TASKS.en.md](./docs/COMMANDS_AND_TASKS.en.md)
+- Migration command guide: [docs/MIGRATE_COMMANDS.en.md](./docs/MIGRATE_COMMANDS.en.md)
 
 ## Quick Start
 
@@ -65,7 +66,6 @@ Most admin projects start with the same goal: get login, permissions, menus, upl
 - `Go >= 1.23`
 - `MySQL >= 5.7`
 - `Redis >= 5.0` (optional)
-- [`migrate`](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate)
 
 ### 2. Install
 
@@ -77,14 +77,24 @@ go mod download
 
 ### 3. Run Migrations
 
+Recommended project commands:
+
 ```bash
-migrate -database 'mysql://root:root@tcp(127.0.0.1:3306)/go_layout?charset=utf8mb4&parseTime=True&loc=Local' \
-  -path data/migrations up
+go run main.go command migrate        # defaults to migrate up
+go run main.go command migrate check
 ```
+
+For migration file creation, timestamp naming rules, and full `down/goto/force/version` usage, see [docs/MIGRATE_COMMANDS.en.md](./docs/MIGRATE_COMMANDS.en.md).
 
 ### 4. Configure
 
-On first run, the project copies `config/config.yaml.example` to the repository root as `config.yaml`. You can also copy it manually and edit it first.
+For source runs, `GO_ENV=development` is recommended. Without `-c`:
+
+- development mode uses `config.yaml` in the current working directory
+- if missing, it copies from `config/config.yaml.example` in the current working directory
+- non-development mode resolves `config.yaml` next to the executable and copies from sibling `config.yaml.example` when needed
+
+You can also copy and edit the config file manually.
 
 Minimal example:
 
@@ -195,6 +205,9 @@ Common commands:
 | `go run main.go command api-route` | Scan the declarative route tree and rebuild the `api` route table |
 | `go run main.go command rebuild-user-permissions` | Rebuild final user API permissions from database relationships |
 | `go run main.go command init-system` | Roll back and rerun migrations, rebuild API routes, and rebuild user permissions |
+| `go run main.go -c ./config.yaml command migrate check` | Validate migration naming and up/down pairing |
+| `go run main.go -c ./config.yaml command migrate up` | Apply all pending migrations |
+| `go run main.go -c ./config.yaml command migrate down 1` | Roll back one migration version |
 | `go run main.go cron` | Start scheduled jobs |
 
 If the config file is not in the default location:
@@ -204,6 +217,8 @@ go run main.go -c /path/to/config.yaml service
 go run main.go -c /path/to/config.yaml command init-system
 ```
 
+See [docs/MIGRATE_COMMANDS.en.md](./docs/MIGRATE_COMMANDS.en.md) for full migration command details.
+
 ## Configuration
 
 ### Config Resolution
@@ -212,13 +227,15 @@ Config lookup order:
 
 1. Explicit `-c` / `--config`
 2. `config.yaml` in the current working directory for development mode
-3. `config.yaml` next to the built binary for production mode
+3. if missing, copy from `config/config.yaml.example` in the current working directory
+4. `config.yaml` next to the executable for non-development mode
+5. if missing, copy from sibling `config.yaml.example`
 
 ### Key Settings
 
 | Key | Description |
 | --- | --- |
-| `app.base_path` | Base directory for logs, uploaded files, and other local paths |
+| `app.base_path` | Base directory for logs, uploaded files, and other local paths; when not set it follows `GO_ENV` (development=current working directory, otherwise executable directory) |
 | `app.base_url` | URL prefix used to generate public file access URLs |
 | `app.trusted_proxies` | Trusted proxy addresses or CIDRs that affect `ClientIP()` and log IPs |
 | `jwt` | Token secret, expiration, and auto-refresh thresholds |

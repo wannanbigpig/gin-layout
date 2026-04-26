@@ -1,14 +1,18 @@
 package cron
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/service/taskcenter"
 )
 
 // Scheduler 提供链式的任务注册方式。
@@ -21,7 +25,7 @@ type scheduledTask struct {
 	name      string
 	spec      string
 	specErr   error
-	job       cron.Job
+	run       func() error
 	skipIfRun bool
 }
 
@@ -29,6 +33,16 @@ type scheduledTask struct {
 type TaskBuilder struct {
 	task *scheduledTask
 }
+
+var cronSpecParser = cron.NewParser(
+	cron.Second |
+		cron.Minute |
+		cron.Hour |
+		cron.Dom |
+		cron.Month |
+		cron.Dow |
+		cron.Descriptor,
+)
 
 func registerTasks(crontab *cron.Cron) error {
 	logger := &cronLogger{}
@@ -49,7 +63,7 @@ func NewSchedule(logger *cronLogger) *Scheduler {
 func (s *Scheduler) Call(name string, fn func()) *TaskBuilder {
 	task := &scheduledTask{
 		name:      name,
-		job:       cron.FuncJob(fn),
+		run:       func() error { fn(); return nil },
 		skipIfRun: true,
 	}
 	s.tasks = append(s.tasks, task)
@@ -58,14 +72,13 @@ func (s *Scheduler) Call(name string, fn func()) *TaskBuilder {
 
 // CallE 注册一个返回 error 的函数任务。
 func (s *Scheduler) CallE(name string, fn func() error) *TaskBuilder {
-	return s.Call(name, func() {
-		if err := fn(); err != nil {
-			log.Logger.Error("定时任务执行失败",
-				zap.String("name", name),
-				zap.Error(err),
-			)
-		}
-	})
+	task := &scheduledTask{
+		name:      name,
+		run:       fn,
+		skipIfRun: true,
+	}
+	s.tasks = append(s.tasks, task)
+	return &TaskBuilder{task: task}
 }
 
 // Cron 直接使用 cron 表达式。
@@ -128,7 +141,7 @@ func (s *Scheduler) registerTask(crontab *cron.Cron, task *scheduledTask) error 
 		)
 	}
 
-	if _, err := crontab.AddJob(task.spec, chain.Then(task.job)); err != nil {
+	if _, err := crontab.AddJob(task.spec, chain.Then(s.recordedJob(task))); err != nil {
 		return fmt.Errorf("添加定时任务失败 [%s] (schedule: %s): %w", task.name, task.spec, err)
 	}
 
@@ -138,6 +151,72 @@ func (s *Scheduler) registerTask(crontab *cron.Cron, task *scheduledTask) error 
 		zap.Bool("skip_if_still_running", task.skipIfRun),
 	)
 	return nil
+}
+
+func (s *Scheduler) recordedJob(task *scheduledTask) cron.Job {
+	return cron.FuncJob(func() {
+		if task == nil || task.run == nil {
+			return
+		}
+
+		ctx := context.Background()
+		taskCode := "cron:" + task.name
+		run, recordErr := taskcenter.NewRunRecorder().Start(ctx, taskcenter.RunStart{
+			TaskCode: taskCode,
+			Kind:     model.TaskKindCron,
+			Source:   model.TaskSourceCron,
+			SourceID: task.name,
+			CronSpec: task.spec,
+		})
+		if recordErr != nil {
+			log.Logger.Warn("记录定时任务开始失败",
+				zap.String("name", task.name),
+				zap.Error(recordErr))
+		}
+
+		err := task.run()
+		if err != nil {
+			log.Logger.Error("定时任务执行失败",
+				zap.String("name", task.name),
+				zap.Error(err))
+		}
+
+		if run == nil {
+			return
+		}
+		finishInput := taskcenter.RunFinish{Error: err}
+		nextRunAt, nextRunErr := calculateNextRunAt(task.spec, time.Now())
+		if nextRunErr != nil {
+			log.Logger.Warn("计算定时任务下次执行时间失败",
+				zap.String("name", task.name),
+				zap.String("schedule", task.spec),
+				zap.Error(nextRunErr))
+		}
+		finishInput.NextRunAt = nextRunAt
+		if recordErr := taskcenter.NewRunRecorder().Finish(ctx, run, finishInput); recordErr != nil {
+			log.Logger.Warn("记录定时任务结束失败",
+				zap.String("name", task.name),
+				zap.Error(recordErr))
+		}
+	})
+}
+
+func calculateNextRunAt(spec string, base time.Time) (*time.Time, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil, nil
+	}
+
+	schedule, err := cronSpecParser.Parse(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	nextRunAt := schedule.Next(base)
+	if nextRunAt.IsZero() {
+		return nil, nil
+	}
+	return &nextRunAt, nil
 }
 
 func dailyAtSpec(value string) (string, error) {

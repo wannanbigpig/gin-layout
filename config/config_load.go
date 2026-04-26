@@ -87,6 +87,7 @@ func load(configPath string) (*Conf, error) {
 	}
 
 	resolveEnvVars(loaded)
+	ensureBasePathDefault(loaded, V.IsSet("app.base_path"))
 
 	ensureCorsDefaults(loaded)
 	registerConfigWatcherIfNeeded(loaded)
@@ -112,6 +113,7 @@ func resolveDefaultConfigFiles() (string, string, error) {
 	if os.Getenv("GO_ENV") == "development" {
 		return resolveDevelopmentConfigFiles()
 	}
+
 	runDirectory, err := utils.GetCurrentPath()
 	if err != nil {
 		return "", "", fmt.Errorf("获取执行文件目录失败: %w", err)
@@ -126,10 +128,54 @@ func resolveDevelopmentConfigFiles() (string, string, error) {
 	}
 
 	exampleConfig := filepath.Join(workDir, "config", "config.yaml.example")
-	if _, err := os.Stat(exampleConfig); os.IsNotExist(err) {
+	if !fileExists(exampleConfig) {
 		exampleConfig = filepath.Join(workDir, "config.yaml.example")
 	}
 	return exampleConfig, filepath.Join(workDir, "config.yaml"), nil
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+func ensureBasePathDefault(cfg *Conf, basePathConfigured bool) {
+	if cfg == nil {
+		return
+	}
+	if basePathConfigured && strings.TrimSpace(cfg.BasePath) != "" {
+		return
+	}
+
+	if os.Getenv("GO_ENV") == "development" {
+		workDir, err := os.Getwd()
+		if err == nil && strings.TrimSpace(workDir) != "" {
+			cfg.BasePath = workDir
+			return
+		}
+	}
+
+	runDir, err := utils.GetCurrentPath()
+	if err == nil && strings.TrimSpace(runDir) != "" {
+		cfg.BasePath = runDir
+		return
+	}
+
+	workDir, err := os.Getwd()
+	if err == nil && strings.TrimSpace(workDir) != "" {
+		cfg.BasePath = workDir
+		return
+	}
+	cfg.BasePath = strings.TrimSpace(cfg.BasePath)
+	if cfg.BasePath == "" {
+		cfg.BasePath = "."
+	}
 }
 
 func registerConfigWatcherIfNeeded(cfg *Conf) {
@@ -174,6 +220,7 @@ func reloadConfigFromWatcher() error {
 		return fmt.Errorf("重新映射配置出错: %w", err)
 	}
 	resolveEnvVars(next)
+	ensureBasePathDefault(next, V.IsSet("app.base_path"))
 	ensureCorsDefaults(next)
 	if err := validateJWTSecretKey(next); err != nil {
 		return fmt.Errorf("JWT 配置校验失败: %w", err)

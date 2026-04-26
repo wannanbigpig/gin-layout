@@ -330,6 +330,23 @@ CREATE TABLE IF NOT EXISTS `admin_login_logs`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='管理员登录日志表';
 
+-- 创建登录安全状态表
+CREATE TABLE IF NOT EXISTS `login_security_state`
+(
+    `id`             int unsigned NOT NULL AUTO_INCREMENT,
+    `username`       varchar(50)  NOT NULL DEFAULT '' COMMENT '登录账号',
+    `fail_count`     int unsigned NOT NULL DEFAULT '0' COMMENT '连续失败次数',
+    `lock_until`     datetime              DEFAULT NULL COMMENT '锁定截止时间',
+    `last_failed_at` datetime              DEFAULT NULL COMMENT '最近失败时间',
+    `created_at`     datetime              DEFAULT NULL,
+    `updated_at`     datetime              DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `lss_username` (`username`),
+    KEY `lss_lock_until` (`lock_until`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='登录安全状态表';
+
 -- 创建请求日志表
 CREATE TABLE IF NOT EXISTS `request_logs`
 (
@@ -345,11 +362,13 @@ CREATE TABLE IF NOT EXISTS `request_logs`
     `base_url`        varchar(160) NOT NULL DEFAULT '' COMMENT '请求基础URL',
     `operation_name`  varchar(255) NOT NULL DEFAULT '' COMMENT '操作名称',
     `operation_status` int(11) NOT NULL DEFAULT '0' COMMENT '操作状态码（响应返回的code，0=成功，其他=失败）',
+    `is_high_risk`    tinyint(1)    NOT NULL DEFAULT '0' COMMENT '是否高危操作 1是 0否',
     `operator_account` varchar(50) NOT NULL DEFAULT '' COMMENT '操作账号',
     `operator_name`   varchar(50)  NOT NULL DEFAULT '' COMMENT '操作人员',
     `request_headers` text                  DEFAULT NULL COMMENT '请求头（JSON格式）',
     `request_query`   text                  DEFAULT NULL COMMENT '请求参数',
     `request_body`    text                  DEFAULT NULL COMMENT '请求体',
+    `change_diff`     longtext              DEFAULT NULL COMMENT '关键变更前后差异（JSON）',
     `response_status` int(11)      NOT NULL DEFAULT '0' COMMENT '响应状态码',
     `response_body`   text                  DEFAULT NULL COMMENT '响应体',
     `response_header` text                  DEFAULT NULL COMMENT '响应头',
@@ -364,7 +383,8 @@ CREATE TABLE IF NOT EXISTS `request_logs`
     KEY `rl_response_status_operator_id_created_at` (`response_status`, `operator_id`, `created_at`),
     KEY `rl_operator_account_created_at` (`operator_account`, `created_at`),
     KEY `rl_created_at` (`created_at`),
-    KEY `rl_jwt_id` (`jwt_id`)
+    KEY `rl_jwt_id` (`jwt_id`),
+    KEY `rl_is_high_risk_created_at` (`is_high_risk`, `created_at`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='请求日志表';
@@ -409,5 +429,202 @@ CREATE TABLE IF NOT EXISTS `upload_files`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='上传文件表';
+
+CREATE TABLE IF NOT EXISTS `sys_config`
+(
+    `id`           int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `config_key`   varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '参数键名',
+    `config_value` text                                                            DEFAULT NULL COMMENT '参数值',
+    `value_type`   varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT 'string' COMMENT '值类型:string,number,bool,json',
+    `group_code`   varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT 'default' COMMENT '参数分组',
+    `is_system`    tinyint unsigned                                       NOT NULL DEFAULT '0' COMMENT '是否系统内置:0否,1是',
+    `is_sensitive` tinyint unsigned                                       NOT NULL DEFAULT '0' COMMENT '是否敏感配置:0否,1是',
+    `status`       tinyint unsigned                                       NOT NULL DEFAULT '1' COMMENT '状态:0禁用,1启用',
+    `sort`         int unsigned                                           NOT NULL DEFAULT '0' COMMENT '排序',
+    `remark`       varchar(255)                                           NOT NULL DEFAULT '' COMMENT '备注',
+    `created_at`   datetime                                                        DEFAULT NULL,
+    `updated_at`   datetime                                                        DEFAULT NULL,
+    `deleted_at`   int unsigned                                           NOT NULL DEFAULT '0' COMMENT '删除时间戳',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_config_key_deleted_at` (`config_key`, `deleted_at`) USING BTREE,
+    KEY `idx_group_status_deleted_at_sort` (`group_code`, `status`, `deleted_at`, `sort`) USING BTREE,
+    KEY `idx_status_deleted_at` (`status`, `deleted_at`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统参数表';
+
+CREATE TABLE IF NOT EXISTS `sys_dict_type`
+(
+    `id`          int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `type_code`   varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '字典类型编码',
+    `is_system`   tinyint unsigned                                       NOT NULL DEFAULT '0' COMMENT '是否系统内置:0否,1是',
+    `status`      tinyint unsigned                                       NOT NULL DEFAULT '1' COMMENT '状态:0禁用,1启用',
+    `sort`        int unsigned                                           NOT NULL DEFAULT '0' COMMENT '排序',
+    `remark`      varchar(255)                                           NOT NULL DEFAULT '' COMMENT '备注',
+    `created_at`  datetime                                                        DEFAULT NULL,
+    `updated_at`  datetime                                                        DEFAULT NULL,
+    `deleted_at`  int unsigned                                           NOT NULL DEFAULT '0' COMMENT '删除时间戳',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_type_code_deleted_at` (`type_code`, `deleted_at`) USING BTREE,
+    KEY `idx_status_deleted_at_sort` (`status`, `deleted_at`, `sort`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统字典类型表';
+
+CREATE TABLE IF NOT EXISTS `sys_dict_item`
+(
+    `id`         int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `type_code`  varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '字典类型编码',
+    `value`      varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '字典值',
+    `color`      varchar(30)                                            NOT NULL DEFAULT '' COMMENT '展示颜色',
+    `tag_type`   varchar(30)                                            NOT NULL DEFAULT '' COMMENT '前端标签类型',
+    `is_default` tinyint unsigned                                       NOT NULL DEFAULT '0' COMMENT '是否默认项:0否,1是',
+    `is_system`  tinyint unsigned                                       NOT NULL DEFAULT '0' COMMENT '是否系统内置:0否,1是',
+    `status`     tinyint unsigned                                       NOT NULL DEFAULT '1' COMMENT '状态:0禁用,1启用',
+    `sort`       int unsigned                                           NOT NULL DEFAULT '0' COMMENT '排序',
+    `remark`     varchar(255)                                           NOT NULL DEFAULT '' COMMENT '备注',
+    `created_at` datetime                                                        DEFAULT NULL,
+    `updated_at` datetime                                                        DEFAULT NULL,
+    `deleted_at` int unsigned                                           NOT NULL DEFAULT '0' COMMENT '删除时间戳',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_type_value_deleted_at` (`type_code`, `value`, `deleted_at`) USING BTREE,
+    KEY `idx_type_status_deleted_at_sort` (`type_code`, `status`, `deleted_at`, `sort`) USING BTREE,
+    KEY `idx_status_deleted_at` (`status`, `deleted_at`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统字典项表';
+
+CREATE TABLE IF NOT EXISTS `sys_config_i18n`
+(
+    `id`          int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `config_id`   int unsigned                                           NOT NULL DEFAULT '0' COMMENT '系统参数ID',
+    `locale`      varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '语言编码',
+    `config_name` varchar(100)                                           NOT NULL DEFAULT '' COMMENT '参数名称',
+    `created_at`  datetime                                                        DEFAULT NULL,
+    `updated_at`  datetime                                                        DEFAULT NULL,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_config_id_locale` (`config_id`, `locale`) USING BTREE,
+    KEY `idx_locale_config_name` (`locale`, `config_name`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统参数多语言表';
+
+CREATE TABLE IF NOT EXISTS `sys_dict_type_i18n`
+(
+    `id`           int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `dict_type_id` int unsigned                                           NOT NULL DEFAULT '0' COMMENT '字典类型ID',
+    `locale`       varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '语言编码',
+    `type_name`    varchar(100)                                           NOT NULL DEFAULT '' COMMENT '字典类型名称',
+    `created_at`   datetime                                                        DEFAULT NULL,
+    `updated_at`   datetime                                                        DEFAULT NULL,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_dict_type_id_locale` (`dict_type_id`, `locale`) USING BTREE,
+    KEY `idx_locale_type_name` (`locale`, `type_name`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统字典类型多语言表';
+
+CREATE TABLE IF NOT EXISTS `sys_dict_item_i18n`
+(
+    `id`           int unsigned                                           NOT NULL AUTO_INCREMENT,
+    `dict_item_id` int unsigned                                           NOT NULL DEFAULT '0' COMMENT '字典项ID',
+    `locale`       varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '语言编码',
+    `label`        varchar(100)                                           NOT NULL DEFAULT '' COMMENT '字典标签',
+    `created_at`   datetime                                                        DEFAULT NULL,
+    `updated_at`   datetime                                                        DEFAULT NULL,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_dict_item_id_locale` (`dict_item_id`, `locale`) USING BTREE,
+    KEY `idx_locale_label` (`locale`, `label`) USING BTREE
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统字典项多语言表';
+
+CREATE TABLE IF NOT EXISTS `task_definitions`
+(
+    `id`             int unsigned NOT NULL AUTO_INCREMENT,
+    `code`           varchar(120) NOT NULL DEFAULT '' COMMENT '任务唯一编码',
+    `name`           varchar(120) NOT NULL DEFAULT '' COMMENT '任务名称',
+    `kind`           varchar(20)  NOT NULL DEFAULT '' COMMENT '任务类型 async/cron/manual',
+    `queue`          varchar(60)  NOT NULL DEFAULT '' COMMENT '队列名称',
+    `cron_spec`      varchar(120) NOT NULL DEFAULT '' COMMENT 'Cron 表达式',
+    `handler`        varchar(255) NOT NULL DEFAULT '' COMMENT '处理器标识',
+    `status`         tinyint(1)   NOT NULL DEFAULT '1' COMMENT '状态 1启用 0停用',
+    `allow_manual`   tinyint(1)   NOT NULL DEFAULT '0' COMMENT '是否允许手动触发 1是 0否',
+    `allow_retry`    tinyint(1)   NOT NULL DEFAULT '1' COMMENT '是否允许手动重试 1是 0否',
+    `is_high_risk`   tinyint(1)   NOT NULL DEFAULT '0' COMMENT '是否高危任务 1是 0否',
+    `remark`         varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    `created_at`     datetime             DEFAULT NULL,
+    `updated_at`     datetime             DEFAULT NULL,
+    `deleted_at`     int          NOT NULL DEFAULT '0' COMMENT '删除时间戳',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `td_code_deleted_at` (`code`, `deleted_at`),
+    KEY `td_kind_status_deleted_at` (`kind`, `status`, `deleted_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='任务定义表';
+
+CREATE TABLE IF NOT EXISTS `task_runs`
+(
+    `id`              bigint unsigned NOT NULL AUTO_INCREMENT,
+    `task_code`       varchar(120)    NOT NULL DEFAULT '' COMMENT '任务唯一编码',
+    `kind`            varchar(20)     NOT NULL DEFAULT '' COMMENT '任务类型 async/cron/manual',
+    `source`          varchar(20)     NOT NULL DEFAULT '' COMMENT '来源 queue/cron/manual',
+    `source_id`       varchar(120)    NOT NULL DEFAULT '' COMMENT '来源任务ID，如 Asynq task id',
+    `queue`           varchar(60)     NOT NULL DEFAULT '' COMMENT '队列名称',
+    `trigger_user_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '触发人ID',
+    `trigger_account` varchar(60)     NOT NULL DEFAULT '' COMMENT '触发人账号',
+    `status`          varchar(20)     NOT NULL DEFAULT '' COMMENT '执行状态 pending/running/success/failed/canceled/retrying',
+    `attempt`         int             NOT NULL DEFAULT '0' COMMENT '当前尝试次数',
+    `max_retry`       int             NOT NULL DEFAULT '0' COMMENT '最大重试次数',
+    `payload`         mediumtext               DEFAULT NULL COMMENT '任务 payload',
+    `error_message`   text                     DEFAULT NULL COMMENT '失败原因',
+    `started_at`      datetime                 DEFAULT NULL COMMENT '开始时间',
+    `finished_at`     datetime                 DEFAULT NULL COMMENT '结束时间',
+    `duration_ms`     decimal(10, 4)  NOT NULL DEFAULT '0.0000' COMMENT '执行耗时毫秒',
+    `created_at`      datetime                 DEFAULT NULL,
+    `updated_at`      datetime                 DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `tr_task_code_created_at` (`task_code`, `created_at`),
+    KEY `tr_status_created_at` (`status`, `created_at`),
+    KEY `tr_source_source_id` (`source`, `source_id`),
+    KEY `tr_kind_created_at` (`kind`, `created_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='任务执行记录表';
+
+CREATE TABLE IF NOT EXISTS `task_run_events`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT,
+    `run_id`     bigint unsigned NOT NULL DEFAULT '0' COMMENT '任务执行记录ID',
+    `event_type` varchar(30)     NOT NULL DEFAULT '' COMMENT '事件类型 enqueue/start/retry/fail/success/cancel',
+    `message`    text                    DEFAULT NULL COMMENT '事件说明',
+    `meta`       text                    DEFAULT NULL COMMENT '事件元数据 JSON',
+    `created_at` datetime                DEFAULT NULL,
+    `updated_at` datetime                DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `tre_run_id_created_at` (`run_id`, `created_at`),
+    KEY `tre_event_type_created_at` (`event_type`, `created_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='任务执行事件表';
+
+CREATE TABLE IF NOT EXISTS `cron_task_states`
+(
+    `id`               bigint unsigned NOT NULL AUTO_INCREMENT,
+    `task_code`        varchar(120)    NOT NULL DEFAULT '' COMMENT '任务唯一编码',
+    `cron_spec`        varchar(120)    NOT NULL DEFAULT '' COMMENT 'Cron 表达式',
+    `last_run_id`      bigint unsigned NOT NULL DEFAULT '0' COMMENT '最近执行记录ID',
+    `last_status`      varchar(20)     NOT NULL DEFAULT '' COMMENT '最近执行状态',
+    `last_started_at`  datetime                 DEFAULT NULL COMMENT '最近开始时间',
+    `last_finished_at` datetime                 DEFAULT NULL COMMENT '最近结束时间',
+    `next_run_at`      datetime                 DEFAULT NULL COMMENT '下次执行时间',
+    `last_error`       text                     DEFAULT NULL COMMENT '最近失败原因',
+    `created_at`       datetime                 DEFAULT NULL,
+    `updated_at`       datetime                 DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `cts_task_code` (`task_code`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='定时任务最近状态表';
 
 COMMIT;

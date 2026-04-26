@@ -68,6 +68,11 @@ func (s *LoginService) extractErrorMessage(err error) string {
 	return err.Error()
 }
 
+// ExtractErrorMessage 提供给 controller 的错误消息提取入口。
+func (s *LoginService) ExtractErrorMessage(err error) string {
+	return s.extractErrorMessage(err)
+}
+
 // RecordLoginFailLog 记录登录失败日志。
 func (s *LoginService) RecordLoginFailLog(username, failReason string, logInfo LoginLogInfo) {
 	if !s.currentConfig().Mysql.Enable {

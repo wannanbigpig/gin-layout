@@ -39,11 +39,12 @@ func (api AdminUserController) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	if err := admin.NewAdminUserService().UpdateProfile(uid, params); err != nil {
+	changeDiff, err := admin.NewAdminUserService().UpdateProfileWithAuditDiff(uid, params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -66,11 +67,12 @@ func (api AdminUserController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := admin.NewAdminUserService().Create(params); err != nil {
+	changeDiff, err := admin.NewAdminUserService().CreateWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -81,11 +83,12 @@ func (api AdminUserController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := admin.NewAdminUserService().Update(params); err != nil {
+	changeDiff, err := admin.NewAdminUserService().UpdateWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -107,11 +110,12 @@ func (api AdminUserController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := admin.NewAdminUserService().Delete(params.ID); err != nil {
+	changeDiff, err := admin.NewAdminUserService().DeleteWithAuditDiff(params.ID)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -122,11 +126,12 @@ func (api AdminUserController) BindRole(c *gin.Context) {
 		return
 	}
 
-	if err := admin.NewAdminUserService().BindRole(params); err != nil {
+	changeDiff, err := admin.NewAdminUserService().BindRoleWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 

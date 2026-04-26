@@ -39,7 +39,7 @@ build/
 gin-layout
 gin-layout/
 go-layout
-migrate
+/migrate
 
 # Documentation (project-specific, not for version control)
 PROJECT_ARCHITECTURE.md

@@ -10,16 +10,24 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
+	"github.com/wannanbigpig/gin-layout/internal/service/taskcenter"
 )
 
 func init() {
 	queue.RegisterPublisherFactory(NewPublisher)
+	queue.RegisterInspectorFactory(NewInspector)
 }
 
 type publisher struct {
 	client    *asynq.Client
+	namespace string
+}
+
+type inspector struct {
+	raw       *asynq.Inspector
 	namespace string
 }
 
@@ -40,6 +48,26 @@ func NewPublisher(cfg *config.Conf) (queue.Publisher, error) {
 	client := asynq.NewClient(redisOpt)
 	return &publisher{
 		client:    client,
+		namespace: strings.TrimSpace(cfg.Queue.Namespace),
+	}, nil
+}
+
+// NewInspector 创建 Asynq inspector。
+func NewInspector(cfg *config.Conf) (queue.Inspector, error) {
+	if cfg == nil {
+		cfg = config.GetConfig()
+	}
+	if cfg == nil || !cfg.Queue.Enable {
+		return nil, nil
+	}
+
+	redisOpt, err := newRedisConnOpt(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return &inspector{
+		raw:       asynq.NewInspector(redisOpt),
 		namespace: strings.TrimSpace(cfg.Queue.Namespace),
 	}, nil
 }
@@ -67,6 +95,22 @@ func (p *publisher) Enqueue(ctx context.Context, job queue.Job) (queue.JobInfo, 
 		Queue: unprefixQueueName(p.namespace, info.Queue),
 		Type:  info.Type,
 	}, nil
+}
+
+func (i *inspector) DeleteTask(ctx context.Context, queueName, taskID string) error {
+	_ = ctx
+	if i == nil || i.raw == nil {
+		return queue.ErrInspectorUnavailable
+	}
+	return normalizeInspectorError(i.raw.DeleteTask(prefixedQueueName(i.namespace, queueName), taskID))
+}
+
+func (i *inspector) CancelProcessing(ctx context.Context, taskID string) error {
+	_ = ctx
+	if i == nil || i.raw == nil {
+		return queue.ErrInspectorUnavailable
+	}
+	return normalizeInspectorError(i.raw.CancelProcessing(taskID))
 }
 
 // NewServer 创建 Asynq worker server 和 mux。
@@ -101,7 +145,9 @@ func NewServer(cfg *config.Conf, registry queue.Registry) (*asynq.Server, *asynq
 	for _, entry := range registry.Entries() {
 		entry := entry
 		mux.HandleFunc(entry.TaskType, func(ctx context.Context, task *asynq.Task) error {
+			run := recordAsynqTaskStart(ctx, task)
 			err := entry.Handler(ctx, task.Payload())
+			recordAsynqTaskFinish(ctx, run, err)
 			if err == nil {
 				return nil
 			}
@@ -112,6 +158,57 @@ func NewServer(cfg *config.Conf, registry queue.Registry) (*asynq.Server, *asynq
 		})
 	}
 	return server, mux, nil
+}
+
+func recordAsynqTaskStart(ctx context.Context, task *asynq.Task) *model.TaskRun {
+	if task == nil {
+		return nil
+	}
+
+	taskID, _ := asynq.GetTaskID(ctx)
+	retryCount, _ := asynq.GetRetryCount(ctx)
+	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	queueName, _ := asynq.GetQueueName(ctx)
+
+	recorder := taskcenter.NewRunRecorder()
+	run, err := recorder.Start(ctx, taskcenter.RunStart{
+		TaskCode: task.Type(),
+		Kind:     model.TaskKindAsync,
+		Source:   model.TaskSourceQueue,
+		SourceID: taskID,
+		Queue:    unprefixQueueName(currentQueueNamespace(), queueName),
+		Attempt:  retryCount + 1,
+		MaxRetry: maxRetry,
+		Payload:  task.Payload(),
+	})
+	if err != nil {
+		log.Warn("Record async task start failed",
+			zap.String("task_type", task.Type()),
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil
+	}
+	return run
+}
+
+func recordAsynqTaskFinish(ctx context.Context, run *model.TaskRun, taskErr error) {
+	if run == nil {
+		return
+	}
+	if err := taskcenter.NewRunRecorder().Finish(ctx, run, taskcenter.RunFinish{Error: taskErr}); err != nil {
+		log.Warn("Record async task finish failed",
+			zap.String("task_type", run.TaskCode),
+			zap.String("task_id", run.SourceID),
+			zap.Error(err))
+	}
+}
+
+func currentQueueNamespace() string {
+	cfg := config.GetConfig()
+	if cfg == nil {
+		return ""
+	}
+	return cfg.Queue.Namespace
 }
 
 func newRedisConnOpt(cfg *config.Conf) (asynq.RedisClientOpt, error) {
@@ -145,6 +242,19 @@ func newRedisConnOpt(cfg *config.Conf) (asynq.RedisClientOpt, error) {
 		Password: cfg.Queue.Redis.Password,
 		DB:       cfg.Queue.Redis.Database,
 	}, nil
+}
+
+func normalizeInspectorError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, asynq.ErrQueueNotFound) {
+		return queue.ErrQueueNotFound
+	}
+	if errors.Is(err, asynq.ErrTaskNotFound) {
+		return queue.ErrTaskNotFound
+	}
+	return err
 }
 
 func mapOptions(namespace string, options []queue.JobOption) []asynq.Option {

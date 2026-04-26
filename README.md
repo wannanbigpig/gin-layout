@@ -57,6 +57,7 @@
 - 在线文档：[Apifox](https://wannanbigpig.apifox.cn/)
 - 演示地址：[在线演示](https://x-l-admin.wannanbigpig.com/)
 - 命令与任务文档：[docs/COMMANDS_AND_TASKS.md](./docs/COMMANDS_AND_TASKS.md)
+- 迁移命令详解：[docs/MIGRATE_COMMANDS.md](./docs/MIGRATE_COMMANDS.md)
 - 代码扫描与优化建议：[docs/OPTIMIZATION_NOTES_20260422.md](./docs/OPTIMIZATION_NOTES_20260422.md)
 
 ## 快速开始
@@ -66,7 +67,6 @@
 - `Go >= 1.23`
 - `MySQL >= 5.7`
 - `Redis >= 5.0`（可选）
-- [`migrate`](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate)
 
 ### 2. 安装项目
 
@@ -78,19 +78,23 @@ go mod download
 
 ### 3. 执行迁移
 
+推荐使用项目命令：
+
 ```bash
-migrate -database 'mysql://root:root@tcp(127.0.0.1:3306)/go_layout?charset=utf8mb4&parseTime=True&loc=Local' \
-  -path data/migrations up
+go run main.go command migrate        # 默认等价于 migrate up
+go run main.go command migrate check
 ```
 
 迁移执行完成后会写入一套默认基础数据，其中包含超级管理员账号 `super_admin / 123456`。仅建议用于本地初始化，首次登录后请立即修改密码。
+
+迁移文件创建、时间戳命名规范、`down/goto/force/version` 等详细说明见：[docs/MIGRATE_COMMANDS.md](./docs/MIGRATE_COMMANDS.md)。
 
 ### 4. 配置项目
 
 源码运行时建议带上 `GO_ENV=development`。未显式传入 `-c` 时：
 
 - 开发模式会把当前工作目录下的 `config/config.yaml.example` 自动复制为项目根目录 `config.yaml`
-- 构建后的二进制会在可执行文件同级查找 `config.yaml`，若不存在则尝试从同目录 `config.yaml.example` 复制
+- 非开发模式会在可执行文件同级查找 `config.yaml`，若不存在则尝试从同目录 `config.yaml.example` 复制
 
 也可以手动复制配置文件后再修改。
 
@@ -221,6 +225,9 @@ go run main.go service --help
 | `go run main.go command api-route -y` | 扫描声明式路由树并重建 `api` 路由表 |
 | `go run main.go command rebuild-user-permissions -y` | 按数据库关系重建用户最终 API 权限 |
 | `go run main.go command init-system -y` | 回滚并重新执行迁移、重建 API 路由、重建用户权限 |
+| `go run main.go -c ./config.yaml command migrate check` | 校验迁移文件命名与 up/down 配对 |
+| `go run main.go -c ./config.yaml command migrate up` | 执行全部未应用迁移 |
+| `go run main.go -c ./config.yaml command migrate down 1` | 回滚 1 个迁移版本 |
 
 如果配置文件不在默认位置，可以显式指定：
 
@@ -228,6 +235,8 @@ go run main.go service --help
 go run main.go -c /path/to/config.yaml service
 go run main.go -c /path/to/config.yaml command init-system
 ```
+
+迁移命令完整参数见：[docs/MIGRATE_COMMANDS.md](./docs/MIGRATE_COMMANDS.md)。
 
 补充说明：
 
@@ -250,7 +259,7 @@ go run main.go -c /path/to/config.yaml command init-system
 
 | 配置项 | 说明 |
 | --- | --- |
-| `app.base_path` | 日志、上传文件等本地路径的基础目录，默认取可执行文件所在目录 |
+| `app.base_path` | 日志、上传文件等本地路径的基础目录；未配置时默认按 `GO_ENV` 选择（development=当前工作目录，其他=可执行文件目录） |
 | `app.allow_degraded_startup` | 仅 `service` 命令生效；依赖初始化失败时允许 HTTP 服务先启动，并通过 readiness / 路由守卫暴露未就绪状态 |
 | `app.base_url` | 文件访问 URL 前缀，用于生成公开文件地址 |
 | `app.trusted_proxies` | 受信任代理地址或网段，影响 `ClientIP()` 与日志 IP |
@@ -342,7 +351,7 @@ go build -o go-layout main.go
 ./go-layout service
 ```
 
-如果没有显式传 `-c`，请把 `config.yaml` 放在二进制同级目录；若只有 `config.yaml.example`，首次启动会自动复制生成 `config.yaml`。
+如果没有显式传 `-c`，请在开发环境使用 `GO_ENV=development`，并确保当前工作目录存在 `config/config.yaml.example`（或已生成 `config.yaml`）；部署二进制时请保证可执行文件同级存在配置文件。
 
 ### Supervisor
 

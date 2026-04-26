@@ -14,8 +14,8 @@ const (
 	AuthModeNone = global.ApiAuthModeNone
 	// AuthModeLogin 需要登录，但无需菜单权限校验（如：获取当前用户信息、退出登录）
 	AuthModeLogin = global.ApiAuthModeLogin
-	// AuthModeAuthz 需要登录且需要api权限校验（如：增删改查业务数据）
-	AuthModeAuthz = global.ApiAuthModeAuthz
+	// AuthModeAuth 需要登录且需要api权限校验（如：增删改查业务数据）
+	AuthModeAuth = global.ApiAuthModeAuth
 )
 
 // RouteDef 定义单条路由。
@@ -25,8 +25,14 @@ type RouteDef struct {
 	Path     string            // 相对路径，如 "list", ":id"
 	Title    string            // 路由标题，用于 API 文档
 	Desc     string            // 路由描述，补充 Title 未涵盖的信息
-	Auth     AuthMode          // 认证授权模式，使用 AuthModeNone/Login/Authz
+	Auth     AuthMode          // 认证授权模式，使用 AuthModeNone/Login/Auth
 	Handlers []gin.HandlerFunc // Gin 处理器链
+}
+
+// WithDesc 设置路由描述，便于在路由声明时按需补充说明。
+func (r RouteDef) WithDesc(desc string) RouteDef {
+	r.Desc = desc
+	return r
 }
 
 // RouteGroupDef 定义一组共享前缀、中间件和分组编码的路由。

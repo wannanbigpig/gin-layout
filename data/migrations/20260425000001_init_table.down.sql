@@ -1,5 +1,17 @@
 BEGIN;
 
+-- 删除系统参数与字典相关表
+DROP TABLE IF EXISTS `sys_dict_item_i18n`;
+DROP TABLE IF EXISTS `sys_dict_type_i18n`;
+DROP TABLE IF EXISTS `sys_config_i18n`;
+DROP TABLE IF EXISTS `sys_dict_item`;
+DROP TABLE IF EXISTS `sys_dict_type`;
+DROP TABLE IF EXISTS `sys_config`;
+-- 删除任务中心相关表
+DROP TABLE IF EXISTS `cron_task_states`;
+DROP TABLE IF EXISTS `task_run_events`;
+DROP TABLE IF EXISTS `task_runs`;
+DROP TABLE IF EXISTS `task_definitions`;
 -- 删除管理员表
 DROP TABLE IF EXISTS `admin_user`;
 -- 删除路由表
@@ -28,6 +40,8 @@ DROP TABLE IF EXISTS `role_menu_map`;
 DROP TABLE IF EXISTS `admin_user_role_map`;
 -- 删除请求日志表
 DROP TABLE IF EXISTS `request_logs`;
+-- 删除登录安全状态表
+DROP TABLE IF EXISTS `login_security_state`;
 -- 删除管理员登录日志表
 DROP TABLE IF EXISTS `admin_login_logs`;
 -- 删除casbin规则表

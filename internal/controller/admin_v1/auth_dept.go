@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/dept"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -37,11 +38,12 @@ func (api DeptController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := dept.NewDeptService().Create(params); err != nil {
+	changeDiff, err := dept.NewDeptService().CreateWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -52,11 +54,12 @@ func (api DeptController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := dept.NewDeptService().Update(params); err != nil {
+	changeDiff, err := dept.NewDeptService().UpdateWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -67,11 +70,12 @@ func (api DeptController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := dept.NewDeptService().Delete(params.ID); err != nil {
+	changeDiff, err := dept.NewDeptService().DeleteWithAuditDiff(params.ID)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -98,10 +102,11 @@ func (api DeptController) BindRole(c *gin.Context) {
 		return
 	}
 
-	if err := dept.NewDeptService().BindRole(params); err != nil {
+	changeDiff, err := dept.NewDeptService().BindRoleWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }

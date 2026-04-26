@@ -16,6 +16,7 @@ type RequestLogBaseResources struct {
 	OperationName       string           `json:"operation_name"`        // 操作名称
 	OperationStatus     int              `json:"operation_status"`      // 操作状态码（响应返回的code，0=成功，其他=失败）
 	OperationStatusName string           `json:"operation_status_name"` // 操作状态名称
+	IsHighRisk          uint8            `json:"is_high_risk"`          // 是否高危操作
 	OperatorAccount     string           `json:"operator_account"`      // 操作账号
 	OperatorName        string           `json:"operator_name"`         // 操作人员
 	ResponseStatus      int              `json:"response_status"`       // 响应状态码
@@ -38,6 +39,7 @@ type RequestLogResources struct {
 	RequestHeaders string           `json:"request_headers"` // 请求头（JSON格式）
 	RequestQuery   string           `json:"request_query"`   // 请求参数
 	RequestBody    string           `json:"request_body"`    // 请求体
+	ChangeDiff     string           `json:"change_diff"`     // 关键变更前后差异（JSON）
 	ResponseBody   string           `json:"response_body"`   // 响应体
 	ResponseHeader string           `json:"response_header"` // 响应头
 	UpdatedAt      utils.FormatDate `json:"updated_at"`      // 更新时间
@@ -71,6 +73,7 @@ func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResourc
 		OperationName:       data.OperationName,
 		OperationStatus:     data.OperationStatus,
 		OperationStatusName: getOperationStatusName(data.OperationStatus),
+		IsHighRisk:          data.IsHighRisk,
 		OperatorAccount:     data.OperatorAccount,
 		OperatorName:        data.OperatorName,
 		ResponseStatus:      data.ResponseStatus,
@@ -91,6 +94,7 @@ func (r RequestLogTransformer) ToStruct(data *model.RequestLogs) *RequestLogReso
 		RequestHeaders:          data.RequestHeaders,
 		RequestQuery:            data.RequestQuery,
 		RequestBody:             data.RequestBody,
+		ChangeDiff:              data.ChangeDiff,
 		ResponseBody:            data.ResponseBody,
 		ResponseHeader:          data.ResponseHeader,
 		UpdatedAt:               data.UpdatedAt,

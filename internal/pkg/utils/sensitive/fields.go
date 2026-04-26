@@ -2,6 +2,7 @@ package sensitive
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -133,12 +134,32 @@ func defaultSensitiveFieldsConfig() SensitiveFieldsConfig {
 	}
 }
 
+// DefaultSensitiveFieldsConfig 返回默认敏感字段配置副本。
+func DefaultSensitiveFieldsConfig() SensitiveFieldsConfig {
+	return defaultSensitiveFieldsConfig()
+}
+
 // LoadSensitiveFieldsConfig 加载敏感字段配置（未来可从配置文件调用）
 func LoadSensitiveFieldsConfig(config SensitiveFieldsConfig) {
 	manager := currentFieldsManager()
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	manager.applyConfig(config)
+}
+
+// GetSensitiveFieldsConfig 返回当前生效的敏感字段配置快照。
+func GetSensitiveFieldsConfig() SensitiveFieldsConfig {
+	manager := currentFieldsManager()
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+
+	return SensitiveFieldsConfig{
+		Common:         mapKeys(manager.commonFields),
+		RequestHeader:  mapKeys(manager.requestHeaderFields),
+		RequestBody:    mapKeys(manager.requestBodyFields),
+		ResponseHeader: mapKeys(manager.responseHeaderFields),
+		ResponseBody:   mapKeys(manager.responseBodyFields),
+	}
 }
 
 func sliceToMap(slice []string) map[string]bool {
@@ -187,5 +208,17 @@ func (m *sensitiveFieldsManager) cloneFieldSet(source map[string]bool) map[strin
 	for k, v := range source {
 		result[k] = v
 	}
+	return result
+}
+
+func mapKeys(source map[string]bool) []string {
+	if len(source) == 0 {
+		return []string{}
+	}
+	result := make([]string, 0, len(source))
+	for key := range source {
+		result = append(result, key)
+	}
+	sort.Strings(result)
 	return result
 }

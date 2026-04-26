@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/api_permission"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -26,11 +27,12 @@ func (api ApiController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := api_permission.NewApiService().Update(params); err != nil {
+	changeDiff, err := api_permission.NewApiService().UpdateWithAuditDiff(params)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 

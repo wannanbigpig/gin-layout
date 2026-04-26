@@ -24,10 +24,33 @@ type stubPublisher struct {
 	lastJob Job
 }
 
+type stubInspector struct {
+	deleteCalled bool
+	cancelCalled bool
+	lastQueue    string
+	lastTaskID   string
+	lastCancelID string
+}
+
 func (s *stubPublisher) Enqueue(ctx context.Context, job Job) (JobInfo, error) {
 	_ = ctx
 	s.lastJob = job
 	return JobInfo{ID: "job-1", Queue: job.Queue(), Type: job.Type()}, nil
+}
+
+func (s *stubInspector) DeleteTask(ctx context.Context, queueName, taskID string) error {
+	_ = ctx
+	s.deleteCalled = true
+	s.lastQueue = queueName
+	s.lastTaskID = taskID
+	return nil
+}
+
+func (s *stubInspector) CancelProcessing(ctx context.Context, taskID string) error {
+	_ = ctx
+	s.cancelCalled = true
+	s.lastCancelID = taskID
+	return nil
 }
 
 func TestPublishJSONUsesGlobalPublisher(t *testing.T) {
@@ -122,6 +145,42 @@ func TestInitPublisherStoresLastError(t *testing.T) {
 	}
 	if PublisherOrNil() != nil {
 		t.Fatal("expected publisher to remain nil on init failure")
+	}
+}
+
+func TestDeleteTaskUsesGlobalInspector(t *testing.T) {
+	inspector := &stubInspector{}
+	restore := SetInspectorForTesting(inspector)
+	defer restore()
+
+	if err := DeleteTask(context.Background(), "default", "task-1"); err != nil {
+		t.Fatalf("DeleteTask returned error: %v", err)
+	}
+	if !inspector.deleteCalled || inspector.lastQueue != "default" || inspector.lastTaskID != "task-1" {
+		t.Fatalf("unexpected inspector state: %#v", inspector)
+	}
+}
+
+func TestCancelProcessingUsesGlobalInspector(t *testing.T) {
+	inspector := &stubInspector{}
+	restore := SetInspectorForTesting(inspector)
+	defer restore()
+
+	if err := CancelProcessing(context.Background(), "task-1"); err != nil {
+		t.Fatalf("CancelProcessing returned error: %v", err)
+	}
+	if !inspector.cancelCalled || inspector.lastCancelID != "task-1" {
+		t.Fatalf("unexpected inspector state: %#v", inspector)
+	}
+}
+
+func TestDeleteTaskReturnsUnavailableWithoutInspector(t *testing.T) {
+	restore := SetInspectorForTesting(nil)
+	defer restore()
+
+	err := DeleteTask(context.Background(), "default", "task-1")
+	if !errors.Is(err, ErrInspectorUnavailable) {
+		t.Fatalf("expected ErrInspectorUnavailable, got %v", err)
 	}
 }
 

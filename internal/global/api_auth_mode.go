@@ -8,8 +8,8 @@ const (
 	ApiAuthModeNone ApiAuthMode = iota
 	// ApiAuthModeLogin 需要登录，但无需 API 权限校验。
 	ApiAuthModeLogin
-	// ApiAuthModeAuthz 需要登录且需要 API 权限校验。
-	ApiAuthModeAuthz
+	// ApiAuthModeAuth 需要登录且需要 API 权限校验。
+	ApiAuthModeAuth
 )
 
 // RequiresLogin 返回该模式是否要求用户先登录。
@@ -19,7 +19,7 @@ func (m ApiAuthMode) RequiresLogin() bool {
 
 // RequiresAPIPermission 返回该模式是否要求 API 权限校验。
 func (m ApiAuthMode) RequiresAPIPermission() bool {
-	return m == ApiAuthModeAuthz
+	return m == ApiAuthModeAuth
 }
 
 // Label 返回该模式的人类可读名称。
@@ -29,7 +29,7 @@ func (m ApiAuthMode) Label() string {
 		return "无需登录"
 	case ApiAuthModeLogin:
 		return "需要登录"
-	case ApiAuthModeAuthz:
+	case ApiAuthModeAuth:
 		return "需要登录和API权限"
 	default:
 		return "-"

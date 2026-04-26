@@ -71,6 +71,7 @@ const (
 	MenuCodeExists          = 20043
 	MenuRouteNameExists     = 20044
 	MenuPathExists          = 20045
+	LoginAccountLocked      = 20046
 )
 
 const (
@@ -78,6 +79,7 @@ const (
 	MsgKeyAuthPermissionInitFailed  = "auth.permission.init_failed"
 	MsgKeyAuthPermissionCheckFailed = "auth.permission.check_failed"
 	MsgKeyAuthAPIOperationDenied    = "auth.api.operation_denied"
+	MsgKeyAuthAccountLocked         = "auth.account.locked"
 )
 
 // ErrorText 根据语言返回业务错误文案。

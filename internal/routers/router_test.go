@@ -24,7 +24,7 @@ func TestSetRoutersRegistersApiMetadata(t *testing.T) {
 	if menuRoute.GroupCode != "menu" {
 		t.Fatalf("unexpected group code: %s", menuRoute.GroupCode)
 	}
-	if menuRoute.Auth != AuthModeAuthz {
+	if menuRoute.Auth != AuthModeAuth {
 		t.Fatalf("unexpected auth flag: %d", menuRoute.Auth)
 	}
 }

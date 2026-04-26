@@ -5,6 +5,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	"github.com/wannanbigpig/gin-layout/internal/service/menu"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -27,11 +28,12 @@ func (api MenuController) Create(c *gin.Context) {
 		return
 	}
 
-	if err := menu.NewMenuService().Create(params, middleware.LocaleFromContext(c)); err != nil {
+	changeDiff, err := menu.NewMenuService().CreateWithAuditDiff(params, middleware.LocaleFromContext(c))
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -42,11 +44,12 @@ func (api MenuController) Update(c *gin.Context) {
 		return
 	}
 
-	if err := menu.NewMenuService().Update(params, middleware.LocaleFromContext(c)); err != nil {
+	changeDiff, err := menu.NewMenuService().UpdateWithAuditDiff(params, middleware.LocaleFromContext(c))
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }
 
@@ -56,7 +59,12 @@ func (api MenuController) UpdateAllMenuPermissions(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
-
+	diff := auditdiff.Marshal(auditdiff.BuildFieldDiff(nil, map[string]any{
+		"action": "sync_all_menu_permissions",
+	}, []auditdiff.FieldRule{
+		{Field: "action", Label: "操作"},
+	}))
+	middleware.SetAuditChangeDiffRaw(c, diff)
 	api.Success(c, nil)
 }
 
@@ -93,10 +101,11 @@ func (api MenuController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := menu.NewMenuService().Delete(params.ID); err != nil {
+	changeDiff, err := menu.NewMenuService().DeleteWithAuditDiff(params.ID)
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
-
+	middleware.SetAuditChangeDiffRaw(c, changeDiff)
 	api.Success(c, nil)
 }

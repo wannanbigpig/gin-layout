@@ -14,7 +14,8 @@ type AppConfig struct {
 	Language string `mapstructure:"language"`
 	// WatchConfig 是否开启配置热更新，true 时配置变更自动重载
 	WatchConfig bool `mapstructure:"watch_config"`
-	// BasePath 应用基础路径，用于拼接文件存储路径
+	// BasePath 应用基础路径，用于拼接文件存储路径。
+	// 未在配置文件显式设置时，会在配置加载阶段优先回填为当前工作目录。
 	BasePath string `mapstructure:"base_path"`
 	// BaseURL 文件访问的基础 URL（如：https://example.com），用于拼接文件访问地址
 	BaseURL string `mapstructure:"base_url"`
@@ -67,12 +68,13 @@ var App = AppConfig{
 }
 
 func getDefaultPath() (path string) {
-	// 始终使用二进制文件所在目录作为 BasePath
-	// 如果获取失败，使用 /tmp 作为后备方案（仅用于初始化，实际不会发生）
+	// 初始化时优先按 GO_ENV 处理：
+	// - development: 当前工作目录
+	// - 其他环境: 可执行文件所在目录
+	// 配置加载阶段会按 app.base_path 是否显式配置进一步修正。
 	path, err := utils.GetDefaultPath()
 	if err != nil || path == "" {
-		// 如果获取失败，使用临时目录（这种情况不应该发生）
-		path = "/tmp"
+		path = "."
 	}
 	return
 }

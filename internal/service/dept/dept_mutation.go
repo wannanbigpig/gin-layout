@@ -28,14 +28,14 @@ type deptMutation struct {
 // 3. 验证并构建树形路径（pids, level）
 // 4. 填充部门基础字段
 // 5. 事务保存：部门数据、级联更新子部门 pids、更新子部门数量
-func (s *DeptService) applyDeptMutation(params *deptMutation) error {
+func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department, error) {
 	dept := model.NewDepartment()
 	originPids := "0"
 	originPid := uint(0)
 	// 更新场景：加载现有部门数据，记录原始 pids 用于后续级联判断
 	if params.Id > 0 {
 		if err := dept.GetById(params.Id); err != nil || dept.ID == 0 {
-			return e.NewBusinessError(e.DepartmentNotFound)
+			return nil, e.NewBusinessError(e.DepartmentNotFound)
 		}
 		originPids = dept.Pids
 		originPid = dept.Pid
@@ -43,7 +43,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 	// 检查是否为受保护部门（系统默认部门只允许修改名称和描述）
 	if params.Id > 0 && access.NewSystemDefaultsService().IsProtectedDepartment(dept) {
 		if params.Pid != dept.Pid || params.Sort != dept.Sort {
-			return e.NewBusinessError(e.FAILURE)
+			return nil, e.NewBusinessError(e.FAILURE)
 		}
 	}
 
@@ -51,12 +51,12 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 	if params.Pid > 0 && params.Pid != dept.Pid {
 		parentDept := model.NewDepartment()
 		if err := parentDept.GetById(params.Pid); err != nil || parentDept.ID == 0 {
-			return e.NewBusinessError(e.ParentDeptNotExists)
+			return nil, e.NewBusinessError(e.ParentDeptNotExists)
 		}
 
 		// 环路检测：当前部门若已在父部门的祖先路径上，选择该父部门会形成环
 		if dept.ID > 0 && utils2.WouldCauseCycle(dept.ID, params.Pid, parentDept.Pids) {
-			return e.NewBusinessError(e.ParentDeptInvalid)
+			return nil, e.NewBusinessError(e.ParentDeptInvalid)
 		}
 
 		// 构建新的层级和路径：父层级 +1，pids = 父 pids + 父 ID
@@ -78,7 +78,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 	}
 	// 检查部门层级深度是否超限
 	if dept.Level > maxDeptLevel {
-		return e.NewBusinessError(e.MaxDeptDepth)
+		return nil, e.NewBusinessError(e.MaxDeptDepth)
 	}
 
 	// 生成部门 code（为空时）
@@ -92,10 +92,10 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 
 	db, err := dept.GetDB()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// 事务执行：保存部门、级联更新子部门 pids、更新子部门数量
-	return access.RunInTransaction(db, func(tx *gorm.DB) error {
+	if err := access.RunInTransaction(db, func(tx *gorm.DB) error {
 		dept.SetDB(tx)
 
 		if err := dept.Save(); err != nil {
@@ -124,7 +124,10 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) error {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return nil, err
+	}
+	return dept, nil
 }
 
 // generateDeptCode 生成部门唯一编码，格式：dept_{uuid}。

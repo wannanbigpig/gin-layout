@@ -26,6 +26,19 @@ func (m *MenuApiMap) CreateBatch(mappings []*MenuApiMap) error {
 	return db.Create(&mappings).Error
 }
 
+// ApiIdsByMenuId 根据菜单 ID 查询关联的 API ID 列表。
+func (m *MenuApiMap) ApiIdsByMenuId(menuId uint) ([]uint, error) {
+	db, err := m.GetDB(m)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uint
+	if err := db.Where("menu_id = ?", menuId).Pluck("api_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 // MenuIdsByApiIds 根据 API ID 列表查询关联的菜单 ID 列表。
 func (m *MenuApiMap) MenuIdsByApiIds(apiIds []uint) ([]uint, error) {
 	if len(apiIds) == 0 {
@@ -61,7 +74,7 @@ func (m *MenuApiMap) ApiPermissionsByMenuIds(menuIds []uint) ([]ApiPermission, e
 	err = db.Table(m.TableName()+" m").
 		Select("DISTINCT a.route, a.method").
 		Joins("JOIN api a ON a.id = m.api_id").
-		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = ? AND a.is_effective = 1", menuIds, global.ApiAuthModeAuthz).
+		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = ? AND a.is_effective = 1", menuIds, global.ApiAuthModeAuth).
 		Find(&permissions).Error
 	if err != nil {
 		return nil, err
@@ -89,7 +102,7 @@ func (m *MenuApiMap) MenuApiPermissionsByMenuIds(menuIds []uint) ([]MenuApiPermi
 	err = db.Table(m.TableName()+" m").
 		Select("m.menu_id, a.route, a.method").
 		Joins("JOIN api a ON a.id = m.api_id").
-		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = ? AND a.is_effective = 1", menuIds, global.ApiAuthModeAuthz).
+		Where("m.menu_id IN ? AND a.deleted_at = 0 AND a.is_auth = ? AND a.is_effective = 1", menuIds, global.ApiAuthModeAuth).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err

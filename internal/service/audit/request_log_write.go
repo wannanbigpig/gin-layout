@@ -19,9 +19,11 @@ type AuditLogSnapshot struct {
 	BaseURL         string  `json:"base_url"`
 	OperationName   string  `json:"operation_name"`
 	OperationStatus int     `json:"operation_status"`
+	IsHighRisk      uint8   `json:"is_high_risk"`
 	RequestHeaders  string  `json:"request_headers"`
 	RequestQuery    string  `json:"request_query"`
 	RequestBody     string  `json:"request_body"`
+	ChangeDiff      string  `json:"change_diff"`
 	ResponseStatus  int     `json:"response_status"`
 	ResponseBody    string  `json:"response_body"`
 	ResponseHeader  string  `json:"response_header"`
@@ -46,11 +48,13 @@ func PersistAuditLog(snapshot *AuditLogSnapshot) error {
 	requestLog.BaseURL = snapshot.BaseURL
 	requestLog.OperationName = snapshot.OperationName
 	requestLog.OperationStatus = snapshot.OperationStatus
+	requestLog.IsHighRisk = snapshot.IsHighRisk
 	requestLog.OperatorAccount = snapshot.OperatorAccount
 	requestLog.OperatorName = snapshot.OperatorName
 	requestLog.RequestHeaders = snapshot.RequestHeaders
 	requestLog.RequestQuery = snapshot.RequestQuery
 	requestLog.RequestBody = snapshot.RequestBody
+	requestLog.ChangeDiff = snapshot.ChangeDiff
 	requestLog.ResponseStatus = snapshot.ResponseStatus
 	requestLog.ResponseBody = snapshot.ResponseBody
 	requestLog.ResponseHeader = snapshot.ResponseHeader
