@@ -8,6 +8,8 @@
 - 如何创建、发布、消费异步队列任务
 - 如何把任务放入指定队列，以及如何配置多队列
 
+系统配置与系统字典的接入边界见：[docs/SYSTEM_CONFIG_AND_DICT_GUIDELINES.md](/Users/liuml/data/go/src/go-layout/docs/SYSTEM_CONFIG_AND_DICT_GUIDELINES.md)。
+
 如果你刚接手项目，建议先看“运行模型”和“命令说明”，再看“定时任务”和“队列”两节。
 
 ## 运行模型
@@ -109,6 +111,12 @@ go run main.go cron
 - 启动周期调度器
 - 注册当前定义的周期任务
 - 收到退出信号后优雅关闭
+
+任务定义边界：
+
+- `task_definitions` 当前是代码内置任务定义的只读镜像，用于任务中心展示、手动触发与重试校验。
+- `cron` 调度器的真实来源仍是 `BuiltinTaskDefinitions(cfg)`，不会读取 DB 中被人工修改的 `task_definitions`。
+- 如需让后台成为调度配置入口，必须先调整 scheduler 读取 DB，并把内置同步策略从覆盖改为初始化缺失记录。
 
 ### 5. 运行一次性命令
 

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -37,4 +38,12 @@ func SetAuditHighRisk(c *gin.Context, highRisk bool) {
 		return
 	}
 	c.Set(global.ContextKeyAuditHighRisk, highRisk)
+}
+
+// SetAuditRequestBodyRaw 覆盖本次请求日志中的请求体快照。
+func SetAuditRequestBodyRaw(c *gin.Context, rawJSON string) {
+	if c == nil || strings.TrimSpace(rawJSON) == "" {
+		return
+	}
+	c.Set(global.ContextKeyAuditRequestBody, rawJSON)
 }

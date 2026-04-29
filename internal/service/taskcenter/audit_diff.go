@@ -27,6 +27,11 @@ var taskActionDiffRules = []auditdiff.FieldRule{
 	{Field: "task_id", Label: "任务ID"},
 	{Field: "retry_from_run", Label: "重试来源执行记录ID"},
 	{Field: "payload_keys", Label: "Payload字段"},
+	{Field: "confirm", Label: "确认信息"},
+	{Field: "reason", Label: "操作原因"},
+	{Field: "canceled_by", Label: "取消人ID"},
+	{Field: "canceled_by_account", Label: "取消人账号"},
+	{Field: "cancel_reason", Label: "取消原因"},
 }
 
 // TaskRunAuditSnapshot 描述任务执行记录审计快照。
@@ -50,6 +55,12 @@ func BuildTriggerAuditDiff(params *form.TaskTriggerForm, result map[string]any) 
 		"queue":        result["queue"],
 		"task_id":      result["task_id"],
 		"payload_keys": payloadKeys(params.Payload),
+	}
+	if strings.TrimSpace(params.Confirm) != "" {
+		after["confirm"] = strings.TrimSpace(params.Confirm)
+	}
+	if strings.TrimSpace(params.Reason) != "" {
+		after["reason"] = strings.TrimSpace(params.Reason)
 	}
 	items := auditdiff.BuildFieldDiff(nil, after, taskActionDiffRules)
 	return auditdiff.Marshal(items)
@@ -96,6 +107,15 @@ func BuildCancelAuditDiff(before *TaskRunAuditSnapshot, result map[string]any) s
 		"status":    result["status"],
 		"queue":     beforeState["queue"],
 		"task_id":   result["task_id"],
+	}
+	if result["canceled_by"] != nil {
+		after["canceled_by"] = result["canceled_by"]
+	}
+	if result["canceled_by_account"] != nil {
+		after["canceled_by_account"] = result["canceled_by_account"]
+	}
+	if result["cancel_reason"] != nil {
+		after["cancel_reason"] = result["cancel_reason"]
 	}
 	items := auditdiff.BuildFieldDiff(beforeState, after, taskActionDiffRules)
 	return auditdiff.Marshal(items)

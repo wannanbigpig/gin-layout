@@ -235,6 +235,112 @@ func TestTriggerTaskReturnsErrorWhenManualNotAllowed(t *testing.T) {
 	}
 }
 
+func TestTriggerTaskHighRiskRequiresConfirm(t *testing.T) {
+	restoreTaskDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:        taskCode,
+			Kind:        model.TaskKindAsync,
+			Status:      1,
+			AllowManual: 1,
+			IsHighRisk:  model.TaskHighRisk,
+		}, nil
+	})
+	defer restoreTaskDefinition()
+
+	svc := NewTaskCenterService()
+	_, err := svc.TriggerTask(context.Background(), &form.TaskTriggerForm{
+		TaskCode: "demo:send",
+	}, 1, "tester")
+	if err == nil {
+		t.Fatal("expected error when high-risk task confirm is empty")
+	}
+
+	var be *e.BusinessError
+	if !stderrors.As(err, &be) {
+		t.Fatalf("expected business error, got %T", err)
+	}
+	if be.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+}
+
+func TestTriggerTaskRecordsConfirmAndReason(t *testing.T) {
+	restoreTaskDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:        taskCode,
+			Kind:        model.TaskKindAsync,
+			Status:      1,
+			AllowManual: 1,
+			IsHighRisk:  model.TaskHighRisk,
+		}, nil
+	})
+	defer restoreTaskDefinition()
+
+	restorePublisher := queue.SetPublisherForTesting(&stubPublisher{
+		info: queue.JobInfo{ID: "task-1", Queue: "default", Type: "demo:send"},
+	})
+	defer restorePublisher()
+
+	fakeRecorder := &fakeActionRecorder{}
+	restoreRecorder := SetRecorderForTesting(fakeRecorder)
+	defer restoreRecorder()
+
+	svc := NewTaskCenterService()
+	_, err := svc.TriggerTask(context.Background(), &form.TaskTriggerForm{
+		TaskCode: "demo:send",
+		Confirm:  "CONFIRM",
+		Reason:   "manual high-risk operation",
+	}, 1, "tester")
+	if err != nil {
+		t.Fatalf("TriggerTask returned error: %v", err)
+	}
+
+	if len(fakeRecorder.enqueueInputs) != 1 {
+		t.Fatalf("expected enqueue record called once, got %d", len(fakeRecorder.enqueueInputs))
+	}
+	if fakeRecorder.enqueueInputs[0].TriggerConfirm != "CONFIRM" || fakeRecorder.enqueueInputs[0].TriggerReason != "manual high-risk operation" {
+		t.Fatalf("unexpected trigger audit meta: %#v", fakeRecorder.enqueueInputs[0])
+	}
+}
+
+func TestRetryTaskRespectsCurrentDefinition(t *testing.T) {
+	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		return &model.TaskRun{
+			BaseModel: model.BaseModel{ID: runID},
+			TaskCode:  "demo:send",
+			Kind:      model.TaskKindAsync,
+			Queue:     "default",
+			Status:    model.TaskRunStatusFailed,
+			Payload:   `{"name":"codex"}`,
+		}, nil
+	})
+	defer restoreRun()
+
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:       taskCode,
+			Kind:       model.TaskKindAsync,
+			Status:     model.TaskStatusEnabled,
+			AllowRetry: 0,
+		}, nil
+	})
+	defer restoreDefinition()
+
+	svc := NewTaskCenterService()
+	_, err := svc.RetryTask(context.Background(), 101, 1, "tester")
+	if err == nil {
+		t.Fatal("expected error when current definition disallows retry")
+	}
+
+	var be *e.BusinessError
+	if !stderrors.As(err, &be) {
+		t.Fatalf("expected business error, got %T", err)
+	}
+	if be.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+}
+
 func TestCancelTaskDeletesPendingTaskAndMarksRunCanceled(t *testing.T) {
 	restoreLoader := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
 		return &model.TaskRun{
@@ -257,7 +363,7 @@ func TestCancelTaskDeletesPendingTaskAndMarksRunCanceled(t *testing.T) {
 	defer restoreInspector()
 
 	svc := NewTaskCenterService()
-	result, err := svc.CancelTask(context.Background(), 101, 1, "tester")
+	result, err := svc.CancelTask(context.Background(), 101, 1, "tester", "manual cancel")
 	if err != nil {
 		t.Fatalf("CancelTask returned error: %v", err)
 	}
@@ -269,6 +375,9 @@ func TestCancelTaskDeletesPendingTaskAndMarksRunCanceled(t *testing.T) {
 	}
 	if len(fakeRecorder.finishInputs) != 1 || fakeRecorder.finishInputs[0].Status != model.TaskRunStatusCanceled {
 		t.Fatalf("expected recorder finish with canceled status, got %#v", fakeRecorder.finishInputs)
+	}
+	if fakeRecorder.finishInputs[0].CanceledBy != 1 || fakeRecorder.finishInputs[0].CanceledByAccount != "tester" || fakeRecorder.finishInputs[0].CancelReason != "manual cancel" {
+		t.Fatalf("unexpected cancel meta: %#v", fakeRecorder.finishInputs[0])
 	}
 }
 
@@ -289,7 +398,7 @@ func TestCancelTaskReturnsDependencyNotReadyWhenInspectorUnavailable(t *testing.
 	defer restoreInspector()
 
 	svc := NewTaskCenterService()
-	_, err := svc.CancelTask(context.Background(), 101, 1, "tester")
+	_, err := svc.CancelTask(context.Background(), 101, 1, "tester", "")
 	if err == nil {
 		t.Fatal("expected error when inspector unavailable")
 	}

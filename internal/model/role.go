@@ -10,7 +10,7 @@ import (
 // 角色状态字典
 var RoleStatusDict modelDict.Dict = map[uint8]string{
 	1: "启用",
-	2: "禁用",
+	0: "禁用",
 }
 
 // Role 角色表
@@ -26,7 +26,7 @@ type Role struct {
 	Sort        uint          `json:"sort" gorm:"column:sort;type:mediumint unsigned;not null;default:0;comment:排序"`
 	ChildrenNum uint          `json:"children_num" gorm:"column:children_num;type:int unsigned;not null;default:0;comment:子集数量"`
 	MenuList    []RoleMenuMap `json:"menu_list,omitempty" gorm:"foreignkey:role_id;references:id;comment:菜单列表"`
-	Status      uint8         `json:"status" gorm:"column:status;type:tinyint unsigned;not null;default:1;comment:是否启用状态,1启用，2不启用"`
+	Status      uint8         `json:"status" gorm:"column:status;type:tinyint unsigned;not null;default:1;comment:是否启用状态,1启用，0禁用"`
 }
 
 func NewRole() *Role {

@@ -79,18 +79,19 @@ func enqueueAuditLog(c *gin.Context, kind string, snapshot *audit.AuditLogSnapsh
 	if err := enqueueAuditTaskFn(ctx, kind, snapshot); err != nil {
 		if errors.Is(err, queue.ErrPublisherUnavailable) {
 			if queueUnavailableLogged.CompareAndSwap(false, true) {
-				log.Warn("Audit queue publisher unavailable, skip enqueue",
+				log.Warn("Audit queue publisher unavailable, fallback to sync persist",
 					zap.String("operation", "enqueue_audit_log"),
 					zap.String("kind", kind),
 					zap.String("request_id", snapshot.RequestID))
 			}
-			return
+		} else {
+			log.Warn("Enqueue audit log failed, fallback to sync persist",
+				zap.String("operation", "enqueue_audit_log"),
+				zap.String("kind", kind),
+				zap.String("request_id", snapshot.RequestID),
+				zap.Error(err))
 		}
-		log.Warn("Enqueue audit log failed",
-			zap.String("operation", "enqueue_audit_log"),
-			zap.String("kind", kind),
-			zap.String("request_id", snapshot.RequestID),
-			zap.Error(err))
+		reportAuditPersistenceResult(kind, snapshot, "sync_fallback")
 		return
 	}
 

@@ -386,7 +386,19 @@ func collectionContainsFieldValue(collectionData any, field string, target any) 
 func plainListContainsFieldValue(data any, field string, target any) bool {
 	rows, ok := data.([]any)
 	if !ok {
-		return false
+		// 全局 response.WithData 对非 object 数据会包装为 data.result。
+		if wrapper, ok := data.(map[string]any); ok {
+			if result, exists := wrapper["result"]; exists {
+				rows, ok = result.([]any)
+				if !ok {
+					return false
+				}
+			} else {
+				return false
+			}
+		} else {
+			return false
+		}
 	}
 	for _, row := range rows {
 		rowMap, ok := row.(map[string]any)

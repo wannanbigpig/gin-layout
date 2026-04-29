@@ -9,4 +9,5 @@ const (
 	ContextKeyRequestStartTime = "requestStartTime"
 	ContextKeyAuditChangeDiff  = "auditChangeDiff"
 	ContextKeyAuditHighRisk    = "auditHighRisk"
+	ContextKeyAuditRequestBody = "auditRequestBody"
 )

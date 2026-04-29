@@ -33,13 +33,18 @@ type RunStart struct {
 	Payload        []byte
 	TriggerUserID  uint
 	TriggerAccount string
+	TriggerConfirm string
+	TriggerReason  string
 }
 
 // RunFinish 描述一次任务执行结束时的结果。
 type RunFinish struct {
-	Status    string
-	Error     error
-	NextRunAt *time.Time
+	Status            string
+	Error             error
+	NextRunAt         *time.Time
+	CanceledBy        uint
+	CanceledByAccount string
+	CancelReason      string
 }
 
 // Recorder 持久化任务执行记录。
@@ -212,10 +217,12 @@ func (r *recorder) Enqueue(ctx context.Context, input RunStart) (*model.TaskRun,
 	run.MaxRetry = input.MaxRetry
 	run.Payload = truncateBytes(input.Payload, maxPayloadBytes)
 
-	if err := db.Create(run).Error; err != nil {
-		return nil, err
-	}
-	if err := db.Create(newEvent(run.ID, model.TaskEventEnqueue, "task enqueued", inputMeta(input))).Error; err != nil {
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(run).Error; err != nil {
+			return err
+		}
+		return tx.Create(newEvent(run.ID, model.TaskEventEnqueue, "task enqueued", inputMeta(input))).Error
+	}); err != nil {
 		return nil, err
 	}
 	return run, nil
@@ -246,6 +253,7 @@ func (r *recorder) Finish(ctx context.Context, run *model.TaskRun, input RunFini
 		eventType = model.TaskEventFail
 		eventMessage = errorMessage
 	}
+	input.Status = status
 
 	durationMS := float64(0)
 	if run.StartedAt != nil && !run.StartedAt.IsZero() {
@@ -315,7 +323,7 @@ func newEvent(runID uint, eventType, message string, meta map[string]any) *model
 }
 
 func inputMeta(input RunStart) map[string]any {
-	return map[string]any{
+	meta := map[string]any{
 		"kind":            input.Kind,
 		"source":          input.Source,
 		"source_id":       input.SourceID,
@@ -325,6 +333,16 @@ func inputMeta(input RunStart) map[string]any {
 		"trigger_user_id": input.TriggerUserID,
 		"cron_spec":       input.CronSpec,
 	}
+	if strings.TrimSpace(input.TriggerAccount) != "" {
+		meta["trigger_account"] = strings.TrimSpace(input.TriggerAccount)
+	}
+	if strings.TrimSpace(input.TriggerConfirm) != "" {
+		meta["trigger_confirm"] = strings.TrimSpace(input.TriggerConfirm)
+	}
+	if strings.TrimSpace(input.TriggerReason) != "" {
+		meta["trigger_reason"] = strings.TrimSpace(input.TriggerReason)
+	}
+	return meta
 }
 
 func finishMeta(input RunFinish) map[string]any {
@@ -333,6 +351,15 @@ func finishMeta(input RunFinish) map[string]any {
 	}
 	if input.NextRunAt != nil {
 		meta["next_run_at"] = input.NextRunAt.Format("2006-01-02 15:04:05")
+	}
+	if input.CanceledBy > 0 {
+		meta["canceled_by"] = input.CanceledBy
+	}
+	if strings.TrimSpace(input.CanceledByAccount) != "" {
+		meta["canceled_by_account"] = strings.TrimSpace(input.CanceledByAccount)
+	}
+	if input.CancelReason != "" {
+		meta["cancel_reason"] = strings.TrimSpace(input.CancelReason)
 	}
 	return meta
 }

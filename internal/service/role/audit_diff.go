@@ -21,7 +21,6 @@ var roleDiffRules = []auditdiff.FieldRule{
 		ValueLabels: map[string]string{
 			"0": "禁用",
 			"1": "启用",
-			"2": "禁用",
 		},
 	},
 	{Field: "pid", Label: "上级角色ID"},

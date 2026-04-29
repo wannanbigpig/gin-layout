@@ -49,6 +49,8 @@ type TaskTriggerForm struct {
 	Queue    string         `form:"queue" json:"queue" binding:"omitempty"`
 	TaskID   string         `form:"task_id" json:"task_id" binding:"omitempty"`
 	Payload  map[string]any `form:"payload" json:"payload" binding:"omitempty"`
+	Confirm  string         `form:"confirm" json:"confirm" binding:"omitempty,max=120"`
+	Reason   string         `form:"reason" json:"reason" binding:"omitempty,max=255"`
 }
 
 func NewTaskTriggerForm() *TaskTriggerForm {
@@ -66,7 +68,8 @@ func NewTaskRetryForm() *TaskRetryForm {
 
 // TaskCancelForm 取消任务参数。
 type TaskCancelForm struct {
-	RunID uint `form:"run_id" json:"run_id" binding:"required,gt=0"`
+	RunID  uint   `form:"run_id" json:"run_id" binding:"required,gt=0"`
+	Reason string `form:"reason" json:"reason" binding:"omitempty,max=255"`
 }
 
 func NewTaskCancelForm() *TaskCancelForm {

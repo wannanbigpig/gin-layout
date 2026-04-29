@@ -218,6 +218,28 @@ func TestBuildRequestAuditLogSnapshotUsesPrincipal(t *testing.T) {
 	}
 }
 
+func TestBuildRequestAuditLogSnapshotUsesAuditRequestBodyOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/admin/v1/system/config/create", bytes.NewBufferString(`{"config_value":"plain-secret"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+	ctx.Set(global.ContextKeyRequestID, "req-override")
+	cacheRequestBody(ctx)
+	SetAuditRequestBodyRaw(ctx, `{"config_value":"******"}`)
+
+	respRecorder := createResponseRecorder(ctx)
+	respRecorder.body.WriteString(`{"code":0,"msg":"ok","data":{}}`)
+	snapshot := buildRequestAuditLogSnapshot(ctx, respRecorder, &response.Result{Code: 0})
+	if snapshot == nil {
+		t.Fatal("expected audit snapshot")
+	}
+	if snapshot.RequestBody != `{"config_value":"******"}` {
+		t.Fatalf("unexpected request body override: %s", snapshot.RequestBody)
+	}
+}
+
 func TestBuildRequestAuditLogSnapshotMarksHighRiskAndDiff(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

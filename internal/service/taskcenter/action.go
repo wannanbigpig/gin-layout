@@ -60,6 +60,9 @@ func (s *TaskCenterService) TriggerTask(ctx context.Context, params *form.TaskTr
 	if definition.AllowManual != 1 {
 		return nil, e.NewBusinessError(e.InvalidParameter, "任务不允许手动触发")
 	}
+	if definition.IsHighRisk == model.TaskHighRisk && strings.TrimSpace(params.Confirm) == "" {
+		return nil, e.NewBusinessError(e.InvalidParameter, "高危任务触发需要确认")
+	}
 
 	switch definition.Kind {
 	case model.TaskKindAsync:
@@ -103,6 +106,8 @@ func (s *TaskCenterService) triggerAsyncTask(ctx context.Context, definition *mo
 		Payload:        rawPayload,
 		TriggerUserID:  triggerUserID,
 		TriggerAccount: triggerAccount,
+		TriggerConfirm: strings.TrimSpace(params.Confirm),
+		TriggerReason:  strings.TrimSpace(params.Reason),
 	})
 	if err != nil {
 		return nil, err
@@ -161,6 +166,8 @@ func (s *TaskCenterService) triggerCronTask(ctx context.Context, definition *mod
 		Payload:        rawPayload,
 		TriggerUserID:  triggerUserID,
 		TriggerAccount: triggerAccount,
+		TriggerConfirm: strings.TrimSpace(params.Confirm),
+		TriggerReason:  strings.TrimSpace(params.Reason),
 	})
 	if err != nil {
 		return nil, err
@@ -198,6 +205,24 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 	}
 	if strings.TrimSpace(runModel.TaskCode) == "" {
 		return nil, e.NewBusinessError(e.InvalidParameter, "任务编码为空，无法重试")
+	}
+
+	// 校验当前任务定义是否允许重试。
+	definition, err := loadTaskDefinitionByCode(runModel.TaskCode)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound, "任务定义不存在")
+		}
+		return nil, e.NewBusinessError(e.ServerErr, "读取任务定义失败")
+	}
+	if definition.Status != 1 {
+		return nil, e.NewBusinessError(e.InvalidParameter, "任务已停用，无法重试")
+	}
+	if definition.AllowRetry != 1 {
+		return nil, e.NewBusinessError(e.InvalidParameter, "任务不允许重试")
+	}
+	if definition.Kind != runModel.Kind {
+		return nil, e.NewBusinessError(e.InvalidParameter, "任务类型与当前定义不一致，无法重试")
 	}
 
 	payloadAny := map[string]any{}
@@ -262,10 +287,7 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 }
 
 // CancelTask 取消待执行或执行中的异步任务。
-func (s *TaskCenterService) CancelTask(ctx context.Context, runID uint, triggerUserID uint, triggerAccount string) (map[string]any, error) {
-	_ = triggerUserID
-	_ = triggerAccount
-
+func (s *TaskCenterService) CancelTask(ctx context.Context, runID uint, triggerUserID uint, triggerAccount string, cancelReason string) (map[string]any, error) {
 	runModel, err := loadTaskRunByID(runID)
 	if err != nil || runModel == nil || runModel.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
@@ -308,13 +330,24 @@ func (s *TaskCenterService) CancelTask(ctx context.Context, runID uint, triggerU
 	}
 
 	runModel.Status = model.TaskRunStatusCanceled
-	if err := NewRunRecorder().Finish(ctx, runModel, RunFinish{Status: model.TaskRunStatusCanceled}); err != nil {
+	if err := NewRunRecorder().Finish(ctx, runModel, RunFinish{
+		Status:            model.TaskRunStatusCanceled,
+		CanceledBy:        triggerUserID,
+		CanceledByAccount: triggerAccount,
+		CancelReason:      strings.TrimSpace(cancelReason),
+	}); err != nil {
 		return nil, err
 	}
 
-	return map[string]any{
-		"run_id":  runModel.ID,
-		"task_id": runModel.SourceID,
-		"status":  model.TaskRunStatusCanceled,
-	}, nil
+	result := map[string]any{
+		"run_id":              runModel.ID,
+		"task_id":             runModel.SourceID,
+		"status":              model.TaskRunStatusCanceled,
+		"canceled_by":         triggerUserID,
+		"canceled_by_account": triggerAccount,
+	}
+	if strings.TrimSpace(cancelReason) != "" {
+		result["cancel_reason"] = strings.TrimSpace(cancelReason)
+	}
+	return result, nil
 }

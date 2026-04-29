@@ -141,10 +141,14 @@ func snapshotConfig(config *model.SysConfig) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	configValue := config.ConfigValue
+	if config.IsSensitive == 1 {
+		configValue = maskedConfigValue
+	}
 	return map[string]any{
 		"config_key":       config.ConfigKey,
 		"config_name_i18n": nameI18n,
-		"config_value":     config.ConfigValue,
+		"config_value":     configValue,
 		"value_type":       model.NormalizeValueType(config.ValueType),
 		"group_code":       config.GroupCode,
 		"is_sensitive":     config.IsSensitive,

@@ -58,7 +58,6 @@
 - 演示地址：[在线演示](https://x-l-admin.wannanbigpig.com/)
 - 命令与任务文档：[docs/COMMANDS_AND_TASKS.md](./docs/COMMANDS_AND_TASKS.md)
 - 迁移命令详解：[docs/MIGRATE_COMMANDS.md](./docs/MIGRATE_COMMANDS.md)
-- 代码扫描与优化建议：[docs/OPTIMIZATION_NOTES_20260422.md](./docs/OPTIMIZATION_NOTES_20260422.md)
 
 ## 快速开始
 

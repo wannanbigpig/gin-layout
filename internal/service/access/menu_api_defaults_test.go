@@ -1,6 +1,9 @@
 package access
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 func TestNewMenuAPIDefaultsServiceUsesIsolatedDefaultBindings(t *testing.T) {
 	first := NewMenuAPIDefaultsService()
@@ -39,5 +42,34 @@ func TestNewMenuAPIDefaultsServiceWithDepsAllowsEmptyBindings(t *testing.T) {
 
 	if len(service.bindings) != 0 {
 		t.Fatalf("expected empty bindings, got %d", len(service.bindings))
+	}
+}
+
+func TestDefaultMenuAPIBindingsCoverManagementRoutes(t *testing.T) {
+	service := NewMenuAPIDefaultsService()
+	bindingSet := make(map[string]struct{}, len(service.bindings))
+	for _, binding := range service.bindings {
+		bindingSet[binding.Method+" "+binding.Route] = struct{}{}
+	}
+
+	required := []string{
+		http.MethodGet + " /admin/v1/system/config/list",
+		http.MethodGet + " /admin/v1/system/config/detail",
+		http.MethodPost + " /admin/v1/system/config/create",
+		http.MethodPost + " /admin/v1/system/config/update",
+		http.MethodGet + " /admin/v1/system/dict/type/list",
+		http.MethodGet + " /admin/v1/system/dict/options",
+		http.MethodGet + " /admin/v1/task/list",
+		http.MethodPost + " /admin/v1/task/trigger",
+		http.MethodPost + " /admin/v1/task/run/retry",
+		http.MethodPost + " /admin/v1/task/run/cancel",
+		http.MethodGet + " /admin/v1/log/request/list",
+		http.MethodGet + " /admin/v1/log/request/detail",
+		http.MethodPost + " /admin/v1/log/request/mask-config",
+	}
+	for _, route := range required {
+		if _, ok := bindingSet[route]; !ok {
+			t.Fatalf("missing default menu API binding for %s", route)
+		}
 	}
 }

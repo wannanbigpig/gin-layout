@@ -129,7 +129,7 @@ func (api TaskCenterController) Cancel(c *gin.Context) {
 
 	service := taskcenter.NewTaskCenterService()
 	before, _ := service.TaskRunAuditSnapshot(params.RunID)
-	result, err := service.CancelTask(c.Request.Context(), params.RunID, uid, account)
+	result, err := service.CancelTask(c.Request.Context(), params.RunID, uid, account, params.Reason)
 	if err != nil {
 		api.Err(c, err)
 		return

@@ -46,7 +46,7 @@ func (api SysConfigController) Value(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	value, err := sys_config.NewSysConfigService().Value(params.ConfigKey)
+	value, err := sys_config.NewSysConfigService().PublicValue(params.ConfigKey)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -59,7 +59,9 @@ func (api SysConfigController) Create(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	changeDiff, err := sys_config.NewSysConfigService().CreateWithAuditDiff(params)
+	service := sys_config.NewSysConfigService()
+	middleware.SetAuditRequestBodyRaw(c, service.MaskedAuditRequestBody(0, &params.SysConfigPayload))
+	changeDiff, err := service.CreateWithAuditDiff(params)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -73,7 +75,9 @@ func (api SysConfigController) Update(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	changeDiff, err := sys_config.NewSysConfigService().UpdateWithAuditDiff(params)
+	service := sys_config.NewSysConfigService()
+	middleware.SetAuditRequestBodyRaw(c, service.MaskedAuditRequestBody(params.Id, &params.SysConfigPayload))
+	changeDiff, err := service.UpdateWithAuditDiff(params)
 	if err != nil {
 		api.Err(c, err)
 		return

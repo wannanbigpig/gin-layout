@@ -52,6 +52,9 @@ func (s *SysConfigService) Detail(id uint, locale string) (any, error) {
 	}
 	config.ConfigNameI18n = translations
 	config.ConfigName = service.ResolveLocaleText(translations, locale)
+	if config.IsSensitive == 1 {
+		config.ConfigValue = maskedConfigValue
+	}
 	return resources.NewSysConfigTransformer().ToStruct(config), nil
 }
 
@@ -84,6 +87,18 @@ func (s *SysConfigService) Value(key string) (ConfigCacheItem, error) {
 		return item, nil
 	}
 	return ConfigCacheItem{}, e.NewBusinessError(e.NotFound)
+}
+
+// PublicValue 对外暴露的系统参数值接口，敏感参数自动脱敏。
+func (s *SysConfigService) PublicValue(key string) (ConfigCacheItem, error) {
+	item, err := s.Value(key)
+	if err != nil {
+		return item, err
+	}
+	if item.IsSensitive == 1 {
+		item.ConfigValue = maskedConfigValue
+	}
+	return item, nil
 }
 
 // RefreshCache 刷新本进程参数缓存；加载失败时保留旧缓存。
@@ -126,6 +141,22 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	if id > 0 {
 		if err := config.GetById(id); err != nil || config.ID == 0 {
 			return e.NewBusinessError(e.NotFound)
+		}
+		// 系统内置参数禁止修改稳定字段。
+		if config.IsProtected() {
+			if params.ConfigKey != config.ConfigKey {
+				return e.NewBusinessError(e.InvalidParameter)
+			}
+			if model.NormalizeValueType(params.ValueType) != config.ValueType {
+				return e.NewBusinessError(e.InvalidParameter)
+			}
+			if strings.TrimSpace(params.GroupCode) != config.GroupCode {
+				return e.NewBusinessError(e.InvalidParameter)
+			}
+			// 敏感标记禁止降级。
+			if params.IsSensitive != nil && *params.IsSensitive == 0 && config.IsSensitive == 1 {
+				return e.NewBusinessError(e.InvalidParameter)
+			}
 		}
 	}
 	if exists, err := model.NewSysConfig().ExistsByKeyExcludeID(params.ConfigKey, id); err != nil {

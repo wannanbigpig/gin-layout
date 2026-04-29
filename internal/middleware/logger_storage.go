@@ -126,7 +126,7 @@ func collectAuditRequestMeta(c *gin.Context) *auditRequestMeta {
 		operationName:  getOperationName(path, method, c.GetHeader("X-Operation-Name")),
 		requestHeaders: sensitive.GetMaskedRequestHeaders(c.Request.Header),
 		requestQuery:   sensitive.MaskQueryString(c.Request.URL.RawQuery),
-		requestBody:    buildMaskedRequestBody(c),
+		requestBody:    resolveAuditRequestBody(c),
 		executionTime:  calculateExecutionTimeMs(c),
 	}
 }
@@ -179,6 +179,17 @@ func buildMaskedRequestBody(c *gin.Context) string {
 	}
 
 	return sensitive.GetMaskedRequestBody(cached.body, contentType) + "...(truncated,total_size=" + strconv.Itoa(cached.totalBytes) + "B)"
+}
+
+func resolveAuditRequestBody(c *gin.Context) string {
+	if c != nil {
+		if raw, exists := c.Get(global.ContextKeyAuditRequestBody); exists {
+			if value, ok := raw.(string); ok && strings.TrimSpace(value) != "" {
+				return value
+			}
+		}
+	}
+	return buildMaskedRequestBody(c)
 }
 
 func buildMaskedResponseBody(recorder *responseRecorder) string {

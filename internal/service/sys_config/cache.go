@@ -7,10 +7,11 @@ import (
 )
 
 type ConfigCacheItem struct {
-	ConfigKey   string `json:"config_key"`
-	ConfigValue string `json:"config_value"`
-	ValueType   string `json:"value_type"`
-	GroupCode   string `json:"group_code"`
+	ConfigKey    string `json:"config_key"`
+	ConfigValue  string `json:"config_value"`
+	ValueType    string `json:"value_type"`
+	GroupCode    string `json:"group_code"`
+	IsSensitive  uint8  `json:"is_sensitive"`
 }
 
 var runtimeCache = struct {
@@ -29,6 +30,7 @@ func replaceCache(configs []model.SysConfig) {
 			ConfigValue: config.ConfigValue,
 			ValueType:   config.ValueType,
 			GroupCode:   config.GroupCode,
+			IsSensitive: config.IsSensitive,
 		}
 	}
 

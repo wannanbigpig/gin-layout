@@ -2,6 +2,7 @@ package taskcenter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -96,6 +97,70 @@ func TestRecorderFinishFailureUpdatesCronState(t *testing.T) {
 	}
 	if state.LastError != "boom" {
 		t.Fatalf("unexpected cron state error: %s", state.LastError)
+	}
+
+	var event model.TaskRunEvent
+	if err := db.Where("run_id = ? AND event_type = ?", run.ID, model.TaskEventFail).First(&event).Error; err != nil {
+		t.Fatalf("query fail event failed: %v", err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(event.Meta), &meta); err != nil {
+		t.Fatalf("unmarshal fail meta failed: %v", err)
+	}
+	if meta["status"] != model.TaskRunStatusFailed {
+		t.Fatalf("unexpected fail meta: %#v", meta)
+	}
+}
+
+func TestRecorderFinishCancelWritesOperatorMeta(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	recorder := NewRecorderWithDB(db)
+
+	run, err := recorder.Enqueue(context.Background(), RunStart{
+		TaskCode:       "demo:send",
+		Kind:           model.TaskKindAsync,
+		Source:         model.TaskSourceManual,
+		SourceID:       "task-1",
+		TriggerUserID:  7,
+		TriggerAccount: "starter",
+		TriggerConfirm: "CONFIRM",
+		TriggerReason:  "manual run",
+	})
+	if err != nil {
+		t.Fatalf("Enqueue returned error: %v", err)
+	}
+
+	if err := recorder.Finish(context.Background(), run, RunFinish{
+		Status:            model.TaskRunStatusCanceled,
+		CanceledBy:        9,
+		CanceledByAccount: "operator",
+		CancelReason:      "manual cancel",
+	}); err != nil {
+		t.Fatalf("Finish returned error: %v", err)
+	}
+
+	var event model.TaskRunEvent
+	if err := db.Where("run_id = ? AND event_type = ?", run.ID, model.TaskEventCancel).First(&event).Error; err != nil {
+		t.Fatalf("query cancel event failed: %v", err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(event.Meta), &meta); err != nil {
+		t.Fatalf("unmarshal cancel meta failed: %v", err)
+	}
+	if meta["canceled_by_account"] != "operator" || meta["cancel_reason"] != "manual cancel" {
+		t.Fatalf("unexpected cancel meta: %#v", meta)
+	}
+
+	var enqueueEvent model.TaskRunEvent
+	if err := db.Where("run_id = ? AND event_type = ?", run.ID, model.TaskEventEnqueue).First(&enqueueEvent).Error; err != nil {
+		t.Fatalf("query enqueue event failed: %v", err)
+	}
+	var enqueueMeta map[string]any
+	if err := json.Unmarshal([]byte(enqueueEvent.Meta), &enqueueMeta); err != nil {
+		t.Fatalf("unmarshal enqueue meta failed: %v", err)
+	}
+	if enqueueMeta["trigger_account"] != "starter" || enqueueMeta["trigger_confirm"] != "CONFIRM" || enqueueMeta["trigger_reason"] != "manual run" {
+		t.Fatalf("unexpected enqueue meta: %#v", enqueueMeta)
 	}
 }
 

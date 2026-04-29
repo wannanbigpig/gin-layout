@@ -8,6 +8,8 @@ This document covers:
 - How to create, publish, and consume async queue jobs
 - How to send jobs to a specific queue and configure multiple queues
 
+For system config and dictionary boundaries, see [docs/SYSTEM_CONFIG_AND_DICT_GUIDELINES.en.md](/Users/liuml/data/go/src/go-layout/docs/SYSTEM_CONFIG_AND_DICT_GUIDELINES.en.md).
+
 If you are new to the project, start with "Runtime Model" and "Commands", then move to "Scheduled Jobs" and "Queue Usage".
 
 ## Runtime Model
@@ -109,6 +111,12 @@ Used for:
 - starting the scheduler
 - registering the current recurring jobs
 - shutting down gracefully on process signals
+
+Task definition boundary:
+
+- `task_definitions` is currently a read-only mirror of built-in task definitions for the task center UI, manual trigger checks, and retry checks.
+- The `cron` scheduler still uses `BuiltinTaskDefinitions(cfg)` as its source of truth and does not read manually edited `task_definitions` rows from DB.
+- If the admin UI should become the scheduler configuration source, update the scheduler to read DB first and change built-in sync from overwrite to missing-record initialization.
 
 ### 5. Run One-Off Commands
 
