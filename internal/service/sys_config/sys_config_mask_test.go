@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -30,6 +31,20 @@ func TestMaskSensitiveValues(t *testing.T) {
 	}
 	if configs[1].ConfigValue != maskedConfigValue {
 		t.Fatalf("expected sensitive value masked, got %q", configs[1].ConfigValue)
+	}
+}
+
+func TestSysConfigDetailResourceKeepsSensitiveConfigValue(t *testing.T) {
+	config := &model.SysConfig{
+		ConfigKey:   "audit.sensitive_fields",
+		ConfigValue: `{"common":["password"]}`,
+		IsSensitive: 1,
+	}
+
+	detail := resources.NewSysConfigTransformer().ToStruct(config)
+
+	if detail.ConfigValue != config.ConfigValue {
+		t.Fatalf("expected detail value to remain unmasked, got %q", detail.ConfigValue)
 	}
 }
 

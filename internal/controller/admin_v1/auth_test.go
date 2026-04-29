@@ -95,6 +95,29 @@ func TestBuildLoginLogInfo(t *testing.T) {
 	if logInfo.UserAgent == "" {
 		t.Fatal("expected user agent in login log info")
 	}
+	if logInfo.OS == "" || logInfo.OS == "Unknown" {
+		t.Fatalf("expected parsed os in login log info, got %q", logInfo.OS)
+	}
+	if logInfo.Browser != "Chrome" {
+		t.Fatalf("expected Chrome browser in login log info, got %q", logInfo.Browser)
+	}
+}
+
+func TestBuildLoginLogInfoFallbacksUnknownForMissingUserAgent(t *testing.T) {
+	initControllerAuthTest(t)
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/admin/v1/login", nil)
+	ctx.Request.RemoteAddr = "192.0.2.1:1234"
+
+	logInfo := authservice.NewLoginService().BuildLoginLogInfo(ctx)
+	if logInfo.OS != "Unknown" {
+		t.Fatalf("expected unknown os fallback, got %q", logInfo.OS)
+	}
+	if logInfo.Browser != "Unknown" {
+		t.Fatalf("expected unknown browser fallback, got %q", logInfo.Browser)
+	}
 }
 
 func initControllerAuthTest(t *testing.T) {

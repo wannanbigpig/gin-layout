@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,13 +16,15 @@ import (
 )
 
 const refreshLockRedisTimeout = 2 * time.Second
+const unknownUserAgentPart = "Unknown"
 
 // BuildLoginLogInfo 从请求上下文构建登录日志信息。
 func (s *LoginService) BuildLoginLogInfo(c *gin.Context) LoginLogInfo {
 	userAgentStr := c.Request.UserAgent()
 	ua := useragent.New(userAgentStr)
-	os := ua.OS()
+	os := normalizeUserAgentPart(ua.OS())
 	browser, _ := ua.Browser()
+	browser = normalizeUserAgentPart(browser)
 
 	return LoginLogInfo{
 		IP:        c.ClientIP(),
@@ -29,6 +32,14 @@ func (s *LoginService) BuildLoginLogInfo(c *gin.Context) LoginLogInfo {
 		OS:        os,
 		Browser:   browser,
 	}
+}
+
+func normalizeUserAgentPart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return unknownUserAgentPart
+	}
+	return value
 }
 
 // tryRefreshToken 尝试自动刷新 Token。

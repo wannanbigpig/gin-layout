@@ -52,9 +52,7 @@ func (s *SysConfigService) Detail(id uint, locale string) (any, error) {
 	}
 	config.ConfigNameI18n = translations
 	config.ConfigName = service.ResolveLocaleText(translations, locale)
-	if config.IsSensitive == 1 {
-		config.ConfigValue = maskedConfigValue
-	}
+	// 详情接口用于编辑回填，敏感参数保留真实值；列表和 PublicValue 继续脱敏。
 	return resources.NewSysConfigTransformer().ToStruct(config), nil
 }
 
