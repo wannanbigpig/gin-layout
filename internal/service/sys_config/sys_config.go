@@ -133,9 +133,6 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	if len(params.ConfigNameI18n) == 0 {
 		return e.NewBusinessError(e.InvalidParameter)
 	}
-	if err := validateConfigValue(params.ValueType, params.ConfigValue); err != nil {
-		return err
-	}
 
 	config := model.NewSysConfig()
 	if id > 0 {
@@ -159,6 +156,10 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 			}
 		}
 	}
+	configValue := resolveMutationConfigValue(config, params.ConfigValue)
+	if err := validateConfigValue(params.ValueType, configValue); err != nil {
+		return err
+	}
 	if exists, err := model.NewSysConfig().ExistsByKeyExcludeID(params.ConfigKey, id); err != nil {
 		return err
 	} else if exists {
@@ -166,7 +167,7 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	}
 
 	config.ConfigKey = params.ConfigKey
-	config.ConfigValue = strings.TrimSpace(params.ConfigValue)
+	config.ConfigValue = configValue
 	config.ValueType = params.ValueType
 	config.GroupCode = params.GroupCode
 	config.IsSensitive = valueOrDefault(params.IsSensitive, config.IsSensitive)
@@ -188,6 +189,13 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 		return err
 	}
 	return s.RefreshCache()
+}
+
+func resolveMutationConfigValue(existing *model.SysConfig, incoming string) string {
+	if existing != nil && existing.ID > 0 && existing.IsSensitive == 1 && strings.TrimSpace(incoming) == maskedConfigValue {
+		return existing.ConfigValue
+	}
+	return incoming
 }
 
 func (s *SysConfigService) buildListCondition(params *form.SysConfigList) (string, []any) {

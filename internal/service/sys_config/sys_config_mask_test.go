@@ -12,8 +12,8 @@ func TestMaskSensitiveValues(t *testing.T) {
 	service := NewSysConfigService()
 	configs := []*model.SysConfig{
 		{
-			ConfigKey:   "system.site_name",
-			ConfigValue: "gin-layout",
+			ConfigKey:   AuthLoginLockEnabledConfigKey,
+			ConfigValue: "true",
 			IsSensitive: 0,
 		},
 		{
@@ -25,7 +25,7 @@ func TestMaskSensitiveValues(t *testing.T) {
 
 	service.maskSensitiveValues(configs)
 
-	if configs[0].ConfigValue != "gin-layout" {
+	if configs[0].ConfigValue != "true" {
 		t.Fatalf("expected non-sensitive value unchanged, got %q", configs[0].ConfigValue)
 	}
 	if configs[1].ConfigValue != maskedConfigValue {
@@ -66,5 +66,41 @@ func TestMaskedAuditRequestBodySkipsNonSensitiveConfig(t *testing.T) {
 	})
 	if raw != "" {
 		t.Fatalf("expected no override for non-sensitive config, got %s", raw)
+	}
+}
+
+func TestResolveMutationConfigValueKeepsSensitiveValueForMaskedPlaceholder(t *testing.T) {
+	existing := &model.SysConfig{
+		ConfigValue: "real-secret",
+		IsSensitive: 1,
+	}
+	existing.ID = 1
+
+	got := resolveMutationConfigValue(existing, maskedConfigValue)
+
+	if got != "real-secret" {
+		t.Fatalf("expected existing sensitive value to be kept, got %q", got)
+	}
+}
+
+func TestResolveMutationConfigValueUsesIncomingValueWhenChanged(t *testing.T) {
+	existing := &model.SysConfig{
+		ConfigValue: "real-secret",
+		IsSensitive: 1,
+	}
+	existing.ID = 1
+
+	got := resolveMutationConfigValue(existing, "new-secret")
+
+	if got != "new-secret" {
+		t.Fatalf("expected incoming value, got %q", got)
+	}
+}
+
+func TestResolveMutationConfigValuePreservesStringWhitespace(t *testing.T) {
+	got := resolveMutationConfigValue(&model.SysConfig{}, "  display value  ")
+
+	if got != "  display value  " {
+		t.Fatalf("expected incoming whitespace to be preserved, got %q", got)
 	}
 }

@@ -27,6 +27,7 @@ var zhCNText = map[int]string{
 	EmailExists:             "邮箱已存在",
 	UsernameRequired:        "用户名必填",
 	NicknameRequired:        "昵称必填",
+	PasswordRequired:        "密码必填",
 	PasswordProcessFailed:   "密码处理失败",
 	SuperAdminCannotModify:  "系统默认超级管理员不允许修改密码",
 	SuperAdminCannotDisable: "系统默认超级管理员不允许被禁用",

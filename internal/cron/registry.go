@@ -69,7 +69,7 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 		resetStatus = model.TaskStatusEnabled
 	}
 	demoStatus := model.TaskStatusEnabled
-	if !sys_config.BoolValue(sys_config.TaskCronDemoEnabledConfigKey, true) {
+	if !sys_config.BoolValue(sys_config.TaskCronDemoEnabledConfigKey, false) {
 		demoStatus = model.TaskStatusDisabled
 	}
 

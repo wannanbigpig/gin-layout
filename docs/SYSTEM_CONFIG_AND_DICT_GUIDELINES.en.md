@@ -55,7 +55,7 @@ These should remain enforced by code constants, validators, service state machin
 
 Use `sys_dict` from backend code to provide:
 
-- Frontend select options.
+- Display-layer select options.
 - Table tag labels, colors, and tag types.
 - Localized display labels.
 - Enumerations whose changes mainly affect display, not backend rules.
@@ -93,14 +93,16 @@ Backend code may reuse dictionary data for display, but dictionary edits must no
 - Keep config reads in services or helpers. Controllers should not assemble business rules directly.
 - Core enums must be explicitly expressed in form validators and model constants.
 - Audit diffs may use label mappings for readability, but diff fields and security masking rules must be controlled by code.
-- API documentation must describe config/dictionary field semantics, enum meanings, and PATCH/replace update semantics.
+- Sensitive config detail and list responses return only a masked placeholder. When an update receives the unchanged masked placeholder, backend code must keep the original value instead of writing the placeholder as the real config value.
+- i18n updates for system config names, dictionary type names, and dictionary item labels use PATCH semantics: only submitted locales are inserted or updated, and omitted locales keep their existing values.
+- API documentation must describe config/dictionary field semantics, enum meanings, and the current i18n PATCH update semantics.
 
-## Frontend Collaboration Constraints
+## Display API Boundary
 
-- Frontend table filters, tags, and normal selects may prefer `dict/options`.
-- Pages must keep local fallbacks so offline usage or dictionary API failures do not break the UI.
-- For fields such as `status` and `is_*`, frontend pages may use dictionaries for display, while backend validators and model constants remain authoritative.
-- When frontend code adds a dependency on a dictionary type code, backend seed data, API documentation, and fallback conventions should be updated together.
+- `dict/options` returns display options only. It does not return backend business rules.
+- Fields such as `status`, `is_*`, and task statuses may use dictionary labels for display, while legal values remain enforced by backend validators and model constants.
+- When a dictionary type code is added, backend seed data, API documentation, and API tests must be updated together. Display fallback behavior belongs to the caller project's documentation.
+- Backend business semantics must not change when dictionary APIs fail, dictionary items are edited incorrectly, or dictionary items are missing.
 
 ## Decision Table
 
@@ -111,4 +113,4 @@ Backend code may reuse dictionary data for display, but dictionary edits must no
 | Validator enums, permission modes, state transitions | Use code constants and validators |
 | Real cron enable/disable from admin UI | Decide scheduler source of truth first |
 | Backend needs runtime policy reads | Read `sys_config` through domain helpers and keep defaults |
-| Reduce frontend enum hardcoding | Use `dict/options` with local fallback |
+| Display layer wants less enum hardcoding | Backend provides `dict/options`; caller fallbacks are maintained by the caller project |

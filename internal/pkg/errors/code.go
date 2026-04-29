@@ -72,6 +72,7 @@ const (
 	MenuRouteNameExists     = 20044
 	MenuPathExists          = 20045
 	LoginAccountLocked      = 20046
+	PasswordRequired        = 20047
 )
 
 const (

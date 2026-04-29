@@ -25,3 +25,17 @@ func TestUpdateAdminUserDeptIDsDistinguishEmptyArrayFromAbsentField(t *testing.T
 		t.Fatalf("expected absent dept_ids to stay nil, got %#v", *withoutField.DeptIds)
 	}
 }
+
+func TestCreateAdminUserRequiresPassword(t *testing.T) {
+	err := bindJSONBody(t, `{"username":"admin_user","nickname":"管理员"}`, NewCreateAdminUser())
+	if err == nil {
+		t.Fatal("expected missing password to fail validation")
+	}
+}
+
+func TestCreateAdminUserAllowsRequiredFields(t *testing.T) {
+	err := bindJSONBody(t, `{"username":"admin_user","nickname":"管理员","password":"123456"}`, NewCreateAdminUser())
+	if err != nil {
+		t.Fatalf("expected required create fields to pass validation, got %v", err)
+	}
+}

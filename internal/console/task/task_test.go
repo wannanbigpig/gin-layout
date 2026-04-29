@@ -56,3 +56,14 @@ func TestBuildAsyncScanRowsSkipsDBStateWhenDBNotReady(t *testing.T) {
 		t.Fatalf("expected InDB=false when dbReady=false, got %+v", rows[0])
 	}
 }
+
+func TestSortedDefinitionCodes(t *testing.T) {
+	codes := sortedDefinitionCodes(map[string]model.TaskDefinition{
+		"cron:reset-system-data": {Code: "cron:reset-system-data"},
+		"cron:demo":              {Code: "cron:demo"},
+	})
+
+	if len(codes) != 2 || codes[0] != "cron:demo" || codes[1] != "cron:reset-system-data" {
+		t.Fatalf("unexpected sorted codes: %#v", codes)
+	}
+}

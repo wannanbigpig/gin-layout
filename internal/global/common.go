@@ -2,7 +2,7 @@ package global
 
 const (
 	// Version is the current gin-layout version.
-	Version = "0.9.1"
+	Version = "0.9.2"
 	// PerPage is the default per page size
 	PerPage = 10
 	// Yes is the value of yes

@@ -27,6 +27,7 @@ var enUSText = map[int]string{
 	EmailExists:             "Email already exists",
 	UsernameRequired:        "Username is required",
 	NicknameRequired:        "Nickname is required",
+	PasswordRequired:        "Password is required",
 	PasswordProcessFailed:   "Password processing failed",
 	SuperAdminCannotModify:  "Cannot modify default super admin password",
 	SuperAdminCannotDisable: "Cannot disable default super admin",

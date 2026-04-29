@@ -144,6 +144,10 @@ Supported subcommands:
 - `migrate`
   - migration management subcommands: `create/check/up/down/goto/force/version`
   - full guide: [docs/MIGRATE_COMMANDS.en.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.en.md)
+- `task scan-async`
+  - scans async queue tasks registered in code and compares them with the `task_definitions` mirror
+- `task scan-cron`
+  - scans built-in cron task definitions and compares them with the `task_definitions` mirror
 
 ### 6. Show Version
 
@@ -197,32 +201,33 @@ The current scheduling code is split into 3 files:
 - [cmd/cron/schedule.go](/Users/liuml/data/go/src/go-layout/cmd/cron/schedule.go)
   - scheduling DSL
 - [cmd/cron/tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go)
-  - the centralized recurring-job list
+  - filters enabled cron definitions and registers them into the scheduler
+- [internal/cron/registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go)
+  - owns built-in task definitions, cron handler registration, and task-center mirror sync
 
 ### Current Style
 
-The project now recommends defining jobs in `defineSchedule`:
+The project now recommends declaring built-in task definitions in `internal/cron/registry.go`, while `cmd/cron/tasks.go` registers enabled cron definitions into the scheduler:
 
 ```go
-func defineSchedule(schedule *Scheduler) {
-	schedule.Call("demo", runTask).
-		EveryFiveSeconds().
-		WithoutOverlapping()
-
-	cfg := config.GetConfig()
-	if cfg != nil && cfg.EnableResetSystemCron {
-		schedule.CallE("reset-system-data", system.ReinitializeSystemData).
-			DailyAt("02:00:00").
-			WithoutOverlapping()
+func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
+	return []model.TaskDefinition{
+		{
+			Code:     "cron:cleanup-cache",
+			Kind:     model.TaskKindCron,
+			CronSpec: "0 */10 * * * *",
+			Handler:  "cron.cleanup-cache",
+			Status:   model.TaskStatusEnabled,
+		},
 	}
 }
 ```
 
 Why this is simpler:
 
-- all jobs are declared in one place
-- name, schedule, and overlap behavior are visible at a glance
-- risky jobs can be explicitly enabled instead of being registered by default
+- task-center display, manual trigger checks, retry checks, and cron registration share the same built-in code definition
+- name, schedule, handler, status, and high-risk flags are visible at a glance
+- risky jobs can be explicitly enabled instead of being registered into cron by default
 - no need to repeat `AddJob`, `Chain`, and `Recover` manually
 
 ### Available Methods
@@ -270,10 +275,11 @@ schedule.Call("heartbeat", heartbeat).
 
 ### Steps To Add A Scheduled Job
 
-1. Prepare the task function in the business layer
-2. If the function returns `error`, use `CallE`
-3. Add one line in `defineSchedule` inside [tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go)
-4. Restart the `cron` process
+1. Prepare the task function in the business layer.
+2. Register its handler in [registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go).
+3. Add a `kind=cron` task definition to `BuiltinTaskDefinitions`.
+4. Run `go run main.go -c ./config.yaml command task scan-cron` to compare built-in definitions with the DB mirror.
+5. Restart the `cron` process.
 
 ## Queue Usage
 

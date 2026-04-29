@@ -224,6 +224,8 @@ go run main.go service --help
 | `go run main.go command api-route -y` | 扫描声明式路由树并重建 `api` 路由表 |
 | `go run main.go command rebuild-user-permissions -y` | 按数据库关系重建用户最终 API 权限 |
 | `go run main.go command init-system -y` | 回滚并重新执行迁移、重建 API 路由、重建用户权限 |
+| `go run main.go -c ./config.yaml command task scan-async` | 扫描异步任务注册与任务定义镜像 |
+| `go run main.go -c ./config.yaml command task scan-cron` | 扫描定时任务定义与任务定义镜像 |
 | `go run main.go -c ./config.yaml command migrate check` | 校验迁移文件命名与 up/down 配对 |
 | `go run main.go -c ./config.yaml command migrate up` | 执行全部未应用迁移 |
 | `go run main.go -c ./config.yaml command migrate down 1` | 回滚 1 个迁移版本 |
@@ -277,7 +279,8 @@ go run main.go -c /path/to/config.yaml command init-system
 - `service` 负责提供 HTTP API。
 - `worker` 负责消费 Asynq 异步任务。当前首版只接入请求审计日志异步落库。
 - `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会在当前请求链路同步落库。
-- `cron` 默认只注册 `demo`（每 5 秒打印一次日志）；`reset-system-data` 需要显式配置 `app.enable_reset_system_cron=true` 才会注册，并在启动时输出高风险告警。
+- `cron` 负责定时任务调度；演示定时任务由系统配置 `task.cron_demo_enabled` 控制，初始化默认关闭。
+- `reset-system-data` 需要显式配置 `app.enable_reset_system_cron=true` 才会注册，并在启动时输出高风险告警。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
 
 注意：`reset-system-data` 当前调用的是 `system.ReinitializeSystemData()`，会回滚迁移并重建系统数据。生产环境建议保持 `app.enable_reset_system_cron=false`，只有在明确需要重建系统数据时才临时开启。
@@ -424,3 +427,7 @@ gin-layout/
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request。
+
+## 免责声明
+
+本项目按 **“现状”提供**，不附带任何明示或默示担保。项目可能存在缺陷、安全漏洞或与特定业务场景不匹配的实现；上线前请自行完成代码审查、安全加固、配置审查、权限验收和数据备份。因使用、依赖、部署、改造或运维本项目导致的问题，由使用者自行承担。

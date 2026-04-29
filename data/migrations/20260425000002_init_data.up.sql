@@ -45,8 +45,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (2, 'ant-design:lock-outlined', '', 'permission', '/permission', 'AdminUserList', 'Permission', '', '', '', 0.00, 1, 1, 1, 0, 0, 99, 1, 0, 1, '0', 0, '', '2025-04-16 15:36:33', '2025-04-22 18:16:25', 0),
 (3, 'ant-design:api-outlined', '', 'list', '/permission/list', '', 'PermissionList', 'permission/api.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 2, 2, '0,2', 2, '', '2025-04-16 15:41:54', '2025-11-25 17:23:53', 0),
 (4, 'ant-design:menu-outlined', '', 'menu-list', '/permission/menu-list', '', 'MenuList', 'permission/menuList.vue', '', '', 0.00, 1, 1, 1, 0, 0, 105, 2, 2, 2, '0,2', 5, '', '2025-04-16 15:45:31', '2025-11-25 17:23:44', 0),
-(5, 'ix:about', '', '/about', '/about', '', 'About', 'about/index.vue', '', '', 0.00, 1, 1, 1, 0, 0, 78, 2, 0, 1, '0', 0, '', '2025-04-16 16:47:58', '2025-04-23 15:01:05', 0),
-(6, 'ix:about', '', 'https://blog.csdn.net/u010324331', 'https://blog.csdn.net/u010324331', '', 'CSDN', '', '', '', 0.00, 1, 1, 1, 1, 0, 79, 2, 0, 1, '0', 0, '', '2025-04-16 16:51:17', '2025-04-18 18:08:51', 0),
+(5, 'lucide:info', '', '/about', '/about', '', 'About', 'about/index.vue', '', '', 0.00, 1, 1, 1, 0, 0, 78, 2, 0, 1, '0', 0, '', '2025-04-16 16:47:58', '2025-04-23 15:01:05', 0),
 (7, 'ep:user', '', 'admin-user-list', '/permission/admin-user-list', '', 'AdminUserList', 'permission/adminUser.vue', '', '', 0.00, 1, 1, 1, 0, 0, 120, 2, 2, 2, '0,2', 5, '', '2025-04-19 11:19:36', '2025-11-25 17:20:23', 0),
 (8, 'ant-design:usergroup-add-outlined', '', 'role-list', '/permission/role-list', '', 'RoleList', 'permission/role.vue', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 5, '', '2025-04-21 16:51:22', '2025-11-25 17:22:21', 0),
 (9, 'tdesign:tree-square-dot', '', 'department-list', '/permission/department-list', '', 'DepartmentList', 'permission/department.vue', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 6, '', '2025-04-21 16:51:22', '2025-11-25 17:21:30', 0),
@@ -80,7 +79,6 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (38, 'ant-design:search-outlined', 'api:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 3, 3, '0,2,3', 0, '', '2025-11-25 17:23:35', '2025-11-25 17:23:35', 0),
 (39, 'ant-design:search-outlined', 'adminLoginLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', '2025-11-25 17:24:20', '2025-11-25 17:24:20', 0),
 (40, 'ant-design:search-outlined', 'requestLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', '2025-11-25 17:25:04', '2025-11-25 17:25:04', 0),
-(41, 'mdi:github', '', 'https://github.com/wannanbigpig/gin-layout', 'https://github.com/wannanbigpig/gin-layout', '', 'GITHUB', '', '', '', 0.00, 1, 1, 1, 1, 1, 80, 2, 0, 1, '0', 0, '', '2025-04-16 16:51:17', '2025-04-18 18:08:51', 0),
 (42, 'ep:setting', '', 'system', '/system', 'SysConfig', 'System', '', '', '', 0.00, 1, 1, 1, 0, 0, 96, 1, 0, 1, '0', 2, '', NOW(), NOW(), 0),
 (43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system/config.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 5, '', NOW(), NOW(), 0),
 (44, 'ep:collection-tag', '', 'dict', '/system/dict', '', 'SysDict', 'system/dict.vue', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 42, 2, '0,42', 4, '', NOW(), NOW(), 0),
@@ -112,7 +110,6 @@ SELECT `id`,
            WHEN 3 THEN '接口'
            WHEN 4 THEN '菜单'
            WHEN 5 THEN '关于'
-           WHEN 6 THEN 'CSDN'
            WHEN 7 THEN '管理员'
            WHEN 8 THEN '角色'
            WHEN 9 THEN '部门'
@@ -146,7 +143,6 @@ SELECT `id`,
            WHEN 38 THEN '列表'
            WHEN 39 THEN '列表'
            WHEN 40 THEN '列表'
-           WHEN 41 THEN 'GITHUB'
            WHEN 42 THEN '系统管理'
            WHEN 43 THEN '系统参数'
            WHEN 44 THEN '字典管理'
@@ -184,7 +180,6 @@ SELECT `id`,
            WHEN 3 THEN 'API'
            WHEN 4 THEN 'Menu'
            WHEN 5 THEN 'About'
-           WHEN 6 THEN 'CSDN'
            WHEN 7 THEN 'Administrators'
            WHEN 8 THEN 'Roles'
            WHEN 9 THEN 'Departments'
@@ -218,7 +213,6 @@ SELECT `id`,
            WHEN 38 THEN 'List'
            WHEN 39 THEN 'List'
            WHEN 40 THEN 'List'
-           WHEN 41 THEN 'GitHub'
            WHEN 42 THEN 'System'
            WHEN 43 THEN 'System Config'
            WHEN 44 THEN 'Dictionary'
@@ -254,12 +248,10 @@ WHERE `deleted_at` = 0;
 
 INSERT INTO `sys_config` (`config_key`, `config_value`, `value_type`, `group_code`, `is_system`,
                           `is_sensitive`, `status`, `sort`, `remark`, `created_at`, `updated_at`, `deleted_at`)
-VALUES ('system.site_name', 'gin-layout', 'string', 'system', 1, 0, 1, 100, '后台展示名称', NOW(), NOW(), 0),
-       ('system.allow_register', 'false', 'bool', 'system', 1, 0, 1, 90, '示例业务开关', NOW(), NOW(), 0),
-       ('auth.login_lock_enabled', 'true', 'bool', 'auth', 1, 0, 1, 89, '是否开启登录失败锁定', NOW(), NOW(), 0),
+VALUES ('auth.login_lock_enabled', 'true', 'bool', 'auth', 1, 0, 1, 89, '是否开启登录失败锁定', NOW(), NOW(), 0),
        ('auth.login_max_failures', '5', 'number', 'auth', 1, 0, 1, 88, '登录连续失败阈值', NOW(), NOW(), 0),
        ('auth.login_lock_minutes', '15', 'number', 'auth', 1, 0, 1, 87, '登录锁定时长（分钟）', NOW(), NOW(), 0),
-       ('task.cron_demo_enabled', 'true', 'bool', 'task', 1, 0, 1, 80, '是否启用演示定时任务', NOW(), NOW(), 0),
+       ('task.cron_demo_enabled', 'false', 'bool', 'task', 1, 0, 1, 80, '是否启用演示定时任务，默认关闭', NOW(), NOW(), 0),
        ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code"],"request_header":["authorization","auth","cookie","x-api-key","x-access-token","x-auth-token","x-token"],"request_body":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","cvv","cvc","cvv2","security_code","pin","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","x-access-token","x-auth-token","x-token","x-refresh-token","refresh-access-token","refresh-exp","cookie"],"response_body":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","cvv","cvc","cvv2","security_code","pin","ssn","social_security"]}', 'json', 'audit', 1, 1, 1, 95, '请求日志脱敏字段配置', NOW(), NOW(), 0)
 ON DUPLICATE KEY UPDATE `updated_at` = VALUES(`updated_at`);
 
@@ -311,8 +303,6 @@ INSERT INTO `sys_config_i18n` (`config_id`, `locale`, `config_name`, `created_at
 SELECT `id`,
        'zh-CN',
        CASE
-           WHEN `config_key` = 'system.site_name' THEN '站点名称'
-           WHEN `config_key` = 'system.allow_register' THEN '是否允许注册'
            WHEN `config_key` = 'auth.login_lock_enabled' THEN '登录失败锁定开关'
            WHEN `config_key` = 'auth.login_max_failures' THEN '登录失败锁定阈值'
            WHEN `config_key` = 'auth.login_lock_minutes' THEN '登录失败锁定时长（分钟）'
@@ -324,15 +314,13 @@ SELECT `id`,
        NOW()
 FROM `sys_config`
 WHERE `deleted_at` = 0
-  AND `config_key` IN ('system.site_name', 'system.allow_register', 'auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
+  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
 ON DUPLICATE KEY UPDATE `config_name` = VALUES(`config_name`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_config_i18n` (`config_id`, `locale`, `config_name`, `created_at`, `updated_at`)
 SELECT `id`,
        'en-US',
        CASE
-           WHEN `config_key` = 'system.site_name' THEN 'Site Name'
-           WHEN `config_key` = 'system.allow_register' THEN 'Allow Register'
            WHEN `config_key` = 'auth.login_lock_enabled' THEN 'Login Lock Enabled'
            WHEN `config_key` = 'auth.login_max_failures' THEN 'Login Lock Max Failures'
            WHEN `config_key` = 'auth.login_lock_minutes' THEN 'Login Lock Minutes'
@@ -344,7 +332,7 @@ SELECT `id`,
        NOW()
 FROM `sys_config`
 WHERE `deleted_at` = 0
-  AND `config_key` IN ('system.site_name', 'system.allow_register', 'auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
+  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
 ON DUPLICATE KEY UPDATE `config_name` = VALUES(`config_name`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_dict_type_i18n` (`dict_type_id`, `locale`, `type_name`, `created_at`, `updated_at`)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wannanbigpig/gin-layout/config"
 	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -35,10 +36,19 @@ var (
 			return runScanAsync()
 		},
 	}
+
+	scanCronCmd = &cobra.Command{
+		Use:   "scan-cron",
+		Short: "Scan built-in cron tasks and compare definitions",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScanCron()
+		},
+	}
 )
 
 func init() {
 	Cmd.AddCommand(scanAsyncCmd)
+	Cmd.AddCommand(scanCronCmd)
 }
 
 func runScanAsync() error {
@@ -48,15 +58,34 @@ func runScanAsync() error {
 		return nil
 	}
 
-	builtinMap := collectBuiltinAsyncDefinitions()
-	dbMap, dbReady, dbErr := loadDBAsyncDefinitions()
+	builtinMap := collectBuiltinDefinitionsByKind(model.TaskKindAsync)
+	dbMap, dbReady, dbErr := loadDBDefinitionsByKind(model.TaskKindAsync)
 	if dbErr != nil {
 		return dbErr
 	}
 
 	rows := buildAsyncScanRows(taskTypes, builtinMap, dbMap, dbReady)
 	printScanRows(rows, dbReady)
-	printScanSummary(taskTypes, rows, builtinMap, dbMap, dbReady)
+	printScanSummary("代码注册异步任务", taskTypes, rows, builtinMap, dbMap, dbReady)
+	return nil
+}
+
+func runScanCron() error {
+	builtinMap := collectBuiltinDefinitionsByKind(model.TaskKindCron)
+	taskTypes := sortedDefinitionCodes(builtinMap)
+	if len(taskTypes) == 0 {
+		fmt.Println("未扫描到内置定时任务。")
+		return nil
+	}
+
+	dbMap, dbReady, dbErr := loadDBDefinitionsByKind(model.TaskKindCron)
+	if dbErr != nil {
+		return dbErr
+	}
+
+	rows := buildAsyncScanRows(taskTypes, builtinMap, dbMap, dbReady)
+	printScanRows(rows, dbReady)
+	printScanSummary("内置定时任务", taskTypes, rows, builtinMap, dbMap, dbReady)
 	return nil
 }
 
@@ -81,11 +110,11 @@ func collectRegistryTaskTypes(registry queue.Registry) []string {
 	return taskTypes
 }
 
-func collectBuiltinAsyncDefinitions() map[string]model.TaskDefinition {
-	definitions := taskcron.BuiltinTaskDefinitions(nil)
+func collectBuiltinDefinitionsByKind(kind string) map[string]model.TaskDefinition {
+	definitions := taskcron.BuiltinTaskDefinitions(config.GetConfig())
 	result := make(map[string]model.TaskDefinition, len(definitions))
 	for _, definition := range definitions {
-		if definition.Kind != model.TaskKindAsync {
+		if definition.Kind != kind {
 			continue
 		}
 		code := strings.TrimSpace(definition.Code)
@@ -97,7 +126,16 @@ func collectBuiltinAsyncDefinitions() map[string]model.TaskDefinition {
 	return result
 }
 
-func loadDBAsyncDefinitions() (map[string]model.TaskDefinition, bool, error) {
+func sortedDefinitionCodes(definitions map[string]model.TaskDefinition) []string {
+	codes := make([]string, 0, len(definitions))
+	for code := range definitions {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	return codes
+}
+
+func loadDBDefinitionsByKind(kind string) (map[string]model.TaskDefinition, bool, error) {
 	db, err := model.GetDB()
 	if err != nil {
 		return map[string]model.TaskDefinition{}, false, nil
@@ -107,7 +145,7 @@ func loadDBAsyncDefinitions() (map[string]model.TaskDefinition, bool, error) {
 	}
 
 	definitions := make([]model.TaskDefinition, 0)
-	if err := db.Where("kind = ? AND deleted_at = 0", model.TaskKindAsync).Find(&definitions).Error; err != nil {
+	if err := db.Where("kind = ? AND deleted_at = 0", kind).Find(&definitions).Error; err != nil {
 		return nil, true, err
 	}
 
@@ -169,7 +207,7 @@ func printScanRows(rows []asyncScanRow, dbReady bool) {
 	_ = writer.Flush()
 }
 
-func printScanSummary(taskTypes []string, rows []asyncScanRow, builtinMap map[string]model.TaskDefinition, dbMap map[string]model.TaskDefinition, dbReady bool) {
+func printScanSummary(sourceLabel string, taskTypes []string, rows []asyncScanRow, builtinMap map[string]model.TaskDefinition, dbMap map[string]model.TaskDefinition, dbReady bool) {
 	missingBuiltin := make([]string, 0)
 	missingDB := make([]string, 0)
 	for _, row := range rows {
@@ -199,7 +237,7 @@ func printScanSummary(taskTypes []string, rows []asyncScanRow, builtinMap map[st
 		sort.Strings(staleDB)
 	}
 
-	fmt.Printf("\n代码注册异步任务: %d\n", len(taskTypes))
+	fmt.Printf("\n%s: %d\n", sourceLabel, len(taskTypes))
 	fmt.Printf("缺失内置定义: %d\n", len(missingBuiltin))
 	if dbReady {
 		fmt.Printf("缺失数据库定义: %d\n", len(missingDB))

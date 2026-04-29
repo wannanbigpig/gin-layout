@@ -144,6 +144,10 @@ go run main.go -c ./config.yaml command migrate up
 - `migrate`
   - 迁移管理子命令，支持 `create/check/up/down/goto/force/version`
   - 详细说明见 [docs/MIGRATE_COMMANDS.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.md)
+- `task scan-async`
+  - 扫描代码注册的异步队列任务，并与 `task_definitions` 镜像做对比
+- `task scan-cron`
+  - 扫描代码内置的 cron 任务定义，并与 `task_definitions` 镜像做对比
 
 ### 6. 查看版本
 
@@ -197,32 +201,33 @@ go run main.go cron
 - [cmd/cron/schedule.go](/Users/liuml/data/go/src/go-layout/cmd/cron/schedule.go)
   - 提供任务声明 DSL
 - [cmd/cron/tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go)
-  - 集中定义当前有哪些周期任务
+  - 从内置任务定义中筛选启用的 cron 任务并注册到调度器
+- [internal/cron/registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go)
+  - 维护内置任务定义、cron handler 注册表和任务中心镜像同步
 
 ### 当前写法
 
-当前项目推荐把所有任务写在 `defineSchedule` 里：
+当前项目推荐先在 `internal/cron/registry.go` 声明内置任务定义，再由 `cmd/cron/tasks.go` 统一注册启用的 cron 任务：
 
 ```go
-func defineSchedule(schedule *Scheduler) {
-	schedule.Call("demo", runTask).
-		EveryFiveSeconds().
-		WithoutOverlapping()
-
-	cfg := config.GetConfig()
-	if cfg != nil && cfg.EnableResetSystemCron {
-		schedule.CallE("reset-system-data", system.ReinitializeSystemData).
-			DailyAt("02:00:00").
-			WithoutOverlapping()
+func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
+	return []model.TaskDefinition{
+		{
+			Code:     "cron:cleanup-cache",
+			Kind:     model.TaskKindCron,
+			CronSpec: "0 */10 * * * *",
+			Handler:  "cron.cleanup-cache",
+			Status:   model.TaskStatusEnabled,
+		},
 	}
 }
 ```
 
 这样做的好处是：
 
-- 新任务统一在一个地方声明
-- 名称、时间规则、是否允许重入一眼能看出来
-- 高风险任务可以显式配置启用，默认不注册
+- 任务中心展示、手动触发、重试校验和 cron 注册共用一份代码内置定义
+- 名称、时间规则、handler、状态和高风险标记一眼能看出来
+- 高风险任务可以显式配置启用，默认不参与 cron 注册
 - 不需要每次手写 `AddJob`、`Chain`、`Recover`
 
 ### 可用方法
@@ -270,10 +275,11 @@ schedule.Call("heartbeat", heartbeat).
 
 ### 新增定时任务步骤
 
-1. 在业务层准备好任务函数
-2. 如果函数返回 `error`，直接使用 `CallE`
-3. 在 [tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go) 的 `defineSchedule` 中新增一行
-4. 重启 `cron` 进程
+1. 在业务层准备好任务函数。
+2. 在 [registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go) 注册 handler。
+3. 在 `BuiltinTaskDefinitions` 中新增 `kind=cron` 的任务定义。
+4. 运行 `go run main.go -c ./config.yaml command task scan-cron` 检查内置定义与 DB 镜像。
+5. 重启 `cron` 进程。
 
 ## 队列使用说明
 

@@ -168,7 +168,7 @@ func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, pa
 }
 
 // applyCreateFields 应用新增场景的字段填充。
-// 必填字段：用户名、昵称
+// 必填字段：用户名、昵称、密码
 // 默认值：国家代码默认为中国
 func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, params *adminUserEditParams) error {
 	if params.Username == nil || *params.Username == "" {
@@ -176,6 +176,9 @@ func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, pa
 	}
 	if params.Nickname == nil || *params.Nickname == "" {
 		return e.NewBusinessError(e.NicknameRequired)
+	}
+	if params.Password == nil || *params.Password == "" {
+		return e.NewBusinessError(e.PasswordRequired)
 	}
 
 	adminUserModel.Username = *params.Username
@@ -191,10 +194,8 @@ func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, pa
 	if params.Email != nil {
 		adminUserModel.Email = *params.Email
 	}
-	if params.Password != nil && *params.Password != "" {
-		if err := setHashedPassword(adminUserModel, *params.Password); err != nil {
-			return err
-		}
+	if err := setHashedPassword(adminUserModel, *params.Password); err != nil {
+		return err
 	}
 	if params.Avatar != nil {
 		adminUserModel.Avatar = *params.Avatar

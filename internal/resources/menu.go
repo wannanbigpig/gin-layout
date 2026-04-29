@@ -15,7 +15,7 @@ type MenuBaseResources struct {
 	Path            string           `json:"path"`                  // 前端路由地址
 	IsExternalLinks uint8            `json:"is_external_links"`     // 是否外链 0:否 1:是
 	IsAuth          uint8            `json:"is_auth"`               // 是否鉴权 0:否 1:是
-	Status          uint8            `json:"status"`                // 状态，0正常 1禁用
+	Status          uint8            `json:"status"`                // 状态，0禁用 1启用
 	StatusName      string           `json:"status_name,omitempty"` // 状态名称
 	IsShow          uint8            `json:"is_show"`               // 是否显示，1是 0否
 	IsNewWindow     uint8            `json:"is_new_window"`         // 是否新窗口打开, 1是 0否

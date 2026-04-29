@@ -1,9 +1,13 @@
 package form
 
 type adminUserEditableFields struct {
-	Username    *string `form:"username" json:"username" label:"用户名" binding:"omitempty,min=3,max=20,regexp=^[a-zA-Z0-9_]+$"`
-	Nickname    *string `form:"nickname" json:"nickname" label:"昵称" binding:"omitempty"`
-	Password    *string `form:"password" json:"password" label:"密码" binding:"omitempty,min=6,max=32"`
+	Username *string `form:"username" json:"username" label:"用户名" binding:"omitempty,min=3,max=20,regexp=^[a-zA-Z0-9_]+$"`
+	Nickname *string `form:"nickname" json:"nickname" label:"昵称" binding:"omitempty"`
+	Password *string `form:"password" json:"password" label:"密码" binding:"omitempty,min=6,max=32"`
+	adminUserOptionalFields
+}
+
+type adminUserOptionalFields struct {
 	PhoneNumber *string `form:"phone_number" json:"phone_number" label:"手机号" binding:"omitempty,phone_number"`
 	CountryCode *string `form:"country_code" json:"country_code" label:"国家代码" binding:"omitempty"`
 	Email       *string `form:"email" json:"email" label:"邮箱" binding:"omitempty,email"`
@@ -13,7 +17,10 @@ type adminUserEditableFields struct {
 }
 
 type CreateAdminUser struct {
-	adminUserEditableFields
+	Username *string `form:"username" json:"username" label:"用户名" binding:"required,min=3,max=20,regexp=^[a-zA-Z0-9_]+$"`
+	Nickname *string `form:"nickname" json:"nickname" label:"昵称" binding:"required"`
+	Password *string `form:"password" json:"password" label:"密码" binding:"required,min=6,max=32"`
+	adminUserOptionalFields
 }
 
 func NewCreateAdminUser() *CreateAdminUser {

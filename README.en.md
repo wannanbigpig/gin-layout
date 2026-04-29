@@ -84,6 +84,8 @@ go run main.go command migrate        # defaults to migrate up
 go run main.go command migrate check
 ```
 
+After migrations finish, a default baseline dataset is inserted, including the super admin account `super_admin / 123456`. It is only recommended for local initialization. Change the password immediately after the first login.
+
 For migration file creation, timestamp naming rules, and full `down/goto/force/version` usage, see [docs/MIGRATE_COMMANDS.en.md](./docs/MIGRATE_COMMANDS.en.md).
 
 ### 4. Configure
@@ -106,6 +108,7 @@ app:
   trusted_proxies:
     - 127.0.0.1
   watch_config: true
+  # allow_degraded_startup: false
 
 jwt:
   ttl: 7200
@@ -142,10 +145,22 @@ queue:
   audit_timeout_seconds: 10
 ```
 
+Notes:
+
+- `jwt.secret_key` is required and cannot be empty
+- If you only run the API and do not need async jobs, set `queue.enable` to `false`
+- If `queue.enable=true` but you do not want to reuse `redis.*`, set `queue.use_default_redis` to `false` and fill in `queue.redis.*`
+
 ### 5. Start Service
 
 ```bash
 GO_ENV=development go run main.go service
+```
+
+To explicitly set the listen host or port:
+
+```bash
+GO_ENV=development go run main.go service -H 127.0.0.1 -P 9001
 ```
 
 If `queue.enable=true`, start the worker in a separate process as well:
@@ -194,21 +209,27 @@ Help:
 ```bash
 go run main.go -h
 go run main.go command -h
+go run main.go service --help
 ```
 
 Common commands:
 
 | Command | Description |
 | --- | --- |
+| `go run main.go version` | Print the current version |
 | `go run main.go service` | Start the API service |
+| `go run main.go service -H 0.0.0.0 -P 9001` | Explicitly set the listen host and port |
 | `go run main.go worker` | Start the Asynq async worker |
+| `go run main.go cron` | Start scheduled jobs |
+| `go run main.go command demo` | Run the demo command |
 | `go run main.go command api-route` | Scan the declarative route tree and rebuild the `api` route table |
 | `go run main.go command rebuild-user-permissions` | Rebuild final user API permissions from database relationships |
 | `go run main.go command init-system` | Roll back and rerun migrations, rebuild API routes, and rebuild user permissions |
+| `go run main.go -c ./config.yaml command task scan-async` | Scan async task registration against the task-definition mirror |
+| `go run main.go -c ./config.yaml command task scan-cron` | Scan cron task definitions against the task-definition mirror |
 | `go run main.go -c ./config.yaml command migrate check` | Validate migration naming and up/down pairing |
 | `go run main.go -c ./config.yaml command migrate up` | Apply all pending migrations |
 | `go run main.go -c ./config.yaml command migrate down 1` | Roll back one migration version |
-| `go run main.go cron` | Start scheduled jobs |
 
 If the config file is not in the default location:
 
@@ -236,11 +257,14 @@ Config lookup order:
 | Key | Description |
 | --- | --- |
 | `app.base_path` | Base directory for logs, uploaded files, and other local paths; when not set it follows `GO_ENV` (development=current working directory, otherwise executable directory) |
+| `app.allow_degraded_startup` | Only applies to the `service` command; allows the HTTP service to start when dependency initialization fails, exposing the not-ready state through readiness and route guards |
 | `app.base_url` | URL prefix used to generate public file access URLs |
 | `app.trusted_proxies` | Trusted proxy addresses or CIDRs that affect `ClientIP()` and log IPs |
-| `jwt` | Token secret, expiration, and auto-refresh thresholds |
+| `jwt.secret_key` | Required; do not use weak placeholder values in production |
+| `jwt.ttl` / `jwt.refresh_ttl` | Token expiration and auto-refresh threshold |
 | `mysql` | Database enable flag and connection settings |
 | `redis` | Cache, blacklist, and distributed lock settings |
+| `queue.use_default_redis` | `true` reuses `redis.*`; `false` uses the independent `queue.redis.*` connection |
 | `queue` | Asynq enable flag, queue concurrency, priorities, and audit-log retry settings |
 | `logger` | Log output, rotation, and retention strategy |
 
@@ -249,9 +273,13 @@ If requests pass through Nginx, Ingress, or a load balancer, keep `app.trusted_p
 ### Worker And Cron
 
 - `service` serves the HTTP API.
-- `worker` consumes Asynq jobs. The first phase only moves request audit-log persistence to Asynq.
-- `cron` still owns the existing scheduled jobs and is not migrated in this change.
+- `worker` consumes Asynq jobs. The current first phase only moves request audit-log persistence to Asynq.
+- When `queue.enable=false`, you do not need to start `worker`; request audit logs are persisted synchronously in the current request flow.
+- `cron` owns scheduled jobs. The demo cron task is controlled by the system config `task.cron_demo_enabled` and is disabled by default after initialization.
+- `reset-system-data` is only registered when `app.enable_reset_system_cron=true` is explicitly configured, and startup logs a high-risk warning.
 - Do not register the same recurring business task in both `cron` and the async worker flow, or it will run twice.
+
+Note: `reset-system-data` currently calls `system.ReinitializeSystemData()`, which rolls back migrations and rebuilds system data. Keep `app.enable_reset_system_cron=false` in production, and only enable it temporarily when you explicitly need to rebuild system data.
 
 ### Hot Reload
 
@@ -276,6 +304,7 @@ Detected but requires restart:
 
 - `app.trusted_proxies`
 - `app.language`
+- `app.allow_degraded_startup`
 - `jwt.secret_key`
 - service listen address and port
 - route structure
@@ -320,6 +349,8 @@ go build -o go-layout main.go
 ./go-layout service
 ```
 
+If `-c` is not provided, use `GO_ENV=development` in development and ensure `config/config.yaml.example` exists in the current working directory or `config.yaml` has already been generated. For binary deployment, keep the config file next to the executable.
+
 ### Supervisor
 
 ```ini
@@ -359,6 +390,7 @@ gin-layout/
 ├── cmd/                    # CLI entrypoints
 ├── config/                 # Config structs and example config
 ├── data/                   # MySQL / Redis and migrations
+├── docs/                   # Supplementary docs and resources
 ├── internal/
 │   ├── access/             # Access and permission infrastructure
 │   ├── controller/         # Controllers
@@ -370,6 +402,7 @@ gin-layout/
 │   └── validator/          # Request validation
 ├── pkg/                    # Shared utilities
 ├── storage/                # File storage
+├── tests/                  # Route and integration tests
 └── README.md
 ```
 
@@ -390,3 +423,7 @@ This project is released under the MIT License. See [LICENSE](LICENSE).
 ## Contributing
 
 Issues and pull requests are welcome.
+
+## Disclaimer
+
+This project is provided **“as is”**, without any express or implied warranty. It may contain defects, security vulnerabilities, or implementations that do not fit a specific business scenario. Before using it in production, you should perform your own code review, security hardening, configuration review, permission validation, and data backup. Any issues caused by using, relying on, deploying, modifying, or operating this project are the responsibility of the user.

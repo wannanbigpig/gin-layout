@@ -4,8 +4,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/samber/lo"
-
 	"github.com/wannanbigpig/gin-layout/internal/model"
 )
 
@@ -130,44 +128,104 @@ func cloneMenuAPIBindings(source []defaultMenuAPIBinding) []defaultMenuAPIBindin
 
 // Sync 将默认菜单接口映射写入数据库。
 func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
-	execTx := FirstTx(tx)
 	bindings := s.bindings
+	if len(bindings) == 0 {
+		return nil
+	}
 
-	menuCodes := lo.Uniq(lo.Map(bindings, func(item defaultMenuAPIBinding, _ int) string {
-		return item.MenuCode
-	}))
-	routes := lo.Uniq(lo.Map(bindings, func(item defaultMenuAPIBinding, _ int) string {
-		return item.Route
-	}))
-	methods := lo.Uniq(lo.Map(bindings, func(item defaultMenuAPIBinding, _ int) string {
-		return item.Method
-	}))
-
-	menus, err := model.NewMenu().FindIdsByCodes(menuCodes)
+	db, err := defaultMenuAPIDB(FirstTx(tx))
 	if err != nil {
 		return err
+	}
+
+	menuCodes, routes, methods := collectMenuAPIBindingKeys(bindings)
+	targets, err := loadDefaultMenuAPITargets(db, menuCodes, routes, methods)
+	if err != nil {
+		return err
+	}
+
+	mappings := buildDefaultMenuAPIMappings(bindings, targets)
+	if len(mappings) == 0 {
+		return nil
+	}
+
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "menu_id"}, {Name: "api_id"}},
+		DoNothing: true,
+	}).Create(&mappings).Error
+}
+
+func defaultMenuAPIDB(tx *gorm.DB) (*gorm.DB, error) {
+	if tx != nil {
+		return tx, nil
+	}
+	return model.NewMenuApiMap().GetDB()
+}
+
+func collectMenuAPIBindingKeys(bindings []defaultMenuAPIBinding) (menuCodes []string, routes []string, methods []string) {
+	menuCodeSet := make(map[string]struct{}, len(bindings))
+	routeSet := make(map[string]struct{}, len(bindings))
+	methodSet := make(map[string]struct{}, len(bindings))
+
+	for _, item := range bindings {
+		if _, ok := menuCodeSet[item.MenuCode]; !ok {
+			menuCodeSet[item.MenuCode] = struct{}{}
+			menuCodes = append(menuCodes, item.MenuCode)
+		}
+		if _, ok := routeSet[item.Route]; !ok {
+			routeSet[item.Route] = struct{}{}
+			routes = append(routes, item.Route)
+		}
+		if _, ok := methodSet[item.Method]; !ok {
+			methodSet[item.Method] = struct{}{}
+			methods = append(methods, item.Method)
+		}
+	}
+	return menuCodes, routes, methods
+}
+
+type defaultMenuAPITargets struct {
+	menuIDByCode       map[string]uint
+	apiIDByRouteMethod map[string]uint
+}
+
+func loadDefaultMenuAPITargets(db *gorm.DB, menuCodes []string, routes []string, methods []string) (defaultMenuAPITargets, error) {
+	menuModel := model.NewMenu()
+	menuModel.SetDB(db)
+	menus, err := menuModel.FindIdsByCodes(menuCodes)
+	if err != nil {
+		return defaultMenuAPITargets{}, err
 	}
 	menuIDByCode := make(map[string]uint, len(menus))
 	for _, menu := range menus {
 		menuIDByCode[menu.Code] = menu.ID
 	}
 
-	apis, err := model.NewApi().FindIdsByRouteAndMethod(routes, methods)
+	apiModel := model.NewApi()
+	apiModel.SetDB(db)
+	apis, err := apiModel.FindIdsByRouteAndMethod(routes, methods)
 	if err != nil {
-		return err
+		return defaultMenuAPITargets{}, err
 	}
 	apiIDByRouteMethod := make(map[string]uint, len(apis))
 	for _, api := range apis {
 		apiIDByRouteMethod[api.Method+":"+api.Route] = api.ID
 	}
 
+	return defaultMenuAPITargets{
+		menuIDByCode:       menuIDByCode,
+		apiIDByRouteMethod: apiIDByRouteMethod,
+	}, nil
+}
+
+func buildDefaultMenuAPIMappings(bindings []defaultMenuAPIBinding, targets defaultMenuAPITargets) []*model.MenuApiMap {
 	mappings := make([]*model.MenuApiMap, 0, len(bindings))
 	for _, item := range bindings {
-		menuID, ok := menuIDByCode[item.MenuCode]
+		menuID, ok := targets.menuIDByCode[item.MenuCode]
 		if !ok {
 			continue
 		}
-		apiID, ok := apiIDByRouteMethod[item.Method+":"+item.Route]
+		apiID, ok := targets.apiIDByRouteMethod[item.Method+":"+item.Route]
 		if !ok {
 			continue
 		}
@@ -176,19 +234,5 @@ func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
 			ApiId:  apiID,
 		})
 	}
-	if len(mappings) == 0 {
-		return nil
-	}
-
-	db, err := model.NewMenuApiMap().GetDB()
-	if err != nil {
-		return err
-	}
-	if execTx != nil {
-		db = execTx
-	}
-	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "menu_id"}, {Name: "api_id"}},
-		DoNothing: true,
-	}).Create(&mappings).Error
+	return mappings
 }

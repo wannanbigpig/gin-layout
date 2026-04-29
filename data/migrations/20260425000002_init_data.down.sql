@@ -27,7 +27,7 @@ DELETE FROM `sys_config_i18n`
 WHERE `config_id` IN (
     SELECT `id`
     FROM `sys_config`
-    WHERE `config_key` IN ('system.site_name', 'system.allow_register', 'auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
+    WHERE `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
       AND `deleted_at` = 0
 );
 DELETE FROM `sys_dict_item`
@@ -37,7 +37,7 @@ DELETE FROM `sys_dict_type`
 WHERE `type_code` IN ('common_status', 'yes_no', 'menu_type', 'api_auth_mode', 'http_method', 'task_kind', 'task_source', 'task_run_status')
   AND `deleted_at` = 0;
 DELETE FROM `sys_config`
-WHERE `config_key` IN ('system.site_name', 'system.allow_register', 'auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
+WHERE `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
   AND `deleted_at` = 0;
 
 -- 删除角色菜单映射

@@ -23,7 +23,7 @@ type TaskRunList struct {
 	Kind      string `form:"kind" json:"kind" binding:"omitempty,oneof=async cron"`
 	Source    string `form:"source" json:"source" binding:"omitempty,oneof=queue cron manual"`
 	SourceID  string `form:"source_id" json:"source_id" binding:"omitempty"`
-	Status    string `form:"status" json:"status" binding:"omitempty"`
+	Status    string `form:"status" json:"status" binding:"omitempty,oneof=pending running success failed canceled retrying"`
 	StartTime string `form:"start_time" json:"start_time" binding:"omitempty"`
 	EndTime   string `form:"end_time" json:"end_time" binding:"omitempty"`
 }
@@ -36,7 +36,7 @@ func NewTaskRunListQuery() *TaskRunList {
 type CronTaskStateList struct {
 	Paginate
 	TaskCode   string `form:"task_code" json:"task_code" binding:"omitempty"`
-	LastStatus string `form:"last_status" json:"last_status" binding:"omitempty"`
+	LastStatus string `form:"last_status" json:"last_status" binding:"omitempty,oneof=pending running success failed canceled retrying"`
 }
 
 func NewCronTaskStateListQuery() *CronTaskStateList {

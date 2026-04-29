@@ -22,12 +22,27 @@ func TestAdminUserCreateRequiresUsername(t *testing.T) {
 func TestAdminUserCreateRequiresNickname(t *testing.T) {
 	service := NewAdminUserService()
 	username := "admin"
+	password := "123456"
 	params := form.NewCreateAdminUser()
 	params.Username = &username
+	params.Password = &password
 
 	err := service.Create(params)
 
 	assertBusinessErrorMessage(t, err, e.NicknameRequired, "昵称必填")
+}
+
+func TestAdminUserCreateRequiresPassword(t *testing.T) {
+	service := NewAdminUserService()
+	username := "admin"
+	nickname := "nick"
+	params := form.NewCreateAdminUser()
+	params.Username = &username
+	params.Nickname = &nickname
+
+	err := service.Create(params)
+
+	assertBusinessErrorMessage(t, err, e.PasswordRequired, "密码必填")
 }
 
 func assertBusinessErrorMessage(t *testing.T, err error, code int, message string) {

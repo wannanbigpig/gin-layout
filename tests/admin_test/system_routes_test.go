@@ -304,7 +304,7 @@ func TestSystemConfigProtectedRoutesRequireLogin(t *testing.T) {
 	}{
 		{name: "系统参数列表需要登录", route: "/admin/v1/system/config/list", query: &url.Values{"page": {"1"}}},
 		{name: "系统参数详情需要登录", route: "/admin/v1/system/config/detail", query: &url.Values{"id": {"1"}}},
-		{name: "系统参数值需要登录", route: "/admin/v1/system/config/value", query: &url.Values{"config_key": {"system.site_name"}}},
+		{name: "系统参数值需要登录", route: "/admin/v1/system/config/value", query: &url.Values{"config_key": {"auth.login_lock_enabled"}}},
 	}
 	for _, tc := range getCases {
 		t.Run(tc.name, func(t *testing.T) {

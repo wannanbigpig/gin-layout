@@ -18,8 +18,8 @@ func TestDefineScheduleSkipsResetTaskByDefault(t *testing.T) {
 	if hasScheduledTask(schedule, "reset-system-data") {
 		t.Fatal("expected reset-system-data task to be skipped by default")
 	}
-	if !hasScheduledTask(schedule, "demo") {
-		t.Fatal("expected demo task to remain registered")
+	if hasScheduledTask(schedule, "demo") {
+		t.Fatal("expected demo task to be skipped by default")
 	}
 }
 

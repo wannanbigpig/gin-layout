@@ -22,6 +22,7 @@ func TestSyncBuiltinDefinitionsUpsert(t *testing.T) {
 
 	assertTaskDefinitionCount(t, db, 3)
 	assertTaskStatus(t, db, TaskCodeCronResetSystemData, 0)
+	assertTaskStatus(t, db, TaskCodeCronDemo, 0)
 	assertTaskStatus(t, db, jobs.AuditLogTaskType, 1)
 	assertTaskAllowManual(t, db, TaskCodeCronDemo, 1)
 	assertTaskAllowManual(t, db, TaskCodeCronResetSystemData, 1)
