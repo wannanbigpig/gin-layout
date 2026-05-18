@@ -130,6 +130,96 @@ func TestSystemConfigWriteFlow(t *testing.T) {
 	assert.Equal(t, e.NotFound, deletedDetailResult.Code)
 }
 
+func TestSystemConfigVisibilityTabsAndHiddenSaveFlags(t *testing.T) {
+	requireWritableDB(t)
+	requireSystemModuleTables(t)
+
+	hiddenKeys := []string{
+		"storage.active_driver",
+		"storage.config",
+		"audit.sensitive_fields",
+	}
+
+	listResp := getRequest("/admin/v1/system/config/list", &url.Values{
+		"page":     {"1"},
+		"per_page": {"50"},
+	})
+	listResult := decodeResult(t, listResp)
+	assert.Equal(t, e.SUCCESS, listResult.Code, listResult.Msg)
+	for _, key := range hiddenKeys {
+		assert.False(t, collectionContainsFieldValue(listResult.Data, "config_key", key))
+	}
+
+	includeHiddenResp := getRequest("/admin/v1/system/config/list", &url.Values{
+		"page":           {"1"},
+		"per_page":       {"50"},
+		"include_hidden": {"1"},
+	})
+	includeHiddenResult := decodeResult(t, includeHiddenResp)
+	assert.Equal(t, e.SUCCESS, includeHiddenResult.Code, includeHiddenResult.Msg)
+	for _, key := range hiddenKeys {
+		assert.True(t, collectionContainsFieldValue(includeHiddenResult.Data, "config_key", key))
+	}
+
+	storageBody := map[string]any{
+		"active_driver": "local",
+		"config": map[string]any{
+			"local": map[string]any{},
+			"aliyun_oss": map[string]any{
+				"bucket":            "",
+				"endpoint":          "",
+				"access_key_id":     "",
+				"access_key_secret": "",
+				"public_url":        "",
+				"private_url":       "",
+			},
+			"s3": map[string]any{
+				"bucket":            "",
+				"region":            "",
+				"endpoint":          "",
+				"access_key_id":     "",
+				"secret_access_key": "",
+				"session_token":     "",
+				"public_url":        "",
+				"private_url":       "",
+			},
+			"signed_url_ttl_seconds": 300,
+			"max_file_size_mb":       10,
+			"allowed_mime_types":     []string{},
+		},
+	}
+	storageBytes, _ := json.Marshal(storageBody)
+	storagePayload := string(storageBytes)
+	storageResp := postRequest("/admin/v1/system/storage/config", &storagePayload)
+	storageResult := decodeResult(t, storageResp)
+	assert.Equal(t, e.SUCCESS, storageResult.Code, storageResult.Msg)
+
+	auditBody := map[string]any{
+		"common":          []string{"password"},
+		"request_header":  []string{"authorization"},
+		"request_body":    []string{"secret"},
+		"response_header": []string{},
+		"response_body":   []string{},
+	}
+	auditBytes, _ := json.Marshal(auditBody)
+	auditPayload := string(auditBytes)
+	auditResp := postRequest("/admin/v1/log/request/mask-config", &auditPayload)
+	auditResult := decodeResult(t, auditResp)
+	assert.Equal(t, e.SUCCESS, auditResult.Code, auditResult.Msg)
+
+	storageConfig := findSysConfigByKey(t, "storage.active_driver")
+	assert.Equal(t, uint8(0), storageConfig.IsVisible)
+	assert.Equal(t, "storage", storageConfig.ManageTab)
+
+	storageJSONConfig := findSysConfigByKey(t, "storage.config")
+	assert.Equal(t, uint8(0), storageJSONConfig.IsVisible)
+	assert.Equal(t, "storage", storageJSONConfig.ManageTab)
+
+	auditConfig := findSysConfigByKey(t, "audit.sensitive_fields")
+	assert.Equal(t, uint8(0), auditConfig.IsVisible)
+	assert.Equal(t, "audit_mask", auditConfig.ManageTab)
+}
+
 func TestSystemDictWriteFlow(t *testing.T) {
 	requireWritableDB(t)
 	requireSystemModuleTables(t)

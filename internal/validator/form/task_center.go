@@ -32,6 +32,15 @@ func NewTaskRunListQuery() *TaskRunList {
 	return &TaskRunList{}
 }
 
+// TaskRunEvents 任务执行事件查询参数。
+type TaskRunEvents struct {
+	RunID uint `form:"run_id" json:"run_id" binding:"required,gt=0"`
+}
+
+func NewTaskRunEventsQuery() *TaskRunEvents {
+	return &TaskRunEvents{}
+}
+
 // CronTaskStateList 定时任务状态列表查询参数。
 type CronTaskStateList struct {
 	Paginate

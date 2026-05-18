@@ -32,6 +32,9 @@ type QueueConfig struct {
 	// true: 必须处理完高优先级队列的所有任务后，才处理低优先级队列
 	// false: 按权重比例调度，高优先级队列的任务被调度的概率更大（推荐）
 	StrictPriority bool `mapstructure:"strict_priority" yaml:"strict_priority"`
+	// ConsumeCronFallback 是否允许 worker 消费历史误入 Asynq 的非高风险 cron 任务。
+	// 仅用于清理旧队列残留，不影响 cron 调度开关。
+	ConsumeCronFallback bool `mapstructure:"consume_cron_fallback" yaml:"consume_cron_fallback"`
 	// Queues 各队列的权重配置，key 为队列名，value 为权重值
 	// 新增队列必须在此配置，否则 Worker 不会消费该队列的任务！
 	// 权重决定任务被调度的概率，不是分配的协程数量！
@@ -62,6 +65,8 @@ var Queue = QueueConfig{
 	Namespace:      "go_layout",
 	Concurrency:    8,     // 整个 worker 最多同时处理 8 个任务（全局上限）
 	StrictPriority: false, // 按权重比例调度，非严格优先级
+	// 默认不让 worker 消费 cron 类型任务；需要清理历史残留时再显式开启。
+	ConsumeCronFallback: false,
 	Queues: map[string]int{
 		// 权重值表示调度概率，不是协程数量！
 		// 所有队列共享 8 个协程，权重越高越容易被优先调度

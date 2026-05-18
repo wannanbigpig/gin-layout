@@ -46,6 +46,16 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	if route, ok := routes[fileCode]; !ok || route.Auth != AuthModeNone {
 		t.Fatalf("missing or invalid file route: %#v", route)
 	}
+
+	storageConfigCode := utils.MD5(http.MethodGet + "_/admin/v1/system/storage/config")
+	if route, ok := routes[storageConfigCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid storage config route: %#v", route)
+	}
+
+	fileDestroyCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/trash/destroy")
+	if route, ok := routes[fileDestroyCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid file destroy route: %#v", route)
+	}
 }
 
 func TestSetRoutersRegistersCriticalRoutes(t *testing.T) {

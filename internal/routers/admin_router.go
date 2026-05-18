@@ -57,6 +57,7 @@ func adminAuthGroup(deps *ControllerDeps) RouteGroupDef {
 		Middleware: []gin.HandlerFunc{middleware.OptionalDatabaseReadyGuard(), middleware.AdminAuthHandler()},
 		Children: []RouteGroupDef{
 			commonGroup(deps),
+			dashboardGroup(deps),
 			authGroup(deps),
 			adminUserGroup(deps),
 			permissionGroup(deps),
@@ -66,6 +67,16 @@ func adminAuthGroup(deps *ControllerDeps) RouteGroupDef {
 			systemGroup(deps),
 			logGroup(deps),
 			taskGroup(deps),
+		},
+	}
+}
+
+func dashboardGroup(deps *ControllerDeps) RouteGroupDef {
+	return RouteGroupDef{
+		Prefix:    "dashboard",
+		GroupCode: "dashboard",
+		Routes: []RouteDef{
+			GET("overview", "仪表盘概览", AuthModeLogin, deps.Dashboard.Overview),
 		},
 	}
 }
@@ -89,6 +100,16 @@ func authGroup(deps *ControllerDeps) RouteGroupDef {
 		Routes: []RouteDef{
 			POST("logout", "退出登录", AuthModeLogin, deps.Login.Logout),
 			GET("check-token", "检查 Token", AuthModeLogin, deps.Login.CheckToken).WithDesc("验证 Token 有效性"),
+		},
+		Children: []RouteGroupDef{
+			{
+				Prefix:    "session",
+				GroupCode: "session",
+				Routes: []RouteDef{
+					GET("list", "在线会话列表", AuthModeAuth, deps.Session.List),
+					POST("revoke", "撤销在线会话", AuthModeAuth, deps.Session.Revoke),
+				},
+			},
 		},
 	}
 }
@@ -211,6 +232,37 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					GET("options", "字典选项", AuthModeAuth, deps.SysDict.Options),
 				},
 			},
+			{
+				Prefix:    "file",
+				GroupCode: "file",
+				Routes: []RouteDef{
+					GET("list", "文件资源列表", AuthModeAuth, deps.File.List),
+					GET("detail", "文件资源详情", AuthModeAuth, deps.File.Detail),
+					GET("folder/tree", "文件目录树", AuthModeAuth, deps.File.FolderTree),
+					POST("folder/create", "创建文件目录", AuthModeAuth, deps.File.FolderCreate),
+					POST("folder/update", "更新文件目录", AuthModeAuth, deps.File.FolderUpdate),
+					POST("folder/delete", "删除文件目录", AuthModeAuth, deps.File.FolderDelete),
+					POST("folder/move", "移动文件目录", AuthModeAuth, deps.File.FolderMove),
+					POST("move", "移动文件资源", AuthModeAuth, deps.File.Move),
+					POST("upload/local", "本地上传文件资源", AuthModeAuth, deps.File.UploadLocal),
+					POST("upload/credential", "获取文件直传凭证", AuthModeAuth, deps.File.UploadCredential),
+					POST("upload/complete", "完成文件直传登记", AuthModeAuth, deps.File.UploadComplete),
+					POST("delete", "删除文件资源", AuthModeAuth, deps.File.Delete),
+					GET("trash/list", "文件回收站列表", AuthModeAuth, deps.File.TrashList),
+					POST("trash/restore", "恢复文件资源", AuthModeAuth, deps.File.Restore),
+					POST("trash/destroy", "硬删除文件资源", AuthModeAuth, deps.File.Destroy),
+					GET("references", "文件引用列表", AuthModeAuth, deps.File.References),
+				},
+			},
+			{
+				Prefix:    "storage",
+				GroupCode: "storage",
+				Routes: []RouteDef{
+					GET("config", "存储配置", AuthModeAuth, deps.Storage.Config),
+					POST("config", "保存存储配置", AuthModeAuth, deps.Storage.Save),
+					POST("test", "测试存储配置", AuthModeAuth, deps.Storage.Test),
+				},
+			},
 		},
 	}
 }
@@ -257,6 +309,7 @@ func taskGroup(deps *ControllerDeps) RouteGroupDef {
 				Routes: []RouteDef{
 					GET("list", "任务执行记录列表", AuthModeAuth, deps.TaskCenter.RunList),
 					GET("detail", "任务执行记录详情", AuthModeAuth, deps.TaskCenter.RunDetail),
+					GET("events", "任务执行事件列表", AuthModeAuth, deps.TaskCenter.RunEvents),
 					POST("retry", "重试失败任务", AuthModeAuth, deps.TaskCenter.Retry),
 					POST("cancel", "取消任务", AuthModeAuth, deps.TaskCenter.Cancel),
 				},

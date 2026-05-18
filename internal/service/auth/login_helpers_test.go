@@ -171,6 +171,33 @@ func TestIsPrincipalValidFallsBackToDatabaseWhenMysqlReady(t *testing.T) {
 	}
 }
 
+func TestIsPrincipalValidChecksDatabaseWhenRedisMisses(t *testing.T) {
+	service := NewLoginService()
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID: "jwt-id",
+		},
+	}
+
+	tokenRevokedCalled := false
+	service.blacklistLookupFn = func(_ string) (bool, error) {
+		return false, nil
+	}
+	service.tokenRevokedLookupFn = func(jwtID string) bool {
+		tokenRevokedCalled = true
+		return jwtID == "jwt-id"
+	}
+	service.mysqlReadyFn = func() bool { return true }
+
+	if service.isPrincipalValid(claims) {
+		t.Fatal("expected redis miss to fall back to revoked token lookup")
+	}
+	if !tokenRevokedCalled {
+		t.Fatal("expected database revoke lookup to be used on redis miss")
+	}
+}
+
 func TestIsPrincipalValidRejectsRevokedToken(t *testing.T) {
 	service := NewLoginService()
 	claims := &token.AdminCustomClaims{

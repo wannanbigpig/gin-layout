@@ -6,6 +6,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
@@ -63,6 +64,7 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 		excludeID = params.Id
 		oldStatus = adminUserModel.Status
 	}
+	oldAvatar := adminUserModel.Avatar
 
 	var err error
 	if params.Id > 0 {
@@ -79,14 +81,16 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 		return e.NewBusinessError(mutationFailedCode)
 	}
 
+	pendingRevocations := make([]userTokenRevocation, 0, 2)
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
 
 		validateParams := map[string]interface{}{
-			"username":     params.Username,
-			"phone_number": params.PhoneNumber,
-			"country_code": params.CountryCode,
-			"email":        params.Email,
+			"username": params.Username,
+			"email":    params.Email,
+		}
+		if (params.PhoneNumber != nil || params.CountryCode != nil) && adminUserModel.PhoneNumber != "" {
+			validateParams["full_phone_number"] = adminUserModel.FullPhoneNumber
 		}
 		if err := s.validateUniqueFieldsWithLock(tx, validateParams, excludeID); err != nil {
 			return err
@@ -94,14 +98,35 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 		if err := adminUserModel.Save(); err != nil {
 			return err
 		}
+		if params.Avatar != nil {
+			refService := service.NewFileReferenceService(tx)
+			if oldAvatar != "" && oldAvatar != adminUserModel.Avatar {
+				if err := refService.ReleaseReference(oldAvatar, "admin_user", adminUserModel.ID, "avatar"); err != nil {
+					return err
+				}
+			}
+			if adminUserModel.Avatar != "" {
+				if err := refService.BindReference(adminUserModel.Avatar, "admin_user", adminUserModel.ID, "avatar"); err != nil {
+					return err
+				}
+			}
+		}
 
 		if params.Id > 0 && params.Status != nil &&
 			oldStatus == model.AdminUserStatusEnabled &&
 			*params.Status == model.AdminUserStatusDisabled {
-			s.revokeUserTokens(tx, adminUserModel.ID, model.RevokedCodeSystemForce, "系统强制登出（账号被封）")
+			pendingRevocations = append(pendingRevocations, userTokenRevocation{
+				userID:        adminUserModel.ID,
+				revokedCode:   model.RevokedCodeSystemForce,
+				revokedReason: "系统强制登出（账号被封）",
+			})
 		}
 		if params.Id > 0 && params.Password != nil && *params.Password != "" {
-			s.revokeUserTokens(tx, adminUserModel.ID, model.RevokedCodePasswordChangeAdmin, "管理员修改密码")
+			pendingRevocations = append(pendingRevocations, userTokenRevocation{
+				userID:        adminUserModel.ID,
+				revokedCode:   model.RevokedCodePasswordChangeAdmin,
+				revokedReason: "管理员修改密码",
+			})
 		}
 
 		if params.DeptIds != nil {
@@ -114,6 +139,7 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 	if err := s.handleMutationError(err, mutationFailedCode); err != nil {
 		return err
 	}
+	s.revokeUserTokensAfterCommit(pendingRevocations)
 	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithCode(mutationFailedCode)
 }
 
@@ -162,7 +188,11 @@ func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, pa
 		adminUserModel.Avatar = *params.Avatar
 	}
 	if params.PhoneNumber != nil || params.CountryCode != nil {
-		adminUserModel.FullPhoneNumber = adminUserModel.CountryCode + adminUserModel.PhoneNumber
+		if adminUserModel.PhoneNumber == "" {
+			adminUserModel.FullPhoneNumber = ""
+		} else {
+			adminUserModel.FullPhoneNumber = adminUserModel.CountryCode + adminUserModel.PhoneNumber
+		}
 	}
 	return nil
 }
@@ -203,7 +233,9 @@ func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, pa
 	if params.Status != nil {
 		adminUserModel.Status = *params.Status
 	}
-	adminUserModel.FullPhoneNumber = adminUserModel.CountryCode + adminUserModel.PhoneNumber
+	if adminUserModel.PhoneNumber != "" {
+		adminUserModel.FullPhoneNumber = adminUserModel.CountryCode + adminUserModel.PhoneNumber
+	}
 	return nil
 }
 
@@ -227,6 +259,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 		}
 		return err
 	}
+	oldAvatar := adminUserModel.Avatar
 
 	passwordChanged := params.Password != nil && *params.Password != ""
 	hasUpdate := params.Nickname != nil ||
@@ -256,13 +289,15 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	if err != nil {
 		return e.NewBusinessError(e.UpdateUserFailed)
 	}
-	return s.handleMutationError(access.RunInTransaction(db, func(tx *gorm.DB) error {
+	pendingRevocations := make([]userTokenRevocation, 0, 1)
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
 
 		validateParams := map[string]interface{}{
-			"phone_number": params.PhoneNumber,
-			"country_code": params.CountryCode,
-			"email":        params.Email,
+			"email": params.Email,
+		}
+		if (params.PhoneNumber != nil || params.CountryCode != nil) && adminUserModel.PhoneNumber != "" {
+			validateParams["full_phone_number"] = adminUserModel.FullPhoneNumber
 		}
 		if err := s.validateUniqueFieldsWithLock(tx, validateParams, uid); err != nil {
 			return err
@@ -270,11 +305,33 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 		if err := adminUserModel.Save(); err != nil {
 			return err
 		}
+		if params.Avatar != nil {
+			refService := service.NewFileReferenceService(tx)
+			if oldAvatar != "" && oldAvatar != adminUserModel.Avatar {
+				if err := refService.ReleaseReference(oldAvatar, "admin_user", uid, "avatar"); err != nil {
+					return err
+				}
+			}
+			if adminUserModel.Avatar != "" {
+				if err := refService.BindReference(adminUserModel.Avatar, "admin_user", uid, "avatar"); err != nil {
+					return err
+				}
+			}
+		}
 		if passwordChanged {
-			s.revokeUserTokens(tx, uid, model.RevokedCodePasswordChangeSelf, "用户自己修改密码")
+			pendingRevocations = append(pendingRevocations, userTokenRevocation{
+				userID:        uid,
+				revokedCode:   model.RevokedCodePasswordChangeSelf,
+				revokedReason: "用户自己修改密码",
+			})
 		}
 		return nil
-	}), e.UpdateUserFailed)
+	})
+	if err := s.handleMutationError(err, e.UpdateUserFailed); err != nil {
+		return err
+	}
+	s.revokeUserTokensAfterCommit(pendingRevocations)
+	return nil
 }
 
 // validateUniqueFieldsWithLock 验证唯一字段（用户名、手机号、邮箱），使用数据库锁防止并发冲突。
@@ -299,24 +356,15 @@ func (s *AdminUserService) validateUniqueFieldsWithLock(tx *gorm.DB, params map[
 		}
 	}
 
-	// 验证手机号唯一性（使用完整手机号：国家代码 + 手机号）
-	if phoneNumberVal, ok := params["phone_number"]; ok {
-		if phoneNumber, ok := phoneNumberVal.(*string); ok && phoneNumber != nil && *phoneNumber != "" {
-			countryCode := global.ChinaCountryCode
-			if countryCodeVal, ok := params["country_code"]; ok {
-				if cc, ok := countryCodeVal.(*string); ok && cc != nil && *cc != "" {
-					countryCode = *cc
-				}
+	// 验证手机号唯一性（使用模型最终的完整手机号，覆盖仅修改国家代码的场景）。
+	if fullPhoneNumberVal, ok := params["full_phone_number"]; ok {
+		if fullPhoneNumber, ok := fullPhoneNumberVal.(string); ok && fullPhoneNumber != "" {
+			exists, err := checkModel.ExistsWithLockExcludeId("full_phone_number", fullPhoneNumber, excludeId)
+			if err != nil {
+				return err
 			}
-			fullPhoneNumber := countryCode + *phoneNumber
-			if fullPhoneNumber != "" {
-				exists, err := checkModel.ExistsWithLockExcludeId("full_phone_number", fullPhoneNumber, excludeId)
-				if err != nil {
-					return err
-				}
-				if exists {
-					return e.NewBusinessError(e.PhoneNumberExists)
-				}
+			if exists {
+				return e.NewBusinessError(e.PhoneNumberExists)
 			}
 		}
 	}
@@ -354,12 +402,27 @@ func (s *AdminUserService) Delete(id uint) error {
 	if err != nil {
 		return e.NewBusinessError(e.DeleteUserFailed)
 	}
+	pendingRevocations := []userTokenRevocation{{
+		userID:        id,
+		revokedCode:   model.RevokedCodeOther,
+		revokedReason: "管理员删除用户",
+	}}
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
 
-		s.revokeUserTokens(tx, id, model.RevokedCodeOther, "管理员删除用户")
-
 		if _, err := adminUserModel.DeleteByID(id); err != nil {
+			return err
+		}
+		if err := service.NewFileReferenceService(tx).ReleaseReferencesByOwner("admin_user", id, "avatar"); err != nil {
+			return err
+		}
+		adminUserDeptMap.SetDB(tx)
+		if err := adminUserDeptMap.DeleteWhere("uid = ?", id); err != nil {
+			return err
+		}
+		adminUserRoleMap := model.NewAdminUserRoleMap()
+		adminUserRoleMap.SetDB(tx)
+		if err := adminUserRoleMap.DeleteWhere("uid = ?", id); err != nil {
 			return err
 		}
 		if len(deptIds) > 0 {
@@ -373,5 +436,6 @@ func (s *AdminUserService) Delete(id uint) error {
 		return e.NewBusinessError(e.DeleteUserFailed)
 	}
 
+	s.revokeUserTokensAfterCommit(pendingRevocations)
 	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithCode(e.DeleteUserFailed)
 }

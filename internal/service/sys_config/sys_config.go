@@ -124,6 +124,7 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	params.ConfigNameI18n = service.NormalizeLocaleTextMap(params.ConfigNameI18n)
 	params.GroupCode = strings.TrimSpace(params.GroupCode)
 	params.ValueType = model.NormalizeValueType(params.ValueType)
+	params.ManageTab = strings.TrimSpace(params.ManageTab)
 	params.Remark = strings.TrimSpace(params.Remark)
 	if params.GroupCode == "" {
 		params.GroupCode = "default"
@@ -169,6 +170,8 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	config.ValueType = params.ValueType
 	config.GroupCode = params.GroupCode
 	config.IsSensitive = valueOrDefault(params.IsSensitive, config.IsSensitive)
+	config.IsVisible = valueOrDefault(params.IsVisible, defaultVisible(config.IsVisible, id))
+	config.ManageTab = params.ManageTab
 	config.Status = valueOrDefault(params.Status, defaultStatus(config.Status, id))
 	config.Sort = params.Sort
 	config.Remark = params.Remark
@@ -201,7 +204,13 @@ func (s *SysConfigService) buildListCondition(params *form.SysConfigList) (strin
 		AddLike("config_key", params.ConfigKey).
 		AddEq("group_code", params.GroupCode).
 		AddEq("value_type", params.ValueType).
+		AddEq("manage_tab", params.ManageTab).
 		AddEq("status", params.Status)
+	if params.IsVisible != nil {
+		qb.AddEq("is_visible", params.IsVisible)
+	} else if params.IncludeHidden == nil || *params.IncludeHidden == 0 {
+		qb.AddEq("is_visible", uint8(1))
+	}
 	if keyword := strings.TrimSpace(params.ConfigName); keyword != "" {
 		qb.AddCondition("id IN (SELECT config_id FROM sys_config_i18n WHERE config_name like ?)", "%"+keyword+"%")
 	}
@@ -270,6 +279,13 @@ func valueOrDefault(value *uint8, fallback uint8) uint8 {
 		return fallback
 	}
 	return *value
+}
+
+func defaultVisible(current uint8, id uint) uint8 {
+	if id == 0 && current == 0 {
+		return 1
+	}
+	return current
 }
 
 func defaultStatus(current uint8, id uint) uint8 {

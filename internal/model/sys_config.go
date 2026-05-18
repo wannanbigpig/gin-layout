@@ -24,6 +24,8 @@ type SysConfig struct {
 	GroupCode      string            `json:"group_code" gorm:"column:group_code;type:varchar(60);not null;default:'default';comment:参数分组"`
 	IsSystem       uint8             `json:"is_system" gorm:"column:is_system;type:tinyint unsigned;not null;default:0;comment:是否系统内置"`
 	IsSensitive    uint8             `json:"is_sensitive" gorm:"column:is_sensitive;type:tinyint unsigned;not null;default:0;comment:是否敏感配置"`
+	IsVisible      uint8             `json:"is_visible" gorm:"column:is_visible;type:tinyint unsigned;not null;default:1;comment:是否在系统参数页展示"`
+	ManageTab      string            `json:"manage_tab" gorm:"column:manage_tab;type:varchar(60);not null;default:'';comment:专属配置Tab"`
 	Status         uint8             `json:"status" gorm:"column:status;type:tinyint unsigned;not null;default:1;comment:状态"`
 	Sort           uint              `json:"sort" gorm:"column:sort;type:int unsigned;not null;default:0;comment:排序"`
 	Remark         string            `json:"remark" gorm:"column:remark;type:varchar(255);not null;default:'';comment:备注"`

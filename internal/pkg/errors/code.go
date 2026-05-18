@@ -24,6 +24,7 @@ const (
 	FilePrivateAuthNeeded = 11002
 	FileAccessDenied      = 11003
 	FileUploadPartialFail = 11004
+	FileReferenced        = 11005
 
 	// 业务错误码 20000-29999
 	UserPasswordWrong       = 20001

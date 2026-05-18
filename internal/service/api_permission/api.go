@@ -1,6 +1,8 @@
 package api_permission
 
 import (
+	"gorm.io/gorm"
+
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
@@ -36,7 +38,14 @@ func (s *ApiService) Update(params *form.UpdatePermission) error {
 		"is_auth":     params.IsAuth,
 		"sort":        params.Sort,
 	}
-	if err := apiModel.UpdateById(params.Id, data); err != nil {
+	db, err := apiModel.GetDB()
+	if err != nil {
+		return err
+	}
+	if err := access.RunInTransaction(db, func(tx *gorm.DB) error {
+		apiModel.SetDB(tx)
+		return apiModel.UpdateById(params.Id, data)
+	}); err != nil {
 		return err
 	}
 	if err := access.NewApiRouteCacheService().RefreshCache(); err != nil {

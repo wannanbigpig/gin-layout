@@ -38,6 +38,8 @@ type LoginService struct {
 	markTokensRevokedFn func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
 	// writeTokenToBlacklistFn 将 token 写入 Redis 黑名单。
 	writeTokenToBlacklistFn func(jwtID string, remainingTime time.Duration) error
+	// loginLogDB 允许测试或事务场景指定登录日志查询连接。
+	loginLogDB *gorm.DB
 }
 
 // LoginServiceDeps 描述 LoginService 可注入依赖。
@@ -58,6 +60,8 @@ type LoginServiceDeps struct {
 	MarkTokensRevoked func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
 	// WriteTokenToBlacklist 自定义写 Redis 黑名单逻辑。
 	WriteTokenToBlacklist func(jwtID string, remainingTime time.Duration) error
+	// LoginLogDB 自定义登录日志查询连接。
+	LoginLogDB *gorm.DB
 }
 
 // NewLoginService 创建登录服务实例。
@@ -76,6 +80,7 @@ func NewLoginServiceWithDeps(deps LoginServiceDeps) *LoginService {
 		tryRefreshPrincipalFn:   deps.TryRefreshPrincipal,
 		markTokensRevokedFn:     deps.MarkTokensRevoked,
 		writeTokenToBlacklistFn: deps.WriteTokenToBlacklist,
+		loginLogDB:              deps.LoginLogDB,
 	}
 	s.ensureRuntimeDeps()
 	return s
@@ -213,6 +218,9 @@ func (s *LoginService) Refresh(id uint, logInfo LoginLogInfo) (*TokenResponse, e
 	adminUserModel := model.NewAdminUsers()
 	if err := adminUserModel.GetById(id); err != nil {
 		return nil, e.NewBusinessError(e.UpdateUserFailed)
+	}
+	if adminUserModel.Status != model.AdminUserStatusEnabled {
+		return nil, e.NewBusinessError(e.UserDisable)
 	}
 
 	claims := s.newAdminCustomClaims(adminUserModel)

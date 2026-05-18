@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+
 	"github.com/wannanbigpig/gin-layout/internal/model/modelDict"
 )
 
@@ -121,6 +123,9 @@ func (m *Menu) EnabledIdsByIds(ids []uint) ([]uint, error) {
 
 // ExistsExcludeId 检查指定字段值的记录是否存在（排除指定 ID）。
 func (m *Menu) ExistsExcludeId(field string, value string, excludeId uint) (bool, error) {
+	if !isAllowedMenuUniqueField(field) {
+		return false, fmt.Errorf("unsupported menu unique field: %s", field)
+	}
 	db, err := m.GetDB()
 	if err != nil {
 		return false, err
@@ -134,6 +139,15 @@ func (m *Menu) ExistsExcludeId(field string, value string, excludeId uint) (bool
 		return false, err
 	}
 	return exists, nil
+}
+
+func isAllowedMenuUniqueField(field string) bool {
+	switch field {
+	case "code", "name", "full_path":
+		return true
+	default:
+		return false
+	}
 }
 
 // MenuTreeNode 菜单树节点，用于展开父级。

@@ -19,6 +19,7 @@ var enUSText = map[int]string{
 	FilePrivateAuthNeeded: "login required for private file access",
 	FileAccessDenied:      "no permission to access this file",
 	FileUploadPartialFail: "partial image upload failure",
+	FileReferenced:        "file is referenced and cannot be deleted",
 
 	// Business error messages 20000-29999
 	UserPasswordWrong:       "Incorrect password",

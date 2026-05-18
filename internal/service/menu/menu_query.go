@@ -53,9 +53,24 @@ func (s *MenuService) Delete(id uint) error {
 	if err != nil {
 		return e.NewBusinessError(e.MenuCannotDelete)
 	}
+	affectedUserIDs, err := access.NewAffectedUsersResolver().Resolve(access.PermissionChangeScope{MenuIDs: []uint{id}})
+	if err != nil {
+		return e.NewBusinessError(e.MenuCannotDelete)
+	}
+	coordinator := access.NewPermissionSyncCoordinator()
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		menu.SetDB(tx)
 		parentID := menu.Pid
+		menuApiMap := model.NewMenuApiMap()
+		menuApiMap.SetDB(tx)
+		if err := menuApiMap.DeleteWhere("menu_id = ?", id); err != nil {
+			return err
+		}
+		roleMenuMap := model.NewRoleMenuMap()
+		roleMenuMap.SetDB(tx)
+		if err := roleMenuMap.DeleteWhere("menu_id = ?", id); err != nil {
+			return err
+		}
 		if _, deleteErr := menu.DeleteByID(id); deleteErr != nil {
 			return deleteErr
 		}
@@ -63,14 +78,16 @@ func (s *MenuService) Delete(id uint) error {
 			return err
 		}
 		if parentID > 0 {
-			return model.UpdateChildrenNum(model.NewMenu(), parentID, tx)
+			if err := model.UpdateChildrenNum(model.NewMenu(), parentID, tx); err != nil {
+				return err
+			}
 		}
-		return nil
+		return coordinator.SyncUsers(affectedUserIDs, tx)
 	})
 	if err != nil {
 		return e.NewBusinessError(e.MenuCannotDelete)
 	}
-	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByMenus([]uint{id})
+	return coordinator.ReloadPolicyCacheWithCode(e.MenuCannotDelete)
 }
 
 // Detail 获取菜单详情

@@ -410,6 +410,9 @@ CREATE TABLE IF NOT EXISTS `upload_files`
 (
     `id`          int unsigned NOT NULL AUTO_INCREMENT,
     `uid`         int unsigned NOT NULL DEFAULT '0' COMMENT '用户ID',
+    `folder_id`   int unsigned NOT NULL DEFAULT '0' COMMENT '逻辑目录ID',
+    `logical_path` varchar(1024) NOT NULL DEFAULT '/' COMMENT '逻辑路径快照',
+    `display_name` varchar(255) NOT NULL DEFAULT '' COMMENT '展示名称',
     `origin_name` varchar(255) NOT NULL DEFAULT '' COMMENT '文件源名称',
     `name`        varchar(255) NOT NULL DEFAULT '' COMMENT '文件名称（UUID+扩展名）',
     `path`        varchar(255) NOT NULL DEFAULT '' COMMENT '文件相对路径（相对于storage/public或storage/private）',
@@ -418,17 +421,75 @@ CREATE TABLE IF NOT EXISTS `upload_files`
     `hash`        varchar(64)  NOT NULL DEFAULT '' COMMENT '文件SHA256哈希值（用于去重）',
     `uuid`        varchar(32)  NOT NULL DEFAULT '' COMMENT '文件UUID（用于URL访问，32位十六进制字符串，不带连字符）',
     `mime_type`   varchar(100) NOT NULL DEFAULT '' COMMENT 'MIME类型（如：image/jpeg, application/pdf）',
+    `file_type`   varchar(20)  NOT NULL DEFAULT '' COMMENT '文件类型:image,pdf,word,excel,ppt,archive,text,audio,video,other',
     `is_public`   tinyint      NOT NULL DEFAULT '0' COMMENT '是否公开访问: 0否 1是',
+    `storage_driver` varchar(20)  NOT NULL DEFAULT 'local' COMMENT '存储驱动:local,aliyun_oss,s3',
+    `storage_base` varchar(512) NOT NULL DEFAULT '' COMMENT '存储基础位置',
+    `bucket`      varchar(128) NOT NULL DEFAULT '' COMMENT '存储桶',
+    `storage_path` varchar(512) NOT NULL DEFAULT '' COMMENT '实际存储路径',
+    `object_key`  varchar(512) NOT NULL DEFAULT '' COMMENT '对象key',
+    `etag`        varchar(128) NOT NULL DEFAULT '' COMMENT '对象ETag',
+    `storage_status` varchar(32) NOT NULL DEFAULT 'stored' COMMENT '存储状态:stored,delete_failed',
+    `upload_source` varchar(20) NOT NULL DEFAULT 'backend' COMMENT '上传来源:backend,direct,system',
+    `upload_scene` varchar(60) NOT NULL DEFAULT '' COMMENT '上传场景',
+    `upload_status` varchar(20) NOT NULL DEFAULT 'uploaded' COMMENT '上传状态:pending,uploaded,failed',
+    `last_accessed_at` datetime DEFAULT NULL COMMENT '最后访问时间',
+    `deleted_by`  int unsigned NOT NULL DEFAULT '0' COMMENT '删除人',
+    `deleted_reason` varchar(255) NOT NULL DEFAULT '' COMMENT '删除原因',
     `created_at`  datetime              DEFAULT NULL COMMENT '创建时间',
     `updated_at`  datetime              DEFAULT NULL COMMENT '更新时间',
+    `deleted_at`  int unsigned NOT NULL DEFAULT '0' COMMENT '删除时间戳',
     PRIMARY KEY (`id`),
     KEY `idx_uid_created_at` (`uid`, `created_at`),
+    KEY `idx_folder_created_at` (`folder_id`, `created_at`),
     KEY `idx_hash_is_public` (`hash`, `is_public`),
+    KEY `idx_file_type_created_at` (`file_type`, `created_at`),
+    KEY `idx_storage_driver_status` (`storage_driver`, `storage_status`),
+    KEY `idx_deleted_at_created_at` (`deleted_at`, `created_at`),
     UNIQUE KEY `idx_uuid` (`uuid`),
     KEY `idx_is_public_uuid` (`is_public`, `uuid`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='上传文件表';
+
+CREATE TABLE IF NOT EXISTS `upload_file_folders`
+(
+    `id`           int unsigned NOT NULL AUTO_INCREMENT,
+    `parent_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '父目录ID',
+    `name`         varchar(120) NOT NULL DEFAULT '' COMMENT '目录名称',
+    `logical_path` varchar(1024) NOT NULL DEFAULT '/' COMMENT '逻辑路径',
+    `sort`         int NOT NULL DEFAULT '0' COMMENT '排序',
+    `created_by`   int unsigned NOT NULL DEFAULT '0' COMMENT '创建人',
+    `updated_by`   int unsigned NOT NULL DEFAULT '0' COMMENT '更新人',
+    `created_at`   datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at`   datetime DEFAULT NULL COMMENT '更新时间',
+    `deleted_at`   int unsigned NOT NULL DEFAULT '0' COMMENT '删除时间戳',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uniq_parent_name_deleted` (`parent_id`, `name`, `deleted_at`),
+    KEY `idx_parent_sort` (`parent_id`, `sort`, `id`),
+    KEY `idx_logical_path` (`logical_path`(191))
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='上传文件逻辑目录表';
+
+CREATE TABLE IF NOT EXISTS `upload_file_references`
+(
+    `id`          int unsigned NOT NULL AUTO_INCREMENT,
+    `file_id`     int unsigned NOT NULL DEFAULT '0' COMMENT 'upload_files.id',
+    `uuid`        varchar(32)  NOT NULL DEFAULT '' COMMENT '文件UUID',
+    `owner_type`  varchar(60)  NOT NULL DEFAULT '' COMMENT '引用对象类型',
+    `owner_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '引用对象ID',
+    `owner_field` varchar(60)  NOT NULL DEFAULT '' COMMENT '引用字段',
+    `created_at`  datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at`  datetime DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uniq_owner_file_field` (`owner_type`, `owner_id`, `owner_field`, `file_id`),
+    KEY `idx_file_id` (`file_id`),
+    KEY `idx_uuid` (`uuid`),
+    KEY `idx_owner` (`owner_type`, `owner_id`, `owner_field`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='上传文件引用关系表';
 
 CREATE TABLE IF NOT EXISTS `sys_config`
 (
@@ -439,6 +500,8 @@ CREATE TABLE IF NOT EXISTS `sys_config`
     `group_code`   varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT 'default' COMMENT '参数分组',
     `is_system`    tinyint unsigned                                       NOT NULL DEFAULT '0' COMMENT '是否系统内置:0否,1是',
     `is_sensitive` tinyint unsigned                                       NOT NULL DEFAULT '0' COMMENT '是否敏感配置:0否,1是',
+    `is_visible`   tinyint unsigned                                       NOT NULL DEFAULT '1' COMMENT '是否在系统参数页展示:0否,1是',
+    `manage_tab`   varchar(60)                                            NOT NULL DEFAULT '' COMMENT '专属配置Tab',
     `status`       tinyint unsigned                                       NOT NULL DEFAULT '1' COMMENT '状态:0禁用,1启用',
     `sort`         int unsigned                                           NOT NULL DEFAULT '0' COMMENT '排序',
     `remark`       varchar(255)                                           NOT NULL DEFAULT '' COMMENT '备注',
@@ -448,6 +511,7 @@ CREATE TABLE IF NOT EXISTS `sys_config`
     PRIMARY KEY (`id`) USING BTREE,
     UNIQUE KEY `uniq_config_key_deleted_at` (`config_key`, `deleted_at`) USING BTREE,
     KEY `idx_group_status_deleted_at_sort` (`group_code`, `status`, `deleted_at`, `sort`) USING BTREE,
+    KEY `idx_visible_deleted_at_sort` (`is_visible`, `deleted_at`, `sort`) USING BTREE,
     KEY `idx_status_deleted_at` (`status`, `deleted_at`) USING BTREE
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4

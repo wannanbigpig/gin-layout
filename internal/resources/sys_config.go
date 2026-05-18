@@ -16,6 +16,8 @@ type SysConfigResources struct {
 	GroupCode      string            `json:"group_code"`
 	IsSystem       uint8             `json:"is_system"`
 	IsSensitive    uint8             `json:"is_sensitive"`
+	IsVisible      uint8             `json:"is_visible"`
+	ManageTab      string            `json:"manage_tab"`
 	Status         uint8             `json:"status"`
 	Sort           uint              `json:"sort"`
 	Remark         string            `json:"remark"`

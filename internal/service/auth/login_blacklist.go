@@ -115,14 +115,17 @@ func (s *LoginService) getBlacklistKey(jwtId string) string {
 }
 
 // addTokensToBlacklist 批量将 token 加入 Redis 黑名单。
-func (s *LoginService) addTokensToBlacklist(loginLogs []model.AdminLoginLogs) {
+func (s *LoginService) addTokensToBlacklist(loginLogs []model.AdminLoginLogs) error {
 	if len(loginLogs) == 0 {
-		return
+		return nil
 	}
 
 	redisClient := data.RedisClient()
 	if redisClient == nil {
-		return
+		if err := data.GetRedisInitError(); err != nil {
+			return fmt.Errorf("%w: %v", errRedisUnavailable, err)
+		}
+		return errRedisUnavailable
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
 	defer cancel()
@@ -144,11 +147,13 @@ func (s *LoginService) addTokensToBlacklist(loginLogs []model.AdminLoginLogs) {
 	}
 
 	if queued == 0 {
-		return
+		return nil
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		log.Logger.Error("批量将 token 加入 Redis 黑名单失败", zap.Error(err), zap.Int("count", queued))
+		return err
 	}
+	return nil
 }
 
 // calculateRemainingTime 计算 token 剩余过期时间。
@@ -188,9 +193,12 @@ func (s *LoginService) RevokeUserTokens(userId uint, revokedCode uint8, revokedR
 		return nil
 	}
 
-	s.addTokensToBlacklist(loginLogs)
-	s.revokeTokenInLogAsync(jwtIds, revokedCode, revokedReason)
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), revokeLogAsyncTimeout)
+	defer cancel()
+	if err := s.markTokensRevokedFn(ctx, jwtIds, revokedCode, revokedReason); err != nil {
+		return err
+	}
+	return s.addTokensToBlacklist(loginLogs)
 }
 
 func collectJWTIDs(loginLogs []model.AdminLoginLogs) []string {

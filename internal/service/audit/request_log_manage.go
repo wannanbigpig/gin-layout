@@ -26,6 +26,7 @@ const (
 	requestLogMaskConfigGroupCode = "audit"
 	requestLogMaskConfigSort      = 95
 	requestLogMaskConfigRemark    = "请求日志脱敏字段配置"
+	requestLogMaskConfigManageTab = "audit_mask"
 )
 
 var requestLogMaskConfigNameI18n = map[string]string{
@@ -283,6 +284,8 @@ func saveMaskConfigToSysConfig(config sensitive.SensitiveFieldsConfig) (bool, er
 	configModel.GroupCode = requestLogMaskConfigGroupCode
 	configModel.IsSystem = 1
 	configModel.IsSensitive = 1
+	configModel.IsVisible = 0
+	configModel.ManageTab = requestLogMaskConfigManageTab
 	configModel.Status = 1
 	configModel.Remark = requestLogMaskConfigRemark
 	if configModel.Sort == 0 {

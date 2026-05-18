@@ -67,7 +67,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (25, 'ant-design:delete-outlined', 'department:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 9, 3, '0,2,9', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:26:52', 0),
 (26, 'ant-design:edit-filled', 'api:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 3, 3, '0,2,3', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:39:39', 0),
 (28, 'ant-design:plus-circle-outlined', 'role:addChild', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 8, 3, '0,2,8', 0, '', '2025-11-17 17:46:21', '2025-11-18 17:41:45', 0),
-(29, 'ep:tickets', '', 'log', '/log', 'RequestLog', 'Log', '', '', '', 0.00, 1, 1, 1, 0, 0, 98, 1, 0, 1, '0', 2, '', '2025-11-20 16:16:47', '2025-11-20 16:17:04', 0),
+(29, 'ep:tickets', '', 'log', '/log', 'RequestLog', 'Log', '', '', '', 0.00, 1, 1, 1, 0, 0, 98, 1, 0, 1, '0', 3, '', '2025-11-20 16:16:47', '2025-11-20 16:17:04', 0),
 (30, 'ep:document', '', 'request-log', '/log/request-log', '', 'RequestLog', 'log/request.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 4, '', '2025-11-20 16:14:39', '2025-11-25 17:25:13', 0),
 (31, 'ep:document', '', 'admin-login-log', '/log/admin-login-log', '', 'AdminLoginLog', 'log/adminLogin.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 2, '', '2025-11-20 16:16:47', '2025-11-25 17:24:30', 0),
 (32, 'ep:document', 'adminLoginLog:detail', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', '2025-11-22 11:48:10', '2025-11-22 11:48:10', 0),
@@ -79,8 +79,8 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (38, 'ant-design:search-outlined', 'api:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 3, 3, '0,2,3', 0, '', '2025-11-25 17:23:35', '2025-11-25 17:23:35', 0),
 (39, 'ant-design:search-outlined', 'adminLoginLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', '2025-11-25 17:24:20', '2025-11-25 17:24:20', 0),
 (40, 'ant-design:search-outlined', 'requestLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', '2025-11-25 17:25:04', '2025-11-25 17:25:04', 0),
-(42, 'ep:setting', '', 'system', '/system', 'SysConfig', 'System', '', '', '', 0.00, 1, 1, 1, 0, 0, 96, 1, 0, 1, '0', 2, '', NOW(), NOW(), 0),
-(43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system/config.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 5, '', NOW(), NOW(), 0),
+(42, 'ep:setting', '', 'system', '/system', 'SysConfig', 'System', '', '', '', 0.00, 1, 1, 1, 0, 0, 96, 1, 0, 1, '0', 3, '', NOW(), NOW(), 0),
+(43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system/config.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 8, '', NOW(), NOW(), 0),
 (44, 'ep:collection-tag', '', 'dict', '/system/dict', '', 'SysDict', 'system/dict.vue', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 42, 2, '0,42', 4, '', NOW(), NOW(), 0),
 (45, 'ant-design:search-outlined', 'sysConfig:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
 (46, 'ant-design:plus-outlined', 'sysConfig:add', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
@@ -99,7 +99,20 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (59, 'ep:circle-close', 'task:cancel', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 55, 3, '0,54,55', 0, '', NOW(), NOW(), 0),
 (60, 'ep:view', 'task:detail', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 60, 3, 55, 3, '0,54,55', 0, '', NOW(), NOW(), 0),
 (61, 'ant-design:search-outlined', 'requestLog:export', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 30, 3, '0,29,30', 0, '', NOW(), NOW(), 0),
-(62, 'ep:setting', 'requestLog:maskConfig', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 30, 3, '0,29,30', 0, '', NOW(), NOW(), 0);
+(62, 'ep:setting', 'requestLog:maskConfig', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 30, 3, '0,29,30', 0, '', NOW(), NOW(), 0),
+(63, 'ep:folder-opened', '', 'file', '/system/file', '', 'FileResource', 'system/file.vue', '', '', 0.00, 1, 1, 1, 0, 0, 80, 2, 42, 2, '0,42', 2, '', NOW(), NOW(), 0),
+(64, 'ant-design:search-outlined', 'file:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
+(65, 'ant-design:delete-outlined', 'file:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
+(66, 'ep:monitor', '', 'session', '/log/session', '', 'OnlineSession', 'log/session.vue', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 29, 2, '0,29', 2, '', NOW(), NOW(), 0),
+(67, 'ant-design:search-outlined', 'session:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 66, 3, '0,29,66', 0, '', NOW(), NOW(), 0),
+(68, 'ep:circle-close', 'session:revoke', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 66, 3, '0,29,66', 0, '', NOW(), NOW(), 0),
+(70, 'ant-design:search-outlined', 'storage:config', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
+(71, 'ant-design:edit-filled', 'storage:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
+(72, 'ep:connection', 'storage:test', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
+(73, 'ep:refresh-left', 'file:restore', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
+(74, 'ant-design:delete-filled', 'file:destroy', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
+(75, 'ant-design:edit-filled', 'file:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 85, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
+(76, 'ant-design:plus-outlined', 'file:create', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 95, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0);
 
 INSERT INTO `menu_i18n` (`menu_id`, `locale`, `title`, `created_at`, `updated_at`)
 SELECT `id`,
@@ -164,6 +177,19 @@ SELECT `id`,
            WHEN 60 THEN '详情'
            WHEN 61 THEN '导出'
            WHEN 62 THEN '脱敏配置'
+           WHEN 63 THEN '文件资源'
+           WHEN 64 THEN '列表'
+           WHEN 65 THEN '删除'
+           WHEN 66 THEN '在线会话'
+           WHEN 67 THEN '列表'
+           WHEN 68 THEN '撤销'
+           WHEN 70 THEN '配置'
+           WHEN 71 THEN '更新'
+           WHEN 72 THEN '测试'
+           WHEN 73 THEN '恢复'
+           WHEN 74 THEN '硬删除'
+           WHEN 75 THEN '编辑'
+           WHEN 76 THEN '新增'
            ELSE ''
            END,
        `created_at`,
@@ -234,6 +260,19 @@ SELECT `id`,
            WHEN 60 THEN 'Detail'
            WHEN 61 THEN 'Export'
            WHEN 62 THEN 'Mask Config'
+           WHEN 63 THEN 'File Resources'
+           WHEN 64 THEN 'List'
+           WHEN 65 THEN 'Delete'
+           WHEN 66 THEN 'Online Sessions'
+           WHEN 67 THEN 'List'
+           WHEN 68 THEN 'Revoke'
+           WHEN 70 THEN 'Config'
+           WHEN 71 THEN 'Update'
+           WHEN 72 THEN 'Test'
+           WHEN 73 THEN 'Restore'
+           WHEN 74 THEN 'Destroy'
+           WHEN 75 THEN 'Edit'
+           WHEN 76 THEN 'Create'
            ELSE ''
            END,
        `created_at`,
@@ -247,12 +286,14 @@ FROM `menu`
 WHERE `deleted_at` = 0;
 
 INSERT INTO `sys_config` (`config_key`, `config_value`, `value_type`, `group_code`, `is_system`,
-                          `is_sensitive`, `status`, `sort`, `remark`, `created_at`, `updated_at`, `deleted_at`)
-VALUES ('auth.login_lock_enabled', 'true', 'bool', 'auth', 1, 0, 1, 89, '是否开启登录失败锁定', NOW(), NOW(), 0),
-       ('auth.login_max_failures', '5', 'number', 'auth', 1, 0, 1, 88, '登录连续失败阈值', NOW(), NOW(), 0),
-       ('auth.login_lock_minutes', '15', 'number', 'auth', 1, 0, 1, 87, '登录锁定时长（分钟）', NOW(), NOW(), 0),
-       ('task.cron_demo_enabled', 'false', 'bool', 'task', 1, 0, 1, 80, '是否启用演示定时任务，默认关闭', NOW(), NOW(), 0),
-       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code"],"request_header":["authorization","auth","cookie","x-api-key","x-access-token","x-auth-token","x-token"],"request_body":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","cvv","cvc","cvv2","security_code","pin","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","x-access-token","x-auth-token","x-token","x-refresh-token","refresh-access-token","refresh-exp","cookie"],"response_body":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","cvv","cvc","cvv2","security_code","pin","ssn","social_security"]}', 'json', 'audit', 1, 1, 1, 95, '请求日志脱敏字段配置', NOW(), NOW(), 0)
+                          `is_sensitive`, `is_visible`, `manage_tab`, `status`, `sort`, `remark`, `created_at`, `updated_at`, `deleted_at`)
+VALUES ('auth.login_lock_enabled', 'true', 'bool', 'auth', 1, 0, 1, '', 1, 89, '是否开启登录失败锁定', NOW(), NOW(), 0),
+       ('auth.login_max_failures', '5', 'number', 'auth', 1, 0, 1, '', 1, 88, '登录连续失败阈值', NOW(), NOW(), 0),
+       ('auth.login_lock_minutes', '15', 'number', 'auth', 1, 0, 1, '', 1, 87, '登录锁定时长（分钟）', NOW(), NOW(), 0),
+       ('task.cron_demo_enabled', 'false', 'bool', 'task', 1, 0, 1, '', 1, 80, '是否启用演示定时任务，默认关闭', NOW(), NOW(), 0),
+       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code"],"request_header":["authorization","auth","cookie","x-api-key","x-access-token","x-auth-token","x-token"],"request_body":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","cvv","cvc","cvv2","security_code","pin","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","x-access-token","x-auth-token","x-token","x-refresh-token","refresh-access-token","refresh-exp","cookie"],"response_body":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","cvv","cvc","cvv2","security_code","pin","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '请求日志脱敏字段配置', NOW(), NOW(), 0),
+       ('storage.active_driver', 'local', 'string', 'storage', 1, 0, 0, 'storage', 1, 90, '当前启用的文件存储驱动', NOW(), NOW(), 0),
+       ('storage.config', '{"local":{},"aliyun_oss":{},"s3":{},"signed_url_ttl_seconds":300,"max_file_size_mb":10,"allowed_mime_types":[]}', 'json', 'storage', 1, 1, 0, 'storage', 1, 80, '文件存储配置', NOW(), NOW(), 0)
 ON DUPLICATE KEY UPDATE `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_dict_type` (`type_code`, `is_system`, `status`, `sort`, `remark`, `created_at`,
@@ -308,13 +349,15 @@ SELECT `id`,
            WHEN `config_key` = 'auth.login_lock_minutes' THEN '登录失败锁定时长（分钟）'
            WHEN `config_key` = 'task.cron_demo_enabled' THEN '演示定时任务开关'
            WHEN `config_key` = 'audit.sensitive_fields' THEN '请求日志脱敏配置'
+           WHEN `config_key` = 'storage.active_driver' THEN '当前存储驱动'
+           WHEN `config_key` = 'storage.config' THEN '文件存储配置'
            ELSE ''
            END,
        NOW(),
        NOW()
 FROM `sys_config`
 WHERE `deleted_at` = 0
-  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
+  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config')
 ON DUPLICATE KEY UPDATE `config_name` = VALUES(`config_name`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_config_i18n` (`config_id`, `locale`, `config_name`, `created_at`, `updated_at`)
@@ -326,13 +369,15 @@ SELECT `id`,
            WHEN `config_key` = 'auth.login_lock_minutes' THEN 'Login Lock Minutes'
            WHEN `config_key` = 'task.cron_demo_enabled' THEN 'Cron Demo Enabled'
            WHEN `config_key` = 'audit.sensitive_fields' THEN 'Request Log Mask Config'
+           WHEN `config_key` = 'storage.active_driver' THEN 'Active Storage Driver'
+           WHEN `config_key` = 'storage.config' THEN 'File Storage Config'
            ELSE ''
            END,
        NOW(),
        NOW()
 FROM `sys_config`
 WHERE `deleted_at` = 0
-  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields')
+  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config')
 ON DUPLICATE KEY UPDATE `config_name` = VALUES(`config_name`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_dict_type_i18n` (`dict_type_id`, `locale`, `type_name`, `created_at`, `updated_at`)
@@ -469,7 +514,9 @@ INSERT INTO `api_group` (`id`, `pid`, `code`, `name`, `created_at`, `updated_at`
 VALUES (10, 0, 'system', '系统管理模块', NOW(), NOW()),
        (11, 10, 'sysConfig', '系统参数模块', NOW(), NOW()),
        (12, 10, 'sysDict', '系统字典模块', NOW(), NOW()),
-       (13, 0, 'task', '任务中心模块', NOW(), NOW())
+       (13, 0, 'task', '任务中心模块', NOW(), NOW()),
+       (14, 10, 'file', '文件资源模块', NOW(), NOW()),
+       (15, 3, 'session', '在线会话模块', NOW(), NOW())
 ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `updated_at` = VALUES(`updated_at`);
 
 COMMIT;

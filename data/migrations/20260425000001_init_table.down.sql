@@ -47,6 +47,8 @@ DROP TABLE IF EXISTS `admin_login_logs`;
 -- 删除casbin规则表
 DROP TABLE IF EXISTS `casbin_rule`;
 -- 删除文件上传表
+DROP TABLE IF EXISTS `upload_file_references`;
+DROP TABLE IF EXISTS `upload_file_folders`;
 DROP TABLE IF EXISTS `upload_files`;
 
 COMMIT;

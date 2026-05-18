@@ -231,6 +231,11 @@ func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error 
 	if err != nil {
 		return e.NewBusinessError(e.RoleCannotDelete)
 	}
+	affectedUserIDs, err := access.NewAffectedUsersResolver().Resolve(access.PermissionChangeScope{RoleIDs: []uint{id}})
+	if err != nil {
+		return e.NewBusinessError(e.RoleCannotDelete)
+	}
+	coordinator := access.NewPermissionSyncCoordinator()
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		role.SetDB(tx)
 
@@ -238,6 +243,16 @@ func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error 
 		roleMenuMap := model.NewRoleMenuMap()
 		roleMenuMap.SetDB(tx)
 		if err := roleMenuMap.DeleteWhere("role_id = ?", id); err != nil {
+			return err
+		}
+		adminUserRoleMap := model.NewAdminUserRoleMap()
+		adminUserRoleMap.SetDB(tx)
+		if err := adminUserRoleMap.DeleteWhere("role_id = ?", id); err != nil {
+			return err
+		}
+		deptRoleMap := model.NewDeptRoleMap()
+		deptRoleMap.SetDB(tx)
+		if err := deptRoleMap.DeleteWhere("role_id = ?", id); err != nil {
 			return err
 		}
 
@@ -252,11 +267,11 @@ func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error 
 				return err
 			}
 		}
-		return nil
+		return coordinator.SyncUsers(affectedUserIDs, tx)
 	})
 	if err != nil {
 		return e.NewBusinessError(e.RoleCannotDelete)
 	}
 	// 同步受影响用户的权限缓存
-	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByRoles([]uint{id})
+	return coordinator.ReloadPolicyCacheWithCode(e.RoleCannotDelete)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/cmd/bootstrapx"
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
+	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
@@ -44,6 +45,10 @@ func run() error {
 	}
 
 	registry := jobs.NewRegistry()
+	cronFallbackHandlers := 0
+	if cfg.Queue.ConsumeCronFallback {
+		cronFallbackHandlers = taskcron.RegisterQueueFallbackHandlers(registry, cfg)
+	}
 
 	server, mux, err := asynqx.NewServer(cfg, registry)
 	if err != nil {
@@ -53,6 +58,8 @@ func run() error {
 	log.Logger.Info("Async worker starting",
 		zap.Int("concurrency", cfg.Queue.Concurrency),
 		zap.Bool("strict_priority", cfg.Queue.StrictPriority),
+		zap.Bool("consume_cron_fallback", cfg.Queue.ConsumeCronFallback),
+		zap.Int("cron_fallback_handlers", cronFallbackHandlers),
 		zap.Any("queues", cfg.Queue.Queues))
 
 	if err := server.Run(mux); err != nil {

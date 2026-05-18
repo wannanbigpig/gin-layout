@@ -25,6 +25,8 @@ func (s *SysConfigService) MaskedAuditRequestBody(id uint, params *form.SysConfi
 		"value_type":       model.NormalizeValueType(params.ValueType),
 		"group_code":       strings.TrimSpace(params.GroupCode),
 		"is_sensitive":     params.IsSensitive,
+		"is_visible":       params.IsVisible,
+		"manage_tab":       strings.TrimSpace(params.ManageTab),
 		"status":           params.Status,
 		"sort":             params.Sort,
 		"remark":           strings.TrimSpace(params.Remark),

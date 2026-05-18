@@ -49,6 +49,13 @@ func storageBasePath(isPublic bool) string {
 	return filepath.Join(cfg.BasePath, "storage/private")
 }
 
+func storageBaseForDriver(driverName string, isPublic bool, bucket string) string {
+	if driverName == model.StorageDriverLocal {
+		return storageBasePath(isPublic)
+	}
+	return bucket
+}
+
 func normalizeUploadPath(path string) (string, error) {
 	normalized := strings.TrimSpace(path)
 	if normalized == "" {
@@ -125,6 +132,32 @@ func fillFileInfoFromUploadResult(fileInfo *utils.FileInfo, result *utils.FileIn
 	fileInfo.MimeType = result.MimeType
 	fileInfo.URL = buildFileURL(result.UUID)
 	fileInfo.Status = global.SUCCESS
+}
+
+func classifyUploadFileType(mimeType string) string {
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	switch {
+	case strings.HasPrefix(mimeType, "image/"):
+		return "image"
+	case mimeType == "application/pdf":
+		return "pdf"
+	case strings.Contains(mimeType, "word") || strings.Contains(mimeType, "wordprocessingml"):
+		return "word"
+	case strings.Contains(mimeType, "excel") || strings.Contains(mimeType, "spreadsheetml"):
+		return "excel"
+	case strings.Contains(mimeType, "powerpoint") || strings.Contains(mimeType, "presentation"):
+		return "ppt"
+	case strings.Contains(mimeType, "zip") || strings.Contains(mimeType, "rar") || strings.Contains(mimeType, "7z") || strings.Contains(mimeType, "gzip") || strings.Contains(mimeType, "tar"):
+		return "archive"
+	case strings.HasPrefix(mimeType, "text/") || mimeType == "application/json" || mimeType == "application/xml" || mimeType == "application/yaml":
+		return "text"
+	case strings.HasPrefix(mimeType, "audio/"):
+		return "audio"
+	case strings.HasPrefix(mimeType, "video/"):
+		return "video"
+	default:
+		return "other"
+	}
 }
 
 func cleanupStoredUpload(path string) {

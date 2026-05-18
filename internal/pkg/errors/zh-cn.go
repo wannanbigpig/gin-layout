@@ -19,6 +19,7 @@ var zhCNText = map[int]string{
 	FilePrivateAuthNeeded: "访问私有文件需要登录认证",
 	FileAccessDenied:      "无权访问该文件",
 	FileUploadPartialFail: "部分图片上传失败",
+	FileReferenced:        "文件存在引用，不能删除",
 
 	// 业务错误消息 20000-29999
 	UserPasswordWrong:       "用户密码错误",

@@ -9,6 +9,9 @@ func TestText(t *testing.T) {
 	if "OK" != errorText.Text(0) {
 		t.Error("text 返回 msg 不是预期的")
 	}
+	if "文件存在引用，不能删除" != errorText.Text(FileReferenced) {
+		t.Error("文件引用错误码文案不是预期的")
+	}
 
 	if "unknown error" != errorText.Text(1202389) {
 		t.Error("text 返回 msg 不是预期的")

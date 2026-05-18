@@ -50,6 +50,7 @@ func TestSysConfigDetailResourceKeepsSensitiveConfigValue(t *testing.T) {
 
 func TestMaskedAuditRequestBodyMasksSensitiveConfigValue(t *testing.T) {
 	isSensitive := uint8(1)
+	isVisible := uint8(0)
 	status := uint8(1)
 	raw := NewSysConfigService().MaskedAuditRequestBody(0, &form.SysConfigPayload{
 		ConfigKey:      "secret.demo",
@@ -57,6 +58,8 @@ func TestMaskedAuditRequestBodyMasksSensitiveConfigValue(t *testing.T) {
 		ConfigValue:    "plain-secret",
 		ValueType:      model.SysConfigValueTypeString,
 		IsSensitive:    &isSensitive,
+		IsVisible:      &isVisible,
+		ManageTab:      "audit_mask",
 		Status:         &status,
 	})
 
@@ -68,6 +71,12 @@ func TestMaskedAuditRequestBodyMasksSensitiveConfigValue(t *testing.T) {
 	}
 	if !strings.Contains(raw, maskedConfigValue) {
 		t.Fatalf("expected masked value in audit request body, got %s", raw)
+	}
+	if !strings.Contains(raw, `"is_visible":0`) {
+		t.Fatalf("expected is_visible in audit request body, got %s", raw)
+	}
+	if !strings.Contains(raw, `"manage_tab":"audit_mask"`) {
+		t.Fatalf("expected manage_tab in audit request body, got %s", raw)
 	}
 }
 
@@ -117,5 +126,42 @@ func TestResolveMutationConfigValuePreservesStringWhitespace(t *testing.T) {
 
 	if got != "  display value  " {
 		t.Fatalf("expected incoming whitespace to be preserved, got %q", got)
+	}
+}
+
+func TestBuildSysConfigDiffIncludesVisibilityFields(t *testing.T) {
+	before := map[string]any{
+		"config_key":       "audit.sensitive_fields",
+		"config_name_i18n": map[string]string{"zh-CN": "请求日志脱敏配置"},
+		"config_value":     "before",
+		"value_type":       model.SysConfigValueTypeJSON,
+		"group_code":       "audit",
+		"is_sensitive":     uint8(1),
+		"is_visible":       uint8(1),
+		"manage_tab":       "",
+		"status":           uint8(1),
+		"sort":             uint(95),
+		"remark":           "before",
+	}
+	after := map[string]any{
+		"config_key":       "audit.sensitive_fields",
+		"config_name_i18n": map[string]string{"zh-CN": "请求日志脱敏配置"},
+		"config_value":     maskedConfigValue,
+		"value_type":       model.SysConfigValueTypeJSON,
+		"group_code":       "audit",
+		"is_sensitive":     uint8(1),
+		"is_visible":       uint8(0),
+		"manage_tab":       "audit_mask",
+		"status":           uint8(1),
+		"sort":             uint(95),
+		"remark":           "before",
+	}
+
+	raw := buildSysConfigDiffJSON(before, after)
+	if !strings.Contains(raw, `"field":"is_visible"`) {
+		t.Fatalf("expected diff to include is_visible, got %s", raw)
+	}
+	if !strings.Contains(raw, `"field":"manage_tab"`) {
+		t.Fatalf("expected diff to include manage_tab, got %s", raw)
 	}
 }

@@ -70,6 +70,16 @@ type TaskRunResources struct {
 	UpdatedAt utils.FormatDate `json:"updated_at"`
 }
 
+// TaskRunEventResources 任务执行事件响应。
+type TaskRunEventResources struct {
+	ID        uint             `json:"id"`
+	RunID     uint             `json:"run_id"`
+	EventType string           `json:"event_type"`
+	Message   string           `json:"message"`
+	Meta      string           `json:"meta"`
+	CreatedAt utils.FormatDate `json:"created_at"`
+}
+
 // TaskRunTransformer 任务执行记录资源转换器。
 type TaskRunTransformer struct {
 	BaseResources[*model.TaskRun, *TaskRunResources]
@@ -124,6 +134,21 @@ func (r TaskRunTransformer) ToCollection(page, perPage int, total int64, data []
 		})
 	}
 	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
+}
+
+// TaskRunEventTransformer 任务执行事件转换器。
+type TaskRunEventTransformer struct {
+	BaseResources[*model.TaskRunEvent, *TaskRunEventResources]
+}
+
+func NewTaskRunEventTransformer() TaskRunEventTransformer {
+	return TaskRunEventTransformer{
+		BaseResources: BaseResources[*model.TaskRunEvent, *TaskRunEventResources]{
+			NewResource: func() *TaskRunEventResources {
+				return &TaskRunEventResources{}
+			},
+		},
+	}
 }
 
 // CronTaskStateResources 定时任务最近状态响应结构。

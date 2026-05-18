@@ -2,11 +2,14 @@ package form
 
 type SysConfigList struct {
 	Paginate
-	ConfigKey  string `form:"config_key" json:"config_key" binding:"omitempty,max=100"`
-	ConfigName string `form:"config_name" json:"config_name" binding:"omitempty,max=100"`
-	GroupCode  string `form:"group_code" json:"group_code" binding:"omitempty,max=60"`
-	ValueType  string `form:"value_type" json:"value_type" binding:"omitempty,oneof=string number bool json"`
-	Status     *uint8 `form:"status" json:"status" binding:"omitempty,oneof=0 1"`
+	ConfigKey     string `form:"config_key" json:"config_key" binding:"omitempty,max=100"`
+	ConfigName    string `form:"config_name" json:"config_name" binding:"omitempty,max=100"`
+	GroupCode     string `form:"group_code" json:"group_code" binding:"omitempty,max=60"`
+	ValueType     string `form:"value_type" json:"value_type" binding:"omitempty,oneof=string number bool json"`
+	Status        *uint8 `form:"status" json:"status" binding:"omitempty,oneof=0 1"`
+	IsVisible     *uint8 `form:"is_visible" json:"is_visible" binding:"omitempty,oneof=0 1"`
+	ManageTab     string `form:"manage_tab" json:"manage_tab" binding:"omitempty,max=60"`
+	IncludeHidden *uint8 `form:"include_hidden" json:"include_hidden" binding:"omitempty,oneof=0 1"`
 }
 
 type SysConfigPayload struct {
@@ -16,6 +19,8 @@ type SysConfigPayload struct {
 	ValueType      string            `form:"value_type" json:"value_type" label:"值类型" binding:"required,oneof=string number bool json"`
 	GroupCode      string            `form:"group_code" json:"group_code" label:"参数分组" binding:"omitempty,max=60"`
 	IsSensitive    *uint8            `form:"is_sensitive" json:"is_sensitive" label:"是否敏感" binding:"omitempty,oneof=0 1"`
+	IsVisible      *uint8            `form:"is_visible" json:"is_visible" label:"是否展示" binding:"omitempty,oneof=0 1"`
+	ManageTab      string            `form:"manage_tab" json:"manage_tab" label:"专属配置Tab" binding:"omitempty,max=60"`
 	Status         *uint8            `form:"status" json:"status" label:"状态" binding:"omitempty,oneof=0 1"`
 	Sort           uint              `form:"sort" json:"sort" label:"排序" binding:"omitempty"`
 	Remark         string            `form:"remark" json:"remark" label:"备注" binding:"omitempty,max=255"`

@@ -83,19 +83,23 @@ func (api CommonController) GetFile(c *gin.Context) {
 		checkAuth = false
 	}
 
-	// 获取文件路径（会自动检查权限）
-	filePath, err := commonService.GetFileAccessPath(fileUUID, checkAuth, currentUID)
+	// 获取文件访问方式（会自动检查权限）
+	access, err := commonService.GetFileAccessPath(fileUUID, checkAuth, currentUID)
 	if err != nil {
 		api.Err(c, err)
 		return
 	}
+	if access.RedirectURL != "" {
+		c.Redirect(302, access.RedirectURL)
+		return
+	}
 
 	// 检查文件是否存在
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	if _, err := os.Stat(access.LocalPath); os.IsNotExist(err) {
 		api.FailCode(c, errors.NotFound)
 		return
 	}
 
 	// 返回文件
-	c.File(filePath)
+	c.File(access.LocalPath)
 }

@@ -133,6 +133,30 @@ func TestApplyUpdateFieldsDefaultsCountryCodeWhenPhoneChanges(t *testing.T) {
 	}
 }
 
+func TestApplyUpdateFieldsClearsFullPhoneWhenPhoneCleared(t *testing.T) {
+	service := NewAdminUserService()
+	phoneNumber := ""
+	adminUserModel := &model.AdminUser{
+		CountryCode:     "+86",
+		PhoneNumber:     "13800138000",
+		FullPhoneNumber: "+8613800138000",
+	}
+
+	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
+		Id:          1,
+		PhoneNumber: &phoneNumber,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if adminUserModel.PhoneNumber != "" {
+		t.Fatalf("expected phone number to be cleared, got %q", adminUserModel.PhoneNumber)
+	}
+	if adminUserModel.FullPhoneNumber != "" {
+		t.Fatalf("expected full phone number to be cleared, got %q", adminUserModel.FullPhoneNumber)
+	}
+}
+
 func TestApplyUpdateFieldsRejectsSuperAdminPasswordChange(t *testing.T) {
 	service := NewAdminUserService()
 	password := "new-password"

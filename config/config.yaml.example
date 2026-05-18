@@ -73,6 +73,7 @@ queue:
   namespace: go_layout
   concurrency: 8
   strict_priority: false
+  consume_cron_fallback: false # true=worker 兜底消费历史误入 Asynq 的非高风险 cron 任务
   queues:
     critical: 4
     default: 2

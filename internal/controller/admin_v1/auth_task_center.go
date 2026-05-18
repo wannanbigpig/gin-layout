@@ -56,6 +56,21 @@ func (api TaskCenterController) RunDetail(c *gin.Context) {
 	api.Success(c, detail)
 }
 
+// RunEvents 查询任务执行事件列表。
+func (api TaskCenterController) RunEvents(c *gin.Context) {
+	query := form.NewTaskRunEventsQuery()
+	if err := validator.CheckQueryParams(c, &query); err != nil {
+		return
+	}
+
+	events, err := taskcenter.NewTaskCenterService().TaskRunEvents(query.RunID)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, events)
+}
+
 // CronStateList 分页查询定时任务最近状态列表。
 func (api TaskCenterController) CronStateList(c *gin.Context) {
 	params := form.NewCronTaskStateListQuery()

@@ -164,6 +164,30 @@ func TestRecorderFinishCancelWritesOperatorMeta(t *testing.T) {
 	}
 }
 
+func TestTaskRunEventsReturnsCreatedAtAscending(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	events := []model.TaskRunEvent{
+		{RunID: 7, EventType: model.TaskEventStart, Message: "start"},
+		{RunID: 7, EventType: model.TaskEventSuccess, Message: "success"},
+	}
+	for i := range events {
+		if err := db.Create(&events[i]).Error; err != nil {
+			t.Fatalf("create event failed: %v", err)
+		}
+	}
+
+	result, err := NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db}).TaskRunEvents(7)
+	if err != nil {
+		t.Fatalf("TaskRunEvents returned error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(result))
+	}
+	if result[0].EventType != model.TaskEventStart || result[1].EventType != model.TaskEventSuccess {
+		t.Fatalf("unexpected event order: %#v", result)
+	}
+}
+
 func newTaskCenterTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 

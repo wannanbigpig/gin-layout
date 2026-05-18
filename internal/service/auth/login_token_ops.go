@@ -57,7 +57,13 @@ func (s *LoginService) isPrincipalValid(claims *token.AdminCustomClaims) bool {
 	}
 	inBlacklist, err := s.blacklistLookupFn(claims.ID)
 	if err == nil {
-		return !inBlacklist
+		if inBlacklist {
+			return false
+		}
+		if s.mysqlReadyFn() {
+			return !s.tokenRevokedLookupFn(claims.ID)
+		}
+		return true
 	}
 
 	if !s.mysqlReadyFn() {

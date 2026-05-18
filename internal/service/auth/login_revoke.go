@@ -33,34 +33,18 @@ func (s *LoginService) isTokenRevokedInLog(jwtId string) bool {
 	return loginLog.IsRevoked == model.IsRevokedYes
 }
 
-func (s *LoginService) revokeTokenInLogAsync(jwtIds []string, revokedCode uint8, revokedReason string) {
-	if len(jwtIds) == 0 {
-		return
-	}
-
-	go func(ids []string) {
-		defer func() {
-			if r := recover(); r != nil {
-				logRevokeError("异步更新 token 撤销状态 panic", zap.Any("recover", r))
-			}
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), revokeLogAsyncTimeout)
-		defer cancel()
-
-		if err := s.markTokensRevoked(ctx, ids, revokedCode, revokedReason); err != nil {
-			logRevokeError("异步更新登录日志 token 撤销状态失败", zap.Error(err), zap.Strings("jwt_ids", ids))
-		}
-	}(append([]string(nil), jwtIds...))
-}
-
 func (s *LoginService) markTokensRevoked(ctx context.Context, jwtIds []string, revokedCode uint8, revokedReason string) error {
 	now := time.Now()
 	revokedAt := utils.FormatDate{Time: now}
 
 	loginLog := model.NewAdminLoginLogs()
-	db, err := loginLog.GetDB()
-	if err != nil {
-		return err
+	db := s.loginLogDB
+	if db == nil {
+		var err error
+		db, err = loginLog.GetDB()
+		if err != nil {
+			return err
+		}
 	}
 	if ctx != nil {
 		db = db.WithContext(ctx)

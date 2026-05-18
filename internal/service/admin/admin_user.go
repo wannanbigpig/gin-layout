@@ -55,6 +55,18 @@ func (s *AdminUserService) revokeUserTokens(tx *gorm.DB, userID uint, revokedCod
 	}
 }
 
+type userTokenRevocation struct {
+	userID        uint
+	revokedCode   uint8
+	revokedReason string
+}
+
+func (s *AdminUserService) revokeUserTokensAfterCommit(items []userTokenRevocation) {
+	for _, item := range items {
+		s.revokeUserTokens(nil, item.userID, item.revokedCode, item.revokedReason)
+	}
+}
+
 // GetUserInfo 获取用户信息。
 func (s *AdminUserService) GetUserInfo(id uint) (*resources.AdminUserResources, error) {
 	adminUsersModel := model.NewAdminUsers()

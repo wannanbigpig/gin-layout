@@ -36,6 +36,15 @@ var sysConfigDiffRules = []auditdiff.FieldRule{
 		},
 	},
 	{
+		Field: "is_visible",
+		Label: "系统参数页展示",
+		ValueLabels: map[string]string{
+			"0": "否",
+			"1": "是",
+		},
+	},
+	{Field: "manage_tab", Label: "专属配置Tab"},
+	{
 		Field: "status",
 		Label: "状态",
 		ValueLabels: map[string]string{
@@ -152,6 +161,8 @@ func snapshotConfig(config *model.SysConfig) (map[string]any, error) {
 		"value_type":       model.NormalizeValueType(config.ValueType),
 		"group_code":       config.GroupCode,
 		"is_sensitive":     config.IsSensitive,
+		"is_visible":       config.IsVisible,
+		"manage_tab":       config.ManageTab,
 		"status":           config.Status,
 		"sort":             config.Sort,
 		"remark":           config.Remark,

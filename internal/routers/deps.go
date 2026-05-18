@@ -13,6 +13,7 @@ type ControllerDeps struct {
 	Demo       *controller.DemoController
 	Login      *admin_v1.LoginController
 	Common     *admin_v1.CommonController
+	Dashboard  *admin_v1.DashboardController
 	AdminUser  *admin_v1.AdminUserController
 	Api        *admin_v1.ApiController
 	Menu       *admin_v1.MenuController
@@ -20,6 +21,9 @@ type ControllerDeps struct {
 	Dept       *admin_v1.DeptController
 	SysConfig  *admin_v1.SysConfigController
 	SysDict    *admin_v1.SysDictController
+	Storage    *admin_v1.StorageConfigController
+	File       *admin_v1.FileResourceController
+	Session    *admin_v1.SessionController
 	RequestLog *admin_v1.RequestLogController
 	LoginLog   *admin_v1.AdminLoginLogController
 	TaskCenter *admin_v1.TaskCenterController
@@ -36,6 +40,7 @@ func DefaultControllerDeps() *ControllerDeps {
 			Demo:       controller.NewDemoController(),
 			Login:      admin_v1.NewLoginController(),
 			Common:     admin_v1.NewCommonController(),
+			Dashboard:  admin_v1.NewDashboardController(),
 			AdminUser:  admin_v1.NewAdminUserController(),
 			Api:        admin_v1.NewApiController(),
 			Menu:       admin_v1.NewMenuController(),
@@ -43,6 +48,9 @@ func DefaultControllerDeps() *ControllerDeps {
 			Dept:       admin_v1.NewDeptController(),
 			SysConfig:  admin_v1.NewSysConfigController(),
 			SysDict:    admin_v1.NewSysDictController(),
+			Storage:    admin_v1.NewStorageConfigController(),
+			File:       admin_v1.NewFileResourceController(),
+			Session:    admin_v1.NewSessionController(),
 			RequestLog: admin_v1.NewRequestLogController(),
 			LoginLog:   admin_v1.NewAdminLoginLogController(),
 			TaskCenter: admin_v1.NewTaskCenterController(),
@@ -65,6 +73,9 @@ func normalizeControllerDeps(deps *ControllerDeps) *ControllerDeps {
 	if deps.Common == nil {
 		deps.Common = defaultDeps.Common
 	}
+	if deps.Dashboard == nil {
+		deps.Dashboard = defaultDeps.Dashboard
+	}
 	if deps.AdminUser == nil {
 		deps.AdminUser = defaultDeps.AdminUser
 	}
@@ -85,6 +96,15 @@ func normalizeControllerDeps(deps *ControllerDeps) *ControllerDeps {
 	}
 	if deps.SysDict == nil {
 		deps.SysDict = defaultDeps.SysDict
+	}
+	if deps.Storage == nil {
+		deps.Storage = defaultDeps.Storage
+	}
+	if deps.File == nil {
+		deps.File = defaultDeps.File
+	}
+	if deps.Session == nil {
+		deps.Session = defaultDeps.Session
 	}
 	if deps.RequestLog == nil {
 		deps.RequestLog = defaultDeps.RequestLog
