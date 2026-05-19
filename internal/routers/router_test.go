@@ -32,6 +32,11 @@ func TestSetRoutersRegistersApiMetadata(t *testing.T) {
 func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	routes := CollectRouteMeta(AppRouteTree())
 
+	dashboardStatisticsCode := utils.MD5(http.MethodGet + "_/admin/v1/dashboard/statistics")
+	if route, ok := routes[dashboardStatisticsCode]; !ok || route.Auth != AuthModeLogin {
+		t.Fatalf("missing or invalid dashboard statistics route: %#v", route)
+	}
+
 	checkTokenCode := utils.MD5(http.MethodGet + "_/admin/v1/auth/check-token")
 	if route, ok := routes[checkTokenCode]; !ok || route.Auth != AuthModeLogin {
 		t.Fatalf("missing or invalid auth check-token route: %#v", route)
@@ -56,6 +61,36 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	if route, ok := routes[fileDestroyCode]; !ok || route.Auth != AuthModeAuth {
 		t.Fatalf("missing or invalid file destroy route: %#v", route)
 	}
+
+	fileBatchDeleteCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/batch-delete")
+	if route, ok := routes[fileBatchDeleteCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid file batch-delete route: %#v", route)
+	}
+
+	multipartInitCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/upload/multipart/init")
+	if route, ok := routes[multipartInitCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid multipart init route: %#v", route)
+	}
+
+	multipartCompleteCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/upload/multipart/complete")
+	if route, ok := routes[multipartCompleteCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid multipart complete route: %#v", route)
+	}
+
+	multipartAbortCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/upload/multipart/abort")
+	if route, ok := routes[multipartAbortCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid multipart abort route: %#v", route)
+	}
+
+	notificationListCode := utils.MD5(http.MethodGet + "_/admin/v1/system/notification/list")
+	if route, ok := routes[notificationListCode]; !ok || route.Auth != AuthModeLogin {
+		t.Fatalf("missing or invalid notification list route: %#v", route)
+	}
+
+	notificationWSCode := utils.MD5(http.MethodGet + "_/admin/v1/system/notification/ws")
+	if route, ok := routes[notificationWSCode]; !ok || route.Auth != AuthModeNone {
+		t.Fatalf("missing or invalid notification ws route: %#v", route)
+	}
 }
 
 func TestSetRoutersRegistersCriticalRoutes(t *testing.T) {
@@ -70,6 +105,8 @@ func TestSetRoutersRegistersCriticalRoutes(t *testing.T) {
 
 	required := []string{
 		http.MethodGet + " /ping",
+		http.MethodGet + " /admin/v1/dashboard/overview",
+		http.MethodGet + " /admin/v1/dashboard/statistics",
 		http.MethodGet + " /admin/v1/admin-user/list",
 		http.MethodPost + " /admin/v1/permission/update",
 		http.MethodGet + " /admin/v1/menu/list",
@@ -77,6 +114,14 @@ func TestSetRoutersRegistersCriticalRoutes(t *testing.T) {
 		http.MethodGet + " /admin/v1/department/list",
 		http.MethodGet + " /admin/v1/log/request/list",
 		http.MethodGet + " /admin/v1/log/login/list",
+		http.MethodGet + " /admin/v1/system/notification/ws",
+		http.MethodGet + " /admin/v1/system/notification/list",
+		http.MethodGet + " /admin/v1/system/notification/unread-count",
+		http.MethodPost + " /admin/v1/system/notification/read",
+		http.MethodPost + " /admin/v1/system/notification/read-all",
+		http.MethodPost + " /admin/v1/system/file/upload/multipart/init",
+		http.MethodPost + " /admin/v1/system/file/upload/multipart/complete",
+		http.MethodPost + " /admin/v1/system/file/upload/multipart/abort",
 	}
 
 	for _, route := range required {

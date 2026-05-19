@@ -2,6 +2,7 @@ package filestorage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -86,6 +87,26 @@ func (d *LocalDriver) URL(bucket, objectKey string, _ bool) string {
 
 func (d *LocalDriver) SignedURL(_ context.Context, bucket, objectKey string, _ time.Duration) (string, error) {
 	return d.URL(bucket, objectKey, false), nil
+}
+
+func (d *LocalDriver) PresignPutObject(_ context.Context, _, _ string, _ string, _ time.Duration) (string, error) {
+	return "", errors.New("local driver does not support presigned PUT upload")
+}
+
+func (d *LocalDriver) InitMultipartUpload(_ context.Context, _ MultipartUploadInput) (MultipartUploadResult, error) {
+	return MultipartUploadResult{}, errors.New("local driver does not support multipart upload")
+}
+
+func (d *LocalDriver) PresignMultipartPart(_ context.Context, _ MultipartPartInput) (MultipartPartResult, error) {
+	return MultipartPartResult{}, errors.New("local driver does not support multipart upload")
+}
+
+func (d *LocalDriver) CompleteMultipartUpload(_ context.Context, _, _, _ string, _ []CompletePartInfo) error {
+	return errors.New("local driver does not support multipart upload")
+}
+
+func (d *LocalDriver) AbortMultipartUpload(_ context.Context, _, _, _ string) error {
+	return errors.New("local driver does not support multipart upload")
 }
 
 func (d *LocalDriver) resolve(bucket, objectKey string) (string, error) {

@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -301,7 +302,7 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	url, err := driver.SignedURL(context.Background(), bucket, objectKey, ttl)
+	url, err := driver.PresignPutObject(context.Background(), bucket, objectKey, params.MimeType, ttl)
 	if err != nil {
 		return nil, err
 	}
@@ -388,14 +389,23 @@ func (s *FileResourceService) CompleteDirectUpload(params *form.FileUploadComple
 			return nil, err
 		}
 	}
+	objectKey := firstNonEmpty(params.ObjectKey, object.ObjectKey)
+	bucket := firstNonEmpty(params.Bucket, object.Bucket)
+	size := params.Size
+	if size == 0 {
+		size = object.Size
+	}
+	hash := firstNonEmpty(params.Hash, object.Hash)
+	mimeType := firstNonEmpty(params.MimeType, object.MimeType)
+	etag := firstNonEmpty(params.ETag, object.ETag)
 	fileUUID := params.UUID
 	if fileUUID == "" {
 		fileUUID = strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
 	displayName := firstNonEmpty(params.DisplayName, params.OriginName)
-	fileType := params.FileType
-	if fileType == "" {
-		fileType = classifyUploadFileType(params.MimeType)
+	fileType, err := resolveUploadFileType(params.FileType, mimeType)
+	if err != nil {
+		return nil, err
 	}
 	uploadFile := &model.UploadFiles{
 		UID:           uid,
@@ -403,21 +413,21 @@ func (s *FileResourceService) CompleteDirectUpload(params *form.FileUploadComple
 		LogicalPath:   logicalPath,
 		DisplayName:   displayName,
 		OriginName:    params.OriginName,
-		Name:          firstNonEmpty(params.Name, filepath.Base(params.ObjectKey)),
-		Path:          params.ObjectKey,
-		Size:          params.Size,
-		Ext:           firstNonEmpty(params.Ext, filepath.Ext(params.OriginName)),
-		Hash:          params.Hash,
+		Name:          firstNonEmpty(params.Name, filepath.Base(objectKey)),
+		Path:          objectKey,
+		Size:          size,
+		Ext:           firstNonEmpty(params.Ext, filepath.Ext(params.OriginName), filepath.Ext(objectKey)),
+		Hash:          hash,
 		UUID:          fileUUID,
-		MimeType:      params.MimeType,
+		MimeType:      mimeType,
 		FileType:      fileType,
 		IsPublic:      params.IsPublic,
 		StorageDriver: storageDriver,
-		StorageBase:   params.Bucket,
-		Bucket:        params.Bucket,
-		StoragePath:   params.ObjectKey,
-		ObjectKey:     params.ObjectKey,
-		ETag:          params.ETag,
+		StorageBase:   bucket,
+		Bucket:        bucket,
+		StoragePath:   objectKey,
+		ObjectKey:     objectKey,
+		ETag:          etag,
 		StorageStatus: model.StorageStatusStored,
 		UploadSource:  model.UploadSourceDirect,
 		UploadScene:   params.UploadScene,
@@ -738,4 +748,333 @@ func updateLogicalPathSnapshots(tx *gorm.DB, folderID uint, oldPath, newPath str
 func buildUploadObjectKey(filename string) string {
 	ext := filepath.Ext(filename)
 	return "uploads/" + time.Now().Format("20060102") + "/" + strings.ReplaceAll(uuid.NewString(), "-", "") + ext
+}
+
+// MultipartInit 分片上传初始化。
+func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*resources.MultipartInitResource, error) {
+	_, cfg, activeDriver, err := s.activeStorageDriver(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	if params.Driver != "" {
+		activeDriver = params.Driver
+	}
+	if activeDriver == model.StorageDriverLocal {
+		return nil, fmt.Errorf("local storage does not support multipart upload")
+	}
+	bucket := bucketForDriver(activeDriver, cfg, params.IsPublic)
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	if object, err := findReusableFileObject(db, activeDriver, bucket, params.Hash); err == nil {
+		return &resources.MultipartInitResource{
+			UploadID:        "",
+			Bucket:          object.Bucket,
+			ObjectKey:       object.ObjectKey,
+			Parts:           nil,
+			Reuse:           true,
+			FileObjectID:    object.ID,
+			Size:            object.Size,
+			Hash:            object.Hash,
+			MimeType:        object.MimeType,
+			ETag:            object.ETag,
+			ObjectStatus:    object.Status,
+			CompletePayload: buildMultipartCompletePayload(params, activeDriver, object.Bucket, object.ObjectKey, "", true, object),
+		}, nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	driver, _, err := s.storageDriverByName(context.Background(), activeDriver)
+	if err != nil {
+		return nil, err
+	}
+	objectKey := buildUploadObjectKey(params.OriginName)
+	contentType := params.MimeType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	partCount := params.PartCount
+	if partCount <= 0 {
+		partCount = 1
+	}
+	initResult, err := driver.InitMultipartUpload(context.Background(), filestorage.MultipartUploadInput{
+		Bucket:      bucket,
+		ObjectKey:   objectKey,
+		ContentType: contentType,
+		PartCount:   partCount,
+	})
+	if err != nil {
+		return nil, err
+	}
+	parts := make([]*resources.MultipartPartResource, 0, partCount)
+	for i := 1; i <= partCount; i++ {
+		partResult, err := driver.PresignMultipartPart(context.Background(), filestorage.MultipartPartInput{
+			Bucket:     bucket,
+			ObjectKey:  objectKey,
+			UploadID:   initResult.UploadID,
+			PartNumber: int32(i),
+		})
+		if err != nil {
+			_ = driver.AbortMultipartUpload(context.Background(), bucket, objectKey, initResult.UploadID)
+			return nil, err
+		}
+		parts = append(parts, &resources.MultipartPartResource{
+			PartNumber: partResult.PartNumber,
+			UploadURL:  partResult.UploadURL,
+			Headers:    partResult.Headers,
+		})
+	}
+	return &resources.MultipartInitResource{
+		UploadID:        initResult.UploadID,
+		Bucket:          initResult.Bucket,
+		ObjectKey:       initResult.ObjectKey,
+		Parts:           parts,
+		Reuse:           false,
+		Size:            uint(params.Size),
+		Hash:            params.Hash,
+		MimeType:        params.MimeType,
+		CompletePayload: buildMultipartCompletePayload(params, activeDriver, initResult.Bucket, initResult.ObjectKey, initResult.UploadID, false, nil),
+	}, nil
+}
+
+// MultipartComplete 分片上传完成。
+func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComplete, uid uint) (*resources.FileResourceResources, error) {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	storageDriver := firstNonEmpty(params.Driver)
+	var object *model.UploadFileObject
+	if shouldResolveMultipartReuse(params) {
+		object, err = s.resolveReusableMultipartObject(db, params, storageDriver)
+		if err != nil {
+			return nil, err
+		}
+		if storageDriver == "" {
+			storageDriver = object.StorageDriver
+		}
+	} else {
+		if storageDriver == "" {
+			return nil, fmt.Errorf("storage driver is required")
+		}
+		if strings.TrimSpace(params.UploadID) == "" {
+			return nil, fmt.Errorf("upload_id is required")
+		}
+		if strings.TrimSpace(params.Bucket) == "" {
+			return nil, fmt.Errorf("bucket is required")
+		}
+		if strings.TrimSpace(params.ObjectKey) == "" {
+			return nil, fmt.Errorf("object_key is required")
+		}
+		completeParts, err := validateMultipartCompleteParts(params.Parts)
+		if err != nil {
+			return nil, err
+		}
+		driver, _, err := s.storageDriverByName(context.Background(), storageDriver)
+		if err != nil {
+			return nil, err
+		}
+		if err := driver.CompleteMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID, completeParts); err != nil {
+			return nil, err
+		}
+		object, _, err = ensureFileObject(db, uploadFileObjectInput{
+			StorageDriver: storageDriver,
+			StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, params.Bucket),
+			Bucket:        params.Bucket,
+			StoragePath:   params.ObjectKey,
+			ObjectKey:     params.ObjectKey,
+			Size:          params.Size,
+			Hash:          params.Hash,
+			MimeType:      params.MimeType,
+			ETag:          "",
+			Status:        model.StorageStatusStored,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	logicalPath, err := s.folderLogicalPath(params.FolderID)
+	if err != nil {
+		return nil, err
+	}
+	bucket := firstNonEmpty(params.Bucket, object.Bucket)
+	objectKey := firstNonEmpty(params.ObjectKey, object.ObjectKey)
+	size := params.Size
+	if size == 0 {
+		size = object.Size
+	}
+	hash := firstNonEmpty(params.Hash, object.Hash)
+	mimeType := firstNonEmpty(params.MimeType, object.MimeType)
+	fileUUID := strings.ReplaceAll(uuid.NewString(), "-", "")
+	displayName := params.OriginName
+	fileType, err := resolveUploadFileType(params.FileType, mimeType)
+	if err != nil {
+		return nil, err
+	}
+	uploadFile := &model.UploadFiles{
+		UID:           uid,
+		FolderID:      params.FolderID,
+		LogicalPath:   logicalPath,
+		DisplayName:   displayName,
+		OriginName:    params.OriginName,
+		Name:          filepath.Base(objectKey),
+		Path:          objectKey,
+		Size:          size,
+		Ext:           filepath.Ext(params.OriginName),
+		Hash:          hash,
+		UUID:          fileUUID,
+		MimeType:      mimeType,
+		FileType:      fileType,
+		IsPublic:      params.IsPublic,
+		StorageDriver: storageDriver,
+		StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, bucket),
+		Bucket:        bucket,
+		StoragePath:   objectKey,
+		ObjectKey:     objectKey,
+		ETag:          "",
+		StorageStatus: model.StorageStatusStored,
+		UploadSource:  model.UploadSourceDirect,
+		UploadStatus:  model.UploadStatusUploaded,
+	}
+	applyObjectToUploadFile(uploadFile, object)
+	if err := db.Create(uploadFile).Error; err != nil {
+		return nil, err
+	}
+	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
+	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
+}
+
+func resolveUploadFileType(explicit, mimeType string) (string, error) {
+	fileType := strings.TrimSpace(explicit)
+	if fileType == "" {
+		return classifyUploadFileType(mimeType), nil
+	}
+	if strings.Contains(fileType, ",") {
+		return "", fmt.Errorf("file_type must be a single value")
+	}
+	if !isAllowedUploadFileType(fileType) {
+		return "", fmt.Errorf("unsupported file_type: %s", fileType)
+	}
+	return fileType, nil
+}
+
+func isAllowedUploadFileType(fileType string) bool {
+	switch fileType {
+	case "image", "pdf", "word", "excel", "ppt", "archive", "text", "audio", "video", "other":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildMultipartCompletePayload(params *form.FileMultipartInit, driver, bucket, objectKey, uploadID string, reuse bool, object *model.UploadFileObject) map[string]any {
+	fileObjectID := uint(0)
+	size := uint(params.Size)
+	hash := params.Hash
+	mimeType := params.MimeType
+	etag := ""
+	if object != nil {
+		fileObjectID = object.ID
+		size = object.Size
+		hash = object.Hash
+		mimeType = object.MimeType
+		etag = object.ETag
+	}
+	return map[string]any{
+		"upload_id":      uploadID,
+		"reuse":          reuse,
+		"file_object_id": fileObjectID,
+		"bucket":         bucket,
+		"object_key":     objectKey,
+		"origin_name":    params.OriginName,
+		"size":           size,
+		"hash":           hash,
+		"mime_type":      mimeType,
+		"is_public":      params.IsPublic,
+		"driver":         driver,
+		"etag":           etag,
+		"parts":          []any{},
+	}
+}
+
+func shouldResolveMultipartReuse(params *form.FileMultipartComplete) bool {
+	if params == nil {
+		return false
+	}
+	if params.Reuse || params.FileObjectID > 0 {
+		return true
+	}
+	// 兼容现有前端 reuse 分支：multipart init 命中已存在对象时，complete 只回传 bucket/object_key/hash/driver，
+	// 不会再显式带 reuse/file_object_id/upload_id/parts。
+	return strings.TrimSpace(params.UploadID) == "" && len(params.Parts) == 0 && strings.TrimSpace(params.Hash) != ""
+}
+
+func (s *FileResourceService) resolveReusableMultipartObject(db *gorm.DB, params *form.FileMultipartComplete, storageDriver string) (*model.UploadFileObject, error) {
+	if params.FileObjectID > 0 {
+		object, err := findFileObjectByID(db, params.FileObjectID)
+		if err != nil {
+			return nil, err
+		}
+		if storageDriver != "" && object.StorageDriver != storageDriver {
+			return nil, fmt.Errorf("file object storage driver mismatch")
+		}
+		return object, nil
+	}
+	if storageDriver == "" {
+		return nil, fmt.Errorf("storage driver is required")
+	}
+	object, err := findReusableFileObject(db, storageDriver, params.Bucket, params.Hash)
+	if err != nil {
+		return nil, err
+	}
+	return object, nil
+}
+
+func validateMultipartCompleteParts(parts []form.MultipartCompletePart) ([]filestorage.CompletePartInfo, error) {
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("parts is required")
+	}
+	completeParts := make([]filestorage.CompletePartInfo, 0, len(parts))
+	seen := make(map[int32]struct{}, len(parts))
+	for _, part := range parts {
+		etag := strings.TrimSpace(part.ETag)
+		if part.PartNumber <= 0 {
+			return nil, fmt.Errorf("part_number must be greater than 0")
+		}
+		if etag == "" {
+			return nil, fmt.Errorf("etag is required")
+		}
+		if _, ok := seen[part.PartNumber]; ok {
+			return nil, fmt.Errorf("duplicate part_number: %d", part.PartNumber)
+		}
+		seen[part.PartNumber] = struct{}{}
+		completeParts = append(completeParts, filestorage.CompletePartInfo{
+			PartNumber: part.PartNumber,
+			ETag:       etag,
+		})
+	}
+	sort.Slice(completeParts, func(i, j int) bool {
+		return completeParts[i].PartNumber < completeParts[j].PartNumber
+	})
+	for i, part := range completeParts {
+		expected := int32(i + 1)
+		if part.PartNumber != expected {
+			return nil, fmt.Errorf("part_number must be continuous from 1")
+		}
+	}
+	return completeParts, nil
+}
+
+// MultipartAbort 分片上传中止。
+func (s *FileResourceService) MultipartAbort(params *form.FileMultipartAbort) error {
+	storageDriver := firstNonEmpty(params.Driver)
+	if storageDriver == "" {
+		return fmt.Errorf("storage driver is required")
+	}
+	driver, _, err := s.storageDriverByName(context.Background(), storageDriver)
+	if err != nil {
+		return err
+	}
+	return driver.AbortMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID)
 }

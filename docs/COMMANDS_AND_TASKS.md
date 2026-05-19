@@ -440,6 +440,7 @@ queue:
     critical: 4
     default: 2
     audit: 2
+    export: 2
     low: 1
   audit_max_retry: 3
   audit_timeout_seconds: 10
@@ -464,6 +465,7 @@ queue:
     critical: 5
     default: 3
     audit: 2
+    export: 2
     low: 1
 ```
 

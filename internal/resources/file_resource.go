@@ -237,3 +237,26 @@ func buildFileResourceURL(uuid string) string {
 	}
 	return baseURL + "/admin/v1/file/" + uuid
 }
+
+// MultipartPartResource 分片签名结果。
+type MultipartPartResource struct {
+	PartNumber int32             `json:"part_number"`
+	UploadURL  string            `json:"upload_url"`
+	Headers    map[string]string `json:"headers,omitempty"`
+}
+
+// MultipartInitResource 分片上传初始化结果。
+type MultipartInitResource struct {
+	UploadID        string                   `json:"upload_id"`
+	Bucket          string                   `json:"bucket"`
+	ObjectKey       string                   `json:"object_key"`
+	Parts           []*MultipartPartResource `json:"parts"`
+	Reuse           bool                     `json:"reuse"`
+	FileObjectID    uint                     `json:"file_object_id"`
+	Size            uint                     `json:"size"`
+	Hash            string                   `json:"hash"`
+	MimeType        string                   `json:"mime_type"`
+	ETag            string                   `json:"etag"`
+	ObjectStatus    string                   `json:"object_status"`
+	CompletePayload map[string]any           `json:"complete_payload,omitempty"`
+}

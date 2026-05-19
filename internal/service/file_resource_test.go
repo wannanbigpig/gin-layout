@@ -78,6 +78,70 @@ func TestFileResourceDeleteReturnsReferencedError(t *testing.T) {
 	}
 }
 
+func TestFileResourceBatchDeleteReturnsStatsAndReferenceFailures(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	deletable := model.UploadFiles{
+		OriginName:    "deletable.txt",
+		UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()),
+		StorageDriver: model.StorageDriverLocal,
+		StorageStatus: model.StorageStatusStored,
+	}
+	if err := db.Create(&deletable).Error; err != nil {
+		t.Fatalf("create deletable file failed: %v", err)
+	}
+
+	referenced := model.UploadFiles{
+		OriginName:    "referenced.txt",
+		UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()+1),
+		StorageDriver: model.StorageDriverLocal,
+		StorageStatus: model.StorageStatusStored,
+	}
+	if err := db.Create(&referenced).Error; err != nil {
+		t.Fatalf("create referenced file failed: %v", err)
+	}
+	if err := db.Create(&model.UploadFileReference{
+		FileID:     referenced.ID,
+		UUID:       referenced.UUID,
+		OwnerType:  "admin_user",
+		OwnerID:    1,
+		OwnerField: "avatar",
+	}).Error; err != nil {
+		t.Fatalf("create referenced relation failed: %v", err)
+	}
+
+	result, err := service.BatchDelete([]uint{deletable.ID, referenced.ID}, 9, "batch")
+	if err != nil {
+		t.Fatalf("batch delete failed: %v", err)
+	}
+	if result.Total != 2 || result.Deleted != 1 || result.Failed != 1 {
+		t.Fatalf("unexpected batch delete stats: %#v", result)
+	}
+	if len(result.Failures) != 1 || result.Failures[0].ID != referenced.ID {
+		t.Fatalf("unexpected batch delete failures: %#v", result.Failures)
+	}
+	if result.Failures[0].Code != e.FileReferenced || len(result.Failures[0].References) != 1 {
+		t.Fatalf("unexpected failure detail: %#v", result.Failures[0])
+	}
+
+	var deletableStored model.UploadFiles
+	if err := db.Unscoped().First(&deletableStored, deletable.ID).Error; err != nil {
+		t.Fatalf("query deletable file failed: %v", err)
+	}
+	if deletableStored.DeletedAt == 0 || deletableStored.DeletedBy != 9 || deletableStored.DeletedReason != "batch" {
+		t.Fatalf("expected deletable file to be soft deleted, got %#v", deletableStored)
+	}
+
+	var referencedStored model.UploadFiles
+	if err := db.First(&referencedStored, referenced.ID).Error; err != nil {
+		t.Fatalf("query referenced file failed: %v", err)
+	}
+	if referencedStored.DeletedAt != 0 {
+		t.Fatalf("expected referenced file to remain undeleted, got deleted_at=%d", referencedStored.DeletedAt)
+	}
+}
+
 func currentConfigFileResourceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -319,6 +383,285 @@ func TestFileResourceUploadCredentialReturnsReuse(t *testing.T) {
 	}
 }
 
+func TestFileResourceCompleteDirectUploadRejectsMultiFileType(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	object := model.UploadFileObject{
+		StorageDriver: model.StorageDriverS3,
+		Bucket:        "assets",
+		StoragePath:   "uploads/reuse.pdf",
+		ObjectKey:     "uploads/reuse.pdf",
+		Size:          12,
+		Hash:          strings.Repeat("f", 64),
+		MimeType:      "application/pdf",
+		Status:        model.StorageStatusStored,
+	}
+	if err := db.Create(&object).Error; err != nil {
+		t.Fatalf("create object failed: %v", err)
+	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
+		},
+	})
+
+	_, err := service.CompleteDirectUpload(&form.FileUploadComplete{
+		Reuse:         true,
+		FileObjectID:  object.ID,
+		OriginName:    "reuse.pdf",
+		FileType:      "pdf,word",
+		StorageDriver: model.StorageDriverS3,
+	}, 1)
+	if err == nil {
+		t.Fatal("expected multi file_type direct complete to fail")
+	}
+}
+
+func TestFileResourceCompleteDirectUploadReuseUsesObjectFields(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	object := model.UploadFileObject{
+		StorageDriver: model.StorageDriverS3,
+		Bucket:        "assets",
+		StoragePath:   "uploads/reuse.txt",
+		ObjectKey:     "uploads/reuse.txt",
+		Size:          12,
+		Hash:          strings.Repeat("9", 64),
+		MimeType:      "text/plain",
+		ETag:          "etag-reuse",
+		Status:        model.StorageStatusStored,
+	}
+	if err := db.Create(&object).Error; err != nil {
+		t.Fatalf("create object failed: %v", err)
+	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
+		},
+	})
+
+	result, err := service.CompleteDirectUpload(&form.FileUploadComplete{
+		Reuse:         true,
+		FileObjectID:  object.ID,
+		OriginName:    "reuse.txt",
+		StorageDriver: model.StorageDriverS3,
+	}, 1)
+	if err != nil {
+		t.Fatalf("direct complete reuse failed: %v", err)
+	}
+	if result.FileType != "text" || result.ObjectKey != object.ObjectKey || result.Size != object.Size || result.Hash != object.Hash || result.MimeType != object.MimeType {
+		t.Fatalf("expected direct complete to derive fields from object, got %#v", result)
+	}
+}
+
+func TestFileResourceListTrimsMultiFileTypes(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	rows := []model.UploadFiles{
+		{OriginName: "a.pdf", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()), FileType: "pdf", StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{OriginName: "b.docx", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+1), FileType: "word", StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{OriginName: "c.png", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+2), FileType: "image", StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("create upload files failed: %v", err)
+	}
+
+	result := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+		Paginate: form.Paginate{Page: 1, PerPage: 10},
+		FileType: "pdf, word",
+	})
+	if result.Total != 2 || len(result.Data) != 2 {
+		t.Fatalf("expected two pdf/word files, total=%d len=%d data=%#v", result.Total, len(result.Data), result.Data)
+	}
+}
+
+func TestFileResourceListAllowsOtherFileType(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	other := model.UploadFiles{OriginName: "a.bin", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()), FileType: "other", StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other file failed: %v", err)
+	}
+
+	result := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+		Paginate: form.Paginate{Page: 1, PerPage: 10},
+		FileType: "other",
+	})
+	if result.Total != 1 || len(result.Data) != 1 {
+		t.Fatalf("expected one other file, total=%d len=%d data=%#v", result.Total, len(result.Data), result.Data)
+	}
+}
+
+func TestFileResourceMultipartInitReuseReturnsCompletablePayload(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	hash := strings.Repeat("c", 64)
+	object := model.UploadFileObject{
+		StorageDriver: model.StorageDriverS3,
+		Bucket:        "assets",
+		StoragePath:   "uploads/existing.pdf",
+		ObjectKey:     "uploads/existing.pdf",
+		Size:          32,
+		Hash:          hash,
+		MimeType:      "application/pdf",
+		ETag:          "etag-reuse",
+		Status:        model.StorageStatusStored,
+	}
+	if err := db.Create(&object).Error; err != nil {
+		t.Fatalf("create object failed: %v", err)
+	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverS3}, filestorage.Config{
+				S3: filestorage.S3Config{Bucket: "assets"},
+			}, model.StorageDriverS3, nil
+		},
+	})
+
+	result, err := service.MultipartInit(&form.FileMultipartInit{
+		Driver:     model.StorageDriverS3,
+		Hash:       hash,
+		OriginName: "existing.pdf",
+		Size:       32,
+		MimeType:   "application/pdf",
+		IsPublic:   global.Yes,
+		PartCount:  2,
+	})
+	if err != nil {
+		t.Fatalf("multipart init failed: %v", err)
+	}
+	if !result.Reuse || result.FileObjectID != object.ID || result.UploadID != "" || len(result.Parts) != 0 {
+		t.Fatalf("unexpected reuse init result: %#v", result)
+	}
+	if result.CompletePayload["reuse"] != true || result.CompletePayload["file_object_id"] != object.ID {
+		t.Fatalf("unexpected complete payload: %#v", result.CompletePayload)
+	}
+}
+
+func TestFileResourceMultipartCompleteReuseCreatesUploadRecord(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	hash := strings.Repeat("d", 64)
+	object := model.UploadFileObject{
+		StorageDriver: model.StorageDriverS3,
+		Bucket:        "assets",
+		StoragePath:   "uploads/reuse.txt",
+		ObjectKey:     "uploads/reuse.txt",
+		Size:          12,
+		Hash:          hash,
+		MimeType:      "text/plain",
+		ETag:          "etag-reuse",
+		Status:        model.StorageStatusStored,
+	}
+	if err := db.Create(&object).Error; err != nil {
+		t.Fatalf("create object failed: %v", err)
+	}
+
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).MultipartComplete(&form.FileMultipartComplete{
+		Reuse:        true,
+		FileObjectID: object.ID,
+		OriginName:   "reuse.txt",
+		IsPublic:     global.Yes,
+	}, 8)
+	if err != nil {
+		t.Fatalf("multipart complete reuse failed: %v", err)
+	}
+	if result.FileObjectID != object.ID || result.FileType != "text" || result.ObjectKey != object.ObjectKey {
+		t.Fatalf("unexpected reuse complete result: %#v", result)
+	}
+}
+
+func TestFileResourceMultipartCompleteImplicitReuseCreatesUploadRecord(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	hash := strings.Repeat("f", 64)
+	object := model.UploadFileObject{
+		StorageDriver: model.StorageDriverS3,
+		Bucket:        "assets",
+		StoragePath:   "uploads/implicit-reuse.txt",
+		ObjectKey:     "uploads/implicit-reuse.txt",
+		Size:          21,
+		Hash:          hash,
+		MimeType:      "text/plain",
+		ETag:          "etag-implicit",
+		Status:        model.StorageStatusStored,
+	}
+	if err := db.Create(&object).Error; err != nil {
+		t.Fatalf("create object failed: %v", err)
+	}
+
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).MultipartComplete(&form.FileMultipartComplete{
+		Driver:     model.StorageDriverS3,
+		Bucket:     object.Bucket,
+		ObjectKey:  object.ObjectKey,
+		OriginName: "implicit-reuse.txt",
+		Hash:       hash,
+		MimeType:   "text/plain",
+		IsPublic:   global.Yes,
+		Parts:      nil,
+	}, 8)
+	if err != nil {
+		t.Fatalf("multipart complete implicit reuse failed: %v", err)
+	}
+	if result.FileObjectID != object.ID || result.ObjectKey != object.ObjectKey || result.FileType != "text" {
+		t.Fatalf("unexpected implicit reuse result: %#v", result)
+	}
+}
+
+func TestFileResourceMultipartCompleteRejectsMultiFileType(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	object := model.UploadFileObject{
+		StorageDriver: model.StorageDriverS3,
+		Bucket:        "assets",
+		StoragePath:   "uploads/reuse.pdf",
+		ObjectKey:     "uploads/reuse.pdf",
+		Size:          12,
+		Hash:          strings.Repeat("7", 64),
+		MimeType:      "application/pdf",
+		Status:        model.StorageStatusStored,
+	}
+	if err := db.Create(&object).Error; err != nil {
+		t.Fatalf("create object failed: %v", err)
+	}
+
+	_, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).MultipartComplete(&form.FileMultipartComplete{
+		Reuse:        true,
+		FileObjectID: object.ID,
+		OriginName:   "reuse.pdf",
+		FileType:     "pdf,word",
+	}, 8)
+	if err == nil {
+		t.Fatal("expected multipart complete multi file_type to fail")
+	}
+}
+
+func TestFileResourceMultipartCompleteRejectsInvalidParts(t *testing.T) {
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: newFileResourceSQLiteDB(t)})
+	base := form.FileMultipartComplete{
+		UploadID:   "upload-1",
+		Driver:     model.StorageDriverS3,
+		Bucket:     "assets",
+		ObjectKey:  "uploads/a.txt",
+		OriginName: "a.txt",
+		Hash:       strings.Repeat("e", 64),
+		MimeType:   "text/plain",
+	}
+	cases := []struct {
+		name  string
+		parts []form.MultipartCompletePart
+	}{
+		{name: "empty", parts: nil},
+		{name: "blank etag", parts: []form.MultipartCompletePart{{PartNumber: 1, ETag: " "}}},
+		{name: "duplicate", parts: []form.MultipartCompletePart{{PartNumber: 1, ETag: "a"}, {PartNumber: 1, ETag: "b"}}},
+		{name: "not continuous", parts: []form.MultipartCompletePart{{PartNumber: 2, ETag: "b"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			params := base
+			params.Parts = tc.parts
+			if _, err := service.MultipartComplete(&params, 1); err == nil {
+				t.Fatal("expected invalid multipart parts to fail")
+			}
+		})
+	}
+}
+
 func TestFileResourceDeletePhysicalUsesFileStorageDriver(t *testing.T) {
 	calls := make([]string, 0, 1)
 	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
@@ -485,4 +828,24 @@ func (d fakeFileResourceDriver) URL(string, string, bool) string {
 
 func (d fakeFileResourceDriver) SignedURL(context.Context, string, string, time.Duration) (string, error) {
 	return "", nil
+}
+
+func (d fakeFileResourceDriver) PresignPutObject(context.Context, string, string, string, time.Duration) (string, error) {
+	return "", nil
+}
+
+func (d fakeFileResourceDriver) InitMultipartUpload(context.Context, filestorage.MultipartUploadInput) (filestorage.MultipartUploadResult, error) {
+	return filestorage.MultipartUploadResult{}, nil
+}
+
+func (d fakeFileResourceDriver) PresignMultipartPart(context.Context, filestorage.MultipartPartInput) (filestorage.MultipartPartResult, error) {
+	return filestorage.MultipartPartResult{}, nil
+}
+
+func (d fakeFileResourceDriver) CompleteMultipartUpload(context.Context, string, string, string, []filestorage.CompletePartInfo) error {
+	return nil
+}
+
+func (d fakeFileResourceDriver) AbortMultipartUpload(context.Context, string, string, string) error {
+	return nil
 }

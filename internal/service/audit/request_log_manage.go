@@ -20,7 +20,12 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
-const defaultRequestLogExportLimit = 1000
+const (
+	defaultRequestLogExportLimit = 1000
+	requestLogExportBatchSize    = 500
+)
+
+type exportProgressReporter func(processed, total int) error
 
 const (
 	requestLogMaskConfigGroupCode = "audit"
@@ -44,99 +49,7 @@ var requestLogMaskConfigDiffRules = []auditdiff.FieldRule{
 
 // ExportCSV 导出请求日志 CSV。
 func (s *RequestLogService) ExportCSV(params *form.RequestLogExport) ([]byte, string, error) {
-	query := buildRequestLogQuery(requestLogQueryInput{
-		OperatorID:      params.OperatorID,
-		OperatorAccount: params.OperatorAccount,
-		OperationStatus: params.OperationStatus,
-		IsHighRisk:      params.IsHighRisk,
-		Method:          params.Method,
-		BaseURL:         params.BaseURL,
-		OperationName:   params.OperationName,
-		IP:              params.IP,
-		StartTime:       params.StartTime,
-		EndTime:         params.EndTime,
-	})
-	condition, args := query.Build()
-
-	limit := params.Limit
-	if limit <= 0 {
-		limit = defaultRequestLogExportLimit
-	}
-
-	logModel := model.NewRequestLogs()
-	listOptionalParams := model.ListOptionalParams{
-		SelectFields: []string{
-			"id",
-			"request_id",
-			"operator_account",
-			"operator_name",
-			"ip",
-			"method",
-			"base_url",
-			"operation_name",
-			"operation_status",
-			"is_high_risk",
-			"response_status",
-			"execution_time",
-			"change_diff",
-			"created_at",
-		},
-		OrderBy: "created_at DESC, id DESC",
-	}
-	_, records, err := model.ListPageE(logModel, 1, limit, condition, args, listOptionalParams)
-	if err != nil {
-		return nil, "", err
-	}
-
-	buffer := &bytes.Buffer{}
-	writer := csv.NewWriter(buffer)
-	if err := writer.Write([]string{
-		"id",
-		"request_id",
-		"operator_account",
-		"operator_name",
-		"ip",
-		"method",
-		"base_url",
-		"operation_name",
-		"operation_status",
-		"is_high_risk",
-		"response_status",
-		"execution_time_ms",
-		"change_diff",
-		"created_at",
-	}); err != nil {
-		return nil, "", err
-	}
-
-	for _, record := range records {
-		if err := writer.Write([]string{
-			strconv.FormatUint(uint64(record.ID), 10),
-			record.RequestID,
-			record.OperatorAccount,
-			record.OperatorName,
-			record.IP,
-			record.Method,
-			record.BaseURL,
-			record.OperationName,
-			strconv.Itoa(record.OperationStatus),
-			strconv.Itoa(int(record.IsHighRisk)),
-			strconv.Itoa(record.ResponseStatus),
-			strconv.FormatFloat(record.ExecutionTime, 'f', 4, 64),
-			record.ChangeDiff,
-			record.CreatedAt.String(),
-		}); err != nil {
-			return nil, "", err
-		}
-	}
-
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		return nil, "", err
-	}
-
-	fileName := "request_logs_" + time.Now().Format("20060102150405") + ".csv"
-	return buffer.Bytes(), fileName, nil
+	return generateRequestLogExportCSV(params, nil)
 }
 
 // GetMaskConfig 获取当前敏感字段脱敏配置。
@@ -302,4 +215,152 @@ func saveMaskConfigToSysConfig(config sensitive.SensitiveFieldsConfig) (bool, er
 		return false, err
 	}
 	return true, nil
+}
+
+// GenerateExportCSV 生成请求日志 CSV 数据（供异步导出任务使用）。
+func GenerateExportCSV(params *form.RequestLogExport) ([]byte, string, error) {
+	return generateRequestLogExportCSV(params, nil)
+}
+
+// GenerateExportCSVWithProgress 生成请求日志导出 CSV，并在每批处理完成后回调真实进度。
+func GenerateExportCSVWithProgress(params *form.RequestLogExport, reporter func(processed, total int) error) ([]byte, string, error) {
+	return generateRequestLogExportCSV(params, reporter)
+}
+
+func generateRequestLogExportCSV(params *form.RequestLogExport, reporter exportProgressReporter) ([]byte, string, error) {
+	query := buildRequestLogQuery(requestLogQueryInput{
+		OperatorID:      params.OperatorID,
+		OperatorAccount: params.OperatorAccount,
+		OperationStatus: params.OperationStatus,
+		IsHighRisk:      params.IsHighRisk,
+		Method:          params.Method,
+		BaseURL:         params.BaseURL,
+		OperationName:   params.OperationName,
+		IP:              params.IP,
+		StartTime:       params.StartTime,
+		EndTime:         params.EndTime,
+	})
+	condition, args := query.Build()
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = defaultRequestLogExportLimit
+	}
+
+	db, err := model.GetDB()
+	if err != nil {
+		return nil, "", err
+	}
+
+	baseQuery := db.Model(&model.RequestLogs{})
+	if condition != "" {
+		baseQuery = baseQuery.Where(condition, args...)
+	}
+	var totalRows int64
+	if err := baseQuery.Count(&totalRows).Error; err != nil {
+		return nil, "", err
+	}
+	total := int(totalRows)
+	if total > limit {
+		total = limit
+	}
+
+	buffer := &bytes.Buffer{}
+	writer := csv.NewWriter(buffer)
+	if err := writer.Write([]string{
+		"id",
+		"request_id",
+		"operator_account",
+		"operator_name",
+		"ip",
+		"method",
+		"base_url",
+		"operation_name",
+		"operation_status",
+		"is_high_risk",
+		"response_status",
+		"execution_time_ms",
+		"change_diff",
+		"created_at",
+	}); err != nil {
+		return nil, "", err
+	}
+
+	if reporter != nil {
+		if err := reporter(0, total); err != nil {
+			return nil, "", err
+		}
+	}
+
+	processed := 0
+	for processed < total {
+		batchLimit := requestLogExportBatchSize
+		if remaining := total - processed; remaining < batchLimit {
+			batchLimit = remaining
+		}
+		records := make([]*model.RequestLogs, 0, batchLimit)
+		queryDB := db.Model(&model.RequestLogs{}).
+			Select([]string{
+				"id",
+				"request_id",
+				"operator_account",
+				"operator_name",
+				"ip",
+				"method",
+				"base_url",
+				"operation_name",
+				"operation_status",
+				"is_high_risk",
+				"response_status",
+				"execution_time",
+				"change_diff",
+				"created_at",
+			}).
+			Order("created_at DESC, id DESC").
+			Limit(batchLimit).
+			Offset(processed)
+		if condition != "" {
+			queryDB = queryDB.Where(condition, args...)
+		}
+		if err := queryDB.Find(&records).Error; err != nil {
+			return nil, "", err
+		}
+		if len(records) == 0 {
+			break
+		}
+		for _, record := range records {
+			if err := writer.Write([]string{
+				strconv.FormatUint(uint64(record.ID), 10),
+				record.RequestID,
+				record.OperatorAccount,
+				record.OperatorName,
+				record.IP,
+				record.Method,
+				record.BaseURL,
+				record.OperationName,
+				strconv.Itoa(record.OperationStatus),
+				strconv.Itoa(int(record.IsHighRisk)),
+				strconv.Itoa(record.ResponseStatus),
+				strconv.FormatFloat(record.ExecutionTime, 'f', 4, 64),
+				record.ChangeDiff,
+				record.CreatedAt.String(),
+			}); err != nil {
+				return nil, "", err
+			}
+		}
+		processed += len(records)
+		if reporter != nil {
+			if err := reporter(processed, total); err != nil {
+				return nil, "", err
+			}
+		}
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return nil, "", err
+	}
+
+	fileName := "request_logs_" + time.Now().Format("20060102150405") + ".csv"
+	return buffer.Bytes(), fileName, nil
 }

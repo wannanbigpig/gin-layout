@@ -1,0 +1,5 @@
+START TRANSACTION;
+
+DROP TABLE IF EXISTS `sys_export_records`;
+
+COMMIT;

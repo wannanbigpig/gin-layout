@@ -27,3 +27,16 @@ func (api DashboardController) Overview(c *gin.Context) {
 
 	api.Success(c, overview)
 }
+
+func (api DashboardController) Statistics(c *gin.Context) {
+	service := dashboard.NewOverviewService()
+	service.SetAdminUserId(api.GetCurrentUserID(c))
+
+	statistics, err := service.Statistics()
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+
+	api.Success(c, statistics)
+}

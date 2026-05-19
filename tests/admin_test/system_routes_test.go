@@ -130,6 +130,78 @@ func TestSystemConfigWriteFlow(t *testing.T) {
 	assert.Equal(t, e.NotFound, deletedDetailResult.Code)
 }
 
+func TestSystemConfigUpdateOmittedLocaleKeepsExistingTranslation(t *testing.T) {
+	requireWritableDB(t)
+	requireSystemModuleTables(t)
+
+	configKeyPrefix := uniqueCompactTestName("cfgpatch")
+	configKey := configKeyPrefix + ".key"
+	configNameZh := configKeyPrefix + "-zh"
+	configNameEn := configKeyPrefix + "-en"
+
+	cleanupSysConfigsByKeyPrefix(t, configKeyPrefix)
+	t.Cleanup(func() {
+		cleanupSysConfigsByKeyPrefix(t, configKeyPrefix)
+	})
+
+	createBody := map[string]any{
+		"config_key": configKey,
+		"config_name_i18n": map[string]string{
+			"zh-CN": configNameZh,
+			"en-US": configNameEn,
+		},
+		"config_value": "init-value",
+		"value_type":   "string",
+		"group_code":   "test",
+		"status":       1,
+		"sort":         10,
+	}
+	createBytes, _ := json.Marshal(createBody)
+	createPayload := string(createBytes)
+	createResp := postRequest("/admin/v1/system/config/create", &createPayload)
+	createResult := decodeResult(t, createResp)
+	assert.Equal(t, e.SUCCESS, createResult.Code, createResult.Msg)
+
+	config := findSysConfigByKey(t, configKey)
+
+	updateBody := map[string]any{
+		"id":         config.ID,
+		"config_key": configKey,
+		"config_name_i18n": map[string]string{
+			"en-US": configNameEn + "-patched",
+		},
+		"config_value": "patched-value",
+		"value_type":   "string",
+		"group_code":   "test",
+		"status":       1,
+		"sort":         20,
+	}
+	updateBytes, _ := json.Marshal(updateBody)
+	updatePayload := string(updateBytes)
+	updateResp := postRequest("/admin/v1/system/config/update", &updatePayload)
+	updateResult := decodeResult(t, updateResp)
+	assert.Equal(t, e.SUCCESS, updateResult.Code, updateResult.Msg)
+
+	detailResp := getRequest("/admin/v1/system/config/detail", &url.Values{
+		"id": {strconv.FormatUint(uint64(config.ID), 10)},
+	})
+	detailResult := decodeResult(t, detailResp)
+	assert.Equal(t, e.SUCCESS, detailResult.Code, detailResult.Msg)
+	detailData, ok := detailResult.Data.(map[string]any)
+	assert.True(t, ok)
+	configNameI18n, ok := detailData["config_name_i18n"].(map[string]any)
+	assert.True(t, ok)
+	assert.Equal(t, configNameZh, configNameI18n["zh-CN"])
+	assert.Equal(t, configNameEn+"-patched", configNameI18n["en-US"])
+
+	stored, err := model.NewSysConfigI18n().LocaleNameMapByConfigID(config.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"zh-CN": configNameZh,
+		"en-US": configNameEn + "-patched",
+	}, stored)
+}
+
 func TestSystemConfigVisibilityTabsAndHiddenSaveFlags(t *testing.T) {
 	requireWritableDB(t)
 	requireSystemModuleTables(t)
@@ -363,6 +435,122 @@ func TestSystemDictWriteFlow(t *testing.T) {
 	})
 	deletedTypeDetailResult := decodeResult(t, deletedTypeDetailResp)
 	assert.Equal(t, e.NotFound, deletedTypeDetailResult.Code)
+}
+
+func TestSystemDictUpdateOmittedLocaleKeepsExistingTranslations(t *testing.T) {
+	requireWritableDB(t)
+	requireSystemModuleTables(t)
+
+	typeCodePrefix := uniqueCompactTestName("dictpatch")
+	typeCode := typeCodePrefix + "_type"
+	typeNameZh := typeCodePrefix + "-zh"
+	typeNameEn := typeCodePrefix + "-en"
+	itemValue := "v1"
+	itemLabelZh := typeCodePrefix + "-label-zh"
+	itemLabelEn := typeCodePrefix + "-label-en"
+
+	cleanupSysDictByTypeCodePrefix(t, typeCodePrefix)
+	t.Cleanup(func() {
+		cleanupSysDictByTypeCodePrefix(t, typeCodePrefix)
+	})
+
+	createTypeBody := map[string]any{
+		"type_code": typeCode,
+		"type_name_i18n": map[string]string{
+			"zh-CN": typeNameZh,
+			"en-US": typeNameEn,
+		},
+		"status": 1,
+		"sort":   10,
+	}
+	createTypeBytes, _ := json.Marshal(createTypeBody)
+	createTypePayload := string(createTypeBytes)
+	createTypeResp := postRequest("/admin/v1/system/dict/type/create", &createTypePayload)
+	createTypeResult := decodeResult(t, createTypeResp)
+	assert.Equal(t, e.SUCCESS, createTypeResult.Code, createTypeResult.Msg)
+
+	dictType := findSysDictTypeByCode(t, typeCode)
+
+	updateTypeBody := map[string]any{
+		"id":        dictType.ID,
+		"type_code": typeCode,
+		"type_name_i18n": map[string]string{
+			"en-US": typeNameEn + "-patched",
+		},
+		"status": 1,
+		"sort":   20,
+	}
+	updateTypeBytes, _ := json.Marshal(updateTypeBody)
+	updateTypePayload := string(updateTypeBytes)
+	updateTypeResp := postRequest("/admin/v1/system/dict/type/update", &updateTypePayload)
+	updateTypeResult := decodeResult(t, updateTypeResp)
+	assert.Equal(t, e.SUCCESS, updateTypeResult.Code, updateTypeResult.Msg)
+
+	typeDetailResp := getRequest("/admin/v1/system/dict/type/detail", &url.Values{
+		"id": {strconv.FormatUint(uint64(dictType.ID), 10)},
+	})
+	typeDetailResult := decodeResult(t, typeDetailResp)
+	assert.Equal(t, e.SUCCESS, typeDetailResult.Code, typeDetailResult.Msg)
+	typeDetailData, ok := typeDetailResult.Data.(map[string]any)
+	assert.True(t, ok)
+	typeNameI18n, ok := typeDetailData["type_name_i18n"].(map[string]any)
+	assert.True(t, ok)
+	assert.Equal(t, typeNameZh, typeNameI18n["zh-CN"])
+	assert.Equal(t, typeNameEn+"-patched", typeNameI18n["en-US"])
+
+	storedTypeNames, err := model.NewSysDictTypeI18n().LocaleNameMapByTypeID(dictType.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"zh-CN": typeNameZh,
+		"en-US": typeNameEn + "-patched",
+	}, storedTypeNames)
+
+	createItemBody := map[string]any{
+		"type_code": typeCode,
+		"label_i18n": map[string]string{
+			"zh-CN": itemLabelZh,
+			"en-US": itemLabelEn,
+		},
+		"value":      itemValue,
+		"color":      "success",
+		"tag_type":   "success",
+		"is_default": 1,
+		"status":     1,
+		"sort":       10,
+	}
+	createItemBytes, _ := json.Marshal(createItemBody)
+	createItemPayload := string(createItemBytes)
+	createItemResp := postRequest("/admin/v1/system/dict/item/create", &createItemPayload)
+	createItemResult := decodeResult(t, createItemResp)
+	assert.Equal(t, e.SUCCESS, createItemResult.Code, createItemResult.Msg)
+
+	item := findSysDictItemByTypeAndValue(t, typeCode, itemValue)
+
+	updateItemBody := map[string]any{
+		"id":        item.ID,
+		"type_code": typeCode,
+		"label_i18n": map[string]string{
+			"en-US": itemLabelEn + "-patched",
+		},
+		"value":      itemValue,
+		"color":      "info",
+		"tag_type":   "warning",
+		"is_default": 1,
+		"status":     1,
+		"sort":       15,
+	}
+	updateItemBytes, _ := json.Marshal(updateItemBody)
+	updateItemPayload := string(updateItemBytes)
+	updateItemResp := postRequest("/admin/v1/system/dict/item/update", &updateItemPayload)
+	updateItemResult := decodeResult(t, updateItemResp)
+	assert.Equal(t, e.SUCCESS, updateItemResult.Code, updateItemResult.Msg)
+
+	storedLabels, err := model.NewSysDictItemI18n().LocaleLabelMapByItemID(item.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"zh-CN": itemLabelZh,
+		"en-US": itemLabelEn + "-patched",
+	}, storedLabels)
 }
 
 func TestSystemConfigProtectedRoutesRequireLogin(t *testing.T) {

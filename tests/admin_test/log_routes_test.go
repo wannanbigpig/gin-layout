@@ -44,10 +44,22 @@ func TestLogListRoutesWithAuthorization(t *testing.T) {
 func TestRequestLogExportRouteWithAuthorization(t *testing.T) {
 	requireMySQL(t)
 
-	resp := getRequest("/admin/v1/log/request/export", &url.Values{"limit": {"10"}})
+	body := `{"limit":10}`
+	resp := postRequest("/admin/v1/log/request/export", &body)
 	assert.Equal(t, http.StatusOK, resp.Code)
-	assert.Contains(t, resp.Header().Get("Content-Type"), "text/csv")
-	assert.Contains(t, resp.Header().Get("Content-Disposition"), "request_logs_")
+	result := decodeResult(t, resp)
+	// 队列未启用时返回 ServiceDependencyNotReady，启用时返回 SUCCESS
+	assert.True(t, result.Code == e.SUCCESS || result.Code == e.ServiceDependencyNotReady,
+		"expected SUCCESS or ServiceDependencyNotReady, got %d", result.Code)
+}
+
+func TestExportRecordListRouteWithAuthorization(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/system/export/list", &url.Values{"page": {"1"}, "per_page": {"5"}})
+	assert.Equal(t, http.StatusOK, resp.Code)
+	result := decodeResult(t, resp)
+	assert.Equal(t, e.SUCCESS, result.Code)
 }
 
 func TestRequestLogMaskConfigRoutesWithAuthorization(t *testing.T) {
@@ -80,11 +92,6 @@ func TestLogRoutesRequireLogin(t *testing.T) {
 			query: &url.Values{"id": {"1"}},
 		},
 		{
-			name:  "请求日志导出需要登录",
-			route: "/admin/v1/log/request/export",
-			query: &url.Values{"limit": {"10"}},
-		},
-		{
 			name:  "请求日志脱敏配置需要登录",
 			route: "/admin/v1/log/request/mask-config",
 			query: nil,
@@ -99,6 +106,11 @@ func TestLogRoutesRequireLogin(t *testing.T) {
 			route: "/admin/v1/log/login/detail",
 			query: &url.Values{"id": {"1"}},
 		},
+		{
+			name:  "导出记录列表需要登录",
+			route: "/admin/v1/system/export/list",
+			query: &url.Values{"page": {"1"}, "per_page": {"5"}},
+		},
 	}
 
 	for _, tc := range getCases {
@@ -111,9 +123,29 @@ func TestLogRoutesRequireLogin(t *testing.T) {
 		})
 	}
 
-	body := `{"common":["password"]}`
-	resp := anonymousPostRequest("/admin/v1/log/request/mask-config", &body)
-	assert.Equal(t, http.StatusOK, resp.Code)
-	result := decodeResult(t, resp)
-	assert.Equal(t, e.NotLogin, result.Code)
+	postCases := []struct {
+		name  string
+		route string
+		body  string
+	}{
+		{
+			name:  "请求日志导出需要登录",
+			route: "/admin/v1/log/request/export",
+			body:  `{"limit":10}`,
+		},
+		{
+			name:  "请求日志脱敏配置更新需要登录",
+			route: "/admin/v1/log/request/mask-config",
+			body:  `{"common":["password"]}`,
+		},
+	}
+
+	for _, tc := range postCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := anonymousPostRequest(tc.route, &tc.body)
+			assert.Equal(t, http.StatusOK, resp.Code)
+			result := decodeResult(t, resp)
+			assert.Equal(t, e.NotLogin, result.Code)
+		})
+	}
 }

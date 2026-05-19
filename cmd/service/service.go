@@ -17,6 +17,7 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	_ "github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
+	"github.com/wannanbigpig/gin-layout/internal/service/notification"
 )
 
 const (
@@ -50,6 +51,8 @@ func registerFlags() {
 
 // run 运行服务器
 func run() error {
+	notification.EnsureRealtimeDispatcherStarted()
+
 	engine, err := routers.SetRouters()
 	if err != nil {
 		return fmt.Errorf("build router failed: %w", err)

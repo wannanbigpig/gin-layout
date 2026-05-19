@@ -43,8 +43,9 @@ type QueueConfig struct {
 	// 示例（总权重=4+2+2+1=9）：
 	//   critical: 权重 4 → 4/9≈44% 概率被调度（支付回调、短信发送）
 	//   default:  权重 2 → 2/9≈22% 概率被调度（普通异步任务）
-	//   audit:    权重 2 → 2/9≈22% 概率被调度（请求日志、登录日志）
-	//   low:      权重 1 → 1/9≈11% 概率被调度（批量通知、数据导出）
+	//   audit:    权重 2 → 2/11≈18% 概率被调度（请求日志落库）
+	//   export:   权重 2 → 2/11≈18% 概率被调度（异步导出）
+	//   low:      权重 1 → 1/11≈9% 概率被调度（批量通知）
 	Queues map[string]int `mapstructure:"queues" yaml:"queues"`
 	// AuditMaxRetry 审计日志队列的最大重试次数
 	AuditMaxRetry int `mapstructure:"audit_max_retry" yaml:"audit_max_retry"`
@@ -70,12 +71,13 @@ var Queue = QueueConfig{
 	Queues: map[string]int{
 		// 权重值表示调度概率，不是协程数量！
 		// 所有队列共享 8 个协程，权重越高越容易被优先调度
-		// 总权重 = 4+2+2+1 = 9
-		// critical 被选中的概率 ≈ 4/9 ≈ 44%
+		// 总权重 = 4+2+2+2+1 = 11
+		// critical 被选中的概率 ≈ 4/11 ≈ 36%
 		"critical": 4, // 权重 4，约 44% 概率被调度（如支付回调）
 		"default":  2, // 权重 2，约 22% 概率被调度（普通任务）
-		"audit":    2, // 权重 2，约 22% 概率被调度（审计日志）
-		"low":      1, // 权重 1，约 11% 概率被调度（批量通知）
+		"audit":    2, // 权重 2，约 18% 概率被调度（审计日志）
+		"export":   2, // 权重 2，约 18% 概率被调度（导出任务）
+		"low":      1, // 权重 1，约 9% 概率被调度（批量通知）
 	},
 	AuditMaxRetry:       3,  // 审计日志失败最多重试 3 次
 	AuditTimeoutSeconds: 10, // 审计日志任务超时 10 秒

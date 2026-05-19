@@ -78,6 +78,7 @@ queue:
     critical: 4
     default: 2
     audit: 2
+    export: 2
     low: 1
   audit_max_retry: 3
   audit_timeout_seconds: 10
@@ -94,3 +95,16 @@ logger:
     max_backups: 15
     max_age: 15
     compress: false
+storage:
+  active_driver: local  # 可选: local, s3, aliyun_oss
+  local:
+    public_base_path: "./storage/public"
+    private_base_path: "./storage/private"
+  s3:
+    region: us-east-1
+    endpoint: "http://127.0.0.1:9000"
+    access_key: "minioadmin"
+    secret_key: "minioadmin123"
+    bucket: "gin-layout"
+    public_bucket: "gin-layout-public"
+    force_path_style: true

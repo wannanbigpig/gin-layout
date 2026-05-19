@@ -6,7 +6,7 @@ type FileResourceList struct {
 	OriginName       string `form:"origin_name" json:"origin_name" binding:"omitempty"`
 	UUID             string `form:"uuid" json:"uuid" binding:"omitempty"`
 	MimeType         string `form:"mime_type" json:"mime_type" binding:"omitempty"`
-	FileType         string `form:"file_type" json:"file_type" binding:"omitempty,oneof=image pdf word excel ppt archive text audio video"`
+	FileType         string `form:"file_type" json:"file_type" binding:"omitempty,file_type_or_multi"`
 	IsPublic         *uint8 `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
 	FolderID         *uint  `form:"folder_id" json:"folder_id" binding:"omitempty"`
 	IncludeSubfolder uint8  `form:"include_subfolder" json:"include_subfolder" binding:"omitempty,oneof=0 1"`
@@ -17,6 +17,8 @@ type FileResourceList struct {
 	UID              uint   `form:"uid" json:"uid" binding:"omitempty,gt=0"`
 	StartTime        string `form:"start_time" json:"start_time" binding:"omitempty"`
 	EndTime          string `form:"end_time" json:"end_time" binding:"omitempty"`
+	// Limit 仅在导出场景生效，控制单次导出最多记录数。
+	Limit int `form:"limit" json:"limit" binding:"omitempty,min=1,max=50000"`
 }
 
 func NewFileResourceListQuery() *FileResourceList {
@@ -31,6 +33,15 @@ type FileResourceID struct {
 
 func NewFileResourceIDForm() *FileResourceID {
 	return &FileResourceID{}
+}
+
+type FileBatchDelete struct {
+	IDs           []uint `form:"ids" json:"ids" binding:"required,min=1,dive,gt=0"`
+	DeletedReason string `form:"deleted_reason" json:"deleted_reason" binding:"omitempty,max=255"`
+}
+
+func NewFileBatchDeleteForm() *FileBatchDelete {
+	return &FileBatchDelete{}
 }
 
 type FileFolderCreate struct {
@@ -142,4 +153,61 @@ type FileReferenceList struct {
 
 func NewFileReferenceListQuery() *FileReferenceList {
 	return &FileReferenceList{}
+}
+
+// FileMultipartInit 分片上传初始化参数。
+type FileMultipartInit struct {
+	Hash       string `form:"hash" json:"hash" binding:"required,len=64"`
+	OriginName string `form:"origin_name" json:"origin_name" binding:"required,max=255"`
+	Size       int64  `form:"size" json:"size" binding:"required,gt=0"`
+	MimeType   string `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
+	FolderID   uint   `form:"folder_id" json:"folder_id" binding:"omitempty"`
+	IsPublic   uint8  `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
+	Driver     string `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss s3"`
+	ChunkSize  int    `form:"chunk_size" json:"chunk_size" binding:"omitempty,gt=0"`
+	PartCount  int    `form:"part_count" json:"part_count" binding:"omitempty,gt=0"`
+}
+
+func NewFileMultipartInitForm() *FileMultipartInit {
+	return &FileMultipartInit{IsPublic: 1}
+}
+
+// FileMultipartComplete 分片上传完成参数。
+type FileMultipartComplete struct {
+	UploadID     string                  `form:"upload_id" json:"upload_id" binding:"omitempty"`
+	Reuse        bool                    `form:"reuse" json:"reuse" binding:"omitempty"`
+	FileObjectID uint                    `form:"file_object_id" json:"file_object_id" binding:"omitempty,gt=0"`
+	Bucket       string                  `form:"bucket" json:"bucket" binding:"omitempty"`
+	ObjectKey    string                  `form:"object_key" json:"object_key" binding:"omitempty"`
+	OriginName   string                  `form:"origin_name" json:"origin_name" binding:"required,max=255"`
+	Size         uint                    `form:"size" json:"size" binding:"omitempty"`
+	Hash         string                  `form:"hash" json:"hash" binding:"omitempty,max=64"`
+	MimeType     string                  `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
+	FileType     string                  `form:"file_type" json:"file_type" binding:"omitempty,oneof=image pdf word excel ppt archive text audio video other"`
+	FolderID     uint                    `form:"folder_id" json:"folder_id" binding:"omitempty"`
+	IsPublic     uint8                   `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
+	Driver       string                  `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss s3"`
+	Parts        []MultipartCompletePart `form:"parts" json:"parts" binding:"omitempty,dive"`
+}
+
+// MultipartCompletePart 分片完成信息。
+type MultipartCompletePart struct {
+	PartNumber int32  `json:"part_number" binding:"required,gt=0"`
+	ETag       string `json:"etag" binding:"required"`
+}
+
+func NewFileMultipartCompleteForm() *FileMultipartComplete {
+	return &FileMultipartComplete{IsPublic: 1}
+}
+
+// FileMultipartAbort 分片上传中止参数。
+type FileMultipartAbort struct {
+	UploadID  string `form:"upload_id" json:"upload_id" binding:"required"`
+	Bucket    string `form:"bucket" json:"bucket" binding:"required"`
+	ObjectKey string `form:"object_key" json:"object_key" binding:"required"`
+	Driver    string `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss s3"`
+}
+
+func NewFileMultipartAbortForm() *FileMultipartAbort {
+	return &FileMultipartAbort{}
 }

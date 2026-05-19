@@ -2,7 +2,9 @@ package filestorage
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type S3Driver struct {
@@ -94,4 +97,94 @@ func (d *S3Driver) SignedURL(ctx context.Context, bucket, objectKey string, ttl 
 		return "", err
 	}
 	return out.URL, nil
+}
+
+func (d *S3Driver) PresignPutObject(ctx context.Context, bucket, objectKey string, contentType string, ttl time.Duration) (string, error) {
+	input := &s3.PutObjectInput{
+		Bucket: aws.String(firstNonEmpty(bucket, d.bucket)),
+		Key:    aws.String(objectKey),
+	}
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+	req, err := d.presign.PresignPutObject(ctx, input, func(opts *s3.PresignOptions) {
+		opts.Expires = ttl
+	})
+	if err != nil {
+		return "", err
+	}
+	return req.URL, nil
+}
+
+func (d *S3Driver) InitMultipartUpload(ctx context.Context, input MultipartUploadInput) (MultipartUploadResult, error) {
+	bucket := firstNonEmpty(input.Bucket, d.bucket)
+	out, err := d.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(input.ObjectKey),
+		ContentType: aws.String(input.ContentType),
+	})
+	if err != nil {
+		return MultipartUploadResult{}, err
+	}
+	return MultipartUploadResult{
+		UploadID:  aws.ToString(out.UploadId),
+		Bucket:    bucket,
+		ObjectKey: input.ObjectKey,
+	}, nil
+}
+
+func (d *S3Driver) PresignMultipartPart(ctx context.Context, input MultipartPartInput) (MultipartPartResult, error) {
+	bucket := firstNonEmpty(input.Bucket, d.bucket)
+	req, err := d.presign.PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String(input.ObjectKey),
+		UploadId:   aws.String(input.UploadID),
+		PartNumber: aws.Int32(input.PartNumber),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = 15 * time.Minute
+	})
+	if err != nil {
+		return MultipartPartResult{}, err
+	}
+	return MultipartPartResult{
+		PartNumber: input.PartNumber,
+		UploadURL:  req.URL,
+		Headers:    nil,
+	}, nil
+}
+
+func (d *S3Driver) CompleteMultipartUpload(ctx context.Context, bucket, objectKey, uploadID string, parts []CompletePartInfo) error {
+	if len(parts) == 0 {
+		return fmt.Errorf("parts is required")
+	}
+	bucket = firstNonEmpty(bucket, d.bucket)
+	sortedParts := make([]types.CompletedPart, len(parts))
+	for i, p := range parts {
+		sortedParts[i] = types.CompletedPart{
+			ETag:       aws.String(p.ETag),
+			PartNumber: aws.Int32(p.PartNumber),
+		}
+	}
+	sort.Slice(sortedParts, func(i, j int) bool {
+		return aws.ToInt32(sortedParts[i].PartNumber) < aws.ToInt32(sortedParts[j].PartNumber)
+	})
+	_, err := d.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String(objectKey),
+		UploadId: aws.String(uploadID),
+		MultipartUpload: &types.CompletedMultipartUpload{
+			Parts: sortedParts,
+		},
+	})
+	return err
+}
+
+func (d *S3Driver) AbortMultipartUpload(ctx context.Context, bucket, objectKey, uploadID string) error {
+	bucket = firstNonEmpty(bucket, d.bucket)
+	_, err := d.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String(objectKey),
+		UploadId: aws.String(uploadID),
+	})
+	return err
 }

@@ -20,20 +20,26 @@ func TestSyncBuiltinDefinitionsUpsert(t *testing.T) {
 		t.Fatalf("sync builtin definitions failed: %v", err)
 	}
 
-	assertTaskDefinitionCount(t, db, 3)
+	assertTaskDefinitionCount(t, db, 5)
 	assertTaskStatus(t, db, TaskCodeCronResetSystemData, 0)
 	assertTaskStatus(t, db, TaskCodeCronDemo, 0)
 	assertTaskStatus(t, db, jobs.AuditLogTaskType, 1)
+	assertTaskStatus(t, db, jobs.TypeExportRequestLog, 1)
+	assertTaskStatus(t, db, jobs.TypeExportFileList, 1)
+	assertTaskQueue(t, db, jobs.TypeExportRequestLog, jobs.ExportRequestLogQueue)
+	assertTaskQueue(t, db, jobs.TypeExportFileList, jobs.ExportFileListQueue)
 	assertTaskAllowManual(t, db, TaskCodeCronDemo, 1)
 	assertTaskAllowManual(t, db, TaskCodeCronResetSystemData, 1)
 	assertTaskAllowManual(t, db, jobs.AuditLogTaskType, 0)
+	assertTaskAllowManual(t, db, jobs.TypeExportRequestLog, 0)
+	assertTaskAllowManual(t, db, jobs.TypeExportFileList, 0)
 
 	cfg.EnableResetSystemCron = true
 	if err := syncBuiltinDefinitions(db, cfg); err != nil {
 		t.Fatalf("sync builtin definitions on second run failed: %v", err)
 	}
 
-	assertTaskDefinitionCount(t, db, 3)
+	assertTaskDefinitionCount(t, db, 5)
 	assertTaskStatus(t, db, TaskCodeCronResetSystemData, 1)
 }
 
@@ -70,6 +76,18 @@ func assertTaskAllowManual(t *testing.T, db *gorm.DB, code string, expected uint
 	}
 	if definition.AllowManual != expected {
 		t.Fatalf("unexpected allow_manual for %s: got=%d want=%d", code, definition.AllowManual, expected)
+	}
+}
+
+func assertTaskQueue(t *testing.T, db *gorm.DB, code string, expected string) {
+	t.Helper()
+
+	var definition model.TaskDefinition
+	if err := db.Where("code = ?", code).First(&definition).Error; err != nil {
+		t.Fatalf("query task definition(%s) failed: %v", code, err)
+	}
+	if definition.Queue != expected {
+		t.Fatalf("unexpected queue for %s: got=%s want=%s", code, definition.Queue, expected)
 	}
 }
 

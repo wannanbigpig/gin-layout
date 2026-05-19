@@ -16,6 +16,7 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
+	baseservice "github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	"go.uber.org/zap"
 )
@@ -38,6 +39,17 @@ var loadTaskDefinitionByCode = func(taskCode string) (*model.TaskDefinition, err
 
 var executeCronHandler = func(ctx context.Context, handler string, payload map[string]any) error {
 	return taskcron.ExecuteHandler(ctx, handler, payload)
+}
+
+type exportTaskService interface {
+	CreateRecordForTask(ctx context.Context, input baseservice.ExportTaskBootstrapInput) (*model.SysExportRecord, bool, error)
+	ReassignTaskRun(ctx context.Context, oldTaskRunID, newTaskRunID uint, queueName string) (bool, error)
+	MarkFailed(ctx context.Context, taskRunID uint, taskErr error) error
+	MarkCanceledIfExists(ctx context.Context, taskRunID uint, cancelReason string) error
+}
+
+var newExportTaskService = func() exportTaskService {
+	return baseservice.NewExportCenterService()
 }
 
 // TriggerTask 手动触发任务（支持 async 与 cron）。
@@ -256,6 +268,43 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 		return nil, err
 	}
 
+	exportService := newExportTaskService()
+	reassigned, err := exportService.ReassignTaskRun(ctx, runModel.ID, retryRun.ID, queueName)
+	if err != nil {
+		_ = recorder.Finish(ctx, retryRun, RunFinish{
+			Status: model.TaskRunStatusFailed,
+			Error:  err,
+		})
+		if errors.Is(err, baseservice.ErrExportRecordTableMissing) {
+			return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "导出记录表未初始化")
+		}
+		return nil, err
+	}
+	shouldCreateExportRecord := reassigned
+	if !reassigned {
+		// 兼容历史：原 run 尚未生成导出记录时，按场景判断是否需要新建。
+		_, shouldCreate, err := exportService.CreateRecordForTask(ctx, baseservice.ExportTaskBootstrapInput{
+			TaskCode:      runModel.TaskCode,
+			TaskRunID:     retryRun.ID,
+			TriggerUserID: triggerUserID,
+			Queue:         queueName,
+		})
+		if err != nil {
+			_ = recorder.Finish(ctx, retryRun, RunFinish{
+				Status: model.TaskRunStatusFailed,
+				Error:  err,
+			})
+			if errors.Is(err, baseservice.ErrExportRecordTableMissing) {
+				return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "导出记录表未初始化")
+			}
+			return nil, err
+		}
+		shouldCreateExportRecord = shouldCreate
+	}
+	if shouldCreateExportRecord {
+		payloadAny["task_run_id"] = retryRun.ID
+	}
+
 	options := []queue.JobOption{queue.WithTaskID(taskID)}
 	if runModel.MaxRetry > 0 {
 		options = append(options, queue.WithMaxRetry(runModel.MaxRetry))
@@ -270,6 +319,9 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 			log.Logger.Warn("重试任务发布失败后更新执行记录失败",
 				zap.Uint("run_id", retryRun.ID),
 				zap.Error(finishErr))
+		}
+		if shouldCreateExportRecord {
+			_ = exportService.MarkFailed(ctx, retryRun.ID, publishErr)
 		}
 		if errors.Is(publishErr, queue.ErrPublisherUnavailable) {
 			return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "队列未启用或未就绪")
@@ -337,6 +389,11 @@ func (s *TaskCenterService) CancelTask(ctx context.Context, runID uint, triggerU
 		CancelReason:      strings.TrimSpace(cancelReason),
 	}); err != nil {
 		return nil, err
+	}
+	if err := newExportTaskService().MarkCanceledIfExists(ctx, runModel.ID, cancelReason); err != nil {
+		log.Logger.Warn("取消任务后同步导出记录失败",
+			zap.Uint("run_id", runModel.ID),
+			zap.Error(err))
 	}
 
 	result := map[string]any{

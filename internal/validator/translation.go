@@ -74,12 +74,14 @@ func localeTranslations(locale string) []translation {
 			{tag: "phone_number", translation: "{0} format is invalid", override: false},
 			{tag: "required_if_exist", translation: "{0} is required", override: false},
 			{tag: "regexp", translation: "{0} format is invalid", override: false},
+			{tag: "file_type_or_multi", translation: "{0} must be one or more of [image pdf word excel ppt archive text audio video other], comma-separated", override: false},
 		}
 	default:
 		return []translation{
 			{tag: "phone_number", translation: "{0}格式不正确", override: false},
 			{tag: "required_if_exist", translation: "{0}字段必填", override: false},
 			{tag: "regexp", translation: "{0}字段规则不匹配", override: false},
+			{tag: "file_type_or_multi", translation: "{0}必须是[image pdf word excel ppt archive text audio video other]中的一个或多个，逗号分隔", override: false},
 		}
 	}
 }

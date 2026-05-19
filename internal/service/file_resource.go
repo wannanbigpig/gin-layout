@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -30,6 +31,20 @@ type FileResourceService struct {
 type FileReferencedDeleteError struct {
 	businessErr *e.BusinessError
 	References  []*resources.FileReferenceResources
+}
+
+type FileBatchDeleteResult struct {
+	Total    int                       `json:"total"`
+	Deleted  int                       `json:"deleted"`
+	Failed   int                       `json:"failed"`
+	Failures []*FileBatchDeleteFailure `json:"failures,omitempty"`
+}
+
+type FileBatchDeleteFailure struct {
+	ID         uint                                `json:"id"`
+	Code       int                                 `json:"code,omitempty"`
+	Message    string                              `json:"message"`
+	References []*resources.FileReferenceResources `json:"references,omitempty"`
 }
 
 func NewFileReferencedDeleteError(references []*resources.FileReferenceResources) *FileReferencedDeleteError {
@@ -80,9 +95,13 @@ func (s *FileResourceService) List(params *form.FileResourceList) *resources.Col
 	query := query_builder.New().
 		AddLike("origin_name", params.OriginName).
 		AddLike("uuid", params.UUID).
-		AddLike("mime_type", params.MimeType).
-		AddEq("file_type", params.FileType).
-		AddEq("is_public", params.IsPublic).
+		AddLike("mime_type", params.MimeType)
+	if types := normalizeFileTypeFilter(params.FileType); len(types) > 1 {
+		query.AddCondition("file_type IN ?", types)
+	} else if len(types) == 1 {
+		query.AddEq("file_type", types[0])
+	}
+	query.AddEq("is_public", params.IsPublic).
 		AddEq("storage_driver", params.StorageDriver).
 		AddEq("storage_status", params.StorageStatus)
 	if params.UID > 0 {
@@ -119,6 +138,19 @@ func (s *FileResourceService) List(params *form.FileResourceList) *resources.Col
 		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
 	}
 	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+}
+
+func normalizeFileTypeFilter(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		result = append(result, part)
+	}
+	return result
 }
 
 // Detail 查询文件资源详情。
@@ -169,6 +201,26 @@ func (s *FileResourceService) Delete(id uint, deletedBy uint, reason string) err
 		return e.NewBusinessError(e.NotFound)
 	}
 	return nil
+}
+
+func (s *FileResourceService) BatchDelete(ids []uint, deletedBy uint, reason string) (*FileBatchDeleteResult, error) {
+	result := &FileBatchDeleteResult{
+		Total: len(ids),
+	}
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	for _, id := range ids {
+		if err := s.Delete(id, deletedBy, reason); err != nil {
+			result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, err))
+			continue
+		}
+		result.Deleted++
+	}
+
+	result.Failed = len(result.Failures)
+	return result, nil
 }
 
 func (s *FileResourceService) Restore(id uint) error {
@@ -227,6 +279,38 @@ func buildFileReferenceResources(refs []*model.UploadFileReference) []*resources
 		items = append(items, transformer.ToStruct(ref))
 	}
 	return items
+}
+
+func buildFileBatchDeleteFailure(id uint, err error) *FileBatchDeleteFailure {
+	failure := &FileBatchDeleteFailure{
+		ID:      id,
+		Message: firstNonEmpty(errMessage(err), e.NewBusinessError(e.FAILURE).GetMessage()),
+	}
+
+	var referencedErr *FileReferencedDeleteError
+	if errors.As(err, &referencedErr) {
+		if businessErr := referencedErr.BusinessError(); businessErr != nil {
+			failure.Code = businessErr.GetCode()
+			failure.Message = businessErr.GetMessage()
+		}
+		failure.References = referencedErr.References
+		return failure
+	}
+
+	var businessErr *e.BusinessError
+	if errors.As(err, &businessErr) {
+		failure.Code = businessErr.GetCode()
+		failure.Message = businessErr.GetMessage()
+	}
+
+	return failure
+}
+
+func errMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.TrimSpace(err.Error())
 }
 
 func (s *FileResourceService) findByID(id uint) (*model.UploadFiles, error) {

@@ -6,10 +6,8 @@ import (
 	"time"
 
 	"github.com/wannanbigpig/gin-layout/config"
-	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
 	auditsvc "github.com/wannanbigpig/gin-layout/internal/service/audit"
-	"go.uber.org/zap"
 )
 
 const (
@@ -80,30 +78,4 @@ func auditLogOptions() []queue.JobOption {
 		queue.WithMaxRetry(maxRetry),
 		queue.WithTimeout(timeout),
 	}
-}
-
-// RegisterAll 注册当前版本的全部异步任务。
-func RegisterAll(registry queue.Registry) {
-	RegisterAllWithDeps(registry, AuditLogHandlerDeps{})
-}
-
-// RegisterAllWithDeps 注册全部异步任务并支持依赖注入。
-func RegisterAllWithDeps(registry queue.Registry, deps AuditLogHandlerDeps) {
-	if registry == nil {
-		return
-	}
-	persistFn := deps.Persist
-	if persistFn == nil {
-		persistFn = auditsvc.PersistAuditLog
-	}
-	queue.RegisterJSON(registry, AuditLogTaskType, func(ctx context.Context, payload AuditLogPayload) error {
-		_ = ctx
-		if err := persistFn(payload.Snapshot); err != nil {
-			log.Error("Persist audit log failed",
-				zap.String("request_id", payload.Snapshot.RequestID),
-				zap.Error(err))
-			return err
-		}
-		return nil
-	})
 }

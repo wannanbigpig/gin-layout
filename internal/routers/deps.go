@@ -23,6 +23,8 @@ type ControllerDeps struct {
 	SysDict    *admin_v1.SysDictController
 	Storage    *admin_v1.StorageConfigController
 	File       *admin_v1.FileResourceController
+	Export     *admin_v1.ExportCenterController
+	Message    *admin_v1.SysMessageController
 	Session    *admin_v1.SessionController
 	RequestLog *admin_v1.RequestLogController
 	LoginLog   *admin_v1.AdminLoginLogController
@@ -50,6 +52,8 @@ func DefaultControllerDeps() *ControllerDeps {
 			SysDict:    admin_v1.NewSysDictController(),
 			Storage:    admin_v1.NewStorageConfigController(),
 			File:       admin_v1.NewFileResourceController(),
+			Export:     admin_v1.NewExportCenterController(),
+			Message:    admin_v1.NewSysMessageController(),
 			Session:    admin_v1.NewSessionController(),
 			RequestLog: admin_v1.NewRequestLogController(),
 			LoginLog:   admin_v1.NewAdminLoginLogController(),
@@ -102,6 +106,12 @@ func normalizeControllerDeps(deps *ControllerDeps) *ControllerDeps {
 	}
 	if deps.File == nil {
 		deps.File = defaultDeps.File
+	}
+	if deps.Export == nil {
+		deps.Export = defaultDeps.Export
+	}
+	if deps.Message == nil {
+		deps.Message = defaultDeps.Message
 	}
 	if deps.Session == nil {
 		deps.Session = defaultDeps.Session

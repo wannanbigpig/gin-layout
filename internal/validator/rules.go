@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/go-playground/validator/v10"
@@ -57,6 +58,11 @@ func initCustomRules(validate *validator.Validate) error {
 	if err != nil {
 		return errors.New("注册 api_auth_mode 校验规则失败")
 	}
+
+	err = validate.RegisterValidation("file_type_or_multi", fileTypeOrMultiValidator)
+	if err != nil {
+		return errors.New("注册 file_type_or_multi 校验规则失败")
+	}
 	return nil
 }
 
@@ -79,6 +85,27 @@ func apiAuthModeValidator(fl validator.FieldLevel) bool {
 	default:
 		return false
 	}
+}
+
+// fileTypeOrMultiValidator 文件类型验证器，支持单值或逗号分隔多值。
+func fileTypeOrMultiValidator(fl validator.FieldLevel) bool {
+	value := fl.Field().String()
+	if value == "" {
+		return true
+	}
+	allowed := map[string]bool{
+		"image": true, "pdf": true, "word": true, "excel": true,
+		"ppt": true, "archive": true, "text": true, "audio": true,
+		"video": true, "other": true,
+	}
+	parts := strings.Split(value, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || !allowed[part] {
+			return false
+		}
+	}
+	return true
 }
 
 // requiredIf 字段B存在时，字段A必填。

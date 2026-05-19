@@ -94,8 +94,37 @@ Backend code may reuse dictionary data for display, but dictionary edits must no
 - Core enums must be explicitly expressed in form validators and model constants.
 - Audit diffs may use label mappings for readability, but diff fields and security masking rules must be controlled by code.
 - Sensitive config detail and list responses return only a masked placeholder. When an update receives the unchanged masked placeholder, backend code must keep the original value instead of writing the placeholder as the real config value.
+- Menu-title i18n updates use Replace semantics: for the same `menu_id`, locale rows omitted from the current request are deleted and only submitted locales remain.
 - i18n updates for system config names, dictionary type names, and dictionary item labels use PATCH semantics: only submitted locales are inserted or updated, and omitted locales keep their existing values.
-- API documentation must describe config/dictionary field semantics, enum meanings, and the current i18n PATCH update semantics.
+- API documentation must explicitly state whether an entity uses Replace or PATCH semantics. "Supports i18n updates" is not specific enough.
+
+## i18n Update Semantics
+
+To prevent callers from accidentally deleting localized rows, the backend splits i18n update semantics into two categories. The table below reflects the current implementation in `internal/model/menu_i18n.go` and `internal/model/sys_i18n.go`, with unit tests in `internal/model/i18n_test.go`.
+
+| Entity table | Update method | Semantics | Behavior |
+| --- | --- | --- | --- |
+| `menu_i18n` | `MenuI18n.UpsertMenuTitles` | Replace | For a given `menu_id`, locale rows that are not part of the current request are deleted inside the same transaction; only submitted locales survive. |
+| `sys_config_i18n` | `SysConfigI18n.UpsertConfigNames` | PATCH | Only the submitted `(config_id, locale)` rows go through `ON CONFLICT DO UPDATE`; omitted locale rows are kept untouched. |
+| `sys_dict_type_i18n` | `SysDictTypeI18n.UpsertTypeNames` | PATCH | Same as above, restricted to submitted `(dict_type_id, locale)`. |
+| `sys_dict_item_i18n` | `SysDictItemI18n.UpsertLabels` | PATCH | Same as above, restricted to submitted `(dict_item_id, locale)`. |
+
+All four methods run `strings.TrimSpace` on inputs before writing:
+
+- If either the `locale` or the corresponding text field (`title` / `config_name` / `type_name` / `label`) becomes empty after `TrimSpace`, the row is silently skipped. It is neither inserted nor used to overwrite an existing value with an empty string.
+- When every submitted locale is empty, the method returns early without touching the database. The menu Replace semantics will not destroy existing rows just because the caller submitted an empty map.
+
+Caller integration guidance:
+
+- The menu edit form must round-trip all locales. Any locale missing from the submitted payload is effectively a deletion, so the UI should clearly show which languages currently exist and which ones will be preserved.
+- System config, dictionary type, and dictionary item edit forms may patch a subset of locales without resubmitting everything. To clear a locale, callers must use the matching `DeleteByXxxIDs` entry point instead of submitting an empty string.
+- When the service layer needs Replace behavior on top of PATCH semantics, it must call the corresponding `DeleteByXxxIDs` explicitly before the Upsert. This responsibility must not be pushed down to the frontend.
+
+Interface tests and caller-side acceptance should cover these facts at minimum:
+
+- When a menu update omits a locale, that locale must disappear from later detail responses and database rows.
+- When a system config, dictionary type, or dictionary item update omits a locale, that locale must keep its previous value in later detail responses and database rows.
+- Submitting an empty string is not a supported way to clear a translation. The row is skipped instead; explicit delete flows must be used for locale removal.
 
 ## Display API Boundary
 

@@ -5,9 +5,11 @@ import (
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 )
 
@@ -34,10 +36,55 @@ type UserLogin struct {
 	LastIP    string `json:"last_ip"`
 }
 
+type TrendData struct {
+	Dates    []string `json:"dates"`
+	Requests []int64  `json:"requests"`
+	Errors   []int64  `json:"errors"`
+	Logins   []int64  `json:"logins"`
+}
+
+// ResponseTimeBucket 表示请求耗时分桶统计中的单个区间。
+type ResponseTimeBucket struct {
+	Label   string `json:"label"`
+	LowerMs int    `json:"lower_ms"`
+	UpperMs int    `json:"upper_ms,omitempty"`
+	Count   int64  `json:"count"`
+}
+
+// ResponseTimeStats 汇总请求耗时分布与平均耗时。
+type ResponseTimeStats struct {
+	Buckets []ResponseTimeBucket `json:"buckets"`
+	AvgMs   float64              `json:"avg_ms"`
+}
+
+// ErrorCodeBucket 表示错误状态码聚合中的单条数据。
+type ErrorCodeBucket struct {
+	StatusCode int   `json:"status_code"`
+	Count      int64 `json:"count"`
+}
+
+// StorageTypeBucket 表示文件存储按 file_type 聚合的单条数据。
+type StorageTypeBucket struct {
+	FileType  string `json:"file_type"`
+	Count     int64  `json:"count"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// StorageStats 汇总文件存储占用情况。
+type StorageStats struct {
+	TotalCount     int64               `json:"total_count"`
+	TotalSizeBytes int64               `json:"total_size_bytes"`
+	ByType         []StorageTypeBucket `json:"by_type"`
+}
+
 type Overview struct {
-	Metrics    []Metric       `json:"metrics"`
-	Activities []ActivityItem `json:"activities"`
-	UserLogin  UserLogin      `json:"user_login"`
+	Metrics      []Metric           `json:"metrics"`
+	Activities   []ActivityItem     `json:"activities"`
+	UserLogin    UserLogin          `json:"user_login"`
+	Trend        *TrendData         `json:"trend"`
+	ResponseTime *ResponseTimeStats `json:"response_time,omitempty"`
+	ErrorCodes   []ErrorCodeBucket  `json:"error_codes,omitempty"`
+	Storage      *StorageStats      `json:"storage,omitempty"`
 }
 
 type OverviewService struct {
@@ -100,6 +147,16 @@ func (s *OverviewService) Overview() (*Overview, error) {
 		}
 	}
 
+	trend, err := buildTrendData(db, todayStart)
+	if err != nil {
+		return nil, err
+	}
+
+	// 以下三段统计为增量扩展，失败不阻断主流程。
+	responseTime := buildResponseTimeStats(db, todayStart, tomorrowStart)
+	errorCodes := buildErrorCodeStats(db, todayStart, tomorrowStart)
+	storage := buildStorageStats(db)
+
 	return &Overview{
 		Metrics: []Metric{
 			{Key: "users", Title: "活跃用户", Value: float64(activeUsers), Compare: "较昨日", Change: formatChange(activeUsers, activeUsersYesterday), Type: changeType(activeUsers, activeUsersYesterday)},
@@ -107,8 +164,12 @@ func (s *OverviewService) Overview() (*Overview, error) {
 			{Key: "errors", Title: "异常告警", Value: float64(errorsToday), Compare: "较昨日", Change: formatChange(errorsToday, errorsYesterday), Type: inverseChangeType(errorsToday, errorsYesterday)},
 			{Key: "tasks", Title: "任务完成率", Value: taskCompletion, Suffix: "%", Compare: "计划完成", Change: "+0.0%", Type: "primary"},
 		},
-		Activities: buildActivities(db),
-		UserLogin:  userLogin,
+		Activities:   buildActivities(db),
+		UserLogin:    userLogin,
+		Trend:        trend,
+		ResponseTime: responseTime,
+		ErrorCodes:   errorCodes,
+		Storage:      storage,
 	}, nil
 }
 
@@ -215,4 +276,229 @@ func activityType(status int) string {
 		return "success"
 	}
 	return "warning"
+}
+
+func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
+	sevenDaysAgo := todayStart.AddDate(0, 0, -6)
+
+	// 构建日期列表
+	dates := make([]string, 7)
+	for i := 0; i < 7; i++ {
+		dates[i] = sevenDaysAgo.AddDate(0, 0, i).Format("01-02")
+	}
+
+	type dayCount struct {
+		Date  string
+		Count int64
+	}
+
+	// DSN 启用 parseTime=true 后，DATE() 会被驱动转为 time.Time，Scan 到 string 字段时会被
+	// database/sql 用 RFC3339Nano 序列化为 "2006-01-02T00:00:00+08:00"，无法匹配下方按
+	// "2006-01-02" 构造的 map key。改用 DATE_FORMAT 直接返回字符串规避此行为。
+	const dateExpr = "DATE_FORMAT(created_at, '%Y-%m-%d')"
+
+	// 查询每日请求数
+	var requestCounts []dayCount
+	if err := db.Table("request_logs").
+		Select(dateExpr+" AS date, COUNT(*) AS count").
+		Where("created_at >= ? AND created_at < ?", sevenDaysAgo, todayStart.AddDate(0, 0, 1)).
+		Group(dateExpr).
+		Order("date ASC").
+		Scan(&requestCounts).Error; err != nil {
+		return nil, err
+	}
+
+	// 查询每日错误数
+	var errorCounts []dayCount
+	if err := db.Table("request_logs").
+		Select(dateExpr+" AS date, COUNT(*) AS count").
+		Where("created_at >= ? AND created_at < ? AND (operation_status <> 0 OR response_status >= 400)", sevenDaysAgo, todayStart.AddDate(0, 0, 1)).
+		Group(dateExpr).
+		Order("date ASC").
+		Scan(&errorCounts).Error; err != nil {
+		return nil, err
+	}
+
+	// 查询每日登录数
+	var loginCounts []dayCount
+	if err := db.Table("admin_login_logs").
+		Select(dateExpr+" AS date, COUNT(*) AS count").
+		Where("deleted_at = 0 AND login_status = ? AND uid > 0 AND created_at >= ? AND created_at < ?", model.LoginStatusSuccess, sevenDaysAgo, todayStart.AddDate(0, 0, 1)).
+		Group(dateExpr).
+		Order("date ASC").
+		Scan(&loginCounts).Error; err != nil {
+		return nil, err
+	}
+
+	// 将查询结果映射到日期
+	requestMap := make(map[string]int64, len(requestCounts))
+	for _, c := range requestCounts {
+		requestMap[c.Date] = c.Count
+	}
+	errorMap := make(map[string]int64, len(errorCounts))
+	for _, c := range errorCounts {
+		errorMap[c.Date] = c.Count
+	}
+	loginMap := make(map[string]int64, len(loginCounts))
+	for _, c := range loginCounts {
+		loginMap[c.Date] = c.Count
+	}
+
+	requests := make([]int64, 7)
+	errors := make([]int64, 7)
+	logins := make([]int64, 7)
+	for i := 0; i < 7; i++ {
+		dateKey := sevenDaysAgo.AddDate(0, 0, i).Format("2006-01-02")
+		requests[i] = requestMap[dateKey]
+		errors[i] = errorMap[dateKey]
+		logins[i] = loginMap[dateKey]
+	}
+
+	return &TrendData{
+		Dates:    dates,
+		Requests: requests,
+		Errors:   errors,
+		Logins:   logins,
+	}, nil
+}
+
+// responseTimeBucketDefs 定义耗时分桶边界，遵循左闭右开规则，最后一个桶为开区间。
+// 边界归属：100ms 落入 100_300ms；300ms 落入 300_1000ms；1000ms 落入 1s_3s；3000ms 落入 gt_3s。
+var responseTimeBucketDefs = []struct {
+	Label   string
+	LowerMs int
+	UpperMs int // 0 表示无上界
+}{
+	{Label: "lt_100ms", LowerMs: 0, UpperMs: 100},
+	{Label: "100_300ms", LowerMs: 100, UpperMs: 300},
+	{Label: "300_1000ms", LowerMs: 300, UpperMs: 1000},
+	{Label: "1s_3s", LowerMs: 1000, UpperMs: 3000},
+	{Label: "gt_3s", LowerMs: 3000, UpperMs: 0},
+}
+
+// buildResponseTimeStats 聚合今日 request_logs.execution_time（毫秒）的分桶分布与平均耗时。
+func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *ResponseTimeStats {
+	if db == nil {
+		return nil
+	}
+	stats := &ResponseTimeStats{
+		Buckets: make([]ResponseTimeBucket, 0, len(responseTimeBucketDefs)),
+	}
+	for _, def := range responseTimeBucketDefs {
+		bucket := ResponseTimeBucket{Label: def.Label, LowerMs: def.LowerMs, UpperMs: def.UpperMs}
+		query := db.Table("request_logs").Where("created_at >= ? AND created_at < ?", start, end)
+		if def.LowerMs > 0 {
+			query = query.Where("execution_time >= ?", def.LowerMs)
+		}
+		if def.UpperMs > 0 {
+			query = query.Where("execution_time < ?", def.UpperMs)
+		}
+		var count int64
+		if err := query.Count(&count).Error; err != nil {
+			if log.Logger != nil {
+				log.Logger.Warn("统计请求耗时分桶失败", zap.String("label", def.Label), zap.Error(err))
+			}
+			return nil
+		}
+		bucket.Count = count
+		stats.Buckets = append(stats.Buckets, bucket)
+	}
+
+	var avg struct {
+		Avg float64
+	}
+	if err := db.Table("request_logs").
+		Select("COALESCE(AVG(execution_time), 0) AS avg").
+		Where("created_at >= ? AND created_at < ?", start, end).
+		Scan(&avg).Error; err != nil {
+		if log.Logger != nil {
+			log.Logger.Warn("统计请求平均耗时失败", zap.Error(err))
+		}
+		return nil
+	}
+	stats.AvgMs = math.Round(avg.Avg*100) / 100
+	return stats
+}
+
+// buildErrorCodeStats 聚合今日 request_logs 中 response_status >= 400 的状态码分布，按数量降序取 TOP10。
+func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCodeBucket {
+	if db == nil {
+		return nil
+	}
+	type row struct {
+		StatusCode int
+		Count      int64
+	}
+	var rows []row
+	if err := db.Table("request_logs").
+		Select("response_status AS status_code, COUNT(*) AS count").
+		Where("created_at >= ? AND created_at < ? AND response_status >= ?", start, end, 400).
+		Group("response_status").
+		Order("count DESC, response_status ASC").
+		Limit(10).
+		Scan(&rows).Error; err != nil {
+		if log.Logger != nil {
+			log.Logger.Warn("统计错误状态码分布失败", zap.Error(err))
+		}
+		return nil
+	}
+	buckets := make([]ErrorCodeBucket, 0, len(rows))
+	for _, r := range rows {
+		buckets = append(buckets, ErrorCodeBucket{StatusCode: r.StatusCode, Count: r.Count})
+	}
+	return buckets
+}
+
+// buildStorageStats 统计 upload_files 表中存活文件的总量、总大小，并按 file_type 聚合。
+func buildStorageStats(db *gorm.DB) *StorageStats {
+	if db == nil {
+		return nil
+	}
+	stats := &StorageStats{ByType: []StorageTypeBucket{}}
+
+	var summary struct {
+		TotalCount int64
+		TotalSize  int64
+	}
+	if err := db.Table("upload_files").
+		Select("COUNT(*) AS total_count, COALESCE(SUM(size), 0) AS total_size").
+		Where("deleted_at = ?", 0).
+		Scan(&summary).Error; err != nil {
+		if log.Logger != nil {
+			log.Logger.Warn("统计文件存储总量失败", zap.Error(err))
+		}
+		return nil
+	}
+	stats.TotalCount = summary.TotalCount
+	stats.TotalSizeBytes = summary.TotalSize
+
+	type row struct {
+		FileType  string
+		Count     int64
+		SizeBytes int64
+	}
+	var rows []row
+	if err := db.Table("upload_files").
+		Select("file_type AS file_type, COUNT(*) AS count, COALESCE(SUM(size), 0) AS size_bytes").
+		Where("deleted_at = ?", 0).
+		Group("file_type").
+		Order("size_bytes DESC, count DESC").
+		Scan(&rows).Error; err != nil {
+		if log.Logger != nil {
+			log.Logger.Warn("统计文件存储分类失败", zap.Error(err))
+		}
+		return stats
+	}
+	for _, r := range rows {
+		fileType := r.FileType
+		if fileType == "" {
+			fileType = "other"
+		}
+		stats.ByType = append(stats.ByType, StorageTypeBucket{
+			FileType:  fileType,
+			Count:     r.Count,
+			SizeBytes: r.SizeBytes,
+		})
+	}
+	return stats
 }

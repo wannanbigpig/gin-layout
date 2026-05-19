@@ -47,6 +47,13 @@ func adminOtherGroup(deps *ControllerDeps) RouteGroupDef {
 					GET("login-captcha", "验证码", AuthModeNone, deps.Login.LoginCaptcha).WithDesc("获取登录验证码"),
 				},
 			},
+			{
+				Prefix:    "system/notification",
+				GroupCode: "notification",
+				Routes: []RouteDef{
+					GET("ws", "消息 WebSocket", AuthModeNone, deps.Message.WS).WithDesc("通过 query token/access_token 建立消息推送连接"),
+				},
+			},
 		},
 	}
 }
@@ -77,6 +84,7 @@ func dashboardGroup(deps *ControllerDeps) RouteGroupDef {
 		GroupCode: "dashboard",
 		Routes: []RouteDef{
 			GET("overview", "仪表盘概览", AuthModeLogin, deps.Dashboard.Overview),
+			GET("statistics", "仪表盘统计", AuthModeLogin, deps.Dashboard.Statistics),
 		},
 	}
 }
@@ -247,11 +255,34 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					POST("upload/local", "本地上传文件资源", AuthModeAuth, deps.File.UploadLocal),
 					POST("upload/credential", "获取文件直传凭证", AuthModeAuth, deps.File.UploadCredential),
 					POST("upload/complete", "完成文件直传登记", AuthModeAuth, deps.File.UploadComplete),
+					POST("upload/multipart/init", "分片上传初始化", AuthModeAuth, deps.File.MultipartInit),
+					POST("upload/multipart/complete", "分片上传完成", AuthModeAuth, deps.File.MultipartComplete),
+					POST("upload/multipart/abort", "分片上传中止", AuthModeAuth, deps.File.MultipartAbort),
 					POST("delete", "删除文件资源", AuthModeAuth, deps.File.Delete),
+					POST("batch-delete", "批量删除文件资源", AuthModeAuth, deps.File.BatchDelete),
 					GET("trash/list", "文件回收站列表", AuthModeAuth, deps.File.TrashList),
 					POST("trash/restore", "恢复文件资源", AuthModeAuth, deps.File.Restore),
 					POST("trash/destroy", "硬删除文件资源", AuthModeAuth, deps.File.Destroy),
 					GET("references", "文件引用列表", AuthModeAuth, deps.File.References),
+					POST("export", "导出文件资源", AuthModeAuth, deps.File.Export),
+				},
+			},
+			{
+				Prefix:    "export",
+				GroupCode: "export",
+				Routes: []RouteDef{
+					GET("list", "导出记录列表", AuthModeAuth, deps.Export.List),
+					GET("detail", "导出记录详情", AuthModeAuth, deps.Export.Detail),
+				},
+			},
+			{
+				Prefix:    "notification",
+				GroupCode: "notification",
+				Routes: []RouteDef{
+					GET("list", "系统消息列表", AuthModeLogin, deps.Message.List),
+					GET("unread-count", "系统消息未读数", AuthModeLogin, deps.Message.UnreadCount),
+					POST("read", "标记消息已读", AuthModeLogin, deps.Message.Read),
+					POST("read-all", "全部标记已读", AuthModeLogin, deps.Message.ReadAll),
 				},
 			},
 			{
@@ -278,7 +309,7 @@ func logGroup(deps *ControllerDeps) RouteGroupDef {
 				Routes: []RouteDef{
 					GET("list", "请求日志列表", AuthModeAuth, deps.RequestLog.List),
 					GET("detail", "请求日志详情", AuthModeAuth, deps.RequestLog.Detail),
-					GET("export", "导出请求日志", AuthModeAuth, deps.RequestLog.Export),
+					POST("export", "导出请求日志", AuthModeAuth, deps.RequestLog.Export),
 					GET("mask-config", "获取请求日志脱敏配置", AuthModeAuth, deps.RequestLog.MaskConfig),
 					POST("mask-config", "更新请求日志脱敏配置", AuthModeAuth, deps.RequestLog.UpdateMaskConfig),
 				},

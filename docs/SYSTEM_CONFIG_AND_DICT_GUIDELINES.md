@@ -94,8 +94,37 @@
 - 核心枚举必须在 form validator 和 model 常量中显式表达。
 - 审计 diff 可以使用 label 映射提升可读性，但 diff 字段集合和安全脱敏规则必须由代码控制。
 - 敏感配置详情和列表只返回脱敏占位符；更新时收到未改动的脱敏占位符应保留原值，不能把占位符写成真实配置值。
+- 菜单标题 i18n 更新采用 Replace 语义：同一 `menu_id` 下，本次请求未提交的 locale 会被删除，仅保留本次提交的 locale。
 - 系统配置名称、字典类型名称、字典项 label 的 i18n 更新采用 PATCH 语义：只新增/更新请求中出现的 locale，未传 locale 保留旧值。
-- 接口文档必须说明配置/字典字段的业务语义、枚举含义和当前 i18n PATCH 更新语义。
+- 接口文档必须显式说明当前实体使用的是 Replace 还是 PATCH，不能笼统写成“支持 i18n 更新”。
+
+## i18n 更新语义差异
+
+为了避免调用方误删多语言，后端把不同实体的 i18n 更新分成两类语义。下表是当前代码事实，对应实现位于 `internal/model/menu_i18n.go` 与 `internal/model/sys_i18n.go`，相关单元测试见 `internal/model/i18n_test.go`。
+
+| 实体表 | 更新方法 | 语义 | 行为 |
+| --- | --- | --- | --- |
+| `menu_i18n` | `MenuI18n.UpsertMenuTitles` | Replace | 同一 `menu_id` 下，本次请求未提交的 locale 行会在事务内被删除，仅保留本次提交的 locale。 |
+| `sys_config_i18n` | `SysConfigI18n.UpsertConfigNames` | PATCH | 仅 `ON CONFLICT DO UPDATE` 提交的 `(config_id, locale)`，未提交的 locale 行保持不变。 |
+| `sys_dict_type_i18n` | `SysDictTypeI18n.UpsertTypeNames` | PATCH | 同上，仅更新提交的 `(dict_type_id, locale)`。 |
+| `sys_dict_item_i18n` | `SysDictItemI18n.UpsertLabels` | PATCH | 同上，仅更新提交的 `(dict_item_id, locale)`。 |
+
+四个方法在写入前都会执行 `strings.TrimSpace`：
+
+- 如果 `locale` 或对应文本（`title` / `config_name` / `type_name` / `label`）经 TrimSpace 后为空字符串，该行会被静默跳过，既不会被插入，也不会用空字符串覆盖已有行。
+- 整批 locale 全部为空时，方法早返回，对数据库零写入；菜单 Replace 语义下也不会因为传入空 map 而误删现有数据。
+
+调用方接入建议：
+
+- 菜单编辑表单必须回填完整的多语言。前端提交时未带的 locale 等价于"删除"，需要在 UI 层显式提示用户当前已有哪些语言、本次会保留哪些。
+- 系统配置 / 字典类型 / 字典项编辑表单可以做"按需更新某个 locale"，不需要每次提交全量多语言；想清空某个 locale 应该走 `DeleteByXxxIDs` 这样的删除入口，而不是传空字符串。
+- 服务端如果需要在 PATCH 语义之上对齐 Replace 语义，应该在业务层显式调用对应模型的 `DeleteByXxxIDs` 后再 Upsert，禁止把责任下放给前端。
+
+接口测试与调用方验收时，至少要覆盖这三条事实：
+
+- 菜单更新时省略某个 locale，后续 detail / 数据库中该 locale 应消失。
+- 系统配置、字典类型、字典项更新时省略某个 locale，后续 detail / 数据库中该 locale 必须保留旧值。
+- 传空字符串不是“清空翻译”，而是“本行跳过不写”；想删除 locale 只能走显式删除链路。
 
 ## 对外展示接口边界
 

@@ -55,6 +55,15 @@ func (m *MenuI18n) UpsertMenuTitles(menuID uint, localeTitles map[string]string,
 		return nil
 	}
 
+	// 收集本次传入的 locale，删除不在本次请求中的旧 locale 行
+	providedLocales := make([]string, 0, len(rows))
+	for _, r := range rows {
+		providedLocales = append(providedLocales, r.Locale)
+	}
+	if err := db.Where("menu_id = ? AND locale NOT IN ?", menuID, providedLocales).Delete(&MenuI18n{}).Error; err != nil {
+		return err
+	}
+
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "menu_id"}, {Name: "locale"}},
 		DoUpdates: clause.AssignmentColumns([]string{"title", "updated_at"}),

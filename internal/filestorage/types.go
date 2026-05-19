@@ -58,6 +58,43 @@ type PutResult struct {
 	ETag      string
 }
 
+// MultipartUploadInput 分片上传初始化参数。
+type MultipartUploadInput struct {
+	Bucket      string
+	ObjectKey   string
+	ContentType string
+	PartCount   int
+}
+
+// MultipartUploadResult 分片上传初始化结果。
+type MultipartUploadResult struct {
+	UploadID  string
+	Bucket    string
+	ObjectKey string
+}
+
+// MultipartPartInput 分片签名参数。
+type MultipartPartInput struct {
+	Bucket      string
+	ObjectKey   string
+	UploadID    string
+	PartNumber  int32
+	ContentType string
+}
+
+// MultipartPartResult 分片签名结果。
+type MultipartPartResult struct {
+	PartNumber int32
+	UploadURL  string
+	Headers    map[string]string
+}
+
+// CompletePartInfo 完成分片信息。
+type CompletePartInfo struct {
+	PartNumber int32
+	ETag       string
+}
+
 type Driver interface {
 	Name() string
 	Put(ctx context.Context, input PutInput) (PutResult, error)
@@ -66,6 +103,11 @@ type Driver interface {
 	Delete(ctx context.Context, bucket, objectKey string) error
 	URL(bucket, objectKey string, isPublic bool) string
 	SignedURL(ctx context.Context, bucket, objectKey string, ttl time.Duration) (string, error)
+	PresignPutObject(ctx context.Context, bucket, objectKey string, contentType string, ttl time.Duration) (string, error)
+	InitMultipartUpload(ctx context.Context, input MultipartUploadInput) (MultipartUploadResult, error)
+	PresignMultipartPart(ctx context.Context, input MultipartPartInput) (MultipartPartResult, error)
+	CompleteMultipartUpload(ctx context.Context, bucket, objectKey, uploadID string, parts []CompletePartInfo) error
+	AbortMultipartUpload(ctx context.Context, bucket, objectKey, uploadID string) error
 }
 
 func DefaultConfig() Config {

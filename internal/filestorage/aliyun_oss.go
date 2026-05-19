@@ -2,7 +2,9 @@ package filestorage
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -79,4 +81,94 @@ func (d *AliyunOSSDriver) SignedURL(ctx context.Context, bucket, objectKey strin
 		return "", err
 	}
 	return out.URL, nil
+}
+
+func (d *AliyunOSSDriver) PresignPutObject(ctx context.Context, bucket, objectKey string, contentType string, ttl time.Duration) (string, error) {
+	request := &oss.PutObjectRequest{
+		Bucket: oss.Ptr(firstNonEmpty(bucket, d.bucket)),
+		Key:    oss.Ptr(objectKey),
+	}
+	if contentType != "" {
+		request.ContentType = oss.Ptr(contentType)
+	}
+	result, err := d.client.Presign(ctx, request, func(opts *oss.PresignOptions) {
+		opts.Expires = ttl
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.URL, nil
+}
+
+func (d *AliyunOSSDriver) InitMultipartUpload(ctx context.Context, input MultipartUploadInput) (MultipartUploadResult, error) {
+	bucket := firstNonEmpty(input.Bucket, d.bucket)
+	out, err := d.client.InitiateMultipartUpload(ctx, &oss.InitiateMultipartUploadRequest{
+		Bucket:      oss.Ptr(bucket),
+		Key:         oss.Ptr(input.ObjectKey),
+		ContentType: oss.Ptr(input.ContentType),
+	})
+	if err != nil {
+		return MultipartUploadResult{}, err
+	}
+	return MultipartUploadResult{
+		UploadID:  oss.ToString(out.UploadId),
+		Bucket:    bucket,
+		ObjectKey: input.ObjectKey,
+	}, nil
+}
+
+func (d *AliyunOSSDriver) PresignMultipartPart(ctx context.Context, input MultipartPartInput) (MultipartPartResult, error) {
+	bucket := firstNonEmpty(input.Bucket, d.bucket)
+	result, err := d.client.Presign(ctx, &oss.UploadPartRequest{
+		Bucket:     oss.Ptr(bucket),
+		Key:        oss.Ptr(input.ObjectKey),
+		UploadId:   oss.Ptr(input.UploadID),
+		PartNumber: input.PartNumber,
+	}, func(opts *oss.PresignOptions) {
+		opts.Expires = 15 * time.Minute
+	})
+	if err != nil {
+		return MultipartPartResult{}, err
+	}
+	return MultipartPartResult{
+		PartNumber: input.PartNumber,
+		UploadURL:  result.URL,
+		Headers:    nil,
+	}, nil
+}
+
+func (d *AliyunOSSDriver) CompleteMultipartUpload(ctx context.Context, bucket, objectKey, uploadID string, parts []CompletePartInfo) error {
+	if len(parts) == 0 {
+		return fmt.Errorf("parts is required")
+	}
+	bucket = firstNonEmpty(bucket, d.bucket)
+	sortedParts := make([]oss.UploadPart, len(parts))
+	for i, p := range parts {
+		sortedParts[i] = oss.UploadPart{
+			PartNumber: p.PartNumber,
+			ETag:       oss.Ptr(p.ETag),
+		}
+	}
+	sort.Slice(sortedParts, func(i, j int) bool {
+		return sortedParts[i].PartNumber < sortedParts[j].PartNumber
+	})
+	_, err := d.client.CompleteMultipartUpload(ctx, &oss.CompleteMultipartUploadRequest{
+		Bucket:   oss.Ptr(bucket),
+		Key:      oss.Ptr(objectKey),
+		UploadId: oss.Ptr(uploadID),
+		CompleteMultipartUpload: &oss.CompleteMultipartUpload{
+			Parts: sortedParts,
+		},
+	})
+	return err
+}
+
+func (d *AliyunOSSDriver) AbortMultipartUpload(ctx context.Context, bucket, objectKey, uploadID string) error {
+	bucket = firstNonEmpty(bucket, d.bucket)
+	_, err := d.client.AbortMultipartUpload(ctx, &oss.AbortMultipartUploadRequest{
+		Bucket:   oss.Ptr(bucket),
+		Key:      oss.Ptr(objectKey),
+		UploadId: oss.Ptr(uploadID),
+	})
+	return err
 }

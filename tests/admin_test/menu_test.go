@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
@@ -107,6 +108,7 @@ func TestMenuWriteFlow(t *testing.T) {
 	updateBody := map[string]any{
 		"id": menu.ID,
 		"title_i18n": map[string]string{
+			"zh-CN": title,
 			"en-US": title + "-u-en",
 		},
 		"name":      title + "-u-name",
@@ -146,6 +148,73 @@ func TestMenuWriteFlow(t *testing.T) {
 	deleteResp := postRequest("/admin/v1/menu/delete", &deletePayload)
 	deleteResult := decodeResult(t, deleteResp)
 	assert.Equal(t, e.SUCCESS, deleteResult.Code, deleteResult.Msg)
+}
+
+func TestMenuUpdateOmittedLocaleUsesReplaceSemantics(t *testing.T) {
+	requireWritableDB(t)
+
+	title := uniqueTestName("menu-replace")
+	cleanupMenus(t, testResourcePrefix+"menu-replace")
+	t.Cleanup(func() {
+		cleanupMenus(t, testResourcePrefix+"menu-replace")
+	})
+
+	createBody := map[string]any{
+		"title_i18n": map[string]string{
+			"zh-CN": title + "-zh",
+			"en-US": title + "-en",
+		},
+		"name":      title,
+		"path":      "/" + title,
+		"component": "test/component",
+		"sort":      10,
+		"type":      2,
+		"status":    1,
+		"is_show":   1,
+		"is_auth":   1,
+	}
+	createBytes, _ := json.Marshal(createBody)
+	createPayload := string(createBytes)
+	createResp := postRequest("/admin/v1/menu/create", &createPayload)
+	createResult := decodeResult(t, createResp)
+	assert.Equal(t, e.SUCCESS, createResult.Code, createResult.Msg)
+
+	menu := findMenuByTitle(t, title+"-zh")
+
+	updateBody := map[string]any{
+		"id": menu.ID,
+		"title_i18n": map[string]string{
+			"zh-CN": title + "-zh-updated",
+		},
+		"name":      title + "-name-updated",
+		"path":      "/" + title + "-path-updated",
+		"component": "test/component",
+		"sort":      20,
+		"type":      2,
+		"status":    1,
+		"is_show":   1,
+		"is_auth":   1,
+	}
+	updateBytes, _ := json.Marshal(updateBody)
+	updatePayload := string(updateBytes)
+	updateResp := postRequest("/admin/v1/menu/update", &updatePayload)
+	updateResult := decodeResult(t, updateResp)
+	assert.Equal(t, e.SUCCESS, updateResult.Code, updateResult.Msg)
+
+	detailResp := getRequest("/admin/v1/menu/detail", &url.Values{"id": {strconv.FormatUint(uint64(menu.ID), 10)}})
+	detailResult := decodeResult(t, detailResp)
+	assert.Equal(t, e.SUCCESS, detailResult.Code, detailResult.Msg)
+	detailData, ok := detailResult.Data.(map[string]any)
+	assert.True(t, ok)
+	titleI18n, ok := detailData["title_i18n"].(map[string]any)
+	assert.True(t, ok)
+	assert.Equal(t, title+"-zh-updated", titleI18n["zh-CN"])
+	_, hasEn := titleI18n["en-US"]
+	assert.False(t, hasEn)
+
+	stored, err := model.NewMenuI18n().LocaleTitleMapByMenuID(menu.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{"zh-CN": title + "-zh-updated"}, stored)
 }
 
 func firstMenuNode(data any) map[string]any {

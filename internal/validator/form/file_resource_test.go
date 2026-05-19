@@ -16,6 +16,34 @@ func TestFileResourceListRejectsInvalidFileType(t *testing.T) {
 	}
 }
 
+func TestFileResourceListAllowsMultiFileTypeAndOther(t *testing.T) {
+	err := bindJSONBody(t, `{"file_type":"pdf, word,other"}`, NewFileResourceListQuery())
+	if err != nil {
+		t.Fatalf("expected multi file_type and other to pass validation, got %v", err)
+	}
+}
+
+func TestFileUploadCompleteRejectsMultiFileType(t *testing.T) {
+	err := bindJSONBody(t, `{"origin_name":"a.txt","storage_driver":"s3","bucket":"assets","object_key":"a.txt","file_type":"pdf,word"}`, NewFileUploadCompleteForm())
+	if err == nil {
+		t.Fatal("expected upload complete multi file_type to fail validation")
+	}
+}
+
+func TestFileMultipartCompleteRejectsMultiFileType(t *testing.T) {
+	err := bindJSONBody(t, `{"origin_name":"a.txt","driver":"s3","bucket":"assets","object_key":"a.txt","file_type":"pdf,word","parts":[{"part_number":1,"etag":"etag"}]}`, NewFileMultipartCompleteForm())
+	if err == nil {
+		t.Fatal("expected multipart complete multi file_type to fail validation")
+	}
+}
+
+func TestFileMultipartCompleteAllowsReuseWithoutUploadIDAndParts(t *testing.T) {
+	err := bindJSONBody(t, `{"reuse":true,"file_object_id":1,"origin_name":"a.txt","file_type":"pdf"}`, NewFileMultipartCompleteForm())
+	if err != nil {
+		t.Fatalf("expected reuse multipart complete without upload_id, bucket, object_key and parts to pass validation, got %v", err)
+	}
+}
+
 func TestFileResourceIDRejectsZero(t *testing.T) {
 	err := bindJSONBody(t, `{"id":0}`, NewFileResourceIDForm())
 	if err == nil {

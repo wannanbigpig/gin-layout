@@ -2,6 +2,7 @@ package taskcenter
 
 import (
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"testing"
 
@@ -9,21 +10,92 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
+	baseservice "github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
 type stubPublisher struct {
 	info queue.JobInfo
 	err  error
+	job  queue.Job
 }
 
 func (s *stubPublisher) Enqueue(ctx context.Context, job queue.Job) (queue.JobInfo, error) {
 	_ = ctx
-	_ = job
+	s.job = job
 	if s.err != nil {
 		return queue.JobInfo{}, s.err
 	}
 	return s.info, nil
+}
+
+type stubExportTaskService struct {
+	createRecordMatched bool
+	createRecordErr     error
+	createRecordInputs  []baseservice.ExportTaskBootstrapInput
+	reassignReturn      bool
+	reassignErr         error
+	reassignInputs      []struct {
+		oldTaskRunID uint
+		newTaskRunID uint
+		queueName    string
+	}
+	markFailedInputs []struct {
+		taskRunID uint
+		taskErr   error
+	}
+	markCanceledInputs []struct {
+		taskRunID    uint
+		cancelReason string
+	}
+}
+
+func (s *stubExportTaskService) CreateRecordForTask(ctx context.Context, input baseservice.ExportTaskBootstrapInput) (*model.SysExportRecord, bool, error) {
+	_ = ctx
+	s.createRecordInputs = append(s.createRecordInputs, input)
+	if s.createRecordErr != nil {
+		return nil, false, s.createRecordErr
+	}
+	return &model.SysExportRecord{}, s.createRecordMatched, nil
+}
+
+func (s *stubExportTaskService) ReassignTaskRun(ctx context.Context, oldTaskRunID, newTaskRunID uint, queueName string) (bool, error) {
+	_ = ctx
+	s.reassignInputs = append(s.reassignInputs, struct {
+		oldTaskRunID uint
+		newTaskRunID uint
+		queueName    string
+	}{oldTaskRunID: oldTaskRunID, newTaskRunID: newTaskRunID, queueName: queueName})
+	if s.reassignErr != nil {
+		return false, s.reassignErr
+	}
+	return s.reassignReturn, nil
+}
+
+func (s *stubExportTaskService) MarkFailed(ctx context.Context, taskRunID uint, taskErr error) error {
+	_ = ctx
+	s.markFailedInputs = append(s.markFailedInputs, struct {
+		taskRunID uint
+		taskErr   error
+	}{taskRunID: taskRunID, taskErr: taskErr})
+	return nil
+}
+
+func (s *stubExportTaskService) MarkCanceledIfExists(ctx context.Context, taskRunID uint, cancelReason string) error {
+	_ = ctx
+	s.markCanceledInputs = append(s.markCanceledInputs, struct {
+		taskRunID    uint
+		cancelReason string
+	}{taskRunID: taskRunID, cancelReason: cancelReason})
+	return nil
+}
+
+func setExportTaskServiceForTesting(svc exportTaskService) func() {
+	prev := newExportTaskService
+	newExportTaskService = func() exportTaskService { return svc }
+	return func() {
+		newExportTaskService = prev
+	}
 }
 
 type fakeActionRecorder struct {
@@ -338,6 +410,146 @@ func TestRetryTaskRespectsCurrentDefinition(t *testing.T) {
 	}
 	if be.GetCode() != e.InvalidParameter {
 		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+}
+
+func TestRetryTaskInjectsNewTaskRunIDForExportTasks(t *testing.T) {
+	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		return &model.TaskRun{
+			BaseModel: model.BaseModel{ID: runID},
+			TaskCode:  "export:request-log",
+			Kind:      model.TaskKindAsync,
+			Queue:     "export",
+			Status:    model.TaskRunStatusFailed,
+			Payload:   `{"limit":50}`,
+		}, nil
+	})
+	defer restoreRun()
+
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:       taskCode,
+			Kind:       model.TaskKindAsync,
+			Status:     model.TaskStatusEnabled,
+			AllowRetry: 1,
+		}, nil
+	})
+	defer restoreDefinition()
+
+	publisher := &stubPublisher{
+		info: queue.JobInfo{ID: "task-export-1", Queue: "export", Type: "export:request-log"},
+	}
+	restorePublisher := queue.SetPublisherForTesting(publisher)
+	defer restorePublisher()
+
+	fakeRecorder := &fakeActionRecorder{}
+	restoreRecorder := SetRecorderForTesting(fakeRecorder)
+	defer restoreRecorder()
+
+	exportSvc := &stubExportTaskService{reassignReturn: true}
+	restoreExportSvc := setExportTaskServiceForTesting(exportSvc)
+	defer restoreExportSvc()
+
+	svc := NewTaskCenterService()
+	result, err := svc.RetryTask(context.Background(), 101, 9, "tester")
+	if err != nil {
+		t.Fatalf("RetryTask returned error: %v", err)
+	}
+	if result["run_id"] != uint(1) {
+		t.Fatalf("unexpected retry run id: %#v", result["run_id"])
+	}
+	if publisher.job == nil {
+		t.Fatal("expected job to be published")
+	}
+	if len(exportSvc.reassignInputs) != 1 {
+		t.Fatalf("expected ReassignTaskRun called once, got %d", len(exportSvc.reassignInputs))
+	}
+	if exportSvc.reassignInputs[0].oldTaskRunID != 101 || exportSvc.reassignInputs[0].newTaskRunID != 1 {
+		t.Fatalf("unexpected reassign args: %#v", exportSvc.reassignInputs[0])
+	}
+	if len(exportSvc.createRecordInputs) != 0 {
+		t.Fatalf("expected CreateRecordForTask NOT called when reassign succeeded, got %d", len(exportSvc.createRecordInputs))
+	}
+
+	rawPayload, err := publisher.job.Payload()
+	if err != nil {
+		t.Fatalf("read published payload failed: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		t.Fatalf("decode published payload failed: %v", err)
+	}
+	if payload["task_run_id"] != float64(1) {
+		t.Fatalf("expected published payload task_run_id=1, got %#v", payload["task_run_id"])
+	}
+	if payload["limit"] != float64(50) {
+		t.Fatalf("unexpected original payload fields: %#v", payload)
+	}
+}
+
+// TestRetryTaskFallsBackToCreateWhenNoExistingExportRecord 验证兼容历史无 export_record 的旧 run：
+// ReassignTaskRun 返回 false 时回退到 CreateRecordForTask，且仍注入新的 task_run_id。
+func TestRetryTaskFallsBackToCreateWhenNoExistingExportRecord(t *testing.T) {
+	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		return &model.TaskRun{
+			BaseModel: model.BaseModel{ID: runID},
+			TaskCode:  "export:request-log",
+			Kind:      model.TaskKindAsync,
+			Queue:     "export",
+			Status:    model.TaskRunStatusFailed,
+			Payload:   `{"limit":50}`,
+		}, nil
+	})
+	defer restoreRun()
+
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:       taskCode,
+			Kind:       model.TaskKindAsync,
+			Status:     model.TaskStatusEnabled,
+			AllowRetry: 1,
+		}, nil
+	})
+	defer restoreDefinition()
+
+	publisher := &stubPublisher{
+		info: queue.JobInfo{ID: "task-export-1", Queue: "export", Type: "export:request-log"},
+	}
+	restorePublisher := queue.SetPublisherForTesting(publisher)
+	defer restorePublisher()
+
+	fakeRecorder := &fakeActionRecorder{}
+	restoreRecorder := SetRecorderForTesting(fakeRecorder)
+	defer restoreRecorder()
+
+	exportSvc := &stubExportTaskService{reassignReturn: false, createRecordMatched: true}
+	restoreExportSvc := setExportTaskServiceForTesting(exportSvc)
+	defer restoreExportSvc()
+
+	svc := NewTaskCenterService()
+	result, err := svc.RetryTask(context.Background(), 101, 9, "tester")
+	if err != nil {
+		t.Fatalf("RetryTask returned error: %v", err)
+	}
+	if result["run_id"] != uint(1) {
+		t.Fatalf("unexpected retry run id: %#v", result["run_id"])
+	}
+	if len(exportSvc.createRecordInputs) != 1 {
+		t.Fatalf("expected CreateRecordForTask called once as fallback, got %d", len(exportSvc.createRecordInputs))
+	}
+	if publisher.job == nil {
+		t.Fatal("expected job to be published")
+	}
+	rawPayload, err := publisher.job.Payload()
+	if err != nil {
+		t.Fatalf("read published payload failed: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rawPayload, &payload); err != nil {
+		t.Fatalf("decode published payload failed: %v", err)
+	}
+	if payload["task_run_id"] != float64(1) {
+		t.Fatalf("expected fallback payload task_run_id=1, got %#v", payload["task_run_id"])
 	}
 }
 
