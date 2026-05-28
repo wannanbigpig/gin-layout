@@ -5,84 +5,9 @@ import (
 	"strings"
 )
 
-const (
-	SUCCESS                   = 0
-	FAILURE                   = 1
-	AuthorizationErr          = 403
-	NotFound                  = 404
-	CaptchaErr                = 400
-	NotLogin                  = 401
-	ServerErr                 = 500
-	InvalidParameter          = 10000
-	UserDoesNotExist          = 10001
-	UserDisable               = 10002
-	ServiceDependencyNotReady = 10003
-	TooManyRequests           = 10102
-
-	// 文件相关错误码 11000-11999
-	FileIdentifierInvalid = 11001
-	FilePrivateAuthNeeded = 11002
-	FileAccessDenied      = 11003
-	FileUploadPartialFail = 11004
-	FileReferenced        = 11005
-
-	// 业务错误码 20000-29999
-	UserPasswordWrong       = 20001
-	UserExists              = 20002
-	PhoneNumberExists       = 20003
-	EmailExists             = 20004
-	UsernameRequired        = 20005
-	NicknameRequired        = 20006
-	PasswordProcessFailed   = 20007
-	SuperAdminCannotModify  = 20008
-	SuperAdminCannotDisable = 20009
-	SuperAdminCannotDelete  = 20010
-	SamePassword            = 20011
-	RoleNotFound            = 20012
-	RoleExists              = 20013
-	RoleHasChildren         = 20014
-	RoleCannotDelete        = 20015
-	ParentRoleNotExists     = 20016
-	ParentRoleInvalid       = 20017
-	MaxRoleDepth            = 20018
-	MaxChildRoles           = 20019
-	MenuNotFound            = 20020
-	MenuExists              = 20021
-	MenuHasChildren         = 20022
-	MenuCannotDelete        = 20023
-	DepartmentNotFound      = 20024
-	DepartmentExists        = 20025
-	DepartmentHasChildren   = 20026
-	DepartmentCannotDelete  = 20027
-	ParentDeptNotExists     = 20028
-	ParentDeptInvalid       = 20029
-	MaxDeptDepth            = 20030
-	CasbinInitFailed        = 20031
-	TokenGenerateFailed     = 20032
-	LoginFailed             = 20033
-	CreateUserFailed        = 20034
-	UpdateUserFailed        = 20035
-	DeleteUserFailed        = 20036
-	QueryUserDeptFailed     = 20037
-	SuperAdminMustKeepRole  = 20038
-	MaxMenuDepth            = 20039
-	ParentMenuNotExists     = 20040
-	ParentMenuTypeInvalid   = 20041
-	ParentMenuInvalid       = 20042
-	MenuCodeExists          = 20043
-	MenuRouteNameExists     = 20044
-	MenuPathExists          = 20045
-	LoginAccountLocked      = 20046
-	PasswordRequired        = 20047
-)
-
-const (
-	MsgKeyAuthSessionExpired        = "auth.session.expired"
-	MsgKeyAuthPermissionInitFailed  = "auth.permission.init_failed"
-	MsgKeyAuthPermissionCheckFailed = "auth.permission.check_failed"
-	MsgKeyAuthAPIOperationDenied    = "auth.api.operation_denied"
-	MsgKeyAuthAccountLocked         = "auth.account.locked"
-)
+// 错误码常量定义按模块拆分至 code_common.go / code_auth.go / code_file.go /
+// code_role.go / code_menu.go / code_dept.go / code_user.go 等文件中，
+// 数值与名称保持稳定，外部引用大量存在，请勿变更。
 
 // ErrorText 根据语言返回业务错误文案。
 type ErrorText struct {

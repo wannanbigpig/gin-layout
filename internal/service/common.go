@@ -15,11 +15,13 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // CommonService 通用服务
 type CommonService struct {
 	Base
+	db *gorm.DB
 }
 
 const maxUploadFileSize int64 = 10 * 1024 * 1024
@@ -27,6 +29,11 @@ const maxUploadFileSize int64 = 10 * 1024 * 1024
 // NewCommonService 创建通用服务实例。
 func NewCommonService() *CommonService {
 	return &CommonService{}
+}
+
+func (s *CommonService) SetDB(db *gorm.DB) *CommonService {
+	s.db = db
+	return s
 }
 
 // UploadImages 批量上传图片。
@@ -196,12 +203,15 @@ type FileAccessResult struct {
 	RedirectURL string
 }
 
-func (s CommonService) GetFileAccessPath(fileUUID string, checkAuth bool, currentUID uint) (FileAccessResult, error) {
+func (s CommonService) GetFileAccessPath(fileUUID string, variant string, checkAuth bool, currentUID uint) (FileAccessResult, error) {
 	if len(fileUUID) != 32 {
 		return FileAccessResult{}, e.NewBusinessError(e.FileIdentifierInvalid)
 	}
 
 	uploadFile := model.NewUploadFiles()
+	if s.db != nil {
+		uploadFile.SetDB(s.db)
+	}
 	// 通过UUID查询（更短，适合URL）
 	err := uploadFile.GetDetail("uuid = ?", fileUUID)
 	if err != nil {
@@ -221,14 +231,17 @@ func (s CommonService) GetFileAccessPath(fileUUID string, checkAuth bool, curren
 	storageBase := uploadFile.StorageBase
 	bucket := uploadFile.Bucket
 	objectKey := firstNonEmpty(uploadFile.ObjectKey, uploadFile.StoragePath, uploadFile.Path)
+	objectMimeType := uploadFile.MimeType
+	db, _ := s.dbOrDefault()
 	if uploadFile.FileObjectID > 0 {
-		if db, dbErr := model.GetDB(); dbErr == nil {
+		if db != nil {
 			var object model.UploadFileObject
 			if err := db.First(&object, uploadFile.FileObjectID).Error; err == nil {
 				storageDriver = object.StorageDriver
 				storageBase = object.StorageBase
 				bucket = object.Bucket
 				objectKey = firstNonEmpty(object.ObjectKey, object.StoragePath)
+				objectMimeType = firstNonEmpty(object.MimeType, objectMimeType)
 			}
 		}
 	}
@@ -242,11 +255,21 @@ func (s CommonService) GetFileAccessPath(fileUUID string, checkAuth bool, curren
 		if ttl <= 0 {
 			ttl = 5 * time.Minute
 		}
+		if normalizeFileVariant(variant) == fileVariantThumb && isImageMimeType(firstNonEmpty(objectMimeType, uploadFile.MimeType)) && storageDriver == model.StorageDriverAliyunOSS {
+			if aliyunDriver, ok := driver.(*filestorage.AliyunOSSDriver); ok {
+				signedThumbnailURL, thumbErr := aliyunDriver.SignedImageThumbnailURL(context.Background(), bucket, objectKey, ttl)
+				if thumbErr == nil {
+					markFileAccessed(uploadFile)
+					return FileAccessResult{RedirectURL: signedThumbnailURL}, nil
+				}
+				log.Logger.Warn("生成 OSS 图片缩略图签名链接失败，回退原图", zap.String("uuid", uploadFile.UUID), zap.Error(thumbErr))
+			}
+		}
 		signedURL, err := driver.SignedURL(context.Background(), bucket, objectKey, ttl)
 		if err != nil {
 			return FileAccessResult{}, e.NewBusinessError(e.FileAccessDenied)
 		}
-		_ = uploadFile.UpdateById(uploadFile.ID, map[string]any{"last_accessed_at": time.Now()})
+		markFileAccessed(uploadFile)
 		return FileAccessResult{RedirectURL: signedURL}, nil
 	}
 
@@ -254,6 +277,21 @@ func (s CommonService) GetFileAccessPath(fileUUID string, checkAuth bool, curren
 	if err != nil {
 		return FileAccessResult{}, e.NewBusinessError(e.FileAccessDenied)
 	}
-	_ = uploadFile.UpdateById(uploadFile.ID, map[string]any{"last_accessed_at": time.Now()})
+	if normalizeFileVariant(variant) == fileVariantThumb && isImageMimeType(firstNonEmpty(objectMimeType, uploadFile.MimeType)) {
+		thumbnailPath, thumbErr := ensureLocalImageThumbnail(filePath, firstNonEmpty(objectMimeType, uploadFile.MimeType))
+		if thumbErr == nil {
+			markFileAccessed(uploadFile)
+			return FileAccessResult{LocalPath: thumbnailPath}, nil
+		}
+		log.Logger.Warn("生成文件缩略图失败，回退原图", zap.String("uuid", uploadFile.UUID), zap.Error(thumbErr))
+	}
+	markFileAccessed(uploadFile)
 	return FileAccessResult{LocalPath: filePath}, nil
+}
+
+func (s CommonService) dbOrDefault() (*gorm.DB, error) {
+	if s.db != nil {
+		return s.db, nil
+	}
+	return model.GetDB()
 }

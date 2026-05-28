@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -186,9 +187,6 @@ func applyLoginFailState(state *model.LoginSecurityState, now time.Time, policy 
 }
 
 func isTableNotFoundErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "doesn't exist") || strings.Contains(msg, "does not exist") || strings.Contains(msg, "no such table")
+	var mysqlErr *mysql.MySQLError
+	return stderrors.As(err, &mysqlErr) && mysqlErr.Number == 1146
 }

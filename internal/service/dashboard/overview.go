@@ -13,6 +13,8 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/service"
 )
 
+const notificationWSRequestPath = "/admin/v1/system/notification/ws"
+
 type Metric struct {
 	Key     string  `json:"key"`
 	Title   string  `json:"title"`
@@ -292,10 +294,7 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 		Count int64
 	}
 
-	// DSN 启用 parseTime=true 后，DATE() 会被驱动转为 time.Time，Scan 到 string 字段时会被
-	// database/sql 用 RFC3339Nano 序列化为 "2006-01-02T00:00:00+08:00"，无法匹配下方按
-	// "2006-01-02" 构造的 map key。改用 DATE_FORMAT 直接返回字符串规避此行为。
-	const dateExpr = "DATE_FORMAT(created_at, '%Y-%m-%d')"
+	dateExpr := requestLogDateExpr(db)
 
 	// 查询每日请求数
 	var requestCounts []dayCount
@@ -362,6 +361,20 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 	}, nil
 }
 
+func requestLogDateExpr(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil {
+		switch db.Dialector.Name() {
+		case "sqlite":
+			return "strftime('%Y-%m-%d', created_at)"
+		}
+	}
+
+	// DSN 启用 parseTime=true 后，DATE() 会被驱动转为 time.Time，Scan 到 string 字段时会被
+	// database/sql 用 RFC3339Nano 序列化为 "2006-01-02T00:00:00+08:00"，无法匹配下方按
+	// "2006-01-02" 构造的 map key。MySQL 下使用 DATE_FORMAT 直接返回字符串规避此行为。
+	return "DATE_FORMAT(created_at, '%Y-%m-%d')"
+}
+
 // responseTimeBucketDefs 定义耗时分桶边界，遵循左闭右开规则，最后一个桶为开区间。
 // 边界归属：100ms 落入 100_300ms；300ms 落入 300_1000ms；1000ms 落入 1s_3s；3000ms 落入 gt_3s。
 var responseTimeBucketDefs = []struct {
@@ -386,7 +399,7 @@ func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *Respon
 	}
 	for _, def := range responseTimeBucketDefs {
 		bucket := ResponseTimeBucket{Label: def.Label, LowerMs: def.LowerMs, UpperMs: def.UpperMs}
-		query := db.Table("request_logs").Where("created_at >= ? AND created_at < ?", start, end)
+		query := requestLogLatencyStatsQuery(db, start, end)
 		if def.LowerMs > 0 {
 			query = query.Where("execution_time >= ?", def.LowerMs)
 		}
@@ -407,9 +420,8 @@ func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *Respon
 	var avg struct {
 		Avg float64
 	}
-	if err := db.Table("request_logs").
+	if err := requestLogLatencyStatsQuery(db, start, end).
 		Select("COALESCE(AVG(execution_time), 0) AS avg").
-		Where("created_at >= ? AND created_at < ?", start, end).
 		Scan(&avg).Error; err != nil {
 		if log.Logger != nil {
 			log.Logger.Warn("统计请求平均耗时失败", zap.Error(err))
@@ -420,7 +432,13 @@ func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *Respon
 	return stats
 }
 
-// buildErrorCodeStats 聚合今日 request_logs 中 response_status >= 400 的状态码分布，按数量降序取 TOP10。
+func requestLogLatencyStatsQuery(db *gorm.DB, start time.Time, end time.Time) *gorm.DB {
+	return db.Table("request_logs").
+		Where("created_at >= ? AND created_at < ?", start, end).
+		Where("execution_time_scope = ?", model.ExecutionTimeScopeRequest)
+}
+
+// buildErrorCodeStats 聚合指定时间窗口内的 response_status 分布，按数量降序取 TOP10。
 func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCodeBucket {
 	if db == nil {
 		return nil
@@ -432,13 +450,13 @@ func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCod
 	var rows []row
 	if err := db.Table("request_logs").
 		Select("response_status AS status_code, COUNT(*) AS count").
-		Where("created_at >= ? AND created_at < ? AND response_status >= ?", start, end, 400).
+		Where("created_at >= ? AND created_at < ?", start, end).
 		Group("response_status").
 		Order("count DESC, response_status ASC").
 		Limit(10).
 		Scan(&rows).Error; err != nil {
 		if log.Logger != nil {
-			log.Logger.Warn("统计错误状态码分布失败", zap.Error(err))
+			log.Logger.Warn("统计响应状态码分布失败", zap.Error(err))
 		}
 		return nil
 	}

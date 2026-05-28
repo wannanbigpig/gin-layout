@@ -51,6 +51,16 @@ type QueueConfig struct {
 	AuditMaxRetry int `mapstructure:"audit_max_retry" yaml:"audit_max_retry"`
 	// AuditTimeoutSeconds 审计日志任务的超时时间（秒）
 	AuditTimeoutSeconds int `mapstructure:"audit_timeout_seconds" yaml:"audit_timeout_seconds"`
+	// AuditFallbackBufferSize 队列降级路径的内存缓冲容量。
+	// <=0 时使用默认值 1024。满时优先丢弃低风险的最旧条目，再不能丢弃则同步落库兜底。
+	AuditFallbackBufferSize int `mapstructure:"audit_fallback_buffer_size" yaml:"audit_fallback_buffer_size"`
+	// AuditFallbackBatchSize 批量 INSERT 的最大条数。<=0 时使用默认值 200。
+	AuditFallbackBatchSize int `mapstructure:"audit_fallback_batch_size" yaml:"audit_fallback_batch_size"`
+	// AuditFallbackFlushIntervalMs 批量 INSERT 的最长等待间隔（毫秒）。<=0 时使用默认值 1000。
+	AuditFallbackFlushIntervalMs int `mapstructure:"audit_fallback_flush_interval_ms" yaml:"audit_fallback_flush_interval_ms"`
+	// AuditSampleGetKeepEvery 对低风险只读请求（GET 且 2xx 且 is_high_risk=0）保留 1/N 条。
+	// <=1 时表示全量保留（不采样）。默认 10 即保留 1/10。
+	AuditSampleGetKeepEvery int `mapstructure:"audit_sample_get_keep_every" yaml:"audit_sample_get_keep_every"`
 }
 
 // Queue 队列默认配置。
@@ -79,6 +89,10 @@ var Queue = QueueConfig{
 		"export":   2, // 权重 2，约 18% 概率被调度（导出任务）
 		"low":      1, // 权重 1，约 9% 概率被调度（批量通知）
 	},
-	AuditMaxRetry:       3,  // 审计日志失败最多重试 3 次
-	AuditTimeoutSeconds: 10, // 审计日志任务超时 10 秒
+	AuditMaxRetry:                3,    // 审计日志失败最多重试 3 次
+	AuditTimeoutSeconds:          10,   // 审计日志任务超时 10 秒
+	AuditFallbackBufferSize:      1024, // 降级路径内存缓冲容量
+	AuditFallbackBatchSize:       200,  // 批量 INSERT 单批最大条数
+	AuditFallbackFlushIntervalMs: 1000, // 批量 INSERT 最长等待间隔（毫秒）
+	AuditSampleGetKeepEvery:      10,   // 低风险只读请求保留 1/10
 }

@@ -60,3 +60,19 @@ func (api StorageConfigController) Test(c *gin.Context) {
 	}
 	api.Success(c, nil)
 }
+
+func (api StorageConfigController) Secret(c *gin.Context) {
+	query := form.NewStorageSecretQuery()
+	if err := validator.CheckQueryParams(c, &query); err != nil {
+		return
+	}
+
+	value, err := service.NewStorageConfigService().GetSensitiveValue(query.Driver, query.Field)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, map[string]string{
+		"value": value,
+	})
+}

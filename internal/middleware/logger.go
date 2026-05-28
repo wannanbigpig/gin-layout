@@ -14,6 +14,16 @@ const (
 	maxResponseBodySize = 32 * 1024 // 响应体最大记录大小：32KB
 )
 
+// skipLogPaths 集中维护审计日志/响应记录需要跳过的路径，避免在多个判定点散落硬编码字符串。
+var skipLogPaths = map[string]struct{}{
+	"/ping": {},
+}
+
+// websocketLoggingPaths 标识在审计日志中应识别为 WebSocket 长连接的路径。
+var websocketLoggingPaths = map[string]struct{}{
+	"/admin/v1/system/notification/ws": {},
+}
+
 // CustomLogger 自定义日志中间件
 func CustomLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -54,8 +64,8 @@ func shouldSkipRequestLogging(c *gin.Context, recorder *responseRecorder) bool {
 		return true
 	}
 
-	// ping 请求不记录日志
-	if c.Request.URL.Path == "/ping" {
+	// 跳过预设路径（如 /ping），避免高频探活请求污染审计日志。
+	if _, skip := skipLogPaths[c.Request.URL.Path]; skip {
 		return true
 	}
 

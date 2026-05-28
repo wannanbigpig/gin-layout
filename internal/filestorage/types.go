@@ -11,10 +11,13 @@ const MaskPlaceholder = "******"
 type Config struct {
 	Local               LocalConfig     `json:"local"`
 	AliyunOSS           AliyunOSSConfig `json:"aliyun_oss"`
-	S3                  S3Config        `json:"s3"`
 	SignedURLTTLSeconds int             `json:"signed_url_ttl_seconds"`
 	MaxFileSizeMB       int             `json:"max_file_size_mb"`
 	AllowedMimeTypes    []string        `json:"allowed_mime_types"`
+	AllowedExtensions   []string        `json:"allowed_extensions"`
+	ExportDefaultFolder string          `json:"export_default_folder"`
+	ExportTempFolder    string          `json:"export_temp_folder"`
+	ExportTempFileTTL   int             `json:"export_temp_file_ttl_days"`
 }
 
 type LocalConfig struct {
@@ -34,15 +37,6 @@ type AliyunOSSConfig struct {
 	ForcePathStyle   bool   `json:"force_path_style"`
 }
 
-type S3Config struct {
-	Endpoint        string `json:"endpoint"`
-	Region          string `json:"region"`
-	Bucket          string `json:"bucket"`
-	AccessKeyID     string `json:"access_key_id"`
-	SecretAccessKey string `json:"secret_access_key"`
-	PublicDomain    string `json:"public_domain"`
-	ForcePathStyle  bool   `json:"force_path_style"`
-}
 
 type PutInput struct {
 	Bucket      string
@@ -95,6 +89,7 @@ type CompletePartInfo struct {
 	ETag       string
 }
 
+// Driver 描述所有存储驱动必须实现的基础能力。
 type Driver interface {
 	Name() string
 	Put(ctx context.Context, input PutInput) (PutResult, error)
@@ -104,6 +99,11 @@ type Driver interface {
 	URL(bucket, objectKey string, isPublic bool) string
 	SignedURL(ctx context.Context, bucket, objectKey string, ttl time.Duration) (string, error)
 	PresignPutObject(ctx context.Context, bucket, objectKey string, contentType string, ttl time.Duration) (string, error)
+}
+
+// MultipartCapable 描述支持分片上传的可选驱动能力。
+// 调用方通过类型断言判断驱动是否支持，否则视为不支持。
+type MultipartCapable interface {
 	InitMultipartUpload(ctx context.Context, input MultipartUploadInput) (MultipartUploadResult, error)
 	PresignMultipartPart(ctx context.Context, input MultipartPartInput) (MultipartPartResult, error)
 	CompleteMultipartUpload(ctx context.Context, bucket, objectKey, uploadID string, parts []CompletePartInfo) error
@@ -115,5 +115,9 @@ func DefaultConfig() Config {
 		SignedURLTTLSeconds: 300,
 		MaxFileSizeMB:       10,
 		AllowedMimeTypes:    []string{},
+		AllowedExtensions:   []string{},
+		ExportDefaultFolder: "导出",
+		ExportTempFolder:    "临时文件",
+		ExportTempFileTTL:   7,
 	}
 }

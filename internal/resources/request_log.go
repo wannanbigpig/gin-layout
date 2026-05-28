@@ -11,6 +11,7 @@ type RequestLogBaseResources struct {
 	RequestID           string           `json:"request_id"`            // 请求唯一标识
 	OperatorID          uint             `json:"operator_id"`           // 操作ID（用户ID）
 	IP                  string           `json:"ip"`                    // 客户端IP地址
+	RequestKind         string           `json:"request_kind"`          // 请求类型：http/websocket/sse
 	Method              string           `json:"method"`                // HTTP请求方法（GET/POST等）
 	BaseURL             string           `json:"base_url"`              // 请求基础URL
 	OperationName       string           `json:"operation_name"`        // 操作名称
@@ -21,6 +22,8 @@ type RequestLogBaseResources struct {
 	OperatorName        string           `json:"operator_name"`         // 操作人员
 	ResponseStatus      int              `json:"response_status"`       // 响应状态码
 	ExecutionTime       float64          `json:"execution_time"`        // 执行时间（毫秒，支持小数，最多4位）
+	ExecutionTimeUnit   string           `json:"execution_time_unit"`   // 执行时间单位
+	ExecutionTimeScope  string           `json:"execution_time_scope"`  // 执行时间语义
 	CreatedAt           utils.FormatDate `json:"created_at"`            // 创建时间
 }
 
@@ -68,6 +71,7 @@ func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResourc
 		RequestID:           data.RequestID,
 		OperatorID:          data.OperatorID,
 		IP:                  data.IP,
+		RequestKind:         data.RequestKind,
 		Method:              data.Method,
 		BaseURL:             data.BaseURL,
 		OperationName:       data.OperationName,
@@ -78,6 +82,8 @@ func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResourc
 		OperatorName:        data.OperatorName,
 		ResponseStatus:      data.ResponseStatus,
 		ExecutionTime:       data.ExecutionTime,
+		ExecutionTimeUnit:   data.ExecutionTimeUnit,
+		ExecutionTimeScope:  data.ExecutionTimeScope,
 		CreatedAt:           data.CreatedAt,
 	}
 }

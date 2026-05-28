@@ -57,6 +57,11 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 		t.Fatalf("missing or invalid storage config route: %#v", route)
 	}
 
+	storageSecretCode := utils.MD5(http.MethodGet + "_/admin/v1/system/storage/secret")
+	if route, ok := routes[storageSecretCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid storage secret route: %#v", route)
+	}
+
 	fileDestroyCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/trash/destroy")
 	if route, ok := routes[fileDestroyCode]; !ok || route.Auth != AuthModeAuth {
 		t.Fatalf("missing or invalid file destroy route: %#v", route)
@@ -65,6 +70,16 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	fileBatchDeleteCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/batch-delete")
 	if route, ok := routes[fileBatchDeleteCode]; !ok || route.Auth != AuthModeAuth {
 		t.Fatalf("missing or invalid file batch-delete route: %#v", route)
+	}
+
+	credentialBatchCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/upload/credential/batch")
+	if route, ok := routes[credentialBatchCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid credential batch route: %#v", route)
+	}
+
+	completeBatchCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/upload/complete/batch")
+	if route, ok := routes[completeBatchCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid complete batch route: %#v", route)
 	}
 
 	multipartInitCode := utils.MD5(http.MethodPost + "_/admin/v1/system/file/upload/multipart/init")
@@ -119,6 +134,9 @@ func TestSetRoutersRegistersCriticalRoutes(t *testing.T) {
 		http.MethodGet + " /admin/v1/system/notification/unread-count",
 		http.MethodPost + " /admin/v1/system/notification/read",
 		http.MethodPost + " /admin/v1/system/notification/read-all",
+		http.MethodGet + " /admin/v1/system/storage/secret",
+		http.MethodPost + " /admin/v1/system/file/upload/credential/batch",
+		http.MethodPost + " /admin/v1/system/file/upload/complete/batch",
 		http.MethodPost + " /admin/v1/system/file/upload/multipart/init",
 		http.MethodPost + " /admin/v1/system/file/upload/multipart/complete",
 		http.MethodPost + " /admin/v1/system/file/upload/multipart/abort",

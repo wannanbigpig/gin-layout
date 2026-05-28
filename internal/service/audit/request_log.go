@@ -1,6 +1,8 @@
 package audit
 
 import (
+	"strings"
+
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
@@ -23,16 +25,18 @@ func NewRequestLogService() *RequestLogService {
 // List 分页查询请求日志列表
 func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collection {
 	query := buildRequestLogQuery(requestLogQueryInput{
-		OperatorID:      params.OperatorID,
-		OperatorAccount: params.OperatorAccount,
-		OperationStatus: params.OperationStatus,
-		IsHighRisk:      params.IsHighRisk,
-		Method:          params.Method,
-		BaseURL:         params.BaseURL,
-		OperationName:   params.OperationName,
-		IP:              params.IP,
-		StartTime:       params.StartTime,
-		EndTime:         params.EndTime,
+		OperatorID:         params.OperatorID,
+		OperatorAccount:    params.OperatorAccount,
+		OperationStatus:    params.OperationStatus,
+		IsHighRisk:         params.IsHighRisk,
+		RequestKind:        params.RequestKind,
+		ExecutionTimeScope: params.ExecutionTimeScope,
+		Method:             params.Method,
+		BaseURL:            params.BaseURL,
+		OperationName:      params.OperationName,
+		IP:                 params.IP,
+		StartTime:          params.StartTime,
+		EndTime:            params.EndTime,
 	})
 	conditionStr, args := query.Build()
 	requestLogModel := model.NewRequestLogs()
@@ -44,6 +48,7 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 			"request_id",
 			"operator_id",
 			"ip",
+			"request_kind",
 			"method",
 			"base_url",
 			"operation_name",
@@ -53,9 +58,12 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 			"operator_name",
 			"response_status",
 			"execution_time",
+			"execution_time_unit",
+			"execution_time_scope",
 			"created_at",
 		},
-		OrderBy: "created_at DESC, id DESC",
+		OrderBy:       resolveRequestLogOrderBy(params.OrderBy),
+		OrderAllowMap: requestLogOrderAllowMap,
 	}
 	transformer := resources.NewRequestLogTransformer()
 
@@ -70,6 +78,22 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
 }
 
+var requestLogOrderAllowMap = map[string]struct{}{
+	"id":               {},
+	"created_at":       {},
+	"execution_time":   {},
+	"response_status":  {},
+	"operation_status": {},
+}
+
+func resolveRequestLogOrderBy(orderBy string) string {
+	orderBy = strings.TrimSpace(orderBy)
+	if orderBy == "" {
+		return "created_at DESC, id DESC"
+	}
+	return orderBy + ", id DESC"
+}
+
 // Detail 获取请求日志详情
 func (s *RequestLogService) Detail(id uint) (any, error) {
 	requestLog := model.NewRequestLogs()
@@ -82,16 +106,18 @@ func (s *RequestLogService) Detail(id uint) (any, error) {
 }
 
 type requestLogQueryInput struct {
-	OperatorID      uint
-	OperatorAccount string
-	OperationStatus *int
-	IsHighRisk      *uint8
-	Method          string
-	BaseURL         string
-	OperationName   string
-	IP              string
-	StartTime       string
-	EndTime         string
+	OperatorID         uint
+	OperatorAccount    string
+	OperationStatus    *int
+	IsHighRisk         *uint8
+	RequestKind        string
+	ExecutionTimeScope string
+	Method             string
+	BaseURL            string
+	OperationName      string
+	IP                 string
+	StartTime          string
+	EndTime            string
 }
 
 func buildRequestLogQuery(input requestLogQueryInput) *logListQuery {
@@ -99,6 +125,8 @@ func buildRequestLogQuery(input requestLogQueryInput) *logListQuery {
 		addEq("operator_id", uintFilterValue(input.OperatorID)).
 		addLike("operator_account", input.OperatorAccount).
 		addEq("base_url", input.BaseURL).
+		addEq("request_kind", input.RequestKind).
+		addEq("execution_time_scope", input.ExecutionTimeScope).
 		addEq("method", input.Method).
 		addLike("operation_name", input.OperationName).
 		addLike("ip", input.IP).

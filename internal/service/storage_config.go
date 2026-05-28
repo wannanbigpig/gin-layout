@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/filestorage"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"gorm.io/gorm"
@@ -100,26 +100,79 @@ func storageSysConfigValue(key string) (string, error) {
 }
 
 func (s *StorageConfigService) Test(ctx context.Context, settings StorageSettings) error {
+	current, _ := s.Get(false)
+	mergeSensitiveStorageConfig(&settings.Config, current.Config)
 	driver, err := buildStorageDriver(ctx, settings.ActiveDriver, settings.Config)
 	if err != nil {
-		return err
+		return newStorageTestBusinessError("init", err)
 	}
 	key := "storage-test/" + time.Now().Format("20060102150405") + ".txt"
 	bucket := bucketForDriver(settings.ActiveDriver, settings.Config, global.Yes)
 	if _, err := driver.Put(ctx, filestorage.PutInput{Bucket: bucket, ObjectKey: key, Reader: strings.NewReader("ok"), Size: 2, ContentType: "text/plain"}); err != nil {
-		return err
+		return newStorageTestBusinessError("upload", err)
 	}
 	exists, err := driver.Exists(ctx, bucket, key)
 	if err != nil {
-		return err
+		return newStorageTestBusinessError("exists", err)
 	}
 	if !exists {
-		return fmt.Errorf("storage object not found after put")
+		return newStorageTestBusinessError("exists", fmt.Errorf("storage object not found after put"))
 	}
 	if _, err := driver.SignedURL(ctx, bucket, key, time.Minute); err != nil {
-		return err
+		return newStorageTestBusinessError("signed_url", err)
 	}
-	return driver.Delete(ctx, bucket, key)
+	if err := driver.Delete(ctx, bucket, key); err != nil {
+		return newStorageTestBusinessError("delete", err)
+	}
+	return nil
+}
+
+func newStorageTestBusinessError(step string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	stepLabel, permissionLabel, defaultReason := storageTestStepMeta(step)
+	message := fmt.Sprintf("%s失败，请检查存储配置、权限和网络连通性", stepLabel)
+	if isStoragePermissionDenied(err) {
+		message = fmt.Sprintf("%s失败：当前存储凭证没有%s权限，请检查 Bucket ACL、RAM Policy、Bucket Policy 或对象权限", stepLabel, permissionLabel)
+	} else if defaultReason != "" {
+		message = fmt.Sprintf("%s失败：%s", stepLabel, defaultReason)
+	}
+
+	businessErr := e.NewBusinessError(e.StorageTestFailed, message)
+	businessErr.AppendContextErr(err)
+	return businessErr
+}
+
+func storageTestStepMeta(step string) (stepLabel string, permissionLabel string, defaultReason string) {
+	switch step {
+	case "init":
+		return "初始化存储驱动", "访问存储配置", "请检查驱动类型、Endpoint、Bucket 和密钥配置"
+	case "upload":
+		return "上传测试文件", "上传对象", "请检查 Bucket 写入权限、Endpoint 和网络连通性"
+	case "exists":
+		return "校验测试文件", "读取对象", "请检查 Bucket 读取权限和对象可见性"
+	case "signed_url":
+		return "生成测试访问链接", "读取对象", "请检查签名配置、Bucket 读取权限和 Endpoint"
+	case "delete":
+		return "删除测试文件", "删除对象", "请检查 Bucket 删除权限和对象归属"
+	default:
+		return "测试存储配置", "访问对象", "请检查存储配置、权限和网络连通性"
+	}
+}
+
+func isStoragePermissionDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "accessdenied") ||
+		strings.Contains(msg, "access denied") ||
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "forbidden") ||
+		strings.Contains(msg, "no right") ||
+		strings.Contains(msg, "no permission")
 }
 
 func NewActiveStorageDriver(ctx context.Context) (filestorage.Driver, filestorage.Config, string, error) {
@@ -148,15 +201,7 @@ func buildStorageDriver(ctx context.Context, driverName string, config filestora
 	case model.StorageDriverLocal:
 		return filestorage.NewLocalDriver(config.Local, storageBasePath(true), storageBasePath(false)), nil
 	case model.StorageDriverAliyunOSS:
-		if strings.TrimSpace(config.AliyunOSS.Bucket) == "" {
-			return nil, fmt.Errorf("aliyun_oss.bucket is required")
-		}
 		return filestorage.NewAliyunOSSDriver(config.AliyunOSS), nil
-	case model.StorageDriverS3:
-		if strings.TrimSpace(config.S3.Bucket) == "" {
-			return nil, fmt.Errorf("s3.bucket is required")
-		}
-		return filestorage.NewS3Driver(ctx, config.S3)
 	default:
 		return nil, fmt.Errorf("unsupported storage driver: %s", driverName)
 	}
@@ -166,8 +211,6 @@ func bucketForDriver(driverName string, config filestorage.Config, isPublic uint
 	switch driverName {
 	case model.StorageDriverAliyunOSS:
 		return config.AliyunOSS.Bucket
-	case model.StorageDriverS3:
-		return config.S3.Bucket
 	default:
 		if isPublic == global.Yes {
 			return "public"
@@ -178,7 +221,7 @@ func bucketForDriver(driverName string, config filestorage.Config, isPublic uint
 
 func validateStorageDriver(driverName string) error {
 	switch driverName {
-	case model.StorageDriverLocal, model.StorageDriverAliyunOSS, model.StorageDriverS3:
+	case model.StorageDriverLocal, model.StorageDriverAliyunOSS:
 		return nil
 	default:
 		return fmt.Errorf("unsupported storage driver: %s", driverName)
@@ -212,24 +255,12 @@ func upsertStorageSysConfig(tx *gorm.DB, key, value, valueType string, sensitive
 }
 
 func maskStorageSettings(settings *StorageSettings) {
-	settings.Config.AliyunOSS.AccessKeyID = maskIfNotEmpty(settings.Config.AliyunOSS.AccessKeyID)
 	settings.Config.AliyunOSS.AccessKeySecret = maskIfNotEmpty(settings.Config.AliyunOSS.AccessKeySecret)
-	settings.Config.S3.AccessKeyID = maskIfNotEmpty(settings.Config.S3.AccessKeyID)
-	settings.Config.S3.SecretAccessKey = maskIfNotEmpty(settings.Config.S3.SecretAccessKey)
 }
 
 func mergeSensitiveStorageConfig(next *filestorage.Config, current filestorage.Config) {
-	if shouldKeepSecret(next.AliyunOSS.AccessKeyID) {
-		next.AliyunOSS.AccessKeyID = current.AliyunOSS.AccessKeyID
-	}
 	if shouldKeepSecret(next.AliyunOSS.AccessKeySecret) {
 		next.AliyunOSS.AccessKeySecret = current.AliyunOSS.AccessKeySecret
-	}
-	if shouldKeepSecret(next.S3.AccessKeyID) {
-		next.S3.AccessKeyID = current.S3.AccessKeyID
-	}
-	if shouldKeepSecret(next.S3.SecretAccessKey) {
-		next.S3.SecretAccessKey = current.S3.SecretAccessKey
 	}
 }
 
@@ -274,15 +305,20 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func ensureLocalStorageDirs() error {
-	cfg := c.GetConfig()
-	if cfg == nil {
-		return nil
+func (s *StorageConfigService) GetSensitiveValue(driverName, field string) (string, error) {
+	settings, err := s.Get(false)
+	if err != nil {
+		return "", err
 	}
-	for _, path := range []string{filepath.Join(cfg.BasePath, "storage/public"), filepath.Join(cfg.BasePath, "storage/private")} {
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			return err
+	switch strings.TrimSpace(driverName) {
+	case model.StorageDriverAliyunOSS:
+		switch strings.TrimSpace(field) {
+		case "access_key_secret":
+			return settings.Config.AliyunOSS.AccessKeySecret, nil
+		default:
+			return "", fmt.Errorf("unsupported storage secret field: %s", field)
 		}
+	default:
+		return "", fmt.Errorf("unsupported storage driver: %s", driverName)
 	}
-	return nil
 }

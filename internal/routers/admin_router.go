@@ -254,7 +254,9 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					POST("move", "移动文件资源", AuthModeAuth, deps.File.Move),
 					POST("upload/local", "本地上传文件资源", AuthModeAuth, deps.File.UploadLocal),
 					POST("upload/credential", "获取文件直传凭证", AuthModeAuth, deps.File.UploadCredential),
+					POST("upload/credential/batch", "批量获取文件直传凭证", AuthModeAuth, deps.File.UploadCredentialBatch),
 					POST("upload/complete", "完成文件直传登记", AuthModeAuth, deps.File.UploadComplete),
+					POST("upload/complete/batch", "批量完成文件直传登记", AuthModeAuth, deps.File.UploadCompleteBatch),
 					POST("upload/multipart/init", "分片上传初始化", AuthModeAuth, deps.File.MultipartInit),
 					POST("upload/multipart/complete", "分片上传完成", AuthModeAuth, deps.File.MultipartComplete),
 					POST("upload/multipart/abort", "分片上传中止", AuthModeAuth, deps.File.MultipartAbort),
@@ -262,7 +264,10 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					POST("batch-delete", "批量删除文件资源", AuthModeAuth, deps.File.BatchDelete),
 					GET("trash/list", "文件回收站列表", AuthModeAuth, deps.File.TrashList),
 					POST("trash/restore", "恢复文件资源", AuthModeAuth, deps.File.Restore),
+					POST("trash/batch-restore", "批量恢复文件资源", AuthModeAuth, deps.File.BatchRestore),
 					POST("trash/destroy", "硬删除文件资源", AuthModeAuth, deps.File.Destroy),
+					POST("trash/batch-destroy", "批量硬删除文件资源", AuthModeAuth, deps.File.BatchDestroy),
+
 					GET("references", "文件引用列表", AuthModeAuth, deps.File.References),
 					POST("export", "导出文件资源", AuthModeAuth, deps.File.Export),
 				},
@@ -290,6 +295,7 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 				GroupCode: "storage",
 				Routes: []RouteDef{
 					GET("config", "存储配置", AuthModeAuth, deps.Storage.Config),
+					GET("secret", "查看存储敏感信息", AuthModeAuth, deps.Storage.Secret),
 					POST("config", "保存存储配置", AuthModeAuth, deps.Storage.Save),
 					POST("test", "测试存储配置", AuthModeAuth, deps.Storage.Test),
 				},

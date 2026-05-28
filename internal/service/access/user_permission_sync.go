@@ -47,6 +47,9 @@ func (s *UserPermissionSyncService) SyncUser(userID uint, tx ...*gorm.DB) error 
 
 // SyncUsers 重建多个用户的最终接口权限并同步到 Casbin。
 func (s *UserPermissionSyncService) SyncUsers(userIDs []uint, tx ...*gorm.DB) error {
+	if len(UniqueUintSlice(userIDs)) == 0 {
+		return nil
+	}
 	return s.withSyncTransaction(tx, func(execTx *gorm.DB) error {
 		enforcer, err := getPolicyEnforcer()
 		if err != nil {

@@ -169,6 +169,27 @@ GO_ENV=development go run main.go service -H 127.0.0.1 -P 9001
 GO_ENV=development go run main.go worker
 ```
 
+本地开发如需热更新，项目已提供 Air 配置：
+
+```bash
+go install github.com/air-verse/air@latest
+make dev-service
+```
+
+如果启用了 `queue.enable=true`，worker 也可以单独使用热更新：
+
+```bash
+make dev-worker
+```
+
+注意：
+
+- `make dev-service` 使用根目录的 [`.air.toml`](./.air.toml) 启动 API 服务热更新。
+- `make dev-service` / `make dev-worker` 都会显式传入 `-c ./config.yaml`，请先确保项目根目录已存在 `config.yaml`。
+- `make dev-worker` 使用 [`.air.worker.toml`](./.air.worker.toml) 启动 worker 热更新，二进制和构建日志与 service 隔离，避免互相覆盖。
+- 不要在运行 `make dev-worker` 的同时，再手动执行 `go run main.go worker` 或启动其他 worker 进程，否则会出现多个 worker 并发消费同一队列。
+- worker 热更新会重启进程，执行中的任务可能被队列机制重试一次；这是开发环境的预期行为。
+
 ### 6. 验证服务
 
 ```bash

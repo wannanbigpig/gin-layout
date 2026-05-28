@@ -84,7 +84,7 @@ func (api CommonController) GetFile(c *gin.Context) {
 	}
 
 	// 获取文件访问方式（会自动检查权限）
-	access, err := commonService.GetFileAccessPath(fileUUID, checkAuth, currentUID)
+	access, err := commonService.GetFileAccessPath(fileUUID, c.Query("variant"), checkAuth, currentUID)
 	if err != nil {
 		api.Err(c, err)
 		return

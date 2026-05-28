@@ -20,6 +20,8 @@ const (
 	maskBankCardSuffixLen = 4
 	maskDefaultPrefixLen  = 1
 	maskDefaultSuffixLen  = 1
+	// 超过该长度的 maskDefault 输出将折叠中间的 `*` 为固定 `***`，避免一长串星号污染审计日志可读性。
+	maskDefaultFoldThreshold = 32
 )
 
 // SensitiveFieldsConfig 敏感字段配置结构（未来可通过配置文件加载）
@@ -79,15 +81,16 @@ func newSensitiveFieldsManager(config SensitiveFieldsConfig) *sensitiveFieldsMan
 }
 
 func (m *sensitiveFieldsManager) applyConfig(config SensitiveFieldsConfig) {
-	m.commonFields = sliceToMap(config.Common)
-	m.requestHeaderFields = sliceToMap(config.RequestHeader)
-	m.requestBodyFields = sliceToMap(config.RequestBody)
-	m.responseHeaderFields = sliceToMap(config.ResponseHeader)
-	m.responseBodyFields = sliceToMap(config.ResponseBody)
+	normalized := NormalizeSensitiveFieldsConfig(config)
+	m.commonFields = sliceToMap(normalized.Common)
+	m.requestHeaderFields = mergeFieldMaps(m.commonFields, normalized.RequestHeader)
+	m.requestBodyFields = mergeFieldMaps(m.commonFields, normalized.RequestBody)
+	m.responseHeaderFields = mergeFieldMaps(m.commonFields, normalized.ResponseHeader)
+	m.responseBodyFields = mergeFieldMaps(m.commonFields, normalized.ResponseBody)
 }
 
 func defaultSensitiveFieldsConfig() SensitiveFieldsConfig {
-	return SensitiveFieldsConfig{
+	return NormalizeSensitiveFieldsConfig(SensitiveFieldsConfig{
 		Common: []string{
 			"password", "pwd", "passwd", "pass", "secret",
 			"token", "access_token", "refresh_token",
@@ -100,38 +103,31 @@ func defaultSensitiveFieldsConfig() SensitiveFieldsConfig {
 			"x-api-key", "x-access-token", "x-auth-token", "x-token",
 		},
 		RequestBody: []string{
-			"password", "pwd", "passwd", "pass", "secret",
-			"token", "access_token", "refresh_token",
-			"api_key", "apikey", "apiKey",
 			"phone", "mobile", "tel", "telephone",
 			"phone_number", "mobile_number",
 			"email", "mail",
 			"id_card", "idcard", "identity", "id_number",
 			"bank_card", "bankcard", "card_number", "card_no",
-			"cvv", "cvc", "cvv2", "security_code",
-			"pin", "ssn", "social_security",
-			"real_name", "realname", "name",
+			"ssn", "social_security",
+			// 仅保留显式表达“真实姓名”的字段；通用 name 字段误报率高，已移出默认列表，
+			// 业务确有脱敏需要时可通过 LoadSensitiveFieldsConfig 补充。
+			"real_name", "realname",
 		},
 		ResponseHeader: []string{
 			"set-cookie",
 			"authorization", "auth",
-			"x-api-key", "x-access-token", "x-auth-token", "x-token", "x-refresh-token",
-			"refresh-access-token", "refresh-exp",
+			"x-api-key", "refresh-exp",
 			"cookie",
 		},
 		ResponseBody: []string{
-			"password", "pwd", "passwd", "pass", "secret",
-			"token", "access_token", "refresh_token",
-			"api_key", "apikey", "apiKey",
 			"phone", "mobile", "tel", "telephone",
 			"phone_number", "mobile_number",
 			"email", "mail",
 			"id_card", "idcard", "identity", "id_number",
 			"bank_card", "bankcard", "card_number", "card_no",
-			"cvv", "cvc", "cvv2", "security_code",
-			"pin", "ssn", "social_security",
+			"ssn", "social_security",
 		},
-	}
+	})
 }
 
 // DefaultSensitiveFieldsConfig 返回默认敏感字段配置副本。
@@ -155,10 +151,23 @@ func GetSensitiveFieldsConfig() SensitiveFieldsConfig {
 
 	return SensitiveFieldsConfig{
 		Common:         mapKeys(manager.commonFields),
-		RequestHeader:  mapKeys(manager.requestHeaderFields),
-		RequestBody:    mapKeys(manager.requestBodyFields),
-		ResponseHeader: mapKeys(manager.responseHeaderFields),
-		ResponseBody:   mapKeys(manager.responseBodyFields),
+		RequestHeader:  subtractCommonFieldKeys(manager.requestHeaderFields, manager.commonFields),
+		RequestBody:    subtractCommonFieldKeys(manager.requestBodyFields, manager.commonFields),
+		ResponseHeader: subtractCommonFieldKeys(manager.responseHeaderFields, manager.commonFields),
+		ResponseBody:   subtractCommonFieldKeys(manager.responseBodyFields, manager.commonFields),
+	}
+}
+
+// NormalizeSensitiveFieldsConfig 统一清洗敏感字段配置，并移除已在 common 中声明的分组重复字段。
+func NormalizeSensitiveFieldsConfig(config SensitiveFieldsConfig) SensitiveFieldsConfig {
+	common := normalizeFieldList(config.Common, nil)
+	commonSet := sliceToMap(common)
+	return SensitiveFieldsConfig{
+		Common:         common,
+		RequestHeader:  normalizeFieldList(config.RequestHeader, commonSet),
+		RequestBody:    normalizeFieldList(config.RequestBody, commonSet),
+		ResponseHeader: normalizeFieldList(config.ResponseHeader, commonSet),
+		ResponseBody:   normalizeFieldList(config.ResponseBody, commonSet),
 	}
 }
 
@@ -172,6 +181,55 @@ func sliceToMap(slice []string) map[string]bool {
 			result[strings.ToLower(s)] = true
 		}
 	}
+	return result
+}
+
+func normalizeFieldList(input []string, exclude map[string]bool) []string {
+	if len(input) == 0 {
+		return []string{}
+	}
+	result := make([]string, 0, len(input))
+	seen := make(map[string]struct{}, len(input))
+	for _, item := range input {
+		trimmed := strings.ToLower(strings.TrimSpace(item))
+		if trimmed == "" {
+			continue
+		}
+		if exclude != nil && exclude[trimmed] {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func mergeFieldMaps(common map[string]bool, specific []string) map[string]bool {
+	result := make(map[string]bool, len(common)+len(specific))
+	for key := range common {
+		result[key] = true
+	}
+	for _, key := range specific {
+		result[strings.ToLower(key)] = true
+	}
+	return result
+}
+
+func subtractCommonFieldKeys(source map[string]bool, common map[string]bool) []string {
+	if len(source) == 0 {
+		return []string{}
+	}
+	result := make([]string, 0, len(source))
+	for key := range source {
+		if common[key] {
+			continue
+		}
+		result = append(result, key)
+	}
+	sort.Strings(result)
 	return result
 }
 

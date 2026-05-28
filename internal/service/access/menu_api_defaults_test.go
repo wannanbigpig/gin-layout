@@ -69,6 +69,8 @@ func TestDefaultMenuAPIBindingsCoverManagementRoutes(t *testing.T) {
 		http.MethodGet + " /admin/v1/system/export/detail",
 		http.MethodPost + " /admin/v1/system/file/export",
 		http.MethodPost + " /admin/v1/system/file/batch-delete",
+		http.MethodPost + " /admin/v1/system/file/upload/credential/batch",
+		http.MethodPost + " /admin/v1/system/file/upload/complete/batch",
 		http.MethodGet + " /admin/v1/log/request/list",
 		http.MethodGet + " /admin/v1/log/request/detail",
 		http.MethodPost + " /admin/v1/log/request/mask-config",

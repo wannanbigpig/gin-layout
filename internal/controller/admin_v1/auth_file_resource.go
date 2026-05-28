@@ -224,6 +224,32 @@ func (api FileResourceController) Destroy(c *gin.Context) {
 	api.Success(c, nil)
 }
 
+func (api FileResourceController) BatchRestore(c *gin.Context) {
+	params := form.NewFileBatchRestoreForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	if err := service.NewFileResourceService().BatchRestore(params.IDs); err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, nil)
+}
+
+func (api FileResourceController) BatchDestroy(c *gin.Context) {
+	params := form.NewFileBatchDestroyForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	result, err := service.NewFileResourceService().BatchDestroy(params.IDs)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+
 func (api FileResourceController) References(c *gin.Context) {
 	params := form.NewFileReferenceListQuery()
 	if err := validator.CheckQueryParams(c, &params); err != nil {
@@ -317,9 +343,18 @@ func (api FileResourceController) UploadLocal(c *gin.Context) {
 		api.FailCode(c, pkgErrors.InvalidParameter)
 		return
 	}
-	result, err := service.NewFileResourceService().UploadLocal(multipartForm.File["files"], params, api.GetCurrentUserID(c))
+	files := multipartForm.File["files"]
+	result, err := service.NewFileResourceService().UploadLocal(files, params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
+		return
+	}
+	if len(files) <= 1 {
+		if result != nil && len(result.Items) > 0 {
+			api.Success(c, result.Items[0])
+			return
+		}
+		api.Success(c, nil)
 		return
 	}
 	api.Success(c, result)
@@ -338,12 +373,46 @@ func (api FileResourceController) UploadCredential(c *gin.Context) {
 	api.Success(c, result)
 }
 
+func (api FileResourceController) UploadCredentialBatch(c *gin.Context) {
+	params := form.NewFileUploadCredentialBatchForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	if isSSERequest(c) {
+		api.streamUploadCredentialBatch(c, params)
+		return
+	}
+	result, err := service.NewFileResourceService().UploadCredentialBatch(params, nil)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
 func (api FileResourceController) UploadComplete(c *gin.Context) {
 	params := form.NewFileUploadCompleteForm()
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
 	result, err := service.NewFileResourceService().CompleteDirectUpload(params, api.GetCurrentUserID(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+func (api FileResourceController) UploadCompleteBatch(c *gin.Context) {
+	params := form.NewFileUploadCompleteBatchForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	if isSSERequest(c) {
+		api.streamUploadCompleteBatch(c, params, api.GetCurrentUserID(c))
+		return
+	}
+	result, err := service.NewFileResourceService().CompleteDirectUploadBatch(params, api.GetCurrentUserID(c), nil)
 	if err != nil {
 		api.Err(c, err)
 		return

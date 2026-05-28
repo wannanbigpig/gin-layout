@@ -109,6 +109,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (70, 'ant-design:search-outlined', 'storage:config', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
 (71, 'ant-design:edit-filled', 'storage:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
 (72, 'ep:connection', 'storage:test', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
+(77, 'ant-design:eye-outlined', 'storage:secret', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
 (73, 'ep:refresh-left', 'file:restore', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
 (74, 'ant-design:delete-filled', 'file:destroy', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
 (75, 'ant-design:edit-filled', 'file:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 85, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
@@ -186,6 +187,7 @@ SELECT `id`,
            WHEN 70 THEN '配置'
            WHEN 71 THEN '更新'
            WHEN 72 THEN '测试'
+           WHEN 77 THEN '查看密钥'
            WHEN 73 THEN '恢复'
            WHEN 74 THEN '硬删除'
            WHEN 75 THEN '编辑'
@@ -269,6 +271,7 @@ SELECT `id`,
            WHEN 70 THEN 'Config'
            WHEN 71 THEN 'Update'
            WHEN 72 THEN 'Test'
+           WHEN 77 THEN 'View Secret'
            WHEN 73 THEN 'Restore'
            WHEN 74 THEN 'Destroy'
            WHEN 75 THEN 'Edit'
@@ -291,9 +294,9 @@ VALUES ('auth.login_lock_enabled', 'true', 'bool', 'auth', 1, 0, 1, '', 1, 89, '
        ('auth.login_max_failures', '5', 'number', 'auth', 1, 0, 1, '', 1, 88, '登录连续失败阈值', NOW(), NOW(), 0),
        ('auth.login_lock_minutes', '15', 'number', 'auth', 1, 0, 1, '', 1, 87, '登录锁定时长（分钟）', NOW(), NOW(), 0),
        ('task.cron_demo_enabled', 'false', 'bool', 'task', 1, 0, 1, '', 1, 80, '是否启用演示定时任务，默认关闭', NOW(), NOW(), 0),
-       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code"],"request_header":["authorization","auth","cookie","x-api-key","x-access-token","x-auth-token","x-token"],"request_body":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","cvv","cvc","cvv2","security_code","pin","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","x-access-token","x-auth-token","x-token","x-refresh-token","refresh-access-token","refresh-exp","cookie"],"response_body":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","cvv","cvc","cvv2","security_code","pin","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '请求日志脱敏字段配置', NOW(), NOW(), 0),
+       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code"],"request_header":["authorization","auth","cookie","x-api-key"],"request_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","refresh-exp","cookie"],"response_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '请求日志脱敏字段配置', NOW(), NOW(), 0),
        ('storage.active_driver', 'local', 'string', 'storage', 1, 0, 0, 'storage', 1, 90, '当前启用的文件存储驱动', NOW(), NOW(), 0),
-       ('storage.config', '{"local":{},"aliyun_oss":{},"s3":{},"signed_url_ttl_seconds":300,"max_file_size_mb":10,"allowed_mime_types":[]}', 'json', 'storage', 1, 1, 0, 'storage', 1, 80, '文件存储配置', NOW(), NOW(), 0)
+       ('storage.config', '{"local":{},"aliyun_oss":{},"signed_url_ttl_seconds":300,"max_file_size_mb":10,"allowed_mime_types":[]}', 'json', 'storage', 1, 1, 0, 'storage', 1, 80, '文件存储配置', NOW(), NOW(), 0)
 ON DUPLICATE KEY UPDATE `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_dict_type` (`type_code`, `is_system`, `status`, `sort`, `remark`, `created_at`,

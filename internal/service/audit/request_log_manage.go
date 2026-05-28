@@ -2,10 +2,13 @@ package audit
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -49,7 +52,7 @@ var requestLogMaskConfigDiffRules = []auditdiff.FieldRule{
 
 // ExportCSV 导出请求日志 CSV。
 func (s *RequestLogService) ExportCSV(params *form.RequestLogExport) ([]byte, string, error) {
-	return generateRequestLogExportCSV(params, nil)
+	return generateRequestLogExportCSVBytes(params, nil)
 }
 
 // GetMaskConfig 获取当前敏感字段脱敏配置。
@@ -84,6 +87,7 @@ func (s *RequestLogService) UpdateMaskConfig(params *form.RequestLogMaskConfigFo
 		ResponseHeader: normalizeSensitiveFieldList(params.ResponseHeader),
 		ResponseBody:   normalizeSensitiveFieldList(params.ResponseBody),
 	}
+	nextConfig = sensitive.NormalizeSensitiveFieldsConfig(nextConfig)
 
 	persisted, err := saveMaskConfigToSysConfig(nextConfig)
 	if err != nil {
@@ -157,13 +161,13 @@ func decodeMaskConfig(raw string) (sensitive.SensitiveFieldsConfig, error) {
 	if err := json.Unmarshal([]byte(raw), &config); err != nil {
 		return sensitive.SensitiveFieldsConfig{}, err
 	}
-	return sensitive.SensitiveFieldsConfig{
+	return sensitive.NormalizeSensitiveFieldsConfig(sensitive.SensitiveFieldsConfig{
 		Common:         normalizeSensitiveFieldList(config.Common),
 		RequestHeader:  normalizeSensitiveFieldList(config.RequestHeader),
 		RequestBody:    normalizeSensitiveFieldList(config.RequestBody),
 		ResponseHeader: normalizeSensitiveFieldList(config.ResponseHeader),
 		ResponseBody:   normalizeSensitiveFieldList(config.ResponseBody),
-	}, nil
+	}), nil
 }
 
 func saveMaskConfigToSysConfig(config sensitive.SensitiveFieldsConfig) (bool, error) {
@@ -219,26 +223,43 @@ func saveMaskConfigToSysConfig(config sensitive.SensitiveFieldsConfig) (bool, er
 
 // GenerateExportCSV 生成请求日志 CSV 数据（供异步导出任务使用）。
 func GenerateExportCSV(params *form.RequestLogExport) ([]byte, string, error) {
-	return generateRequestLogExportCSV(params, nil)
+	return generateRequestLogExportCSVBytes(params, nil)
 }
 
 // GenerateExportCSVWithProgress 生成请求日志导出 CSV，并在每批处理完成后回调真实进度。
+//
+// Deprecated: 优先使用 StreamExportCSV 以避免在内存中持有完整 CSV，
+// 当前函数仅作为薄包装保留以兼容旧调用方。
 func GenerateExportCSVWithProgress(params *form.RequestLogExport, reporter func(processed, total int) error) ([]byte, string, error) {
-	return generateRequestLogExportCSV(params, reporter)
+	return generateRequestLogExportCSVBytes(params, reporter)
 }
 
-func generateRequestLogExportCSV(params *form.RequestLogExport, reporter exportProgressReporter) ([]byte, string, error) {
+// StreamExportCSV 流式生成请求日志 CSV，按 batch (requestLogExportBatchSize) 通过 Rows()/ScanRows
+// 写入 w，每写完一批回调一次 reporter，返回生成的文件名以及流式过程中遇到的首个错误。
+//
+// 与 GenerateExportCSVWithProgress 相比，本函数不会在内存中累积全部 CSV，
+// 内存峰值取决于 batch 大小而不是总行数，适合搭配 io.Pipe 与 CreateFromReader 串接。
+func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Writer, reporter func(processed, total int) error) (string, error) {
+	if w == nil {
+		return "", fmt.Errorf("StreamExportCSV: writer is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	query := buildRequestLogQuery(requestLogQueryInput{
-		OperatorID:      params.OperatorID,
-		OperatorAccount: params.OperatorAccount,
-		OperationStatus: params.OperationStatus,
-		IsHighRisk:      params.IsHighRisk,
-		Method:          params.Method,
-		BaseURL:         params.BaseURL,
-		OperationName:   params.OperationName,
-		IP:              params.IP,
-		StartTime:       params.StartTime,
-		EndTime:         params.EndTime,
+		OperatorID:         params.OperatorID,
+		OperatorAccount:    params.OperatorAccount,
+		OperationStatus:    params.OperationStatus,
+		IsHighRisk:         params.IsHighRisk,
+		RequestKind:        params.RequestKind,
+		ExecutionTimeScope: params.ExecutionTimeScope,
+		Method:             params.Method,
+		BaseURL:            params.BaseURL,
+		OperationName:      params.OperationName,
+		IP:                 params.IP,
+		StartTime:          params.StartTime,
+		EndTime:            params.EndTime,
 	})
 	condition, args := query.Build()
 
@@ -249,8 +270,9 @@ func generateRequestLogExportCSV(params *form.RequestLogExport, reporter exportP
 
 	db, err := model.GetDB()
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
+	db = db.WithContext(ctx)
 
 	baseQuery := db.Model(&model.RequestLogs{})
 	if condition != "" {
@@ -258,21 +280,22 @@ func generateRequestLogExportCSV(params *form.RequestLogExport, reporter exportP
 	}
 	var totalRows int64
 	if err := baseQuery.Count(&totalRows).Error; err != nil {
-		return nil, "", err
+		return "", err
 	}
 	total := int(totalRows)
 	if total > limit {
 		total = limit
 	}
 
-	buffer := &bytes.Buffer{}
-	writer := csv.NewWriter(buffer)
+	writer := csv.NewWriter(w)
 	if err := writer.Write([]string{
 		"id",
 		"request_id",
 		"operator_account",
 		"operator_name",
 		"ip",
+		"request_kind",
+		"execution_time_scope",
 		"method",
 		"base_url",
 		"operation_name",
@@ -280,25 +303,32 @@ func generateRequestLogExportCSV(params *form.RequestLogExport, reporter exportP
 		"is_high_risk",
 		"response_status",
 		"execution_time_ms",
+		"execution_time_unit",
 		"change_diff",
 		"created_at",
 	}); err != nil {
-		return nil, "", err
+		return "", err
 	}
 
 	if reporter != nil {
 		if err := reporter(0, total); err != nil {
-			return nil, "", err
+			return "", err
 		}
 	}
 
 	processed := 0
 	for processed < total {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+
 		batchLimit := requestLogExportBatchSize
 		if remaining := total - processed; remaining < batchLimit {
 			batchLimit = remaining
 		}
-		records := make([]*model.RequestLogs, 0, batchLimit)
+
 		queryDB := db.Model(&model.RequestLogs{}).
 			Select([]string{
 				"id",
@@ -306,6 +336,8 @@ func generateRequestLogExportCSV(params *form.RequestLogExport, reporter exportP
 				"operator_account",
 				"operator_name",
 				"ip",
+				"request_kind",
+				"execution_time_scope",
 				"method",
 				"base_url",
 				"operation_name",
@@ -313,6 +345,7 @@ func generateRequestLogExportCSV(params *form.RequestLogExport, reporter exportP
 				"is_high_risk",
 				"response_status",
 				"execution_time",
+				"execution_time_unit",
 				"change_diff",
 				"created_at",
 			}).
@@ -322,45 +355,88 @@ func generateRequestLogExportCSV(params *form.RequestLogExport, reporter exportP
 		if condition != "" {
 			queryDB = queryDB.Where(condition, args...)
 		}
-		if err := queryDB.Find(&records).Error; err != nil {
-			return nil, "", err
+
+		rows, err := queryDB.Rows()
+		if err != nil {
+			return "", err
 		}
-		if len(records) == 0 {
+
+		batchCount, scanErr := writeRequestLogRows(db, rows, writer)
+		// 立即关闭 rows，释放连接
+		_ = rows.Close()
+		if scanErr != nil {
+			return "", scanErr
+		}
+		// 每批 flush 一次，让下游 reader 能尽快拿到数据，避免大批写入造成的卡顿
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			return "", err
+		}
+		if batchCount == 0 {
 			break
 		}
-		for _, record := range records {
-			if err := writer.Write([]string{
-				strconv.FormatUint(uint64(record.ID), 10),
-				record.RequestID,
-				record.OperatorAccount,
-				record.OperatorName,
-				record.IP,
-				record.Method,
-				record.BaseURL,
-				record.OperationName,
-				strconv.Itoa(record.OperationStatus),
-				strconv.Itoa(int(record.IsHighRisk)),
-				strconv.Itoa(record.ResponseStatus),
-				strconv.FormatFloat(record.ExecutionTime, 'f', 4, 64),
-				record.ChangeDiff,
-				record.CreatedAt.String(),
-			}); err != nil {
-				return nil, "", err
-			}
-		}
-		processed += len(records)
+		processed += batchCount
 		if reporter != nil {
 			if err := reporter(processed, total); err != nil {
-				return nil, "", err
+				return "", err
 			}
 		}
 	}
 
 	writer.Flush()
 	if err := writer.Error(); err != nil {
-		return nil, "", err
+		return "", err
 	}
 
 	fileName := "request_logs_" + time.Now().Format("20060102150405") + ".csv"
+	return fileName, nil
+}
+
+// writeRequestLogRows 流式扫描 rows 并将每一行写入 csv writer，返回写入行数及首个错误。
+func writeRequestLogRows(db *gorm.DB, rows *sql.Rows, writer *csv.Writer) (int, error) {
+	count := 0
+	for rows.Next() {
+		record := &model.RequestLogs{}
+		if err := db.ScanRows(rows, record); err != nil {
+			return count, err
+		}
+		if err := writer.Write([]string{
+			strconv.FormatUint(uint64(record.ID), 10),
+			record.RequestID,
+			record.OperatorAccount,
+			record.OperatorName,
+			record.IP,
+			record.RequestKind,
+			record.ExecutionTimeScope,
+			record.Method,
+			record.BaseURL,
+			record.OperationName,
+			strconv.Itoa(record.OperationStatus),
+			strconv.Itoa(int(record.IsHighRisk)),
+			strconv.Itoa(record.ResponseStatus),
+			strconv.FormatFloat(record.ExecutionTime, 'f', 4, 64),
+			record.ExecutionTimeUnit,
+			record.ChangeDiff,
+			record.CreatedAt.String(),
+		}); err != nil {
+			return count, err
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return count, err
+	}
+	return count, nil
+}
+
+// generateRequestLogExportCSVBytes 是 StreamExportCSV 的薄包装：
+// 复用同一份流式实现，但把 writer 替换为 bytes.Buffer，便于继续兼容
+// 那些直接需要 []byte 形式的旧调用方（例如同步导出接口）。
+func generateRequestLogExportCSVBytes(params *form.RequestLogExport, reporter exportProgressReporter) ([]byte, string, error) {
+	buffer := &bytes.Buffer{}
+	fileName, err := StreamExportCSV(context.Background(), params, buffer, reporter)
+	if err != nil {
+		return nil, "", err
+	}
 	return buffer.Bytes(), fileName, nil
 }

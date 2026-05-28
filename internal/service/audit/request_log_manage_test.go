@@ -10,10 +10,10 @@ import (
 func TestDecodeMaskConfigNormalizesFields(t *testing.T) {
 	config, err := decodeMaskConfig(`{
 		"common": [" Password ", "password", "Token"],
-		"request_header": ["authorization", "Authorization", ""],
-		"request_body": ["mobile", "MOBILE"],
+		"request_header": ["authorization", "Authorization", "token", ""],
+		"request_body": ["mobile", "MOBILE", "password"],
 		"response_header": [],
-		"response_body": ["IDCard", "idcard"]
+		"response_body": ["IDCard", "idcard", "token"]
 	}`)
 	if err != nil {
 		t.Fatalf("decodeMaskConfig returned error: %v", err)
@@ -57,6 +57,9 @@ func TestDecodeMaskConfigEmptyUsesDefault(t *testing.T) {
 	}
 	if len(config.RequestHeader) != len(defaultConfig.RequestHeader) {
 		t.Fatalf("unexpected default request_header length: got=%d want=%d", len(config.RequestHeader), len(defaultConfig.RequestHeader))
+	}
+	if len(config.RequestBody) >= len(defaultConfig.Common)+len(defaultConfig.RequestBody) {
+		t.Fatalf("expected default request_body to omit common duplicates, got request_body=%d common=%d", len(config.RequestBody), len(defaultConfig.Common))
 	}
 }
 

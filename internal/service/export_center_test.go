@@ -333,6 +333,10 @@ func TestExportCenterServiceReassignTaskRun(t *testing.T) {
 func newExportCenterTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	// 重置 sys_export_records 表探测缓存：包级 sync.Once 会跨用例残留，
+	// 这里每次创建测试 db 时显式清空，避免不同测试用例的 in-memory sqlite 相互影响。
+	ResetExportRecordsTableCacheForTest()
+
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite failed: %v", err)

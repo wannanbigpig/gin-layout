@@ -20,6 +20,9 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 			id integer primary key autoincrement,
 			created_at datetime,
 			updated_at datetime,
+			base_url text,
+			request_kind text,
+			execution_time_scope text,
 			response_status integer,
 			operation_status integer,
 			execution_time real
@@ -49,11 +52,28 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func insertRequestLog(t *testing.T, db *gorm.DB, createdAt time.Time, execMs float64, responseStatus int) {
+func insertRequestLog(t *testing.T, db *gorm.DB, createdAt time.Time, baseURL string, execMs float64, responseStatus int) {
 	t.Helper()
-	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, response_status, operation_status, execution_time) VALUES (?, ?, ?, 0, ?)`,
-		createdAt, createdAt, responseStatus, execMs).Error; err != nil {
+	if baseURL == "" {
+		baseURL = "/admin/v1/dashboard/overview"
+	}
+	requestKind := "http"
+	executionScope := "request"
+	if baseURL == notificationWSRequestPath {
+		requestKind = "websocket"
+		executionScope = "connection"
+	}
+	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, base_url, request_kind, execution_time_scope, response_status, operation_status, execution_time) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+		createdAt, createdAt, baseURL, requestKind, executionScope, responseStatus, execMs).Error; err != nil {
 		t.Fatalf("insert request_log failed: %v", err)
+	}
+}
+
+func insertStreamRequestLog(t *testing.T, db *gorm.DB, createdAt time.Time, baseURL string, execMs float64, responseStatus int) {
+	t.Helper()
+	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, base_url, request_kind, execution_time_scope, response_status, operation_status, execution_time) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+		createdAt, createdAt, baseURL, "sse", "stream", responseStatus, execMs).Error; err != nil {
+		t.Fatalf("insert sse request_log failed: %v", err)
 	}
 }
 
@@ -75,19 +95,19 @@ func TestBuildResponseTimeStatsBucketBoundaries(t *testing.T) {
 	yesterday := todayStart.AddDate(0, 0, -1).Add(2 * time.Hour)
 
 	// 落入 lt_100ms
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 50, 200)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 99.9, 200)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 50, 200)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 99.9, 200)
 	// 边界：100ms 应进入 100_300ms
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 100, 200)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 100, 200)
 	// 边界：300ms 应进入 300_1000ms
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 300, 200)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 300, 200)
 	// 边界：1000ms 应进入 1s_3s
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 1000, 500)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 1000, 500)
 	// 边界：3000ms 应进入 gt_3s
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 3000, 500)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 5000, 500)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 3000, 500)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 5000, 500)
 	// 昨日数据不应计入今日
-	insertRequestLog(t, db, yesterday, 50, 200)
+	insertRequestLog(t, db, yesterday, "", 50, 200)
 
 	stats := buildResponseTimeStats(db, todayStart, tomorrowStart)
 	if stats == nil {
@@ -118,6 +138,39 @@ func TestBuildResponseTimeStatsBucketBoundaries(t *testing.T) {
 	}
 }
 
+func TestBuildResponseTimeStatsOnlyCountsRequestScope(t *testing.T) {
+	db := newDashboardTestDB(t)
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "/admin/v1/dashboard/overview", 120, 200)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), notificationWSRequestPath, 85000, 200)
+	insertStreamRequestLog(t, db, todayStart.Add(2*time.Hour), "/admin/v1/system/file/upload/credential/batch", 2200, 200)
+
+	stats := buildResponseTimeStats(db, todayStart, tomorrowStart)
+	if stats == nil {
+		t.Fatal("expected non-nil stats")
+	}
+	if stats.AvgMs != 120 {
+		t.Fatalf("expected avg_ms=120 after excluding non-request scopes, got %v", stats.AvgMs)
+	}
+
+	expected := map[string]int64{
+		"lt_100ms":   0,
+		"100_300ms":  1,
+		"300_1000ms": 0,
+		"1s_3s":      0,
+		"gt_3s":      0,
+	}
+	for _, bucket := range stats.Buckets {
+		if bucket.Count != expected[bucket.Label] {
+			t.Fatalf("bucket %s: expected count %d, got %d", bucket.Label, expected[bucket.Label], bucket.Count)
+		}
+	}
+}
+
 func TestBuildErrorCodeStatsOrderedDesc(t *testing.T) {
 	db := newDashboardTestDB(t)
 
@@ -125,20 +178,19 @@ func TestBuildErrorCodeStatsOrderedDesc(t *testing.T) {
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 
-	// 500 出现 3 次，404 出现 2 次，403 出现 1 次。
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 10, 500)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 10, 500)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 10, 500)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 10, 404)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 10, 404)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 10, 403)
-	// 非错误码不应计入
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 10, 200)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), 10, 302)
+	// 500 出现 3 次，404 出现 2 次，403 出现 1 次，200/302 也应参与全量响应状态码分布。
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 404)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 404)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 403)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 200)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 302)
 
 	buckets := buildErrorCodeStats(db, todayStart, tomorrowStart)
-	if len(buckets) != 3 {
-		t.Fatalf("expected 3 buckets, got %d", len(buckets))
+	if len(buckets) != 5 {
+		t.Fatalf("expected 5 buckets, got %d", len(buckets))
 	}
 	if buckets[0].StatusCode != 500 || buckets[0].Count != 3 {
 		t.Fatalf("bucket[0] expected 500/3, got %+v", buckets[0])
@@ -146,8 +198,14 @@ func TestBuildErrorCodeStatsOrderedDesc(t *testing.T) {
 	if buckets[1].StatusCode != 404 || buckets[1].Count != 2 {
 		t.Fatalf("bucket[1] expected 404/2, got %+v", buckets[1])
 	}
-	if buckets[2].StatusCode != 403 || buckets[2].Count != 1 {
-		t.Fatalf("bucket[2] expected 403/1, got %+v", buckets[2])
+	if buckets[2].StatusCode != 200 || buckets[2].Count != 1 {
+		t.Fatalf("bucket[2] expected 200/1, got %+v", buckets[2])
+	}
+	if buckets[3].StatusCode != 302 || buckets[3].Count != 1 {
+		t.Fatalf("bucket[3] expected 302/1, got %+v", buckets[3])
+	}
+	if buckets[4].StatusCode != 403 || buckets[4].Count != 1 {
+		t.Fatalf("bucket[4] expected 403/1, got %+v", buckets[4])
 	}
 }
 
@@ -245,9 +303,9 @@ func TestBuildStatisticsAggregatesSummaryAndTrend(t *testing.T) {
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	insertRequestLog(t, db, todayStart.Add(-2*24*time.Hour).Add(time.Hour), 120, 200)
-	insertRequestLog(t, db, todayStart.Add(-time.Hour), 220, 500)
-	insertRequestLog(t, db, todayStart.Add(-time.Hour), 360, 404)
+	insertRequestLog(t, db, todayStart.Add(-2*24*time.Hour).Add(time.Hour), "", 120, 200)
+	insertRequestLog(t, db, todayStart.Add(-time.Hour), "", 220, 500)
+	insertRequestLog(t, db, todayStart.Add(-time.Hour), "", 360, 404)
 
 	insertUploadFile(t, db, "image", 2048, 0)
 	insertUploadFile(t, db, "pdf", 4096, 0)

@@ -30,6 +30,10 @@ func maskSensitiveString(s string) string {
 		return s
 	}
 
+	if isJWT(s) {
+		return maskToken(s)
+	}
+
 	if prefix, ok := authPrefix(s); ok {
 		return maskAuthToken(s, prefix)
 	}
@@ -41,10 +45,24 @@ func maskSensitiveString(s string) string {
 	return maskDefault(s)
 }
 
+func isJWT(s string) bool {
+	if !strings.HasPrefix(s, "eyJ") {
+		return false
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func authPrefix(s string) (string, bool) {
 	switch sLower := strings.ToLower(s); {
-	case strings.HasPrefix(s, "eyJ"):
-		return "", false
 	case strings.HasPrefix(sLower, "bearer "):
 		return "bearer ", true
 	case strings.HasPrefix(sLower, "basic "):
@@ -151,6 +169,9 @@ func maskDefault(s string) string {
 	length := len(s)
 	if length <= maskDefaultPrefixLen+maskDefaultSuffixLen {
 		return strings.Repeat("*", length)
+	}
+	if length > maskDefaultFoldThreshold {
+		return s[:maskDefaultPrefixLen] + "***" + s[length-maskDefaultSuffixLen:]
 	}
 	maskLen := length - maskDefaultPrefixLen - maskDefaultSuffixLen
 	return s[:maskDefaultPrefixLen] + strings.Repeat("*", maskLen) + s[length-maskDefaultSuffixLen:]

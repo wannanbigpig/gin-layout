@@ -93,22 +93,6 @@ func (d *LocalDriver) PresignPutObject(_ context.Context, _, _ string, _ string,
 	return "", errors.New("local driver does not support presigned PUT upload")
 }
 
-func (d *LocalDriver) InitMultipartUpload(_ context.Context, _ MultipartUploadInput) (MultipartUploadResult, error) {
-	return MultipartUploadResult{}, errors.New("local driver does not support multipart upload")
-}
-
-func (d *LocalDriver) PresignMultipartPart(_ context.Context, _ MultipartPartInput) (MultipartPartResult, error) {
-	return MultipartPartResult{}, errors.New("local driver does not support multipart upload")
-}
-
-func (d *LocalDriver) CompleteMultipartUpload(_ context.Context, _, _, _ string, _ []CompletePartInfo) error {
-	return errors.New("local driver does not support multipart upload")
-}
-
-func (d *LocalDriver) AbortMultipartUpload(_ context.Context, _, _, _ string) error {
-	return errors.New("local driver does not support multipart upload")
-}
-
 func (d *LocalDriver) resolve(bucket, objectKey string) (string, error) {
 	if objectKey == "" {
 		return "", fmt.Errorf("object_key is required")

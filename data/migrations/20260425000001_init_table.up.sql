@@ -323,7 +323,6 @@ CREATE TABLE IF NOT EXISTS `admin_login_logs`
     PRIMARY KEY (`id`),
     KEY `aall_deleted_at_created_at` (`deleted_at`, `created_at`),
     KEY `aall_login_status_deleted_at_created_at` (`login_status`, `deleted_at`, `created_at`),
-    KEY `aall_is_revoked_deleted_at_revoked_at` (`is_revoked`, `deleted_at`, `revoked_at`),
     KEY `aall_uid_deleted_at_is_revoked_login_status_token_expires` (`uid`, `deleted_at`, `is_revoked`, `login_status`, `token_expires`),
     KEY `aall_jwt_id_deleted_at_is_revoked` (`jwt_id`, `deleted_at`, `is_revoked`)
 ) ENGINE = InnoDB
@@ -358,6 +357,7 @@ CREATE TABLE IF NOT EXISTS `request_logs`
     `user_agent`      varchar(1024) NOT NULL DEFAULT '' COMMENT '用户代理（浏览器/设备信息）',
     `os`             varchar(50)  NOT NULL DEFAULT '' COMMENT '操作系统',
     `browser`        varchar(50)  NOT NULL DEFAULT '' COMMENT '浏览器',
+    `request_kind`    varchar(16)  NOT NULL DEFAULT 'http' COMMENT '请求类型：http/websocket/sse',
     `method`          varchar(10)  NOT NULL DEFAULT '' COMMENT 'HTTP请求方法（GET/POST等）',
     `base_url`        varchar(160) NOT NULL DEFAULT '' COMMENT '请求基础URL',
     `operation_name`  varchar(255) NOT NULL DEFAULT '' COMMENT '操作名称',
@@ -372,19 +372,18 @@ CREATE TABLE IF NOT EXISTS `request_logs`
     `response_status` int(11)      NOT NULL DEFAULT '0' COMMENT '响应状态码',
     `response_body`   text                  DEFAULT NULL COMMENT '响应体',
     `response_header` text                  DEFAULT NULL COMMENT '响应头',
-    `execution_time`  DECIMAL(10,4) NOT NULL DEFAULT '0.0000' COMMENT '执行时间（毫秒，支持小数，最多4位）',
+    `execution_time`  DECIMAL(12,4) NOT NULL DEFAULT '0.0000' COMMENT '执行时间（毫秒，支持小数，最多4位）',
+    `execution_time_unit` varchar(16) NOT NULL DEFAULT 'ms' COMMENT '执行时间单位：ms',
+    `execution_time_scope` varchar(16) NOT NULL DEFAULT 'request' COMMENT '执行时间语义：request/connection/stream/none',
     `created_at`      datetime              DEFAULT NULL COMMENT '创建时间',
     `updated_at`      datetime              DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    KEY `rl_request_id` (`request_id`),
     KEY `rl_operator_id_created_at` (`operator_id`, `created_at`),
     KEY `rl_base_url_method_created_at` (`base_url`, `method`, `created_at`),
     KEY `rl_operation_status_created_at` (`operation_status`, `created_at`),
-    KEY `rl_response_status_operator_id_created_at` (`response_status`, `operator_id`, `created_at`),
-    KEY `rl_operator_account_created_at` (`operator_account`, `created_at`),
     KEY `rl_created_at` (`created_at`),
-    KEY `rl_jwt_id` (`jwt_id`),
-    KEY `rl_is_high_risk_created_at` (`is_high_risk`, `created_at`)
+    KEY `rl_is_high_risk_created_at` (`is_high_risk`, `created_at`),
+    KEY `rl_execution_time_scope_created_at` (`execution_time_scope`, `created_at`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='请求日志表';
@@ -423,7 +422,7 @@ CREATE TABLE IF NOT EXISTS `upload_files`
     `mime_type`   varchar(100) NOT NULL DEFAULT '' COMMENT 'MIME类型（如：image/jpeg, application/pdf）',
     `file_type`   varchar(20)  NOT NULL DEFAULT '' COMMENT '文件类型:image,pdf,word,excel,ppt,archive,text,audio,video,other',
     `is_public`   tinyint      NOT NULL DEFAULT '0' COMMENT '是否公开访问: 0否 1是',
-    `storage_driver` varchar(20)  NOT NULL DEFAULT 'local' COMMENT '存储驱动:local,aliyun_oss,s3',
+    `storage_driver` varchar(20)  NOT NULL DEFAULT 'local' COMMENT '存储驱动:local,aliyun_oss',
     `storage_base` varchar(512) NOT NULL DEFAULT '' COMMENT '存储基础位置',
     `bucket`      varchar(128) NOT NULL DEFAULT '' COMMENT '存储桶',
     `storage_path` varchar(512) NOT NULL DEFAULT '' COMMENT '实际存储路径',
@@ -649,9 +648,7 @@ CREATE TABLE IF NOT EXISTS `task_runs`
     `updated_at`      datetime                 DEFAULT NULL,
     PRIMARY KEY (`id`),
     KEY `tr_task_code_created_at` (`task_code`, `created_at`),
-    KEY `tr_status_created_at` (`status`, `created_at`),
-    KEY `tr_source_source_id` (`source`, `source_id`),
-    KEY `tr_kind_created_at` (`kind`, `created_at`)
+    KEY `tr_status_created_at` (`status`, `created_at`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='任务执行记录表';
@@ -666,8 +663,7 @@ CREATE TABLE IF NOT EXISTS `task_run_events`
     `created_at` datetime                DEFAULT NULL,
     `updated_at` datetime                DEFAULT NULL,
     PRIMARY KEY (`id`),
-    KEY `tre_run_id_created_at` (`run_id`, `created_at`),
-    KEY `tre_event_type_created_at` (`event_type`, `created_at`)
+    KEY `tre_run_id_created_at` (`run_id`, `created_at`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='任务执行事件表';

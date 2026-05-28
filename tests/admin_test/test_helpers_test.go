@@ -28,11 +28,6 @@ func uniqueTestName(kind string) string {
 	return fmt.Sprintf("%s%s-%d", testResourcePrefix, kind, time.Now().UnixNano())
 }
 
-// containsPrefix 判断字符串是否包含测试前缀。
-func containsPrefix(s string) bool {
-	return strings.HasPrefix(s, testResourcePrefix)
-}
-
 // uniqueCompactTestName 生成适合表单校验长度限制的测试名称。
 func uniqueCompactTestName(kind string) string {
 	return fmt.Sprintf("ta%s%d", strings.ReplaceAll(kind, "-", ""), time.Now().UnixNano()%1e8)

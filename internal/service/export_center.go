@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -281,7 +283,7 @@ func (s *ExportCenterService) List(params *form.ExportRecordList) *resources.Col
 		return transformer.ToCollection(params.Page, params.PerPage, total, rows)
 	}
 
-	if db, err := model.GetDB(); err != nil || !db.Migrator().HasTable(&model.SysExportRecord{}) {
+	if db, err := model.GetDB(); err != nil || !exportRecordsTableReady(db) {
 		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
 	}
 
@@ -391,8 +393,47 @@ func normalizeExportProgressCounts(processedCount, totalCount uint64) (uint64, u
 	return processedCount, totalCount, progress
 }
 
+// sys_export_records 表存在性探测使用 sync.Once + atomic.Bool 缓存。
+//
+// 背景：原实现中 ensureExportRecordTable 在每次 CreateRecord / UpdateProgress /
+// MarkSuccess / MarkFailed / List / Detail / Reassign / updateByTaskRunID 等
+// 路径都会调用 db.Migrator().HasTable(&model.SysExportRecord{})。在 MySQL 下，
+// 该调用会真实下发一次 INFORMATION_SCHEMA 查询，纯属重复劳动，因为应用启动后
+// 该表是否存在不会再发生变化（不会被在线 drop）。
+//
+// 缓存策略：
+//   - hasExportRecordsTable: 当前进程缓存的就绪状态，原子读。
+//   - exportRecordsTableProbe: 保证整个进程内只真正探测一次。
+//   - 首次探测时若 db 为 nil 或 HasTable 返回 false，将缓存 false；
+//     后续传入有效 db 时不再回探（保持简单与一致）。
+//
+// 单元测试可调用 ResetExportRecordsTableCacheForTest 重置缓存以隔离用例。
+var (
+	hasExportRecordsTable   atomic.Bool
+	exportRecordsTableProbe sync.Once
+)
+
+// exportRecordsTableReady 返回 sys_export_records 表是否就绪。
+// 首次调用会执行真实 HasTable 探测，之后仅做一次 atomic load，开销可忽略。
+func exportRecordsTableReady(db *gorm.DB) bool {
+	exportRecordsTableProbe.Do(func() {
+		if db == nil {
+			hasExportRecordsTable.Store(false)
+			return
+		}
+		hasExportRecordsTable.Store(db.Migrator().HasTable(&model.SysExportRecord{}))
+	})
+	return hasExportRecordsTable.Load()
+}
+
+// ResetExportRecordsTableCacheForTest 重置探测缓存，仅供测试代码调用。
+func ResetExportRecordsTableCacheForTest() {
+	hasExportRecordsTable.Store(false)
+	exportRecordsTableProbe = sync.Once{}
+}
+
 func ensureExportRecordTable(db *gorm.DB) error {
-	if db == nil || !db.Migrator().HasTable(&model.SysExportRecord{}) {
+	if !exportRecordsTableReady(db) {
 		return ErrExportRecordTableMissing
 	}
 	return nil

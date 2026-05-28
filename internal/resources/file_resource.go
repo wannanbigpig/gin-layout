@@ -44,6 +44,7 @@ type FileResourceResources struct {
 	ObjectStatus      string           `json:"object_status"`
 	ObjectStatusName  string           `json:"object_status_name"`
 	URL               string           `json:"url"`
+	ThumbnailURL      string           `json:"thumbnail_url"`
 	CreatedAt         utils.FormatDate `json:"created_at"`
 	UpdatedAt         utils.FormatDate `json:"updated_at"`
 	LastAccessedAt    utils.FormatDate `json:"last_accessed_at"`
@@ -70,6 +71,7 @@ func NewFileResourceTransformer() FileResourceTransformer {
 
 func (r *FileResourceResources) SetCustomFields(data *model.UploadFiles) {
 	r.URL = buildFileResourceURL(data.UUID)
+	r.ThumbnailURL = buildFileThumbnailURL(data)
 	r.DeletedAt = uint(data.DeletedAt)
 	if r.DisplayName == "" {
 		r.DisplayName = data.OriginName
@@ -177,6 +179,50 @@ type FileUploadCredentialResources struct {
 	CompletePayload map[string]any    `json:"complete_payload"`
 }
 
+type FileUploadBatchFailure struct {
+	ClientID   string `json:"client_id,omitempty"`
+	OriginName string `json:"origin_name,omitempty"`
+	Index      int    `json:"index,omitempty"`
+	Code       int    `json:"code,omitempty"`
+	Message    string `json:"message,omitempty"`
+}
+
+type FileLocalUploadBatchResult struct {
+	Total    int64                     `json:"total"`
+	Success  int64                     `json:"success"`
+	Failed   int64                     `json:"failed"`
+	Items    []*FileResourceResources  `json:"items"`
+	Failures []*FileUploadBatchFailure `json:"failures,omitempty"`
+}
+
+type FileUploadCredentialBatchItemResult struct {
+	ClientID string                         `json:"client_id,omitempty"`
+	Success  bool                           `json:"success"`
+	Data     *FileUploadCredentialResources `json:"data,omitempty"`
+	Error    *FileUploadBatchFailure        `json:"error,omitempty"`
+}
+
+type FileUploadCredentialBatchResult struct {
+	Total   int64                                  `json:"total"`
+	Success int64                                  `json:"success"`
+	Failed  int64                                  `json:"failed"`
+	Items   []*FileUploadCredentialBatchItemResult `json:"items"`
+}
+
+type FileUploadCompleteBatchItemResult struct {
+	ClientID string                  `json:"client_id,omitempty"`
+	Success  bool                    `json:"success"`
+	Data     *FileResourceResources  `json:"data,omitempty"`
+	Error    *FileUploadBatchFailure `json:"error,omitempty"`
+}
+
+type FileUploadCompleteBatchResult struct {
+	Total   int64                                `json:"total"`
+	Success int64                                `json:"success"`
+	Failed  int64                                `json:"failed"`
+	Items   []*FileUploadCompleteBatchItemResult `json:"items"`
+}
+
 type FileReferenceResources struct {
 	ID         uint             `json:"id"`
 	FileID     uint             `json:"file_id"`
@@ -236,6 +282,16 @@ func buildFileResourceURL(uuid string) string {
 		return "/admin/v1/file/" + uuid
 	}
 	return baseURL + "/admin/v1/file/" + uuid
+}
+
+func buildFileThumbnailURL(data *model.UploadFiles) string {
+	if data == nil || data.UUID == "" {
+		return ""
+	}
+	if data.FileType != "image" && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(data.MimeType)), "image/") {
+		return ""
+	}
+	return buildFileResourceURL(data.UUID) + "?variant=thumb"
 }
 
 // MultipartPartResource 分片签名结果。

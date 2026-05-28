@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	stderrors "errors"
 
 	"github.com/gin-gonic/gin"
@@ -69,7 +70,11 @@ func (api Api) Err(c *gin.Context, err error) {
 			api.FailCode(c, errors.ServiceDependencyNotReady)
 			return
 		}
-		log.Logger.Warn("Unknown error:", zap.String("requestId", requestID), zap.Error(parseErr))
+		log.Logger.Warn("Unknown error:", 
+			zap.String("requestId", requestID), 
+			zap.Error(parseErr),
+			zap.String("type", fmt.Sprintf("%T", parseErr)),
+		)
 		api.FailCode(c, errors.ServerErr)
 		return
 	}

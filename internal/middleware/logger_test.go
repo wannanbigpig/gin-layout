@@ -216,6 +216,80 @@ func TestBuildRequestAuditLogSnapshotUsesPrincipal(t *testing.T) {
 	if snapshot.OperatorAccount != "tester" || snapshot.OperatorName != "Tester" {
 		t.Fatalf("unexpected operator names: %#v", snapshot)
 	}
+	if snapshot.RequestKind != "http" {
+		t.Fatalf("expected request kind http, got %q", snapshot.RequestKind)
+	}
+}
+
+func TestBuildRequestAuditLogSnapshotMarksNotificationWSAsWebSocket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/system/notification/ws?access_token=demo", nil)
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-2*time.Second))
+	ctx.Set(global.ContextKeyRequestID, "req-ws")
+
+	respRecorder := createResponseRecorder(ctx)
+	snapshot := buildRequestAuditLogSnapshot(ctx, respRecorder, &response.Result{Code: 0})
+	if snapshot == nil {
+		t.Fatal("expected audit snapshot")
+	}
+	if snapshot.RequestKind != "websocket" {
+		t.Fatalf("expected request kind websocket, got %q", snapshot.RequestKind)
+	}
+	if snapshot.ExecutionTime <= 0 {
+		t.Fatalf("expected websocket execution_time > 0, got %f", snapshot.ExecutionTime)
+	}
+	if snapshot.ExecutionTimeScope != "connection" {
+		t.Fatalf("expected websocket execution_time_scope connection, got %q", snapshot.ExecutionTimeScope)
+	}
+	if snapshot.ExecutionTimeUnit != "ms" {
+		t.Fatalf("expected websocket execution_time_unit ms, got %q", snapshot.ExecutionTimeUnit)
+	}
+}
+
+func TestCalculateExecutionTimeMsClampsLargeHTTPDuration(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-30*time.Hour))
+
+	got, scope := calculateExecutionTimeMeta(ctx, "http")
+	if got != requestLogExecutionTimeMaxMs {
+		t.Fatalf("expected clamped execution_time %f, got %f", requestLogExecutionTimeMaxMs, got)
+	}
+	if scope != "request" {
+		t.Fatalf("expected request scope, got %q", scope)
+	}
+}
+
+func TestBuildRequestAuditLogSnapshotMarksSSEStreamRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	req := httptest.NewRequest(http.MethodPost, "/admin/v1/system/file/upload/credential/batch?stream=1", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	ctx.Request = req
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-1500*time.Millisecond))
+	ctx.Set(global.ContextKeyRequestID, "req-sse")
+
+	respRecorder := createResponseRecorder(ctx)
+	snapshot := buildRequestAuditLogSnapshot(ctx, respRecorder, &response.Result{Code: 0})
+	if snapshot == nil {
+		t.Fatal("expected audit snapshot")
+	}
+	if snapshot.RequestKind != "sse" {
+		t.Fatalf("expected request kind sse, got %q", snapshot.RequestKind)
+	}
+	if snapshot.ExecutionTimeScope != "stream" {
+		t.Fatalf("expected execution_time_scope stream, got %q", snapshot.ExecutionTimeScope)
+	}
+	if snapshot.ExecutionTimeUnit != "ms" {
+		t.Fatalf("expected execution_time_unit ms, got %q", snapshot.ExecutionTimeUnit)
+	}
+	if snapshot.ExecutionTime <= 0 {
+		t.Fatalf("expected sse execution_time > 0, got %f", snapshot.ExecutionTime)
+	}
 }
 
 func TestBuildRequestAuditLogSnapshotUsesAuditRequestBodyOverride(t *testing.T) {

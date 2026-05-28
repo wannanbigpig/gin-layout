@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 )
 
@@ -51,7 +52,7 @@ func cacheRequestBody(c *gin.Context) {
 	if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
 		return
 	}
-	if _, exists := c.Get("requestBody"); exists {
+	if _, exists := c.Get(global.ContextKeyRequestBodyCache); exists {
 		return
 	}
 	if c.Request.Body == nil {
@@ -65,7 +66,7 @@ func cacheRequestBody(c *gin.Context) {
 	if err != nil || len(bodyBytes) == 0 {
 		return
 	}
-	c.Set("requestBody", &requestBodyCache{
+	c.Set(global.ContextKeyRequestBodyCache, &requestBodyCache{
 		body:       truncateBytes(bodyBytes, maxRequestBodySize),
 		totalBytes: totalBytes,
 		truncated:  truncated,
@@ -128,7 +129,7 @@ func shouldCaptureResponseBody(c *gin.Context) bool {
 	if c == nil || c.Request == nil {
 		return true
 	}
-	if c.Request.URL.Path == "/ping" {
+	if _, skip := skipLogPaths[c.Request.URL.Path]; skip {
 		return false
 	}
 	return c.Request.Method != http.MethodGet
@@ -136,7 +137,7 @@ func shouldCaptureResponseBody(c *gin.Context) bool {
 
 // readRequestBody 读取请求体缓存。
 func readRequestBody(c *gin.Context) []byte {
-	if body, exists := c.Get("requestBody"); exists {
+	if body, exists := c.Get(global.ContextKeyRequestBodyCache); exists {
 		if cached, ok := body.(*requestBodyCache); ok && len(cached.body) > 0 {
 			return cached.body
 		}
@@ -159,12 +160,12 @@ func readRequestBody(c *gin.Context) []byte {
 		totalBytes: totalBytes,
 		truncated:  truncated,
 	}
-	c.Set("requestBody", cached)
+	c.Set(global.ContextKeyRequestBodyCache, cached)
 	return cached.body
 }
 
 func getRequestBodyCache(c *gin.Context) *requestBodyCache {
-	if body, exists := c.Get("requestBody"); exists {
+	if body, exists := c.Get(global.ContextKeyRequestBodyCache); exists {
 		if cached, ok := body.(*requestBodyCache); ok {
 			return cached
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/mssola/useragent"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/sensitive"
 	accesssvc "github.com/wannanbigpig/gin-layout/internal/service/access"
@@ -51,11 +52,14 @@ type auditRequestMeta struct {
 	userAgent      string
 	os             string
 	browser        string
+	requestKind    string
 	operationName  string
 	requestHeaders string
 	requestQuery   string
 	requestBody    string
 	executionTime  float64
+	executionUnit  string
+	executionScope string
 }
 
 type auditOperatorMeta struct {
@@ -64,6 +68,8 @@ type auditOperatorMeta struct {
 	operatorAccount string
 	operatorName    string
 }
+
+const requestLogExecutionTimeMaxMs = 99999999.9999
 
 // buildAuditLogSnapshot 组装审计快照（仅负责编排，不包含具体字段提取细节）。
 func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operationStatus int, responseBody string, responseHeader string) *auditsvc.AuditLogSnapshot {
@@ -77,28 +83,31 @@ func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operation
 	changeDiff := resolveAuditChangeDiff(c, isHighRisk, requestMeta.requestBody, responseBody)
 
 	return &auditsvc.AuditLogSnapshot{
-		RequestID:       requestMeta.requestID,
-		JwtID:           operatorMeta.jwtID,
-		OperatorID:      operatorMeta.operatorID,
-		OperatorAccount: operatorMeta.operatorAccount,
-		OperatorName:    operatorMeta.operatorName,
-		IP:              requestMeta.ip,
-		UserAgent:       requestMeta.userAgent,
-		OS:              requestMeta.os,
-		Browser:         requestMeta.browser,
-		Method:          requestMeta.method,
-		BaseURL:         requestMeta.path,
-		OperationName:   requestMeta.operationName,
-		OperationStatus: operationStatus,
-		IsHighRisk:      isHighRisk,
-		RequestHeaders:  requestMeta.requestHeaders,
-		RequestQuery:    requestMeta.requestQuery,
-		RequestBody:     requestMeta.requestBody,
-		ChangeDiff:      changeDiff,
-		ResponseStatus:  resolveAuditResponseStatus(recorder),
-		ResponseBody:    responseBody,
-		ResponseHeader:  responseHeader,
-		ExecutionTime:   requestMeta.executionTime,
+		RequestID:          requestMeta.requestID,
+		JwtID:              operatorMeta.jwtID,
+		OperatorID:         operatorMeta.operatorID,
+		OperatorAccount:    operatorMeta.operatorAccount,
+		OperatorName:       operatorMeta.operatorName,
+		IP:                 requestMeta.ip,
+		UserAgent:          requestMeta.userAgent,
+		OS:                 requestMeta.os,
+		Browser:            requestMeta.browser,
+		RequestKind:        requestMeta.requestKind,
+		Method:             requestMeta.method,
+		BaseURL:            requestMeta.path,
+		OperationName:      requestMeta.operationName,
+		OperationStatus:    operationStatus,
+		IsHighRisk:         isHighRisk,
+		RequestHeaders:     requestMeta.requestHeaders,
+		RequestQuery:       requestMeta.requestQuery,
+		RequestBody:        requestMeta.requestBody,
+		ChangeDiff:         changeDiff,
+		ResponseStatus:     resolveAuditResponseStatus(recorder),
+		ResponseBody:       responseBody,
+		ResponseHeader:     responseHeader,
+		ExecutionTime:      requestMeta.executionTime,
+		ExecutionTimeUnit:  requestMeta.executionUnit,
+		ExecutionTimeScope: requestMeta.executionScope,
 	}
 }
 
@@ -114,6 +123,8 @@ func collectAuditRequestMeta(c *gin.Context) *auditRequestMeta {
 	userAgentStr := c.Request.UserAgent()
 	ua := useragent.New(userAgentStr)
 	browser, _ := ua.Browser()
+	requestKind := resolveAuditRequestKind(c)
+	executionTime, executionScope := calculateExecutionTimeMeta(c, requestKind)
 
 	return &auditRequestMeta{
 		requestID:      requestID,
@@ -123,12 +134,29 @@ func collectAuditRequestMeta(c *gin.Context) *auditRequestMeta {
 		userAgent:      userAgentStr,
 		os:             ua.OS(),
 		browser:        browser,
+		requestKind:    requestKind,
 		operationName:  getOperationName(path, method, c.GetHeader("X-Operation-Name")),
 		requestHeaders: sensitive.GetMaskedRequestHeaders(c.Request.Header),
 		requestQuery:   sensitive.MaskQueryString(c.Request.URL.RawQuery),
 		requestBody:    resolveAuditRequestBody(c),
-		executionTime:  calculateExecutionTimeMs(c),
+		executionTime:  executionTime,
+		executionUnit:  model.ExecutionTimeUnitMilliseconds,
+		executionScope: executionScope,
 	}
+}
+
+func resolveAuditRequestKind(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return model.RequestKindHTTP
+	}
+	path := c.Request.URL.Path
+	if _, ok := websocketLoggingPaths[path]; ok {
+		return model.RequestKindWebSocket
+	}
+	if c.Query("stream") == "1" || strings.Contains(c.GetHeader("Accept"), "text/event-stream") {
+		return model.RequestKindSSE
+	}
+	return model.RequestKindHTTP
 }
 
 // collectAuditOperatorMeta 提取操作者信息（优先 principal，回退到上下文 uid）。
@@ -147,10 +175,31 @@ func collectAuditOperatorMeta(c *gin.Context) auditOperatorMeta {
 	}
 }
 
-func calculateExecutionTimeMs(c *gin.Context) float64 {
-	duration := time.Since(c.GetTime(global.ContextKeyRequestStartTime))
+func calculateExecutionTimeMeta(c *gin.Context, requestKind string) (float64, string) {
+	scope := model.ExecutionTimeScopeRequest
+	switch requestKind {
+	case model.RequestKindWebSocket:
+		scope = model.ExecutionTimeScopeConnection
+	case model.RequestKindSSE:
+		scope = model.ExecutionTimeScopeStream
+	}
+	if c == nil {
+		return 0, model.ExecutionTimeScopeNone
+	}
+	startTime := c.GetTime(global.ContextKeyRequestStartTime)
+	if startTime.IsZero() {
+		return 0, model.ExecutionTimeScopeNone
+	}
+	duration := time.Since(startTime)
 	executionTime := float64(duration.Nanoseconds()) / 1000000.0
-	return float64(int(executionTime*10000+0.5)) / 10000.0
+	if executionTime < 0 {
+		return 0, model.ExecutionTimeScopeNone
+	}
+	executionTime = float64(int(executionTime*10000+0.5)) / 10000.0
+	if executionTime > requestLogExecutionTimeMaxMs {
+		return requestLogExecutionTimeMaxMs, scope
+	}
+	return executionTime, scope
 }
 
 func resolveAuditResponseStatus(recorder *responseRecorder) int {

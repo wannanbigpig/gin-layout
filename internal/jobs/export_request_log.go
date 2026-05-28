@@ -1,10 +1,11 @@
 package jobs
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
+	"time"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
@@ -24,19 +25,21 @@ const (
 
 // ExportRequestLogPayload 表示异步导出请求日志任务 payload。
 type ExportRequestLogPayload struct {
-	TaskRunID       uint   `json:"task_run_id"`
-	TriggerUserID   uint   `json:"trigger_user_id"`
-	OperatorID      uint   `json:"operator_id"`
-	OperatorAccount string `json:"operator_account"`
-	OperationStatus *int   `json:"operation_status"`
-	IsHighRisk      *uint8 `json:"is_high_risk"`
-	Method          string `json:"method"`
-	BaseURL         string `json:"base_url"`
-	OperationName   string `json:"operation_name"`
-	IP              string `json:"ip"`
-	StartTime       string `json:"start_time"`
-	EndTime         string `json:"end_time"`
-	Limit           int    `json:"limit"`
+	TaskRunID          uint   `json:"task_run_id"`
+	TriggerUserID      uint   `json:"trigger_user_id"`
+	OperatorID         uint   `json:"operator_id"`
+	OperatorAccount    string `json:"operator_account"`
+	OperationStatus    *int   `json:"operation_status"`
+	IsHighRisk         *uint8 `json:"is_high_risk"`
+	RequestKind        string `json:"request_kind"`
+	ExecutionTimeScope string `json:"execution_time_scope"`
+	Method             string `json:"method"`
+	BaseURL            string `json:"base_url"`
+	OperationName      string `json:"operation_name"`
+	IP                 string `json:"ip"`
+	StartTime          string `json:"start_time"`
+	EndTime            string `json:"end_time"`
+	Limit              int    `json:"limit"`
 }
 
 // handleExportRequestLog 处理异步导出请求日志任务。
@@ -46,32 +49,48 @@ func handleExportRequestLog(ctx context.Context, payload ExportRequestLogPayload
 	exportService := service.NewExportCenterService()
 
 	params := &form.RequestLogExport{
-		OperatorID:      payload.OperatorID,
-		OperatorAccount: payload.OperatorAccount,
-		OperationStatus: payload.OperationStatus,
-		IsHighRisk:      payload.IsHighRisk,
-		Method:          payload.Method,
-		BaseURL:         payload.BaseURL,
-		OperationName:   payload.OperationName,
-		IP:              payload.IP,
-		StartTime:       payload.StartTime,
-		EndTime:         payload.EndTime,
-		Limit:           payload.Limit,
+		OperatorID:         payload.OperatorID,
+		OperatorAccount:    payload.OperatorAccount,
+		OperationStatus:    payload.OperationStatus,
+		IsHighRisk:         payload.IsHighRisk,
+		RequestKind:        payload.RequestKind,
+		ExecutionTimeScope: payload.ExecutionTimeScope,
+		Method:             payload.Method,
+		BaseURL:            payload.BaseURL,
+		OperationName:      payload.OperationName,
+		IP:                 payload.IP,
+		StartTime:          payload.StartTime,
+		EndTime:            payload.EndTime,
+		Limit:              payload.Limit,
 	}
 
+	// 使用 io.Pipe 将 StreamExportCSV 的 writer 端与 CreateFromReader 的 reader 端串接，
+	// 避免在内存中一次性持有完整 CSV：内存峰值 ≈ batch × 单行大小，而不是导出行数 × 单行大小。
+	pipeReader, pipeWriter := io.Pipe()
 	progressStarted := false
-	csvData, fileName, err := auditsvc.GenerateExportCSVWithProgress(params, func(processed, total int) error {
-		if !progressStarted {
-			progressStarted = true
-			return exportService.MarkRunningWithTotal(ctx, payload.TaskRunID, uint64(total))
+	// fileName 在主 goroutine 内完成生成，作为 OriginName 传给 CreateFromReader，避免
+	// 与 StreamExportCSV 返回值产生跨 goroutine 共享写。
+	fileName := resolveRequestLogExportFileName()
+
+	// writer 协程：流式生成 CSV，结束时通过 CloseWithError 将错误传递给 reader 端，
+	// 这样下游 CreateFromReader 在读取过程中能立刻拿到原始错误而不是 io.EOF。
+	streamErrCh := make(chan error, 1)
+	go func() {
+		_, err := auditsvc.StreamExportCSV(ctx, params, pipeWriter, func(processed, total int) error {
+			if !progressStarted {
+				progressStarted = true
+				return exportService.MarkRunningWithTotal(ctx, payload.TaskRunID, uint64(total))
+			}
+			return exportService.UpdateProgress(ctx, payload.TaskRunID, uint64(processed), uint64(total))
+		})
+		if err != nil {
+			_ = pipeWriter.CloseWithError(err)
+			streamErrCh <- err
+			return
 		}
-		return exportService.UpdateProgress(ctx, payload.TaskRunID, uint64(processed), uint64(total))
-	})
-	if err != nil {
-		_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
-		notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)
-		return err
-	}
+		_ = pipeWriter.Close()
+		streamErrCh <- nil
+	}()
 
 	fileService := service.NewFileResourceService()
 	uploadFile, err := fileService.CreateFromReader(ctx, service.ServerGeneratedFileInput{
@@ -80,8 +99,24 @@ func handleExportRequestLog(ctx context.Context, payload ExportRequestLogPayload
 		MimeType:    "text/csv; charset=utf-8",
 		IsPublic:    0,
 		UploadScene: "export",
-		Reader:      bytes.NewReader(csvData),
+		Reader:      pipeReader,
 	})
+	// reader 端关闭：成功路径下 io.Copy 已读到 EOF，Close 是幂等收尾；
+	// 失败路径下 CloseWithError 会让仍在写入的 writer 收到 ErrClosedPipe 并退出，
+	// 避免 writer 协程永久阻塞在 Write 上。
+	if err != nil {
+		_ = pipeReader.CloseWithError(err)
+	} else {
+		_ = pipeReader.Close()
+	}
+	// 等待 writer 协程结束并采集其错误：writer 端错误优先级最高，因为 reader 看到的
+	// 可能是被 CloseWithError 注入的同一错误，也可能是 EOF。
+	streamErr := <-streamErrCh
+	if streamErr != nil {
+		_ = exportService.MarkFailed(ctx, payload.TaskRunID, streamErr)
+		notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", streamErr)
+		return streamErr
+	}
 	if err != nil {
 		_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
 		notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)
@@ -166,4 +201,11 @@ func recordExportRequestLogResultWithDB(ctx context.Context, db *gorm.DB, taskRu
 		Message:   "export file generated",
 		Meta:      string(meta),
 	}).Error
+}
+
+// resolveRequestLogExportFileName 在主 goroutine 中生成最终文件名。
+// 与 StreamExportCSV 内部生成的命名规则保持一致，但在主 goroutine 内决定，避免
+// 跨 goroutine 共享 fileName 字段引入数据竞争。
+func resolveRequestLogExportFileName() string {
+	return "request_logs_" + time.Now().Format("20060102150405") + ".csv"
 }

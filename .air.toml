@@ -4,8 +4,8 @@ tmp_dir = "tmp"
 
 [build]
   args_bin = []
-  # 使用相对路径，或者不指定配置文件让程序自动查找
-  bin = "./tmp/main service"
+  # 显式传入项目根目录 config.yaml，避免运行目录变化时查找错位
+  bin = "./tmp/main -c ./config.yaml service"
   cmd = "go build -o ./tmp/main"
   # 设置环境变量
   env = ["GO_ENV=development"]

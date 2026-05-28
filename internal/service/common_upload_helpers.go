@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,19 @@ func buildFileURL(uuid string) string {
 		return "/admin/v1/file/" + uuid
 	}
 	return baseURL + "/admin/v1/file/" + uuid
+}
+
+func buildFileVariantURL(uuid string, variant string) string {
+	base := buildFileURL(uuid)
+	variant = strings.TrimSpace(variant)
+	if base == "" || variant == "" {
+		return base
+	}
+	return base + "?variant=" + url.QueryEscape(variant)
+}
+
+func buildFileThumbnailURL(uuid string) string {
+	return buildFileVariantURL(uuid, "thumb")
 }
 
 func setFileFailure(info *utils.FileInfo, reason string, err error) (*utils.FileInfo, error) {
@@ -91,23 +105,6 @@ func resolveUploadDestination(basePath, uploadPath string) (string, error) {
 		return "", fmt.Errorf("upload target escapes storage root")
 	}
 	return absTarget, nil
-}
-
-func findReusableUploadFile(hash string, isPublic uint8) (*model.UploadFiles, error) {
-	uploadFile := model.NewUploadFiles()
-	if err := uploadFile.GetDetail("hash = ? AND is_public = ?", hash, isPublic); err != nil {
-		return nil, err
-	}
-	return uploadFile, nil
-}
-
-func existingUploadFileExists(basePath, relativePath string) bool {
-	absolutePath, err := resolveUploadDestination(basePath, relativePath)
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(absolutePath)
-	return err == nil
 }
 
 func fillFileInfoFromModel(fileInfo *utils.FileInfo, uploadFile *model.UploadFiles) {

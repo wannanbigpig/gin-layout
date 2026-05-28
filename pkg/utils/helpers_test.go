@@ -42,7 +42,7 @@ func TestMaskSensitiveInfo(t *testing.T) {
 	}
 }
 
-func TestPasswordHashUsesStrongerCost(t *testing.T) {
+func TestPasswordHashUsesConfiguredCost(t *testing.T) {
 	hashed, err := PasswordHash("hello-password")
 	if err != nil {
 		t.Fatalf("password hash failed: %v", err)
@@ -52,7 +52,7 @@ func TestPasswordHashUsesStrongerCost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read bcrypt cost failed: %v", err)
 	}
-	if cost < 12 {
-		t.Fatalf("expected bcrypt cost >= 12, got %d", cost)
+	if cost != passwordHashCost {
+		t.Fatalf("expected bcrypt cost = %d, got %d", passwordHashCost, cost)
 	}
 }

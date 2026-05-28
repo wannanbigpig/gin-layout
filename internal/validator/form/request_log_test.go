@@ -41,3 +41,67 @@ func TestRequestLogListRejectsUnknownHTTPMethod(t *testing.T) {
 		t.Fatal("expected method=TRACE to fail validation")
 	}
 }
+
+func TestRequestLogListAllowsKnownRequestKind(t *testing.T) {
+	if err := validatorx.InitValidatorTrans("zh"); err != nil {
+		t.Fatalf("init validator: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+
+	req := httptest.NewRequest(http.MethodGet, "/?request_kind=websocket", nil)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	payload := NewRequestLogListQuery()
+	if err := ctx.ShouldBindQuery(payload); err != nil {
+		t.Fatalf("expected request_kind=websocket to pass validation, got %v", err)
+	}
+}
+
+func TestRequestLogListRejectsUnknownRequestKind(t *testing.T) {
+	if err := validatorx.InitValidatorTrans("zh"); err != nil {
+		t.Fatalf("init validator: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+
+	req := httptest.NewRequest(http.MethodGet, "/?request_kind=grpc", nil)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	payload := NewRequestLogListQuery()
+	if err := ctx.ShouldBindQuery(payload); err == nil {
+		t.Fatal("expected request_kind=grpc to fail validation")
+	}
+}
+
+func TestRequestLogListAllowsSSEAndExecutionTimeScope(t *testing.T) {
+	if err := validatorx.InitValidatorTrans("zh"); err != nil {
+		t.Fatalf("init validator: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+
+	req := httptest.NewRequest(http.MethodGet, "/?request_kind=sse&execution_time_scope=stream", nil)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	payload := NewRequestLogListQuery()
+	if err := ctx.ShouldBindQuery(payload); err != nil {
+		t.Fatalf("expected sse/stream query to pass validation, got %v", err)
+	}
+}
+
+func TestRequestLogListRejectsUnknownExecutionTimeScope(t *testing.T) {
+	if err := validatorx.InitValidatorTrans("zh"); err != nil {
+		t.Fatalf("init validator: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+
+	req := httptest.NewRequest(http.MethodGet, "/?execution_time_scope=duration", nil)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	payload := NewRequestLogListQuery()
+	if err := ctx.ShouldBindQuery(payload); err == nil {
+		t.Fatal("expected execution_time_scope=duration to fail validation")
+	}
+}

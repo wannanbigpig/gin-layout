@@ -42,6 +42,23 @@ func TestUserPermissionSyncForEachUserStopsOnError(t *testing.T) {
 	}
 }
 
+func TestUserPermissionSyncSyncUsersSkipsEmptyUserSet(t *testing.T) {
+	reloadCount := 0
+	service := NewUserPermissionSyncServiceWithDeps(UserPermissionSyncServiceDeps{
+		ReloadPolicy: func() error {
+			reloadCount++
+			return nil
+		},
+	})
+
+	if err := service.SyncUsers(nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reloadCount != 0 {
+		t.Fatalf("expected reload to be skipped, got %d", reloadCount)
+	}
+}
+
 func TestExpandRoleAncestorsSkipsDisabledRoles(t *testing.T) {
 	roleMap := map[uint]roleStatusInfo{
 		1: {ID: 1, Status: 1},
@@ -83,5 +100,44 @@ func TestPermissionSyncCoordinatorRunAfterCommitReloadsOnce(t *testing.T) {
 	}
 	if reloadCount != 1 {
 		t.Fatalf("expected reload once, got %d", reloadCount)
+	}
+}
+
+func TestPermissionSyncCoordinatorRunAfterCommitSwallowsReloadFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+
+	coordinator := NewPermissionSyncCoordinatorWithDeps(PermissionSyncCoordinatorDeps{
+		Syncer: NewUserPermissionSyncServiceWithDeps(UserPermissionSyncServiceDeps{
+			ReloadPolicy: func() error {
+				return errors.New("reload failed")
+			},
+		}),
+	})
+
+	err = coordinator.RunAfterCommit(db, "reload failed", func(tx *gorm.DB) error {
+		if tx == nil {
+			t.Fatal("expected transaction")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected nil even when reload fails after commit, got %v", err)
+	}
+}
+
+func TestPermissionSyncCoordinatorReloadPolicyCacheWithCodeSwallowsReloadFailure(t *testing.T) {
+	coordinator := NewPermissionSyncCoordinatorWithDeps(PermissionSyncCoordinatorDeps{
+		Syncer: NewUserPermissionSyncServiceWithDeps(UserPermissionSyncServiceDeps{
+			ReloadPolicy: func() error {
+				return errors.New("reload failed")
+			},
+		}),
+	})
+
+	if err := coordinator.ReloadPolicyCacheWithCode(12345); err != nil {
+		t.Fatalf("expected nil when reload fails after commit, got %v", err)
 	}
 }

@@ -62,13 +62,13 @@ func resolveAuditSensitiveFieldsConfig(configs []model.SysConfig) (sensitive.Sen
 }
 
 func normalizeSensitiveFieldsConfig(config sensitive.SensitiveFieldsConfig) sensitive.SensitiveFieldsConfig {
-	return sensitive.SensitiveFieldsConfig{
+	return sensitive.NormalizeSensitiveFieldsConfig(sensitive.SensitiveFieldsConfig{
 		Common:         normalizeStringList(config.Common),
 		RequestHeader:  normalizeStringList(config.RequestHeader),
 		RequestBody:    normalizeStringList(config.RequestBody),
 		ResponseHeader: normalizeStringList(config.ResponseHeader),
 		ResponseBody:   normalizeStringList(config.ResponseBody),
-	}
+	})
 }
 
 func normalizeStringList(input []string) []string {

@@ -14,16 +14,21 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/sys_config"
 	"go.uber.org/zap"
 )
 
 const (
-	TaskCodeCronDemo            = "cron:demo"
-	TaskCodeCronResetSystemData = "cron:reset-system-data"
+	TaskCodeCronDemo              = "cron:demo"
+	TaskCodeCronResetSystemData   = "cron:reset-system-data"
+	TaskCodeCronFileAccessFlush   = "cron:file-access-flush"
+	TaskCodeCronCleanExpiredFiles = "cron:clean-expired-files"
 
-	HandlerCronDemo            = "cron.demo"
-	HandlerCronResetSystemData = "cron.reset-system-data"
+	HandlerCronDemo              = "cron.demo"
+	HandlerCronResetSystemData   = "cron.reset-system-data"
+	HandlerCronFileAccessFlush   = "cron.file-access-flush"
+	HandlerCronCleanExpiredFiles = "cron.clean-expired-files"
 )
 
 const cronLogTimeFormat = "2006-01-02 15:04:05"
@@ -37,6 +42,7 @@ var (
 			log.Logger.Info("计划任务 demo 执行：", zap.String("time", time.Now().Format(cronLogTimeFormat)))
 			return nil
 		},
+		HandlerCronCleanExpiredFiles: CleanExpiredFilesHandler,
 	}
 )
 
@@ -59,6 +65,15 @@ func ExecuteHandler(ctx context.Context, handler string, payload map[string]any)
 		return fmt.Errorf("unsupported cron handler: %s", handler)
 	}
 	return fn(ctx, payload)
+}
+
+// RegisterBuiltinHandlers 集中注册系统内置 cron handler。
+// 调用方需保证此函数仅被调用一次（通常由 bootstrap 在数据源初始化完成后触发）。
+func RegisterBuiltinHandlers() {
+	RegisterHandler(HandlerCronFileAccessFlush, func(ctx context.Context, payload map[string]any) error {
+		_ = payload
+		return service.FlushFileAccessPending(ctx)
+	})
 }
 
 // BuiltinTaskDefinitions 返回系统内置任务定义（任务中心列表与 cron 注册共用此定义源）。
@@ -139,6 +154,32 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 			AllowRetry:  model.TaskRetryNotAllowed,
 			IsHighRisk:  model.TaskHighRisk,
 			Remark:      "高风险任务，默认关闭",
+		},
+		{
+			Code:        TaskCodeCronFileAccessFlush,
+			Name:        "文件访问时间聚合落库",
+			Kind:        model.TaskKindCron,
+			Queue:       "",
+			CronSpec:    "0 * * * * *",
+			Handler:     HandlerCronFileAccessFlush,
+			Status:      model.TaskStatusEnabled,
+			AllowManual: model.TaskManualAllowed,
+			AllowRetry:  model.TaskRetryNotAllowed,
+			IsHighRisk:  model.TaskNotHighRisk,
+			Remark:      "每分钟将 upload_files.last_accessed_at 从 Redis ZSet 批量落库",
+		},
+		{
+			Code:        TaskCodeCronCleanExpiredFiles,
+			Name:        "自动清理过期临时文件",
+			Kind:        model.TaskKindCron,
+			Queue:       "",
+			CronSpec:    "0 0 3 * * *",
+			Handler:     HandlerCronCleanExpiredFiles,
+			Status:      model.TaskStatusEnabled,
+			AllowManual: model.TaskManualAllowed,
+			AllowRetry:  model.TaskRetryNotAllowed,
+			IsHighRisk:  model.TaskNotHighRisk,
+			Remark:      "自动物理清理系统内所有已过期的临时导出/上传文件及物理介质",
 		},
 	}
 }

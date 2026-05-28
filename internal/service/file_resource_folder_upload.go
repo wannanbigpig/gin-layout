@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,7 +13,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"go.uber.org/zap"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -22,6 +25,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/filestorage"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	pkgErrors "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	dateutils "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
@@ -150,14 +154,14 @@ func (s *FileResourceService) DeleteFolder(id uint) error {
 		return err
 	}
 	if childCount > 0 {
-		return fmt.Errorf("folder is not empty")
+		return pkgErrors.NewBusinessError(pkgErrors.FolderNotEmpty)
 	}
 	var fileCount int64
 	if err := db.Model(&model.UploadFiles{}).Where("folder_id = ?", id).Count(&fileCount).Error; err != nil {
 		return err
 	}
 	if fileCount > 0 {
-		return fmt.Errorf("folder is not empty")
+		return pkgErrors.NewBusinessError(pkgErrors.FolderNotEmpty)
 	}
 	result := db.Delete(&model.UploadFileFolder{}, id)
 	if result.Error != nil {
@@ -185,7 +189,7 @@ func (s *FileResourceService) MoveFolder(params *form.FileFolderMove, uid uint) 
 			return err
 		}
 		if targetParentID == folder.ID {
-			return fmt.Errorf("folder cannot move to itself")
+			return pkgErrors.NewBusinessError(pkgErrors.FolderMoveInvalid)
 		}
 		if targetParentID > 0 {
 			parentPath, err := folderLogicalPathTx(tx, targetParentID)
@@ -193,7 +197,7 @@ func (s *FileResourceService) MoveFolder(params *form.FileFolderMove, uid uint) 
 				return err
 			}
 			if parentPath == folder.LogicalPath || strings.HasPrefix(parentPath, folder.LogicalPath+"/") {
-				return fmt.Errorf("folder cannot move to descendant")
+				return pkgErrors.NewBusinessError(pkgErrors.FolderMoveInvalid)
 			}
 		}
 		if err := ensureFolderNameUnique(tx, folder.ID, targetParentID, folder.Name); err != nil {
@@ -243,19 +247,48 @@ func (s *FileResourceService) MoveFiles(params *form.FileMove) (*resources.FileM
 	return &resources.FileMoveResult{Total: total, Moved: result.RowsAffected, Skipped: total - result.RowsAffected}, nil
 }
 
-func (s *FileResourceService) UploadLocal(files []*multipart.FileHeader, params *form.FileLocalUpload, uid uint) ([]*resources.FileResourceResources, error) {
-	items := make([]*resources.FileResourceResources, 0, len(files))
-	for _, file := range files {
+func (s *FileResourceService) UploadLocal(files []*multipart.FileHeader, params *form.FileLocalUpload, uid uint) (*resources.FileLocalUploadBatchResult, error) {
+	result := &resources.FileLocalUploadBatchResult{
+		Total: int64(len(files)),
+		Items: make([]*resources.FileResourceResources, 0, len(files)),
+	}
+	for idx, file := range files {
 		item, err := s.uploadLocalOne(file, params, uid)
 		if err != nil {
-			return items, err
+			if len(files) <= 1 {
+				return nil, err
+			}
+			result.Failures = append(result.Failures, buildLocalUploadFailureItem(idx, file, err))
+			continue
 		}
-		items = append(items, item)
+		result.Items = append(result.Items, item)
 	}
-	return items, nil
+	result.Success = int64(len(result.Items))
+	result.Failed = int64(len(result.Failures))
+	return result, nil
+}
+
+func buildLocalUploadFailureItem(index int, file *multipart.FileHeader, err error) *resources.FileUploadBatchFailure {
+	item := &resources.FileUploadBatchFailure{
+		Index:   index,
+		Message: err.Error(),
+	}
+	if file != nil {
+		item.OriginName = file.Filename
+	}
+	var businessErr *pkgErrors.BusinessError
+	if errors.As(err, &businessErr) {
+		item.Code = businessErr.GetCode()
+		item.Message = businessErr.GetMessage()
+	}
+	return item
 }
 
 func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential) (*resources.FileUploadCredentialResources, error) {
+	fileName := firstNonEmpty(params.FileName, params.OriginName)
+	if err := s.validateFileLimit(fileName, params.Size, params.MimeType); err != nil {
+		return nil, err
+	}
 	_, cfg, activeDriver, err := s.activeStorageDriver(context.Background())
 	if err != nil {
 		return nil, err
@@ -293,7 +326,7 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 	if err != nil {
 		return nil, err
 	}
-	fileName := firstNonEmpty(params.FileName, params.OriginName)
+	fileName = firstNonEmpty(params.FileName, params.OriginName)
 	if strings.TrimSpace(fileName) == "" {
 		return nil, fmt.Errorf("file name is required")
 	}
@@ -344,7 +377,124 @@ func buildCredentialCompletePayload(params *form.FileUploadCredential, driver, b
 	}
 }
 
+func normalizeCredentialItem(parent *form.FileUploadCredentialBatch, item form.FileUploadCredentialBatchItem) *form.FileUploadCredential {
+	isPublic := parent.IsPublic
+	if item.IsPublic != nil {
+		isPublic = *item.IsPublic
+	}
+	return &form.FileUploadCredential{
+		FolderID:    item.FolderID,
+		FileName:    item.FileName,
+		OriginName:  item.OriginName,
+		MimeType:    item.MimeType,
+		Size:        item.Size,
+		Hash:        item.Hash,
+		IsPublic:    isPublic,
+		UploadScene: firstNonEmpty(item.UploadScene, parent.UploadScene),
+		Driver:      firstNonEmpty(item.Driver, parent.Driver),
+	}
+}
+
+func buildBatchFailure(index int, clientID string, err error) *resources.FileUploadBatchFailure {
+	failure := &resources.FileUploadBatchFailure{
+		ClientID: clientID,
+		Index:    index,
+		Message:  err.Error(),
+	}
+	var businessErr *pkgErrors.BusinessError
+	if errors.As(err, &businessErr) {
+		failure.Code = businessErr.GetCode()
+		failure.Message = businessErr.GetMessage()
+	}
+	return failure
+}
+
+// BatchProgress 描述一次批量上传中单个文件处理完成时的进度。
+type BatchProgress struct {
+	Index     int    `json:"index"`
+	Total     int    `json:"total"`
+	Completed int    `json:"completed"`
+	Success   int    `json:"success"`
+	Failed    int    `json:"failed"`
+	ClientID  string `json:"client_id,omitempty"`
+}
+
+// UploadBatchProgressFn 用于在批量上传过程中接收每个文件的处理进度。
+type UploadBatchProgressFn func(BatchProgress)
+
+const uploadBatchConcurrency = 8
+
+func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCredentialBatch, onProgress UploadBatchProgressFn) (*resources.FileUploadCredentialBatchResult, error) {
+	total := len(params.Items)
+	result := &resources.FileUploadCredentialBatchResult{
+		Total: int64(total),
+		Items: make([]*resources.FileUploadCredentialBatchItemResult, total),
+	}
+	if total == 0 {
+		return result, nil
+	}
+	concurrency := uploadBatchConcurrency
+	if concurrency > total {
+		concurrency = total
+	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	completed, success, failed := 0, 0, 0
+	for index, item := range params.Items {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(index int, it form.FileUploadCredentialBatchItem) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			data, err := s.UploadCredential(normalizeCredentialItem(params, it))
+			var itemResult *resources.FileUploadCredentialBatchItemResult
+			if err != nil {
+				itemResult = &resources.FileUploadCredentialBatchItemResult{
+					ClientID: it.ClientID,
+					Success:  false,
+					Error:    buildBatchFailure(index, it.ClientID, err),
+				}
+			} else {
+				itemResult = &resources.FileUploadCredentialBatchItemResult{
+					ClientID: it.ClientID,
+					Success:  true,
+					Data:     data,
+				}
+			}
+			mu.Lock()
+			result.Items[index] = itemResult
+			completed++
+			if itemResult.Success {
+				success++
+			} else {
+				failed++
+			}
+			progress := BatchProgress{
+				Index:     index,
+				Total:     total,
+				Completed: completed,
+				Success:   success,
+				Failed:    failed,
+				ClientID:  it.ClientID,
+			}
+			mu.Unlock()
+			if onProgress != nil {
+				onProgress(progress)
+			}
+		}(index, item)
+	}
+	wg.Wait()
+	result.Success = int64(success)
+	result.Failed = int64(failed)
+	return result, nil
+}
+
 func (s *FileResourceService) CompleteDirectUpload(params *form.FileUploadComplete, uid uint) (*resources.FileResourceResources, error) {
+	return s.completeDirectUploadWithPath(params, uid, nil)
+}
+
+func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUploadComplete, uid uint, pathResolver func(uint) (string, error)) (*resources.FileResourceResources, error) {
 	db, err := s.dbOrDefault()
 	if err != nil {
 		return nil, err
@@ -356,7 +506,12 @@ func (s *FileResourceService) CompleteDirectUpload(params *form.FileUploadComple
 	if _, _, err := s.storageDriverByName(context.Background(), storageDriver); err != nil {
 		return nil, err
 	}
-	logicalPath, err := s.folderLogicalPath(params.FolderID)
+	var logicalPath string
+	if pathResolver != nil {
+		logicalPath, err = pathResolver(params.FolderID)
+	} else {
+		logicalPath, err = s.folderLogicalPath(params.FolderID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -441,17 +596,174 @@ func (s *FileResourceService) CompleteDirectUpload(params *form.FileUploadComple
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
 }
 
+func normalizeCompleteItem(parent *form.FileUploadCompleteBatch, item form.FileUploadCompleteBatchItem) *form.FileUploadComplete {
+	isPublic := parent.IsPublic
+	if item.IsPublic != nil {
+		isPublic = *item.IsPublic
+	}
+	driver := firstNonEmpty(item.Driver, item.StorageDriver, parent.Driver)
+	return &form.FileUploadComplete{
+		FolderID:      item.FolderID,
+		Reuse:         item.Reuse,
+		FileObjectID:  item.FileObjectID,
+		OriginName:    item.OriginName,
+		DisplayName:   item.DisplayName,
+		Name:          item.Name,
+		Size:          item.Size,
+		Ext:           item.Ext,
+		Hash:          item.Hash,
+		UUID:          item.UUID,
+		MimeType:      item.MimeType,
+		FileType:      item.FileType,
+		IsPublic:      isPublic,
+		StorageDriver: driver,
+		Driver:        driver,
+		Bucket:        item.Bucket,
+		ObjectKey:     item.ObjectKey,
+		ETag:          item.ETag,
+		UploadScene:   firstNonEmpty(item.UploadScene, parent.UploadScene),
+	}
+}
+
+func (s *FileResourceService) CompleteDirectUploadBatch(params *form.FileUploadCompleteBatch, uid uint, onProgress UploadBatchProgressFn) (*resources.FileUploadCompleteBatchResult, error) {
+	total := len(params.Items)
+	result := &resources.FileUploadCompleteBatchResult{
+		Total: int64(total),
+		Items: make([]*resources.FileUploadCompleteBatchItemResult, total),
+	}
+	if total == 0 {
+		return result, nil
+	}
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	pathCache := sync.Map{}
+	getLogicalPath := func(folderID uint) (string, error) {
+		if v, ok := pathCache.Load(folderID); ok {
+			return v.(string), nil
+		}
+		path, err := folderLogicalPathTx(db, folderID)
+		if err != nil {
+			return "", err
+		}
+		pathCache.Store(folderID, path)
+		return path, nil
+	}
+	concurrency := uploadBatchConcurrency
+	if concurrency > total {
+		concurrency = total
+	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	completed, success, failed := 0, 0, 0
+	for index, item := range params.Items {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(index int, it form.FileUploadCompleteBatchItem) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			data, err := s.completeDirectUploadWithPath(normalizeCompleteItem(params, it), uid, getLogicalPath)
+			var itemResult *resources.FileUploadCompleteBatchItemResult
+			if err != nil {
+				itemResult = &resources.FileUploadCompleteBatchItemResult{
+					ClientID: it.ClientID,
+					Success:  false,
+					Error:    buildBatchFailure(index, it.ClientID, err),
+				}
+			} else {
+				itemResult = &resources.FileUploadCompleteBatchItemResult{
+					ClientID: it.ClientID,
+					Success:  true,
+					Data:     data,
+				}
+			}
+			mu.Lock()
+			result.Items[index] = itemResult
+			completed++
+			if itemResult.Success {
+				success++
+			} else {
+				failed++
+			}
+			progress := BatchProgress{
+				Index:     index,
+				Total:     total,
+				Completed: completed,
+				Success:   success,
+				Failed:    failed,
+				ClientID:  it.ClientID,
+			}
+			mu.Unlock()
+			if onProgress != nil {
+				onProgress(progress)
+			}
+		}(index, item)
+	}
+	wg.Wait()
+	result.Success = int64(success)
+	result.Failed = int64(failed)
+	return result, nil
+}
+
 func (s *FileResourceService) CreateFromReader(ctx context.Context, input ServerGeneratedFileInput) (*model.UploadFiles, error) {
+	// 自动寻回或创建统一的临时导出目录
+	var expiresAtVal time.Time
+	if input.FolderID == 0 {
+		folderID, err := s.ensureExportTempFolder(ctx)
+		if err == nil {
+			input.FolderID = folderID
+		} else {
+			log.Logger.Warn("自动创建/寻找导出目录失败，退回到根目录", zap.Error(err))
+		}
+	}
+
+	if input.ExpiresAt != nil {
+		expiresAtVal = *input.ExpiresAt
+	} else if input.FolderID > 0 {
+		// 检查是否是默认的临时导出目录，若是则自动附加过期天数
+		tempFolderID, err := s.ensureExportTempFolder(ctx)
+		if err == nil && input.FolderID == tempFolderID {
+			ttlDays := 7
+			cfgSvc := NewStorageConfigService()
+			if settings, err := cfgSvc.Get(false); err == nil && settings.Config.ExportTempFileTTL > 0 {
+				ttlDays = settings.Config.ExportTempFileTTL
+			}
+			expiresAtVal = time.Now().AddDate(0, 0, ttlDays)
+		}
+	}
+
 	driver, cfg, activeDriver, err := s.activeStorageDriver(ctx)
 	if err != nil {
 		return nil, err
 	}
-	data, err := io.ReadAll(input.Reader)
+	// 通过临时文件落盘 + 边写边算 hash 的方式避免把整个 Reader 读进内存，
+	// 后续 driver.Put 直接从临时文件流式上传。
+	tmpFile, err := os.CreateTemp("", "upload-stream-*.tmp")
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(data)
-	hash := hex.EncodeToString(sum[:])
+	tmpPath := tmpFile.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = tmpFile.Close()
+		}
+		_ = os.Remove(tmpPath)
+	}()
+	hasher := sha256.New()
+	size, err := io.Copy(io.MultiWriter(hasher, tmpFile), input.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		return nil, err
+	}
+	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	hash := hex.EncodeToString(hasher.Sum(nil))
 	fileUUID := strings.ReplaceAll(uuid.NewString(), "-", "")
 	ext := filepath.Ext(input.OriginName)
 	objectKey := buildUploadObjectKey(fileUUID + ext)
@@ -466,7 +778,7 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		Bucket:        bucket,
 		StoragePath:   objectKey,
 		ObjectKey:     objectKey,
-		Size:          uint(len(data)),
+		Size:          uint(size),
 		Hash:          hash,
 		MimeType:      input.MimeType,
 		ETag:          hash,
@@ -479,8 +791,8 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		putResult, err := driver.Put(ctx, filestorage.PutInput{
 			Bucket:      bucket,
 			ObjectKey:   objectKey,
-			Reader:      bytes.NewReader(data),
-			Size:        int64(len(data)),
+			Reader:      tmpFile,
+			Size:        size,
 			ContentType: input.MimeType,
 		})
 		if err != nil {
@@ -502,6 +814,9 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		object.ObjectKey = putResult.ObjectKey
 		object.ETag = firstNonEmpty(putResult.ETag, hash)
 	}
+	// 上传完成后立即关闭临时文件句柄，defer 仍负责 Remove。
+	_ = tmpFile.Close()
+	closed = true
 	logicalPath, err := s.folderLogicalPath(input.FolderID)
 	if err != nil {
 		return nil, err
@@ -514,7 +829,7 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		OriginName:    input.OriginName,
 		Name:          fileUUID + ext,
 		Path:          object.ObjectKey,
-		Size:          uint(len(data)),
+		Size:          uint(size),
 		Ext:           ext,
 		Hash:          hash,
 		UUID:          fileUUID,
@@ -531,6 +846,7 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		UploadSource:  model.UploadSourceSystem,
 		UploadScene:   input.UploadScene,
 		UploadStatus:  model.UploadStatusUploaded,
+		ExpiresAt:     dateutils.FormatDate{Time: expiresAtVal},
 	}
 	applyObjectToUploadFile(uploadFile, object)
 	if err := db.Create(uploadFile).Error; err != nil {
@@ -548,6 +864,7 @@ type ServerGeneratedFileInput struct {
 	IsPublic    uint8
 	UploadScene string
 	Reader      io.Reader
+	ExpiresAt   *time.Time
 }
 
 func (s *FileResourceService) CreateFromLocalPath(ctx context.Context, path string, input ServerGeneratedFileInput) (*model.UploadFiles, error) {
@@ -567,6 +884,9 @@ func (s *FileResourceService) CreateFromLocalPath(ctx context.Context, path stri
 }
 
 func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params *form.FileLocalUpload, uid uint) (*resources.FileResourceResources, error) {
+	if err := s.validateFileLimit(file.Filename, file.Size, file.Header.Get("Content-Type")); err != nil {
+		return nil, err
+	}
 	db, err := s.dbOrDefault()
 	if err != nil {
 		return nil, err
@@ -697,7 +1017,7 @@ func folderLogicalPathTx(tx *gorm.DB, folderID uint) (string, error) {
 func normalizeFolderName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || name == "." || name == ".." {
-		return "", fmt.Errorf("invalid folder name")
+		return "", pkgErrors.NewBusinessError(pkgErrors.FolderNameInvalid)
 	}
 	return name, nil
 }
@@ -712,7 +1032,7 @@ func ensureFolderNameUnique(tx *gorm.DB, currentID, parentID uint, name string) 
 		return err
 	}
 	if count > 0 {
-		return fmt.Errorf("folder name already exists")
+		return pkgErrors.NewBusinessError(pkgErrors.FolderNameExists)
 	}
 	return nil
 }
@@ -752,6 +1072,9 @@ func buildUploadObjectKey(filename string) string {
 
 // MultipartInit 分片上传初始化。
 func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*resources.MultipartInitResource, error) {
+	if err := s.validateFileLimit(params.OriginName, params.Size, params.MimeType); err != nil {
+		return nil, err
+	}
 	_, cfg, activeDriver, err := s.activeStorageDriver(context.Background())
 	if err != nil {
 		return nil, err
@@ -760,7 +1083,7 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 		activeDriver = params.Driver
 	}
 	if activeDriver == model.StorageDriverLocal {
-		return nil, fmt.Errorf("local storage does not support multipart upload")
+		return nil, pkgErrors.NewBusinessError(pkgErrors.LocalStorageMultipartUnsupported)
 	}
 	bucket := bucketForDriver(activeDriver, cfg, params.IsPublic)
 	db, err := s.dbOrDefault()
@@ -789,6 +1112,10 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 	if err != nil {
 		return nil, err
 	}
+	mp, ok := driver.(filestorage.MultipartCapable)
+	if !ok {
+		return nil, pkgErrors.NewBusinessError(pkgErrors.LocalStorageMultipartUnsupported)
+	}
 	objectKey := buildUploadObjectKey(params.OriginName)
 	contentType := params.MimeType
 	if contentType == "" {
@@ -798,7 +1125,7 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 	if partCount <= 0 {
 		partCount = 1
 	}
-	initResult, err := driver.InitMultipartUpload(context.Background(), filestorage.MultipartUploadInput{
+	initResult, err := mp.InitMultipartUpload(context.Background(), filestorage.MultipartUploadInput{
 		Bucket:      bucket,
 		ObjectKey:   objectKey,
 		ContentType: contentType,
@@ -809,14 +1136,14 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 	}
 	parts := make([]*resources.MultipartPartResource, 0, partCount)
 	for i := 1; i <= partCount; i++ {
-		partResult, err := driver.PresignMultipartPart(context.Background(), filestorage.MultipartPartInput{
+		partResult, err := mp.PresignMultipartPart(context.Background(), filestorage.MultipartPartInput{
 			Bucket:     bucket,
 			ObjectKey:  objectKey,
 			UploadID:   initResult.UploadID,
 			PartNumber: int32(i),
 		})
 		if err != nil {
-			_ = driver.AbortMultipartUpload(context.Background(), bucket, objectKey, initResult.UploadID)
+			_ = mp.AbortMultipartUpload(context.Background(), bucket, objectKey, initResult.UploadID)
 			return nil, err
 		}
 		parts = append(parts, &resources.MultipartPartResource{
@@ -875,7 +1202,11 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 		if err != nil {
 			return nil, err
 		}
-		if err := driver.CompleteMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID, completeParts); err != nil {
+		mp, ok := driver.(filestorage.MultipartCapable)
+		if !ok {
+			return nil, pkgErrors.NewBusinessError(pkgErrors.LocalStorageMultipartUnsupported)
+		}
+		if err := mp.CompleteMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID, completeParts); err != nil {
 			return nil, err
 		}
 		object, _, err = ensureFileObject(db, uploadFileObjectInput{
@@ -1076,5 +1407,217 @@ func (s *FileResourceService) MultipartAbort(params *form.FileMultipartAbort) er
 	if err != nil {
 		return err
 	}
-	return driver.AbortMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID)
+	mp, ok := driver.(filestorage.MultipartCapable)
+	if !ok {
+		return fmt.Errorf("storage driver %q does not support multipart upload", storageDriver)
+	}
+	return mp.AbortMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID)
+}
+
+// validateFileLimit 验证文件大小与 MIME 类型限制。
+func (s *FileResourceService) validateFileLimit(fileName string, size int64, mimeType string) error {
+	_, cfg, _, err := s.activeStorageDriver(context.Background())
+	if err != nil {
+		return err
+	}
+
+	maxSizeMB := cfg.MaxFileSizeMB
+	if maxSizeMB <= 0 {
+		maxSizeMB = 10
+	}
+	maxSizeBytes := int64(maxSizeMB) * 1024 * 1024
+	if size > maxSizeBytes {
+		return pkgErrors.NewBusinessError(pkgErrors.FileTooLarge)
+	}
+
+	if len(cfg.AllowedExtensions) > 0 {
+		allowed := false
+		fileExt := strings.ToLower(filepath.Ext(fileName))
+		matchedPattern := ""
+		for _, extPattern := range cfg.AllowedExtensions {
+			extPattern = strings.ToLower(strings.TrimSpace(extPattern))
+			if extPattern == "" {
+				continue
+			}
+			if extPattern == "*" {
+				allowed = true
+				matchedPattern = "*"
+				break
+			}
+			if !strings.HasPrefix(extPattern, ".") {
+				extPattern = "." + extPattern
+			}
+			if fileExt == extPattern {
+				allowed = true
+				matchedPattern = extPattern
+				break
+			}
+		}
+		if !allowed {
+			return pkgErrors.NewBusinessError(pkgErrors.FileMimeTypeNotAllowed)
+		}
+
+		// 后缀校验通过后，如果匹配的不是通配符 "*"，自动推导标准 MIME 并强校验上传的 MIME 是否兼容
+		if matchedPattern != "*" && matchedPattern != "" {
+			if expectedMime := mime.TypeByExtension(matchedPattern); expectedMime != "" {
+				expectedMime = strings.ToLower(strings.TrimSpace(strings.Split(expectedMime, ";")[0]))
+				
+				cleanMime := strings.ToLower(strings.TrimSpace(mimeType))
+				cleanMime = strings.Split(cleanMime, ";")[0] // 去除参数部分
+				
+				if cleanMime == "" && fileName != "" {
+					if guessedMime := mime.TypeByExtension(fileExt); guessedMime != "" {
+						cleanMime = strings.ToLower(strings.TrimSpace(strings.Split(guessedMime, ";")[0]))
+					}
+				}
+				
+				if cleanMime == "" {
+					cleanMime = "application/octet-stream"
+				}
+
+				if !isMimeCompatible(cleanMime, expectedMime) {
+					return pkgErrors.NewBusinessError(pkgErrors.FileMimeTypeNotAllowed)
+				}
+			}
+		}
+	}
+
+	if len(cfg.AllowedMimeTypes) > 0 {
+		allowed := false
+		cleanMime := strings.ToLower(strings.TrimSpace(mimeType))
+
+		if cleanMime == "" && fileName != "" {
+			ext := filepath.Ext(fileName)
+			if ext != "" {
+				cleanMime = strings.ToLower(strings.TrimSpace(mime.TypeByExtension(ext)))
+			}
+		}
+
+		if cleanMime == "" {
+			cleanMime = "application/octet-stream"
+		}
+
+		for _, pattern := range cfg.AllowedMimeTypes {
+			pattern = strings.ToLower(strings.TrimSpace(pattern))
+			if pattern == "" {
+				continue
+			}
+			if pattern == "*" || pattern == "*/*" {
+				allowed = true
+				break
+			}
+			if strings.Contains(pattern, "*") {
+				prefix := strings.ReplaceAll(pattern, "*", "")
+				if strings.HasPrefix(cleanMime, prefix) {
+					allowed = true
+					break
+				}
+			} else {
+				if cleanMime == pattern {
+					allowed = true
+					break
+				}
+			}
+		}
+
+		if !allowed {
+			return pkgErrors.NewBusinessError(pkgErrors.FileMimeTypeNotAllowed)
+		}
+	}
+
+	return nil
+}
+
+func isMimeCompatible(actual, expected string) bool {
+	actual = strings.ToLower(strings.TrimSpace(actual))
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	if actual == expected {
+		return true
+	}
+	if actual == "application/octet-stream" {
+		return true
+	}
+
+	groups := [][]string{
+		{"image/jpeg", "image/jpg", "image/pjpeg"},
+		{"image/png", "image/x-png"},
+		{"text/javascript", "application/javascript", "application/x-javascript"},
+		{"text/xml", "application/xml"},
+	}
+
+	for _, g := range groups {
+		hasActual := false
+		hasExpected := false
+		for _, m := range g {
+			if m == actual {
+				hasActual = true
+			}
+			if m == expected {
+				hasExpected = true
+			}
+		}
+		if hasActual && hasExpected {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *FileResourceService) ensureExportTempFolder(ctx context.Context) (uint, error) {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return 0, err
+	}
+
+	defaultFolderName := "导出"
+	tempFolderName := "临时文件"
+	cfgSvc := NewStorageConfigService()
+	if settings, err := cfgSvc.Get(false); err == nil {
+		if strings.TrimSpace(settings.Config.ExportDefaultFolder) != "" {
+			defaultFolderName = strings.TrimSpace(settings.Config.ExportDefaultFolder)
+		}
+		if strings.TrimSpace(settings.Config.ExportTempFolder) != "" {
+			tempFolderName = strings.TrimSpace(settings.Config.ExportTempFolder)
+		}
+	}
+
+	var parentFolder model.UploadFileFolder
+	err = db.Where("parent_id = 0 AND name = ? AND deleted_at = 0", defaultFolderName).First(&parentFolder).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			parentFolder = model.UploadFileFolder{
+				ParentID:    0,
+				Name:        defaultFolderName,
+				LogicalPath: "/" + defaultFolderName,
+				CreatedBy:   0,
+				UpdatedBy:   0,
+			}
+			if err := db.Create(&parentFolder).Error; err != nil {
+				return 0, err
+			}
+		} else {
+			return 0, err
+		}
+	}
+
+	var tempFolder model.UploadFileFolder
+	err = db.Where("parent_id = ? AND name = ? AND deleted_at = 0", parentFolder.ID, tempFolderName).First(&tempFolder).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			tempFolder = model.UploadFileFolder{
+				ParentID:    parentFolder.ID,
+				Name:        tempFolderName,
+				LogicalPath: joinLogicalPath(parentFolder.LogicalPath, tempFolderName),
+				CreatedBy:   0,
+				UpdatedBy:   0,
+			}
+			if err := db.Create(&tempFolder).Error; err != nil {
+				return 0, err
+			}
+		} else {
+			return 0, err
+		}
+	}
+
+	return tempFolder.ID, nil
 }

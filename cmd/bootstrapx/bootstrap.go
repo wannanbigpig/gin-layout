@@ -1,7 +1,6 @@
 package bootstrapx
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
 	"github.com/wannanbigpig/gin-layout/internal/service/sys_config"
-	"github.com/wannanbigpig/gin-layout/internal/service/system"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"go.uber.org/zap"
 )
@@ -66,11 +64,7 @@ func InitializeData() error {
 	if err := data.InitData(); err != nil {
 		return err
 	}
-	taskcron.RegisterHandler(taskcron.HandlerCronResetSystemData, func(ctx context.Context, payload map[string]any) error {
-		_ = ctx
-		_ = payload
-		return system.ReinitializeSystemData()
-	})
+	taskcron.RegisterBuiltinHandlers()
 	if err := sys_config.NewSysConfigService().WarmupRuntimeConfigIfAvailable(); err != nil {
 		return err
 	}

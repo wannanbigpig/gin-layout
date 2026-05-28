@@ -12,6 +12,10 @@ import (
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
 
+const (
+	aliyunOSSThumbnailProcess = "image/resize,m_lfit,w_320,h_320"
+)
+
 type AliyunOSSDriver struct {
 	client       *oss.Client
 	bucket       string
@@ -23,8 +27,7 @@ func NewAliyunOSSDriver(config AliyunOSSConfig) *AliyunOSSDriver {
 	cfg := oss.LoadDefaultConfig().
 		WithRegion(config.Region).
 		WithEndpoint(endpoint).
-		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(config.AccessKeyID, config.AccessKeySecret)).
-		WithUsePathStyle(config.ForcePathStyle)
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(config.AccessKeyID, config.AccessKeySecret))
 	return &AliyunOSSDriver{
 		client:       oss.NewClient(cfg),
 		bucket:       config.Bucket,
@@ -75,6 +78,21 @@ func (d *AliyunOSSDriver) URL(bucket, objectKey string, isPublic bool) string {
 
 func (d *AliyunOSSDriver) SignedURL(ctx context.Context, bucket, objectKey string, ttl time.Duration) (string, error) {
 	out, err := d.client.Presign(ctx, &oss.GetObjectRequest{Bucket: oss.Ptr(firstNonEmpty(bucket, d.bucket)), Key: oss.Ptr(objectKey)}, func(options *oss.PresignOptions) {
+		options.Expires = ttl
+	})
+	if err != nil {
+		return "", err
+	}
+	return out.URL, nil
+}
+
+func (d *AliyunOSSDriver) SignedImageThumbnailURL(ctx context.Context, bucket, objectKey string, ttl time.Duration) (string, error) {
+	request := &oss.GetObjectRequest{
+		Bucket:  oss.Ptr(firstNonEmpty(bucket, d.bucket)),
+		Key:     oss.Ptr(objectKey),
+		Process: oss.Ptr(aliyunOSSThumbnailProcess),
+	}
+	out, err := d.client.Presign(ctx, request, func(options *oss.PresignOptions) {
 		options.Expires = ttl
 	})
 	if err != nil {

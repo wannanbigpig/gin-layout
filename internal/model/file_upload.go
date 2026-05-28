@@ -5,7 +5,6 @@ import "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 const (
 	StorageDriverLocal     = "local"
 	StorageDriverAliyunOSS = "aliyun_oss"
-	StorageDriverS3        = "s3"
 
 	StorageStatusStored       = "stored"
 	StorageStatusDeleteFailed = "delete_failed"
@@ -28,7 +27,7 @@ type UploadFiles struct {
 	MimeType         string           `json:"mime_type"`               // MIME类型（如：image/jpeg, application/pdf）
 	FileType         string           `json:"file_type"`               // 文件类型：image,pdf,word,excel,ppt,archive,text,audio,video,other
 	IsPublic         uint8            `json:"is_public"`               // 是否公开访问：0否 1是
-	StorageDriver    string           `json:"storage_driver"`          // 存储驱动：local,aliyun_oss,s3
+	StorageDriver    string           `json:"storage_driver"`          // 存储驱动：local,aliyun_oss
 	StorageBase      string           `json:"storage_base"`            // 存储基础位置
 	Bucket           string           `json:"bucket"`                  // 存储桶
 	StoragePath      string           `json:"storage_path"`            // 实际存储路径
@@ -38,6 +37,7 @@ type UploadFiles struct {
 	UploadSource     string           `json:"upload_source"`           // 上传来源
 	UploadScene      string           `json:"upload_scene"`            // 上传场景
 	UploadStatus     string           `json:"upload_status"`           // 上传状态
+	ExpiresAt        utils.FormatDate `json:"expires_at" gorm:"column:expires_at;default:null"` // 过期删除时间
 	LastAccessedAt   utils.FormatDate `json:"last_accessed_at"`        // 最后访问时间
 	DeletedBy        uint             `json:"deleted_by"`              // 删除人
 	DeletedReason    string           `json:"deleted_reason"`          // 删除原因

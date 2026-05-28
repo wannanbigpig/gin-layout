@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down dev-logs dev-init-bucket
+.PHONY: dev-up dev-down dev-logs dev-init-bucket dev-service dev-worker
 
 dev-up:
 	docker-compose -f docker-compose.dev.yml up -d
@@ -21,3 +21,9 @@ dev-init-bucket:
 	docker exec go-layout-minio mc mb local/gin-layout --ignore-existing
 	docker exec go-layout-minio mc anonymous set download local/gin-layout/public
 	@echo "Bucket 创建完成"
+
+dev-service:
+	air -c .air.toml
+
+dev-worker:
+	air -c .air.worker.toml

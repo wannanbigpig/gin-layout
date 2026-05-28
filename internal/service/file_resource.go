@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -46,6 +45,20 @@ type FileBatchDeleteFailure struct {
 	Message    string                              `json:"message"`
 	References []*resources.FileReferenceResources `json:"references,omitempty"`
 }
+
+type FileBatchDestroyResult struct {
+	Total     int                        `json:"total"`
+	Destroyed int                        `json:"destroyed"`
+	Failed    int                        `json:"failed"`
+	Failures  []*FileBatchDestroyFailure `json:"failures,omitempty"`
+}
+
+type FileBatchDestroyFailure struct {
+	ID      uint   `json:"id"`
+	Code    int    `json:"code,omitempty"`
+	Message string `json:"message"`
+}
+
 
 func NewFileReferencedDeleteError(references []*resources.FileReferenceResources) *FileReferencedDeleteError {
 	return &FileReferencedDeleteError{
@@ -268,6 +281,49 @@ func (s *FileResourceService) Destroy(id uint) error {
 	return nil
 }
 
+func (s *FileResourceService) BatchRestore(ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return err
+	}
+	result := db.Unscoped().Model(&model.UploadFiles{}).Where("id IN ? AND deleted_at <> 0", ids).Updates(map[string]any{
+		"deleted_at":     0,
+		"deleted_by":     0,
+		"deleted_reason": "",
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return e.NewBusinessError(e.NotFound)
+	}
+	return nil
+}
+
+func (s *FileResourceService) BatchDestroy(ids []uint) (*FileBatchDestroyResult, error) {
+	result := &FileBatchDestroyResult{
+		Total: len(ids),
+	}
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	for _, id := range ids {
+		if err := s.Destroy(id); err != nil {
+			result.Failures = append(result.Failures, buildFileBatchDestroyFailure(id, err))
+			continue
+		}
+		result.Destroyed++
+	}
+
+	result.Failed = len(result.Failures)
+	return result, nil
+}
+
+
 func (s *FileResourceService) References(params *form.FileReferenceList) *resources.Collection {
 	return NewFileReferenceService(s.db).List(params)
 }
@@ -305,6 +361,22 @@ func buildFileBatchDeleteFailure(id uint, err error) *FileBatchDeleteFailure {
 
 	return failure
 }
+
+func buildFileBatchDestroyFailure(id uint, err error) *FileBatchDestroyFailure {
+	failure := &FileBatchDestroyFailure{
+		ID:      id,
+		Message: firstNonEmpty(errMessage(err), e.NewBusinessError(e.FAILURE).GetMessage()),
+	}
+
+	var businessErr *e.BusinessError
+	if errors.As(err, &businessErr) {
+		failure.Code = businessErr.GetCode()
+		failure.Message = businessErr.GetMessage()
+	}
+
+	return failure
+}
+
 
 func errMessage(err error) string {
 	if err == nil {
@@ -512,17 +584,6 @@ func (s *FileResourceService) fillObjectReuseCounts(rows []*model.UploadFiles) {
 		row.ObjectReuseCount = countMap[row.FileObjectID]
 		row.ObjectStatus = statusMap[row.FileObjectID]
 	}
-}
-
-func (s *FileResourceService) markDeleteFailed(id uint) error {
-	db, err := s.dbOrDefault()
-	if err != nil {
-		return err
-	}
-	return db.Unscoped().Model(&model.UploadFiles{}).Where("id = ?", id).Updates(map[string]any{
-		"storage_status": model.StorageStatusDeleteFailed,
-		"updated_at":     time.Now(),
-	}).Error
 }
 
 func (s *FileResourceService) dbOrDefault() (*gorm.DB, error) {

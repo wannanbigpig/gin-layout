@@ -36,7 +36,10 @@ func TestFileReferenceTransformerFallsBackToRawNames(t *testing.T) {
 
 func TestFileResourceTransformerAddsStatusDisplayNames(t *testing.T) {
 	result := NewFileResourceTransformer().ToStruct(&model.UploadFiles{
+		UUID:          "1234567890abcdef1234567890abcdef",
 		OriginName:    "avatar.png",
+		FileType:      "image",
+		MimeType:      "image/png",
 		StorageStatus: model.StorageStatusStored,
 		UploadSource:  model.UploadSourceBackend,
 		UploadStatus:  model.UploadStatusUploaded,
@@ -49,5 +52,29 @@ func TestFileResourceTransformerAddsStatusDisplayNames(t *testing.T) {
 	}
 	if result.UploadStatusName != "已上传" {
 		t.Fatalf("expected upload_status_name 已上传, got %q", result.UploadStatusName)
+	}
+	if result.URL != "/admin/v1/file/1234567890abcdef1234567890abcdef" {
+		t.Fatalf("expected original url, got %q", result.URL)
+	}
+	if result.ThumbnailURL != "/admin/v1/file/1234567890abcdef1234567890abcdef?variant=thumb" {
+		t.Fatalf("expected thumbnail url, got %q", result.ThumbnailURL)
+	}
+}
+
+func TestFileResourceTransformerLeavesThumbnailURLBlankForNonImage(t *testing.T) {
+	result := NewFileResourceTransformer().ToStruct(&model.UploadFiles{
+		UUID:     "abcdef1234567890abcdef1234567890",
+		FileType: "pdf",
+		MimeType: "application/pdf",
+	})
+	if result.ThumbnailURL != "" {
+		t.Fatalf("expected thumbnail_url empty for non-image, got %q", result.ThumbnailURL)
+	}
+}
+
+func TestFileUploadBatchFailureCarriesCodeAndMessage(t *testing.T) {
+	result := &FileUploadBatchFailure{ClientID: "c1", Code: 11006, Message: "failed"}
+	if result.ClientID != "c1" || result.Code != 11006 || result.Message != "failed" {
+		t.Fatalf("unexpected batch failure payload: %#v", result)
 	}
 }

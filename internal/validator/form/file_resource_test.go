@@ -24,14 +24,42 @@ func TestFileResourceListAllowsMultiFileTypeAndOther(t *testing.T) {
 }
 
 func TestFileUploadCompleteRejectsMultiFileType(t *testing.T) {
-	err := bindJSONBody(t, `{"origin_name":"a.txt","storage_driver":"s3","bucket":"assets","object_key":"a.txt","file_type":"pdf,word"}`, NewFileUploadCompleteForm())
+	err := bindJSONBody(t, `{"origin_name":"a.txt","storage_driver":"aliyun_oss","bucket":"assets","object_key":"a.txt","file_type":"pdf,word"}`, NewFileUploadCompleteForm())
 	if err == nil {
 		t.Fatal("expected upload complete multi file_type to fail validation")
 	}
 }
 
+func TestFileUploadCredentialBatchAllowsSharedDriverAndItems(t *testing.T) {
+	err := bindJSONBody(t, `{"driver":"aliyun_oss","is_public":1,"upload_scene":"picker","items":[{"client_id":"c1","folder_id":2,"origin_name":"a.txt","size":12,"mime_type":"text/plain","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`, NewFileUploadCredentialBatchForm())
+	if err != nil {
+		t.Fatalf("expected credential batch to pass validation, got %v", err)
+	}
+}
+
+func TestFileUploadCredentialBatchRequiresClientIDAndHash(t *testing.T) {
+	err := bindJSONBody(t, `{"items":[{"origin_name":"a.txt","size":12,"hash":"short"}]}`, NewFileUploadCredentialBatchForm())
+	if err == nil {
+		t.Fatal("expected invalid credential batch item to fail validation")
+	}
+}
+
+func TestFileUploadCompleteBatchRejectsLocalDriver(t *testing.T) {
+	err := bindJSONBody(t, `{"driver":"local","items":[{"client_id":"c1","origin_name":"a.txt"}]}`, NewFileUploadCompleteBatchForm())
+	if err == nil {
+		t.Fatal("expected local complete batch driver to fail validation")
+	}
+}
+
+func TestFileUploadCompleteBatchAllowsReuseItem(t *testing.T) {
+	err := bindJSONBody(t, `{"driver":"aliyun_oss","items":[{"client_id":"c1","reuse":true,"file_object_id":1,"origin_name":"a.txt"}]}`, NewFileUploadCompleteBatchForm())
+	if err != nil {
+		t.Fatalf("expected complete batch reuse item to pass validation, got %v", err)
+	}
+}
+
 func TestFileMultipartCompleteRejectsMultiFileType(t *testing.T) {
-	err := bindJSONBody(t, `{"origin_name":"a.txt","driver":"s3","bucket":"assets","object_key":"a.txt","file_type":"pdf,word","parts":[{"part_number":1,"etag":"etag"}]}`, NewFileMultipartCompleteForm())
+	err := bindJSONBody(t, `{"origin_name":"a.txt","driver":"aliyun_oss","bucket":"assets","object_key":"a.txt","file_type":"pdf,word","parts":[{"part_number":1,"etag":"etag"}]}`, NewFileMultipartCompleteForm())
 	if err == nil {
 		t.Fatal("expected multipart complete multi file_type to fail validation")
 	}
@@ -59,7 +87,7 @@ func TestFileResourceListRejectsInvalidStorageDriver(t *testing.T) {
 }
 
 func TestFileResourceListAllowsStorageFilters(t *testing.T) {
-	err := bindJSONBody(t, `{"storage_driver":"s3","storage_status":"stored","is_referenced":1,"is_deleted":0}`, NewFileResourceListQuery())
+	err := bindJSONBody(t, `{"storage_driver":"aliyun_oss","storage_status":"stored","is_referenced":1,"is_deleted":0}`, NewFileResourceListQuery())
 	if err != nil {
 		t.Fatalf("expected storage filters to pass validation, got %v", err)
 	}

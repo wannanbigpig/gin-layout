@@ -1,6 +1,7 @@
 package system
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -8,12 +9,21 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/data"
+	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
+
+func init() {
+	taskcron.RegisterHandler(taskcron.HandlerCronResetSystemData, func(ctx context.Context, payload map[string]any) error {
+		_ = ctx
+		_ = payload
+		return ReinitializeSystemData()
+	})
+}
 
 const (
 	defaultSort      = 100

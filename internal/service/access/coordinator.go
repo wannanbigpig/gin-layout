@@ -1,9 +1,11 @@
 package access
 
 import (
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 )
 
 // PermissionSyncCoordinator 统一协调权限重建触发逻辑。
@@ -112,15 +114,17 @@ func (c *PermissionSyncCoordinator) ReloadPolicyCache() error {
 	return c.syncer.ReloadPolicyCache()
 }
 
-// ReloadPolicyCacheWithMessage 在事务提交后刷新共享策略，并统一包装业务错误。
+// ReloadPolicyCacheWithMessage 在事务提交后刷新共享策略。
+// 事务已经成功提交，刷新失败只记录告警，避免向调用方回传“操作失败但数据已落库”的假象。
 func (c *PermissionSyncCoordinator) ReloadPolicyCacheWithMessage(_ string) error {
 	return c.ReloadPolicyCacheWithCode(e.FAILURE)
 }
 
-// ReloadPolicyCacheWithCode 在事务提交后刷新共享策略，并按错误码包装业务错误。
-func (c *PermissionSyncCoordinator) ReloadPolicyCacheWithCode(code int) error {
+// ReloadPolicyCacheWithCode 在事务提交后刷新共享策略。
+// 事务已经成功提交时，刷新共享 Casbin 缓存失败只能影响后续内存态一致性，不能再让当前写请求返回失败。
+func (c *PermissionSyncCoordinator) ReloadPolicyCacheWithCode(_ int) error {
 	if err := c.ReloadPolicyCache(); err != nil {
-		return e.NewBusinessError(code)
+		log.Logger.Warn("权限策略缓存刷新失败，已忽略以避免误报写操作失败", zap.Error(err))
 	}
 	return nil
 }
@@ -130,7 +134,8 @@ func (c *PermissionSyncCoordinator) RunAfterCommit(db *gorm.DB, _ string, fn fun
 	return c.RunAfterCommitWithCode(db, e.FAILURE, fn)
 }
 
-// RunAfterCommitWithCode 执行事务逻辑并在成功提交后刷新共享策略缓存，失败时返回指定错误码。
+// RunAfterCommitWithCode 执行事务逻辑并在成功提交后刷新共享策略缓存。
+// 事务函数失败仍原样返回；提交后的缓存刷新失败仅告警，不再覆盖已成功提交的业务结果。
 func (c *PermissionSyncCoordinator) RunAfterCommitWithCode(db *gorm.DB, code int, fn func(tx *gorm.DB) error) error {
 	if err := RunInTransaction(db, fn); err != nil {
 		return err

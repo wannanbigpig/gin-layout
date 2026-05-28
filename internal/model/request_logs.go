@@ -1,30 +1,46 @@
 package model
 
+const (
+	RequestKindHTTP      = "http"
+	RequestKindWebSocket = "websocket"
+	RequestKindSSE       = "sse"
+
+	ExecutionTimeUnitMilliseconds = "ms"
+
+	ExecutionTimeScopeRequest    = "request"
+	ExecutionTimeScopeConnection = "connection"
+	ExecutionTimeScopeStream     = "stream"
+	ExecutionTimeScopeNone       = "none"
+)
+
 // RequestLogs 请求日志表
 type RequestLogs struct {
 	BaseModel
-	RequestID       string  `json:"request_id"`       // 请求唯一标识
-	JwtID           string  `json:"jwt_id"`           // 请求授权的jwtId
-	OperatorID      uint    `json:"operator_id"`      // 操作ID（用户ID）
-	IP              string  `json:"ip"`               // 客户端IP地址
-	UserAgent       string  `json:"user_agent"`       // 用户代理（浏览器/设备信息）
-	OS              string  `json:"os"`               // 操作系统
-	Browser         string  `json:"browser"`          // 浏览器
-	Method          string  `json:"method"`           // HTTP请求方法（GET/POST等）
-	BaseURL         string  `json:"base_url"`         // 请求基础URL
-	OperationName   string  `json:"operation_name"`   // 操作名称
-	OperationStatus int     `json:"operation_status"` // 操作状态码（响应返回的code，0=成功，其他=失败）
-	IsHighRisk      uint8   `json:"is_high_risk"`     // 是否高危操作 1是 0否
-	OperatorAccount string  `json:"operator_account"` // 操作账号
-	OperatorName    string  `json:"operator_name"`    // 操作人员
-	RequestHeaders  string  `json:"request_headers"`  // 请求头（JSON格式）
-	RequestQuery    string  `json:"request_query"`    // 请求参数
-	RequestBody     string  `json:"request_body"`     // 请求体
-	ChangeDiff      string  `json:"change_diff"`      // 关键变更前后差异（JSON）
-	ResponseStatus  int     `json:"response_status"`  // 响应状态码
-	ResponseBody    string  `json:"response_body"`    // 响应体
-	ResponseHeader  string  `json:"response_header"`  // 响应头
-	ExecutionTime   float64 `json:"execution_time"`   // 执行时间（毫秒，支持小数，最多4位）
+	RequestID          string  `json:"request_id"`           // 请求唯一标识
+	JwtID              string  `json:"jwt_id"`               // 请求授权的jwtId
+	OperatorID         uint    `json:"operator_id"`          // 操作ID（用户ID）
+	IP                 string  `json:"ip"`                   // 客户端IP地址
+	UserAgent          string  `json:"user_agent"`           // 用户代理（浏览器/设备信息）
+	OS                 string  `json:"os"`                   // 操作系统
+	Browser            string  `json:"browser"`              // 浏览器
+	RequestKind        string  `json:"request_kind"`         // 请求类型：http/websocket/sse
+	Method             string  `json:"method"`               // HTTP请求方法（GET/POST等）
+	BaseURL            string  `json:"base_url"`             // 请求基础URL
+	OperationName      string  `json:"operation_name"`       // 操作名称
+	OperationStatus    int     `json:"operation_status"`     // 操作状态码（响应返回的code，0=成功，其他=失败）
+	IsHighRisk         uint8   `json:"is_high_risk"`         // 是否高危操作 1是 0否
+	OperatorAccount    string  `json:"operator_account"`     // 操作账号
+	OperatorName       string  `json:"operator_name"`        // 操作人员
+	RequestHeaders     string  `json:"request_headers"`      // 请求头（JSON格式）
+	RequestQuery       string  `json:"request_query"`        // 请求参数
+	RequestBody        string  `json:"request_body"`         // 请求体
+	ChangeDiff         string  `json:"change_diff"`          // 关键变更前后差异（JSON）
+	ResponseStatus     int     `json:"response_status"`      // 响应状态码
+	ResponseBody       string  `json:"response_body"`        // 响应体
+	ResponseHeader     string  `json:"response_header"`      // 响应头
+	ExecutionTime      float64 `json:"execution_time"`       // 执行时间（毫秒，支持小数，最多4位）
+	ExecutionTimeUnit  string  `json:"execution_time_unit"`  // 执行时间单位：ms
+	ExecutionTimeScope string  `json:"execution_time_scope"` // 执行时间语义：request/connection/stream/none
 }
 
 func NewRequestLogs() *RequestLogs {

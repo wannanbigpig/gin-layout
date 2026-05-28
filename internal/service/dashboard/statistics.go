@@ -43,9 +43,10 @@ type StatisticsTrendDay struct {
 }
 
 type ErrorDistribution struct {
-	Total      int64                 `json:"total"`
-	Categories []ErrorCategoryBucket `json:"categories"`
-	StatusCode []ErrorCodeBucket     `json:"status_codes"`
+	Total          int64                 `json:"total"`
+	Categories     []ErrorCategoryBucket `json:"categories"`
+	StatusCode     []ErrorCodeBucket     `json:"status_codes"`
+	BizStatusCodes []ErrorCodeBucket     `json:"biz_status_codes"`
 }
 
 type ErrorCategoryBucket struct {
@@ -120,7 +121,8 @@ func buildErrorDistribution(db *gorm.DB, start time.Time, end time.Time) ErrorDi
 			{Key: "http_5xx", Title: "HTTP 5xx"},
 			{Key: "biz_failure", Title: "业务失败"},
 		},
-		StatusCode: buildErrorCodeStats(db, start, end),
+		StatusCode:     buildErrorCodeStats(db, start, end),
+		BizStatusCodes: buildBizStatusCodeStats(db, start, end),
 	}
 	if db == nil {
 		return distribution
@@ -147,4 +149,33 @@ func buildErrorDistribution(db *gorm.DB, start time.Time, end time.Time) ErrorDi
 	distribution.Total = counts.FourXX + counts.FiveXX + counts.BizFailed
 
 	return distribution
+}
+
+func buildBizStatusCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCodeBucket {
+	if db == nil {
+		return nil
+	}
+	type row struct {
+		StatusCode int
+		Count      int64
+	}
+	var rows []row
+	if err := db.Table("request_logs").
+		Select("operation_status AS status_code, COUNT(*) AS count").
+		Where("created_at >= ? AND created_at < ? AND operation_status <> ?", start, end, 0).
+		Group("operation_status").
+		Order("count DESC, operation_status ASC").
+		Limit(10).
+		Scan(&rows).Error; err != nil {
+		return nil
+	}
+
+	buckets := make([]ErrorCodeBucket, 0, len(rows))
+	for _, r := range rows {
+		buckets = append(buckets, ErrorCodeBucket{
+			StatusCode: r.StatusCode,
+			Count:      r.Count,
+		})
+	}
+	return buckets
 }

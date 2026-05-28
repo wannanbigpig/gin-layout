@@ -1,80 +1,24 @@
 package errors
 
-var enUSText = map[int]string{
-	SUCCESS:                   "OK",
-	FAILURE:                   "FAIL",
-	NotFound:                  "resources not found",
-	ServerErr:                 "Internal server error",
-	TooManyRequests:           "Too many requests",
-	InvalidParameter:          "Parameter error",
-	UserDoesNotExist:          "user does not exist",
-	UserDisable:               "User is disabled",
-	ServiceDependencyNotReady: "service database is not configured, please contact the administrator",
-	AuthorizationErr:          "You have no permission",
-	NotLogin:                  "Please login first",
-	CaptchaErr:                "Captcha error",
+// enUSText 汇总各模块英文错误码文案。
+// 模块拆分位于 en-us_common.go / en-us_file.go / en-us_auth.go /
+// en-us_role.go / en-us_menu.go / en-us_dept.go，通过 init() 合并到此处。
+var enUSText = map[int]string{}
 
-	// File-related error messages 11000-11999
-	FileIdentifierInvalid: "invalid file identifier",
-	FilePrivateAuthNeeded: "login required for private file access",
-	FileAccessDenied:      "no permission to access this file",
-	FileUploadPartialFail: "partial image upload failure",
-	FileReferenced:        "file is referenced and cannot be deleted",
+// enUSTextKey 汇总各模块英文文案 key。
+// 拆分文件通过 init() 合并到此处。
+var enUSTextKey = map[string]string{}
 
-	// Business error messages 20000-29999
-	UserPasswordWrong:       "Incorrect password",
-	UserExists:              "User already exists",
-	PhoneNumberExists:       "Phone number already exists",
-	EmailExists:             "Email already exists",
-	UsernameRequired:        "Username is required",
-	NicknameRequired:        "Nickname is required",
-	PasswordRequired:        "Password is required",
-	PasswordProcessFailed:   "Password processing failed",
-	SuperAdminCannotModify:  "Cannot modify default super admin password",
-	SuperAdminCannotDisable: "Cannot disable default super admin",
-	SuperAdminCannotDelete:  "Cannot delete default super admin",
-	SamePassword:            "New password cannot be the same as current password",
-	RoleNotFound:            "Role not found",
-	RoleExists:              "Role already exists",
-	RoleHasChildren:         "Cannot delete role with child roles",
-	RoleCannotDelete:        "Failed to delete role",
-	ParentRoleNotExists:     "Parent role not exists",
-	ParentRoleInvalid:       "Parent role cannot be itself or its child role",
-	MaxRoleDepth:            "Can only create up to 2 levels of roles",
-	MaxChildRoles:           "Each top-level role can have up to 5 child roles",
-	MenuNotFound:            "Menu not found",
-	MenuExists:              "Menu already exists",
-	MenuHasChildren:         "Cannot delete menu with child menus",
-	MenuCannotDelete:        "Failed to delete menu",
-	DepartmentNotFound:      "Department not found",
-	DepartmentExists:        "Department already exists",
-	DepartmentHasChildren:   "Cannot delete department with child departments",
-	DepartmentCannotDelete:  "Failed to delete department",
-	ParentDeptNotExists:     "Parent department not exists",
-	ParentDeptInvalid:       "Parent department cannot be itself or its child department",
-	MaxDeptDepth:            "Department level exceeds limit",
-	CasbinInitFailed:        "Permission initialization failed",
-	TokenGenerateFailed:     "Failed to generate token",
-	LoginFailed:             "Login failed, please try again later",
-	CreateUserFailed:        "Failed to create user, please try again",
-	UpdateUserFailed:        "Failed to update user, please try again",
-	DeleteUserFailed:        "Failed to delete user, please try again",
-	QueryUserDeptFailed:     "Failed to query user department association",
-	SuperAdminMustKeepRole:  "Default super admin must keep super admin role",
-	MaxMenuDepth:            "Can only create up to 4 levels of menu",
-	ParentMenuNotExists:     "Parent menu not exists",
-	ParentMenuTypeInvalid:   "Parent menu cannot be a button",
-	ParentMenuInvalid:       "Parent menu cannot be itself or its child menu",
-	MenuCodeExists:          "Permission code already exists",
-	MenuRouteNameExists:     "Route name already exists",
-	MenuPathExists:          "Route already exists",
-	LoginAccountLocked:      "Account is locked, please try again later",
+// mergeEnUSText 将模块内英文文案合并到 enUSText。
+func mergeEnUSText(src map[int]string) {
+	for code, msg := range src {
+		enUSText[code] = msg
+	}
 }
 
-var enUSTextKey = map[string]string{
-	MsgKeyAuthSessionExpired:        "Session expired, please log in again",
-	MsgKeyAuthPermissionInitFailed:  "Permission engine initialization failed",
-	MsgKeyAuthPermissionCheckFailed: "Permission check failed",
-	MsgKeyAuthAPIOperationDenied:    "No permission to operate this API",
-	MsgKeyAuthAccountLocked:         "Account is locked, please try again in %d minutes",
+// mergeEnUSTextKey 将模块内文案 key 合并到 enUSTextKey。
+func mergeEnUSTextKey(src map[string]string) {
+	for key, msg := range src {
+		enUSTextKey[key] = msg
+	}
 }

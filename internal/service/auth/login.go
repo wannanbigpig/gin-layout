@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	stderrors "errors"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -18,6 +19,70 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
+
+// loginLogAsyncBufferSize 控制登录日志异步写入队列容量；队列打满时调用方会被强制走同步落库，
+// 避免登录链路被异步队列阻塞。
+const loginLogAsyncBufferSize = 256
+
+var (
+	loginLogQueueOnce sync.Once
+	loginLogQueue     chan *model.AdminLoginLogs
+)
+
+// initLoginLogWorker 懒启动单 worker，从队列拉取并落库登录日志。
+// 单 worker 已足够：登录链路 QPS 远低于落库吞吐，且单写入串行化便于失败时降级。
+func initLoginLogWorker() {
+	loginLogQueueOnce.Do(func() {
+		loginLogQueue = make(chan *model.AdminLoginLogs, loginLogAsyncBufferSize)
+		go runLoginLogWorker(loginLogQueue)
+	})
+}
+
+func runLoginLogWorker(queue <-chan *model.AdminLoginLogs) {
+	defer func() {
+		if r := recover(); r != nil && log.Logger != nil {
+			log.Logger.Error("login log async worker panic",
+				zap.Any("recover", r))
+		}
+	}()
+	for entry := range queue {
+		writeLoginLogAsync(entry)
+	}
+}
+
+func writeLoginLogAsync(entry *model.AdminLoginLogs) {
+	defer func() {
+		if r := recover(); r != nil && log.Logger != nil {
+			log.Logger.Error("login log async write panic",
+				zap.Any("recover", r),
+				zap.Uint("user_id", entry.UID),
+				zap.String("username", entry.Username))
+		}
+	}()
+	if err := entry.Create(); err != nil {
+		if log.Logger != nil {
+			log.Logger.Error("login log async write failed",
+				zap.Error(err),
+				zap.Uint("user_id", entry.UID),
+				zap.String("username", entry.Username))
+		}
+	}
+}
+
+// enqueueLoginLogAsync 尝试将登录日志投递到异步队列。
+// 队列未初始化或已满时返回 false，调用方需走同步落库兜底。
+func enqueueLoginLogAsync(entry *model.AdminLoginLogs) bool {
+	if entry == nil {
+		return true
+	}
+	initLoginLogWorker()
+	select {
+	case loginLogQueue <- entry:
+		return true
+	default:
+		return false
+	}
+}
 
 // LoginService 登录授权服务。
 type LoginService struct {
@@ -185,30 +250,36 @@ func (s *LoginService) validateUser(username, password string) (*model.AdminUser
 }
 
 // recordLoginLog 记录登录日志并更新用户信息。
+//
+// 关键路径变更：
+//   - 同步阶段仅保留 admin_users 的 last_ip / last_login 字段更新（使用 Updates(map) 显式指定列，
+//     避免 Save 全字段回写带来的写放大与并发覆盖风险）；
+//   - admin_login_logs 的 INSERT 改为投递异步队列，登录响应不再被这条 I/O 拖慢；
+//   - 异步队列已满或尚未初始化时回退同步写入，保证不丢日志；任意路径失败均必须打 Error 日志。
 func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.AdminCustomClaims, accessToken, refreshToken string, logInfo LoginLogInfo, logType uint8) error {
-	db, err := model.NewAdminLoginLogs().GetDB()
-	if err != nil {
-		return err
-	}
-	return db.Transaction(func(tx *gorm.DB) error {
-		loginLog := s.buildLoginLog(adminUser.ID, adminUser.Username, claims.ID, accessToken, refreshToken, claims.ExpiresAt.Time, logInfo, model.LoginStatusSuccess, "", logType)
-		loginLog.SetDB(tx)
-		if err := loginLog.Create(); err != nil {
-			log.Logger.Error("记录登录日志失败", zap.Error(err), zap.Uint("user_id", adminUser.ID), zap.String("username", adminUser.Username))
+	loginLog := s.buildLoginLog(adminUser.ID, adminUser.Username, claims.ID, accessToken, refreshToken, claims.ExpiresAt.Time, logInfo, model.LoginStatusSuccess, "", logType)
+
+	if logType == model.LoginTypeLogin {
+		updates := map[string]any{
+			"last_ip":    logInfo.IP,
+			"last_login": utils.FormatDate{Time: time.Now()},
+		}
+		if err := model.NewAdminUsers().UpdateById(adminUser.ID, updates); err != nil {
+			log.Logger.Error("更新用户最后登录信息失败", zap.Error(err), zap.Uint("user_id", adminUser.ID))
 			return err
 		}
+	}
 
-		if logType == model.LoginTypeLogin {
-			adminUser.LastIp = logInfo.IP
-			adminUser.LastLogin = utils.FormatDate{Time: time.Now()}
-			adminUser.SetDB(tx)
-			if err := adminUser.Save(); err != nil {
-				log.Logger.Error("更新用户最后登录信息失败", zap.Error(err), zap.Uint("user_id", adminUser.ID))
-				return err
-			}
-		}
+	if enqueueLoginLogAsync(loginLog) {
 		return nil
-	})
+	}
+
+	// 队列不可用时同步落库兜底，避免登录日志丢失。
+	if err := loginLog.Create(); err != nil {
+		log.Logger.Error("记录登录日志失败", zap.Error(err), zap.Uint("user_id", adminUser.ID), zap.String("username", adminUser.Username))
+		return err
+	}
+	return nil
 }
 
 // Refresh 刷新 Token。

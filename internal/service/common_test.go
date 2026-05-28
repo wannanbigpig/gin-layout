@@ -2,6 +2,10 @@ package service
 
 import (
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -51,6 +55,17 @@ func TestBuildFileURL(t *testing.T) {
 	c.Config.BaseURL = ""
 	assert.Equal(t, "/admin/v1/file/abc123", buildFileURL("abc123"))
 	assert.Equal(t, "", buildFileURL(""))
+}
+
+func TestBuildFileThumbnailURL(t *testing.T) {
+	originBaseURL := c.Config.BaseURL
+	t.Cleanup(func() {
+		c.Config.BaseURL = originBaseURL
+	})
+
+	c.Config.BaseURL = ""
+	assert.Equal(t, "/admin/v1/file/abc123?variant=thumb", buildFileThumbnailURL("abc123"))
+	assert.Equal(t, "", buildFileThumbnailURL(""))
 }
 
 func TestFillFileInfoFromModel(t *testing.T) {
@@ -127,4 +142,62 @@ func TestSummarizeImageUploadResultsAllFailed(t *testing.T) {
 func TestIsPartialImageUploadError(t *testing.T) {
 	assert.False(t, IsPartialImageUploadError(nil))
 	assert.False(t, IsPartialImageUploadError(errors.New("plain error")))
+}
+
+func TestGetFileAccessPathReturnsThumbnailForLocalImageVariant(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	basePath := t.TempDir()
+	imageDir := filepath.Join(basePath, "images")
+	assert.NoError(t, os.MkdirAll(imageDir, 0o755))
+
+	originalPath := filepath.Join(imageDir, "poster.jpg")
+	writeLargeJPEG(t, originalPath, 1200, 800)
+
+	record := &model.UploadFiles{
+		UUID:          "1234567890abcdef1234567890abcdef",
+		Path:          "images/poster.jpg",
+		FileType:      "image",
+		MimeType:      "image/jpeg",
+		IsPublic:      global.Yes,
+		StorageDriver: model.StorageDriverLocal,
+		StorageBase:   basePath,
+		StoragePath:   "images/poster.jpg",
+		ObjectKey:     "images/poster.jpg",
+		StorageStatus: model.StorageStatusStored,
+	}
+	assert.NoError(t, db.Create(record).Error)
+
+	access, err := NewCommonService().SetDB(db).GetFileAccessPath(record.UUID, fileVariantThumb, false, 0)
+	assert.NoError(t, err)
+	assert.FileExists(t, access.LocalPath)
+	assert.Empty(t, access.RedirectURL)
+	assert.NotEqual(t, originalPath, access.LocalPath)
+
+	imageFile, err := os.Open(access.LocalPath)
+	assert.NoError(t, err)
+	defer imageFile.Close()
+
+	thumbImage, _, err := image.Decode(imageFile)
+	assert.NoError(t, err)
+	bounds := thumbImage.Bounds()
+	assert.LessOrEqual(t, bounds.Dx(), thumbnailMaxDimension)
+	assert.LessOrEqual(t, bounds.Dy(), thumbnailMaxDimension)
+}
+
+func writeLargeJPEG(t *testing.T, path string, width int, height int) {
+	t.Helper()
+	imageData := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			imageData.Set(x, y, color.RGBA{R: uint8(x % 255), G: uint8(y % 255), B: 200, A: 255})
+		}
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create image file failed: %v", err)
+	}
+	defer file.Close()
+	if err := jpeg.Encode(file, imageData, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatalf("encode image file failed: %v", err)
+	}
 }

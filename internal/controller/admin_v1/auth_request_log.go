@@ -74,18 +74,20 @@ func (api RequestLogController) Export(c *gin.Context) {
 	taskID := jobs.TypeExportRequestLog + ":" + uuid.NewString()
 
 	payload := map[string]any{
-		"trigger_user_id":  uid,
-		"operator_id":      params.OperatorID,
-		"operator_account": params.OperatorAccount,
-		"operation_status": params.OperationStatus,
-		"is_high_risk":     params.IsHighRisk,
-		"method":           params.Method,
-		"base_url":         params.BaseURL,
-		"operation_name":   params.OperationName,
-		"ip":               params.IP,
-		"start_time":       params.StartTime,
-		"end_time":         params.EndTime,
-		"limit":            params.Limit,
+		"trigger_user_id":      uid,
+		"operator_id":          params.OperatorID,
+		"operator_account":     params.OperatorAccount,
+		"operation_status":     params.OperationStatus,
+		"is_high_risk":         params.IsHighRisk,
+		"request_kind":         params.RequestKind,
+		"execution_time_scope": params.ExecutionTimeScope,
+		"method":               params.Method,
+		"base_url":             params.BaseURL,
+		"operation_name":       params.OperationName,
+		"ip":                   params.IP,
+		"start_time":           params.StartTime,
+		"end_time":             params.EndTime,
+		"limit":                params.Limit,
 	}
 	rawPayload, _ := json.Marshal(payload)
 

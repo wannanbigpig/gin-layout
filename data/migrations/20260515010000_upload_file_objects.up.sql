@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS `upload_file_objects`
 (
     `id`             int unsigned NOT NULL AUTO_INCREMENT,
-    `storage_driver` varchar(20)  NOT NULL DEFAULT 'local' COMMENT '存储驱动:local,aliyun_oss,s3',
+    `storage_driver` varchar(20)  NOT NULL DEFAULT 'local' COMMENT '存储驱动:local,aliyun_oss',
     `storage_base`   varchar(512) NOT NULL DEFAULT '' COMMENT '存储基础位置',
     `bucket`         varchar(128) NOT NULL DEFAULT '' COMMENT '存储桶',
     `storage_path`   varchar(512) NOT NULL DEFAULT '' COMMENT '实际存储路径',
@@ -14,10 +14,7 @@ CREATE TABLE IF NOT EXISTS `upload_file_objects`
     `created_at`     datetime DEFAULT NULL COMMENT '创建时间',
     `updated_at`     datetime DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uniq_driver_bucket_hash` (`storage_driver`, `bucket`, `hash`),
-    KEY `idx_local_hash` (`storage_driver`, `hash`),
-    KEY `idx_remote_bucket_hash` (`storage_driver`, `bucket`, `hash`),
-    KEY `idx_status` (`status`)
+    UNIQUE KEY `uniq_driver_bucket_hash` (`storage_driver`, `bucket`, `hash`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='上传文件物理对象表';

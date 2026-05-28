@@ -13,8 +13,8 @@ func TestRegisterQueueFallbackHandlersRegistersDisabledNonHighRiskCron(t *testin
 	registry := queue.NewRegistry()
 
 	count := RegisterQueueFallbackHandlers(registry, &config.Conf{})
-	if count != 1 {
-		t.Fatalf("unexpected fallback handler count: got=%d want=1", count)
+	if count != 3 {
+		t.Fatalf("unexpected fallback handler count: got=%d want=3", count)
 	}
 
 	entry, ok := findRegistration(registry, TaskCodeCronDemo)
@@ -23,6 +23,12 @@ func TestRegisterQueueFallbackHandlersRegistersDisabledNonHighRiskCron(t *testin
 	}
 	if err := entry.Handler(context.Background(), []byte(`{}`)); err != nil {
 		t.Fatalf("fallback handler returned error: %v", err)
+	}
+	if _, ok := findRegistration(registry, TaskCodeCronFileAccessFlush); !ok {
+		t.Fatalf("expected %s fallback handler to be registered", TaskCodeCronFileAccessFlush)
+	}
+	if _, ok := findRegistration(registry, TaskCodeCronCleanExpiredFiles); !ok {
+		t.Fatalf("expected %s fallback handler to be registered", TaskCodeCronCleanExpiredFiles)
 	}
 }
 

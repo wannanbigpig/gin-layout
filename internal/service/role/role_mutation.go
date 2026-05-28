@@ -1,8 +1,11 @@
 package role
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -91,10 +94,18 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 		return e.NewBusinessError(e.MaxRoleDepth)
 	}
 
+	trimmedCode := strings.TrimSpace(params.Code)
+	if params.Id == 0 && trimmedCode != "" {
+		existing := model.NewRole()
+		if err := existing.FindByCode(trimmedCode); err == nil && existing.ID > 0 {
+			return e.NewBusinessError(e.RoleExists)
+		}
+	}
+
 	// 新增角色时生成 code
 	if params.Id == 0 {
-		if params.Code != "" {
-			role.Code = params.Code
+		if trimmedCode != "" {
+			role.Code = trimmedCode
 		} else if role.Code == "" {
 			role.Code = s.generateRoleCode()
 		}
@@ -120,6 +131,9 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 		role.SetDB(tx)
 
 		if err := role.Save(); err != nil {
+			if isRoleCodeDuplicateErr(err) {
+				return e.NewBusinessError(e.RoleExists)
+			}
 			return err
 		}
 		// pids 变更时，级联更新所有子角色的 pids 路径
@@ -152,6 +166,19 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	}
 	// 同步受影响角色的用户权限缓存
 	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByRoles([]uint{role.ID})
+}
+
+func isRoleCodeDuplicateErr(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1062 && strings.Contains(mysqlErr.Message, "role.uniq_code_deleted_at")
+	}
+
+	return strings.Contains(err.Error(), "Duplicate entry") && strings.Contains(err.Error(), "role.uniq_code_deleted_at")
 }
 
 // generateRoleCode 生成角色唯一编码，格式：role_{uuid}。
