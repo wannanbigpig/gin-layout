@@ -1,21 +1,15 @@
 package admin_v1
 
 import (
-	"encoding/json"
 	stderrors "errors"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
-	"github.com/wannanbigpig/gin-layout/internal/model"
 	pkgErrors "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"github.com/wannanbigpig/gin-layout/internal/queue"
-	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
-	"github.com/wannanbigpig/gin-layout/internal/service/taskcenter"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -47,16 +41,7 @@ func (api FileResourceController) Export(c *gin.Context) {
 		return
 	}
 
-	uid := api.GetCurrentUserID(c)
-	account := ""
-	if user := api.GetCurrentAdminUserSnapshot(c); user != nil {
-		account = user.Username
-	}
-
-	taskID := jobs.TypeExportFileList + ":" + uuid.NewString()
-
 	payload := map[string]any{
-		"trigger_user_id":   uid,
 		"origin_name":       params.OriginName,
 		"uuid":              params.UUID,
 		"mime_type":         params.MimeType,
@@ -73,67 +58,11 @@ func (api FileResourceController) Export(c *gin.Context) {
 		"end_time":          params.EndTime,
 		"limit":             params.Limit,
 	}
-	rawPayload, _ := json.Marshal(payload)
 
-	recorder := taskcenter.NewRunRecorder()
-	run, err := recorder.Enqueue(c.Request.Context(), taskcenter.RunStart{
-		TaskCode:       jobs.TypeExportFileList,
-		Kind:           model.TaskKindAsync,
-		Source:         model.TaskSourceManual,
-		SourceID:       taskID,
-		Queue:          jobs.ExportFileListQueue,
-		Payload:        rawPayload,
-		TriggerUserID:  uid,
-		TriggerAccount: account,
-	})
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-
-	exportRecord, _, err := service.NewExportCenterService().CreateRecordForTask(c.Request.Context(), service.ExportTaskBootstrapInput{
-		TaskCode:      jobs.TypeExportFileList,
-		TaskRunID:     run.ID,
-		TriggerUserID: uid,
-		Queue:         jobs.ExportFileListQueue,
-	})
-	if err != nil {
-		_ = recorder.Finish(c.Request.Context(), run, taskcenter.RunFinish{
-			Status: model.TaskRunStatusFailed,
-			Error:  err,
-		})
-		if stderrors.Is(err, service.ErrExportRecordTableMissing) {
-			api.FailCode(c, pkgErrors.ServiceDependencyNotReady)
-			return
-		}
-		api.Err(c, err)
-		return
-	}
-
-	payload["task_run_id"] = run.ID
-
-	jobInfo, publishErr := queue.PublishJSON(c.Request.Context(), jobs.TypeExportFileList, jobs.ExportFileListQueue, payload, queue.WithTaskID(taskID))
-	if publishErr != nil {
-		_ = recorder.Finish(c.Request.Context(), run, taskcenter.RunFinish{
-			Status: model.TaskRunStatusFailed,
-			Error:  publishErr,
-		})
-		_ = service.NewExportCenterService().MarkFailed(c.Request.Context(), run.ID, publishErr)
-		if stderrors.Is(publishErr, queue.ErrPublisherUnavailable) {
-			api.FailCode(c, pkgErrors.ServiceDependencyNotReady)
-			return
-		}
-		api.Err(c, publishErr)
-		return
-	}
-
-	api.Success(c, map[string]any{
-		"run_id":           run.ID,
-		"export_record_id": exportRecord.ID,
-		"export_record":    resources.NewExportRecordTransformer().ToStruct(exportRecord),
-		"task_id":          jobInfo.ID,
-		"queue":            jobInfo.Queue,
-		"type":             jobInfo.Type,
+	submitAsyncExport(api.Api, c, asyncExportRequest{
+		taskCode:  jobs.TypeExportFileList,
+		queueName: jobs.ExportFileListQueue,
+		payload:   payload,
 	})
 }
 
@@ -249,7 +178,6 @@ func (api FileResourceController) BatchDestroy(c *gin.Context) {
 	}
 	api.Success(c, result)
 }
-
 
 func (api FileResourceController) References(c *gin.Context) {
 	params := form.NewFileReferenceListQuery()

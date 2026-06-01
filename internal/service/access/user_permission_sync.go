@@ -158,7 +158,8 @@ func (s *UserPermissionSyncService) batchSyncUsersWithEnforcer(userIDs []uint, e
 		subjectPolicies[s.UserKey(userID)] = policiesByUser[userID]
 	}
 
-	return enforcer.EditPolicyPermissionsBatch(subjectPolicies, tx)
+	// 经 SetDB(tx) 走一次性 wrapper，避免在全局单例 enforcer 上累积/并发写事务级缓存。
+	return enforcer.SetDB(tx).EditPolicyPermissionsBatch(subjectPolicies)
 }
 
 // syncUserWithTx 在指定事务内同步单个用户的最终接口权限到 Casbin。

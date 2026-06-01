@@ -26,6 +26,9 @@ const (
 	defaultAuditFallbackFlushIntervalMs = 1000
 	defaultAuditSampleGetKeepEvery   = 10
 	auditBatchPersistTimeout         = 10 * time.Second
+	// auditStorageRetryCooldown 是存储不可用后的熔断冷却期：冷却期内短路，过后放行一次探测，
+	// 避免 DB 短暂故障被永久判定为不可用（探测成功即复位，失败则重新计时）。
+	auditStorageRetryCooldown = 30 * time.Second
 )
 
 var (
@@ -35,6 +38,8 @@ var (
 
 	queueUnavailableLogged atomic.Bool
 	storageUnavailable     atomic.Bool
+	// storageUnavailableSince 记录最近一次判定存储不可用的时刻（UnixNano），用于冷却期半开探测。
+	storageUnavailableSince atomic.Int64
 
 	// auditSampleCounter 用于低风险只读请求的 1/N 采样。
 	auditSampleCounter uint64
@@ -70,6 +75,7 @@ func setAuditQueueDepsForTesting(deps auditQueueDeps) func() {
 
 	queueUnavailableLogged.Store(false)
 	storageUnavailable.Store(false)
+	storageUnavailableSince.Store(0)
 	atomic.StoreUint64(&auditSampleCounter, 0)
 
 	return func() {
@@ -78,6 +84,7 @@ func setAuditQueueDepsForTesting(deps auditQueueDeps) func() {
 		persistAuditLogBatchFn = previousPersistBatch
 		queueUnavailableLogged.Store(previousQueueUnavailable)
 		storageUnavailable.Store(previousStorageUnavailable)
+		storageUnavailableSince.Store(0)
 	}
 }
 
@@ -97,9 +104,9 @@ func enqueueAuditLog(_ *gin.Context, kind string, snapshot *audit.AuditLogSnapsh
 		return
 	}
 
-	if storageUnavailable.Load() {
-		// 已知存储不可用：跳过缓冲与同步落库，避免持续放大 DB 压力。
-		// 后续一次成功 persist 后会清除该标记。
+	if auditStorageInCooldown() {
+		// 存储不可用且仍在冷却期内：跳过缓冲与同步落库，避免持续放大 DB 压力。
+		// 冷却期过后会放行一条做半开探测，探测成功即清除标记，恢复正常落库。
 		return
 	}
 
@@ -135,6 +142,34 @@ func enqueueAuditLog(_ *gin.Context, kind string, snapshot *audit.AuditLogSnapsh
 
 	// 队列恢复后复位告警开关，保证下次不可用时仍能打首条告警。
 	queueUnavailableLogged.Store(false)
+}
+
+// auditStorageInCooldown 判断当前是否处于"存储不可用且冷却期未到"的短路状态。
+// 标记为不可用但冷却期已过时返回 false，放行一条快照去探测存储是否恢复。
+func auditStorageInCooldown() bool {
+	if !storageUnavailable.Load() {
+		return false
+	}
+	since := storageUnavailableSince.Load()
+	if since == 0 {
+		// 未记录时刻（如测试直接 Store(true)）：保守按仍不可用处理。
+		return true
+	}
+	return time.Since(time.Unix(0, since)) < auditStorageRetryCooldown
+}
+
+// markAuditStorageUnavailable 标记存储不可用并刷新计时；返回 true 表示首次从可用转入不可用，
+// 供调用方仅在状态翻转时打印一条告警，避免持续故障期间日志风暴。
+func markAuditStorageUnavailable() bool {
+	firstTransition := storageUnavailable.CompareAndSwap(false, true)
+	storageUnavailableSince.Store(time.Now().UnixNano())
+	return firstTransition
+}
+
+// markAuditStorageAvailable 在一次成功落库后复位熔断状态。
+func markAuditStorageAvailable() {
+	storageUnavailable.Store(false)
+	storageUnavailableSince.Store(0)
 }
 
 // shouldDropBySampling 判定是否需要按采样比例丢弃当前快照。
@@ -210,7 +245,7 @@ func reportAuditPersistenceResult(kind string, snapshot *audit.AuditLogSnapshot,
 
 	if err := persistAuditLogFn(snapshot); err != nil {
 		if perrors.IsDependencyNotReady(err) {
-			if storageUnavailable.CompareAndSwap(false, true) {
+			if markAuditStorageUnavailable() {
 				log.Warn("Audit log storage unavailable, skip persistence",
 					zap.String("kind", kind),
 					zap.String("mode", mode),
@@ -227,7 +262,7 @@ func reportAuditPersistenceResult(kind string, snapshot *audit.AuditLogSnapshot,
 		return
 	}
 
-	storageUnavailable.Store(false)
+	markAuditStorageAvailable()
 }
 
 // ---------------------------- 降级缓冲实现 ----------------------------
@@ -432,12 +467,13 @@ func (b *auditFallbackBuffer) persistBatch(batch []*bufferedAuditItem) {
 
 	if err := persistAuditLogBatchFn(ctx, snapshots); err != nil {
 		if perrors.IsDependencyNotReady(err) {
-			if storageUnavailable.CompareAndSwap(false, true) {
+			if markAuditStorageUnavailable() {
 				log.Warn("Audit log storage unavailable, skip batch persistence",
 					zap.Int("batch_size", len(snapshots)),
 					zap.Error(err))
 			}
-			// 存储不可用：丢弃这批，避免阻塞 worker；后续条目会被 enqueueAuditLog 短路。
+			// 存储不可用：丢弃这批，避免阻塞 worker；冷却期内后续条目被 enqueueAuditLog 短路，
+			// 冷却期过后放行探测，存储恢复即自动复位。
 			return
 		}
 		log.Error("Batch persist audit log failed, fallback to per-item sync persist",
@@ -453,7 +489,7 @@ func (b *auditFallbackBuffer) persistBatch(batch []*bufferedAuditItem) {
 		return
 	}
 
-	storageUnavailable.Store(false)
+	markAuditStorageAvailable()
 }
 
 // Stop 触发缓冲停止并等待 worker 完成 drain。drainTimeout<=0 时立即返回不等待。

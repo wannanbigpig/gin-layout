@@ -33,6 +33,9 @@ func (e *CasbinEnforcer) execute(tx *gorm.DB, fn func(enforcer casbin.IEnforcer)
 		return err
 	}
 
+	// 该缓存的生命周期绑定到当前 enforcer 实例：事务级调用应经 SetDB(tx) 取一次性 wrapper，
+	// 用完即随 wrapper 回收，故不会随事务无限增长。切勿在长生命周期的全局单例上直接传入裸 tx，
+	// 否则条目无人清理会泄漏（参见 user_permission_sync.go 统一走 SetDB(tx)）。
 	if e.txEnforcerCache == nil {
 		e.txEnforcerCache = make(map[*gorm.DB]*casbin.Enforcer)
 	}

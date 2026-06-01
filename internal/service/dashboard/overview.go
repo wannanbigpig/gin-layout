@@ -1,8 +1,10 @@
 package dashboard
 
 import (
+	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -390,45 +392,62 @@ var responseTimeBucketDefs = []struct {
 }
 
 // buildResponseTimeStats 聚合今日 request_logs.execution_time（毫秒）的分桶分布与平均耗时。
+//
+// 单次扫描：用 SUM(CASE WHEN ...) 一并算出各分桶计数与 AVG，避免“每桶一条 COUNT + 一条 AVG”
+// 造成对 request_logs 的多次全窗口扫描（原实现每次调用要扫 6 遍，dashboard 热路径开销翻倍）。
 func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *ResponseTimeStats {
 	if db == nil {
 		return nil
 	}
-	stats := &ResponseTimeStats{
-		Buckets: make([]ResponseTimeBucket, 0, len(responseTimeBucketDefs)),
-	}
-	for _, def := range responseTimeBucketDefs {
-		bucket := ResponseTimeBucket{Label: def.Label, LowerMs: def.LowerMs, UpperMs: def.UpperMs}
-		query := requestLogLatencyStatsQuery(db, start, end)
+
+	selectParts := make([]string, 0, len(responseTimeBucketDefs)+1)
+	for i, def := range responseTimeBucketDefs {
+		// LowerMs/UpperMs 均为内部定义的 int 常量，非外部输入，可安全内联。
+		conds := make([]string, 0, 2)
 		if def.LowerMs > 0 {
-			query = query.Where("execution_time >= ?", def.LowerMs)
+			conds = append(conds, fmt.Sprintf("execution_time >= %d", def.LowerMs))
 		}
 		if def.UpperMs > 0 {
-			query = query.Where("execution_time < ?", def.UpperMs)
+			conds = append(conds, fmt.Sprintf("execution_time < %d", def.UpperMs))
 		}
-		var count int64
-		if err := query.Count(&count).Error; err != nil {
-			if log.Logger != nil {
-				log.Logger.Warn("统计请求耗时分桶失败", zap.String("label", def.Label), zap.Error(err))
-			}
-			return nil
+		when := "1=1"
+		if len(conds) > 0 {
+			when = strings.Join(conds, " AND ")
 		}
-		bucket.Count = count
-		stats.Buckets = append(stats.Buckets, bucket)
+		selectParts = append(selectParts, fmt.Sprintf("COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) AS b%d", when, i))
 	}
+	selectParts = append(selectParts, "COALESCE(AVG(execution_time), 0) AS avg_ms")
 
-	var avg struct {
-		Avg float64
+	row := requestLogLatencyStatsQuery(db, start, end).
+		Select(strings.Join(selectParts, ", ")).
+		Row()
+
+	counts := make([]int64, len(responseTimeBucketDefs))
+	var avgMs float64
+	dest := make([]any, 0, len(counts)+1)
+	for i := range counts {
+		dest = append(dest, &counts[i])
 	}
-	if err := requestLogLatencyStatsQuery(db, start, end).
-		Select("COALESCE(AVG(execution_time), 0) AS avg").
-		Scan(&avg).Error; err != nil {
+	dest = append(dest, &avgMs)
+	if err := row.Scan(dest...); err != nil {
 		if log.Logger != nil {
-			log.Logger.Warn("统计请求平均耗时失败", zap.Error(err))
+			log.Logger.Warn("统计请求耗时分桶失败", zap.Error(err))
 		}
 		return nil
 	}
-	stats.AvgMs = math.Round(avg.Avg*100) / 100
+
+	stats := &ResponseTimeStats{
+		Buckets: make([]ResponseTimeBucket, 0, len(responseTimeBucketDefs)),
+	}
+	for i, def := range responseTimeBucketDefs {
+		stats.Buckets = append(stats.Buckets, ResponseTimeBucket{
+			Label:   def.Label,
+			LowerMs: def.LowerMs,
+			UpperMs: def.UpperMs,
+			Count:   counts[i],
+		})
+	}
+	stats.AvgMs = math.Round(avgMs*100) / 100
 	return stats
 }
 

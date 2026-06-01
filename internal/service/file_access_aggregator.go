@@ -29,6 +29,9 @@ const (
 	fileAccessPendingKey  = "file_resource:last_accessed_pending"
 	fileAccessFlushBatch  = 1000
 	fileAccessRedisTimeoutOp = 500 * time.Millisecond
+	// fileAccessMaxFlushIterations 限制单次 Flush 的排空轮数，避免高访问量下 pending ZSet
+	// 持续累积（每分钟仅排一批会丢不掉积压），同时给个上限防止单轮 cron 长时间占用。
+	fileAccessMaxFlushIterations = 50
 )
 
 // fileAccessStore 抽象出 ZSet 操作，便于单测。
@@ -171,14 +174,32 @@ func (a *FileAccessAggregator) Flush(ctx context.Context) (int, error) {
 		batchSize = fileAccessFlushBatch
 	}
 
+	// 循环排空 pending ZSet：单批取满说明可能还有积压，继续取下一批；
+	// 取不满或取空即结束，并以 fileAccessMaxFlushIterations 兜底避免单轮 cron 占用过久。
+	total := 0
+	for iter := 0; iter < fileAccessMaxFlushIterations; iter++ {
+		written, popped, err := a.flushBatch(ctx, store, batchSize)
+		total += written
+		if err != nil {
+			return total, err
+		}
+		if popped < int(batchSize) {
+			break
+		}
+	}
+	return total, nil
+}
+
+// flushBatch 取出并落库一批待写入项，返回实际写入条数、本批取出条数与可能的错误。
+func (a *FileAccessAggregator) flushBatch(ctx context.Context, store fileAccessStore, batchSize int64) (int, int, error) {
 	popCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	items, err := store.ZPopMin(popCtx, fileAccessPendingKey, batchSize)
 	if err != nil && !errors.Is(err, redis.Nil) {
-		return 0, err
+		return 0, 0, err
 	}
 	if len(items) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 
 	// 按时间戳分组（同一秒内的多个 ID 共用一条 UPDATE）。
@@ -200,14 +221,14 @@ func (a *FileAccessAggregator) Flush(ctx context.Context) (int, error) {
 		idScore[id] = item.Score
 	}
 	if len(groups) == 0 {
-		return 0, nil
+		return 0, len(items), nil
 	}
 
 	db, err := a.dbFn()
 	if err != nil {
 		// DB 不可用：把本批 ID 整体按原 score 回写，避免数据丢失。
 		a.requeueFailedGroups(ctx, store, groups, idScore, nil)
-		return 0, err
+		return 0, len(items), err
 	}
 
 	tableName := a.tableName
@@ -236,7 +257,7 @@ func (a *FileAccessAggregator) Flush(ctx context.Context) (int, error) {
 		written += len(ids)
 	}
 
-	return written, nil
+	return written, len(items), nil
 }
 
 // requeueFailedGroups 把指定分组按原 score 回写到 pending ZSet。

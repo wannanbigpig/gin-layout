@@ -2,11 +2,11 @@ package middleware
 
 import (
 	"fmt"
-	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/corsutil"
 )
 
 var builtInDefaultMethods = [...]string{
@@ -125,23 +125,8 @@ func getMaxAge(cfg *config.Conf) int {
 }
 
 func isOriginAllowed(origin string, cfg *config.Conf) bool {
-	if len(cfg.CorsOrigins) == 0 {
-		return false
-	}
-	for _, allowedOrigin := range cfg.CorsOrigins {
-		if allowedOrigin == "*" {
-			return true
-		}
-		if origin == allowedOrigin {
-			return true
-		}
-		if strings.Contains(allowedOrigin, "*") {
-			if matched, _ := path.Match(allowedOrigin, origin); matched {
-				return true
-			}
-		}
-	}
-	return false
+	// HTTP CORS：无凭证时允许字面 "*"，沿用历史行为。
+	return corsutil.IsOriginAllowed(origin, cfg.CorsOrigins, true)
 }
 
 func hasWildcardOrigin(cfg *config.Conf) bool {

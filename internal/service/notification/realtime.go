@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/corsutil"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
@@ -487,55 +487,9 @@ func checkWebSocketOrigin(r *http.Request) bool {
 	if cfg == nil || len(cfg.CorsOrigins) == 0 {
 		return false
 	}
-	return isOriginAllowed(origin, cfg.CorsOrigins)
-}
-
-func isOriginAllowed(origin string, allowedOrigins []string) bool {
-	originURL, originErr := url.Parse(origin)
-	for _, allowed := range allowedOrigins {
-		if allowed == "*" {
-			return true
-		}
-		if origin == allowed {
-			return true
-		}
-		if originErr == nil && originURL != nil {
-			if matchWildcardOrigin(originURL, allowed) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func matchWildcardOrigin(originURL *url.URL, allowedOrigin string) bool {
-	allowedURL, err := url.Parse(allowedOrigin)
-	if err != nil || allowedURL.Scheme == "" || allowedURL.Host == "" {
-		if strings.HasPrefix(allowedOrigin, "*.") {
-			return wildcardHostnameMatch(originURL.Hostname(), allowedOrigin)
-		}
-		return false
-	}
-	if allowedURL.Scheme != originURL.Scheme {
-		return false
-	}
-	if port := allowedURL.Port(); port != "" && port != originURL.Port() {
-		return false
-	}
-	return wildcardHostnameMatch(originURL.Hostname(), allowedURL.Hostname())
-}
-
-func wildcardHostnameMatch(originHost, allowedHost string) bool {
-	originHost = strings.ToLower(strings.TrimSpace(originHost))
-	allowedHost = strings.ToLower(strings.TrimSpace(allowedHost))
-	if originHost == "" || allowedHost == "" {
-		return false
-	}
-	if strings.HasPrefix(allowedHost, "*.") {
-		suffix := allowedHost[1:] // e.g. ".example.com"
-		return strings.HasSuffix(originHost, suffix) && originHost != allowedHost[2:]
-	}
-	return originHost == allowedHost
+	// WebSocket 与 HTTP CORS 共用同一份 Origin 匹配实现，避免两套通配语义漂移；
+	// allowWildcardAll=false：WS 握手必带身份，字面 "*" 不放行任意 Origin，杜绝 CSWSH。
+	return corsutil.IsOriginAllowed(origin, cfg.CorsOrigins, false)
 }
 
 // ShutdownRealtimeDispatcher 主动关闭所有活跃的 WebSocket 连接，发送 Close 帧。

@@ -184,10 +184,3 @@ func (api SysMessageController) WS(c *gin.Context) {
 		}
 	}
 }
-
-func safeTokenPrefix(token string) string {
-	if len(token) <= 12 {
-		return token
-	}
-	return token[:12] + "..."
-}

@@ -289,10 +289,12 @@ func (s *FileResourceService) Destroy(id uint) error {
 		return err
 	}
 
-	// 物理文件删除在事务外执行，失败只记录日志。
+	// 物理文件删除在事务外执行（DB 记录已删，blob 删除失败会产生磁盘孤儿）。
+	// 失败不再静默吞掉：记录 ERROR 并返回错误，让调用方/监控可见，避免孤儿文件无声泄漏。
 	if uploadFile.FileObjectID == 0 {
 		if err := s.deletePhysicalFile(uploadFile); err != nil {
-			log.Logger.Error("物理文件删除失败（已忽略）", zap.Error(err), zap.Uint("id", uploadFile.ID))
+			log.Logger.Error("物理文件删除失败", zap.Error(err), zap.Uint("id", uploadFile.ID))
+			return err
 		}
 	}
 	return nil

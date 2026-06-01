@@ -210,6 +210,38 @@ func TestReportAuditPersistenceResultResetsStorageUnavailableAfterSuccess(t *tes
 	}
 }
 
+// TestAuditStorageCooldownReopensAfterExpiry 守护熔断半开恢复：
+// 存储不可用进入冷却期后会短路，冷却期过后应重新放行探测，避免 DB 短暂故障导致审计日志永久丢弃。
+func TestAuditStorageCooldownReopensAfterExpiry(t *testing.T) {
+	// 包级全局状态可能被前序测试污染，先复位到"可用"。
+	markAuditStorageAvailable()
+	defer markAuditStorageAvailable()
+
+	// 标记不可用：冷却期内应短路。
+	if first := markAuditStorageUnavailable(); !first {
+		t.Fatal("expected first transition to report true")
+	}
+	if !auditStorageInCooldown() {
+		t.Fatal("expected short-circuit while within cooldown window")
+	}
+	// 再次标记（持续故障）不应再报首次转换，但仍处于冷却期。
+	if second := markAuditStorageUnavailable(); second {
+		t.Fatal("expected non-first transition to report false during outage")
+	}
+
+	// 模拟冷却期已过：把上次不可用时刻推到 cooldown 之前，应放行探测。
+	storageUnavailableSince.Store(time.Now().Add(-auditStorageRetryCooldown - time.Second).UnixNano())
+	if auditStorageInCooldown() {
+		t.Fatal("expected cooldown to reopen after retry window elapsed")
+	}
+
+	// 一次成功落库后应彻底复位。
+	markAuditStorageAvailable()
+	if auditStorageInCooldown() {
+		t.Fatal("expected storage to be available after reset")
+	}
+}
+
 // TestShouldDropBySamplingKeepsOneOutOfN 验证 1/N 采样：N=4 时每 4 条保留 1 条。
 func TestShouldDropBySamplingKeepsOneOutOfN(t *testing.T) {
 	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {

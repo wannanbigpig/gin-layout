@@ -138,7 +138,7 @@ type FileUploadCredentialBatchItem struct {
 	FileName    string `form:"file_name" json:"file_name" binding:"omitempty,max=255"`
 	OriginName  string `form:"origin_name" json:"origin_name" binding:"required,max=255"`
 	MimeType    string `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
-	Size        int64  `form:"size" json:"size" binding:"required,gte=0"`
+	Size        int64  `form:"size" json:"size" binding:"omitempty,gte=0"`
 	Hash        string `form:"hash" json:"hash" binding:"required,len=64"`
 	IsPublic    *uint8 `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
 	UploadScene string `form:"upload_scene" json:"upload_scene" binding:"omitempty,max=60"`

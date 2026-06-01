@@ -6,7 +6,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const passwordHashCost = 10
+// passwordHashCost 为 bcrypt 工作因子，下限 12（密码哈希强度安全底线，勿低于此值）。
+const passwordHashCost = 12
 
 // MaskSensitiveInfo 对于字符串脱敏
 // s 需要脱敏的字符串
