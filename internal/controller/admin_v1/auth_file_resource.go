@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	pkgErrors "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -260,7 +261,10 @@ func (api FileResourceController) References(c *gin.Context) {
 }
 
 func (api FileResourceController) FolderTree(c *gin.Context) {
-	result, err := service.NewFileResourceService().FolderTree()
+	params := form.NewFileFolderTreeForm()
+	_ = validator.CheckQueryParams(c, &params)
+	includeHidden := params.IncludeHidden != nil && *params.IncludeHidden == global.Yes
+	result, err := service.NewFileResourceService().FolderTree(includeHidden)
 	if err != nil {
 		api.Err(c, err)
 		return

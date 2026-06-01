@@ -4,6 +4,7 @@ import "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 
 const (
 	MessageCategoryExport = "export"
+	MessageCategorySystem = "system"
 
 	MessageTopicExportFinished = "export.finished"
 	MessageTopicManual         = "manual.notification"

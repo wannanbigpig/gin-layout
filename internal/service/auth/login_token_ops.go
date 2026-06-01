@@ -76,6 +76,11 @@ func (s *LoginService) isPrincipalValid(claims *token.AdminCustomClaims) bool {
 	return !s.tokenRevokedLookupFn(claims.ID)
 }
 
+// IsPrincipalValid 检查 Token 对应主体是否仍然有效，用于 WebSocket 等长连接外部反查。
+func (s *LoginService) IsPrincipalValid(claims *token.AdminCustomClaims) bool {
+	return s.isPrincipalValid(claims)
+}
+
 func (s *LoginService) shouldLogRedisFallback(err error) bool {
 	if err == nil {
 		return false

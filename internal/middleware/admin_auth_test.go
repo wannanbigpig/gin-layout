@@ -89,8 +89,8 @@ func TestAdminAuthHandlerWithDepsReturnsServerErrWhenEnforcerLoadFails(t *testin
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 	router.ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
 	}
 
 	result := decodeResult(t, recorder.Body.Bytes())
@@ -130,8 +130,8 @@ func TestAdminAuthHandlerWithDepsReturnsAuthorizationMessageWhenDenied(t *testin
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 	router.ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, recorder.Code)
 	}
 
 	result := decodeResult(t, recorder.Body.Bytes())

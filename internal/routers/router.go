@@ -47,6 +47,9 @@ func createEngine() (*gin.Engine, error) {
 	var engine *gin.Engine
 	cfg := config.GetConfig()
 
+	// 启动时校验 CORS 配置
+	middleware.ValidateCORSConfig(cfg)
+
 	if cfg != nil && cfg.Debug {
 		// 开发调试模式
 		engine = gin.New()

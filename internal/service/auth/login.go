@@ -258,28 +258,40 @@ func (s *LoginService) validateUser(username, password string) (*model.AdminUser
 //   - 异步队列已满或尚未初始化时回退同步写入，保证不丢日志；任意路径失败均必须打 Error 日志。
 func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.AdminCustomClaims, accessToken, refreshToken string, logInfo LoginLogInfo, logType uint8) error {
 	loginLog := s.buildLoginLog(adminUser.ID, adminUser.Username, claims.ID, accessToken, refreshToken, claims.ExpiresAt.Time, logInfo, model.LoginStatusSuccess, "", logType)
+	if s.loginLogDB != nil {
+		loginLog.SetDB(s.loginLogDB)
+	}
 
 	if logType == model.LoginTypeLogin {
 		updates := map[string]any{
 			"last_ip":    logInfo.IP,
 			"last_login": utils.FormatDate{Time: time.Now()},
 		}
-		if err := model.NewAdminUsers().UpdateById(adminUser.ID, updates); err != nil {
+		if err := s.updateUserLastLogin(adminUser.ID, updates); err != nil {
 			log.Logger.Error("更新用户最后登录信息失败", zap.Error(err), zap.Uint("user_id", adminUser.ID))
 			return err
 		}
 	}
 
-	if enqueueLoginLogAsync(loginLog) {
+	if s.loginLogDB == nil && enqueueLoginLogAsync(loginLog) {
 		return nil
 	}
 
-	// 队列不可用时同步落库兜底，避免登录日志丢失。
+	// 队列不可用或指定了自定义 DB 时同步落库兜底，避免登录日志丢失。
 	if err := loginLog.Create(); err != nil {
 		log.Logger.Error("记录登录日志失败", zap.Error(err), zap.Uint("user_id", adminUser.ID), zap.String("username", adminUser.Username))
 		return err
 	}
 	return nil
+}
+
+// updateUserLastLogin 更新用户最后登录信息，优先使用注入的 DB。
+func (s *LoginService) updateUserLastLogin(userID uint, updates map[string]any) error {
+	adminUserModel := model.NewAdminUsers()
+	if s.loginLogDB != nil {
+		adminUserModel.SetDB(s.loginLogDB)
+	}
+	return adminUserModel.UpdateById(userID, updates)
 }
 
 // Refresh 刷新 Token。

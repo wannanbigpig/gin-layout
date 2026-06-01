@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -16,14 +17,19 @@ func TestServiceCreateListReadAndReadAll(t *testing.T) {
 	db := newMessageTestDB(t)
 	var broadcasted []Event
 	var published []Event
+	var captureMu sync.Mutex
 
 	svc := NewServiceWithDeps(ServiceDeps{
 		DB: db,
 		BroadcastFn: func(event Event) {
+			captureMu.Lock()
 			broadcasted = append(broadcasted, event)
+			captureMu.Unlock()
 		},
 		PublishFn: func(_ context.Context, event Event) error {
+			captureMu.Lock()
 			published = append(published, event)
+			captureMu.Unlock()
 			return nil
 		},
 	})
@@ -95,8 +101,12 @@ func TestServiceCreateListReadAndReadAll(t *testing.T) {
 		t.Fatalf("unexpected mark all read result: affected=%d unread=%d", affected, unreadCount)
 	}
 
-	if len(broadcasted) != 5 || len(published) != 5 {
-		t.Fatalf("expected create/read/read-all events to dispatch, got broadcast=%d publish=%d", len(broadcasted), len(published))
+	captureMu.Lock()
+	bcLen := len(broadcasted)
+	pubLen := len(published)
+	captureMu.Unlock()
+	if bcLen != 5 || pubLen != 5 {
+		t.Fatalf("expected create/read/read-all events to dispatch, got broadcast=%d publish=%d", bcLen, pubLen)
 	}
 }
 

@@ -25,7 +25,7 @@ type MenuBaseResources struct {
 	Pid             uint             `json:"pid"`          // 上级菜单id
 	ChildrenNum     uint             `json:"children_num"` // 子集数量
 	Description     string           `json:"description"`  // 描述
-	Component       string           `json:"component"`    // 前端组件路径
+	ComponentKey    string           `json:"component_key"` // 前端组件标识
 	Redirect        string           `json:"redirect"`     // 重定向地址
 	FullPath        string           `json:"full_path"`
 	CreatedAt       utils.FormatDate `json:"created_at"`
@@ -95,7 +95,7 @@ func buildMenuBaseResources(v *model.Menu, title string) MenuBaseResources {
 		Icon:            v.Icon,
 		Title:           title,
 		Name:            v.Name,
-		Component:       v.Component,
+		ComponentKey:    v.ComponentKey,
 		Code:            v.Code,
 		Path:            v.Path,
 		FullPath:        v.FullPath,

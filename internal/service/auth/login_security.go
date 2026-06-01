@@ -187,6 +187,16 @@ func applyLoginFailState(state *model.LoginSecurityState, now time.Time, policy 
 }
 
 func isTableNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// MySQL error 1146: table doesn't exist
 	var mysqlErr *mysql.MySQLError
-	return stderrors.As(err, &mysqlErr) && mysqlErr.Number == 1146
+	if stderrors.As(err, &mysqlErr) && mysqlErr.Number == 1146 {
+		return true
+	}
+	// SQLite: "no such table"
+	// PostgreSQL: "relation does not exist"
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "no such table") || strings.Contains(msg, "relation does not exist")
 }

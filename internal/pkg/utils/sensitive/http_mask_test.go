@@ -10,9 +10,9 @@ func TestMaskQueryString_JWTReadable(t *testing.T) {
 	raw := "client=admin-web&lang=zh-CN&token=" + jwt
 	out := MaskQueryString(raw)
 
-	// url.Values.Encode 会将 * 编码为 %2A，这是标准行为
+	// * 被 URL 编码为 %2A，不再还原
 	if !strings.Contains(out, "token=eyJhbG%2A%2A%2A") {
-		t.Fatalf("expected JWT to be masked with maskToken (6 prefix + *** + 6 suffix), got %q", out)
+		t.Fatalf("expected JWT to be masked with maskToken (6 prefix + %%2A%%2A%%2A + 6 suffix), got %q", out)
 	}
 	if strings.Contains(out, "eyJhbGciOiJI") {
 		t.Fatalf("expected JWT alg header to be masked, got %q", out)

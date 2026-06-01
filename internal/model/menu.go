@@ -25,7 +25,7 @@ type Menu struct {
 	IsAuth          uint8        `json:"is_auth"`           // 是否鉴权 0:否 1:是
 	IsExternalLinks uint8        `json:"is_external_links"` // 是否外链 0:否 1:是
 	Name            string       `json:"name"`              // 路由名称
-	Component       string       `json:"component"`         // 组件路径
+	ComponentKey    string       `json:"component_key"`     // 前端组件标识
 	AnimateEnter    string       `json:"animate_enter"`     // 进入动画
 	AnimateLeave    string       `json:"animate_leave"`     // 离开动画
 	AnimateDuration float32      `json:"animate_duration"`  // 动画时长

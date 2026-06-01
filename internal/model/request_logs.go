@@ -6,6 +6,7 @@ const (
 	RequestKindSSE       = "sse"
 
 	ExecutionTimeUnitMilliseconds = "ms"
+	ExecutionTimeUnitSeconds     = "s"
 
 	ExecutionTimeScopeRequest    = "request"
 	ExecutionTimeScopeConnection = "connection"

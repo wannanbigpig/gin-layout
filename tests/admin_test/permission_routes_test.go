@@ -14,7 +14,7 @@ func TestPermissionEditRequiresLogin(t *testing.T) {
 	body := `{"id":10,"name":"ping","description":"服务心跳检测接口","method":"GET","route":"/ping","is_auth":0,"sort":100}`
 	resp := anonymousPostRequest("/admin/v1/permission/update", &body)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }
@@ -29,7 +29,7 @@ func TestPermissionListRequiresLogin(t *testing.T) {
 	queryParams.Set("is_auth", "1")
 	resp := anonymousGetRequest("/admin/v1/permission/list", queryParams)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }
@@ -55,7 +55,7 @@ func TestPermissionUpdateValidationWithAuthorization(t *testing.T) {
 	body := `{}`
 	resp := postRequest("/admin/v1/permission/update", &body)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.InvalidParameter, result.Code)
 }

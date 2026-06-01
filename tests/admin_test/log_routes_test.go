@@ -46,11 +46,15 @@ func TestRequestLogExportRouteWithAuthorization(t *testing.T) {
 
 	body := `{"limit":10}`
 	resp := postRequest("/admin/v1/log/request/export", &body)
-	assert.Equal(t, http.StatusOK, resp.Code)
 	result := decodeResult(t, resp)
-	// 队列未启用时返回 ServiceDependencyNotReady，启用时返回 SUCCESS
+	// 队列未启用时返回 ServiceDependencyNotReady（HTTP 503），启用时返回 SUCCESS（HTTP 200）
 	assert.True(t, result.Code == e.SUCCESS || result.Code == e.ServiceDependencyNotReady,
 		"expected SUCCESS or ServiceDependencyNotReady, got %d", result.Code)
+	expectedHTTP := http.StatusOK
+	if result.Code == e.ServiceDependencyNotReady {
+		expectedHTTP = http.StatusServiceUnavailable
+	}
+	assert.Equal(t, expectedHTTP, resp.Code)
 }
 
 func TestExportRecordListRouteWithAuthorization(t *testing.T) {
@@ -117,7 +121,7 @@ func TestLogRoutesRequireLogin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := anonymousGetRequest(tc.route, tc.query)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
@@ -143,7 +147,7 @@ func TestLogRoutesRequireLogin(t *testing.T) {
 	for _, tc := range postCases {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := anonymousPostRequest(tc.route, &tc.body)
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})

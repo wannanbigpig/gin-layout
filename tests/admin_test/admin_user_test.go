@@ -19,7 +19,7 @@ func TestGetAdminUserRequiresLogin(t *testing.T) {
 	queryParams.Set("id", "1")
 	resp := anonymousGetRequest("/admin/v1/admin-user/get", queryParams)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }
@@ -54,7 +54,7 @@ func TestUpdateProfileInvalidEmail(t *testing.T) {
 	body := `{"email":"invalid-email"}`
 	resp := postRequest("/admin/v1/admin-user/update-profile", &body)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.InvalidParameter, result.Code)
 }
@@ -72,7 +72,7 @@ func TestAdminUserListWithAuthorization(t *testing.T) {
 func TestAdminUserListRequiresLogin(t *testing.T) {
 	resp := anonymousGetRequest("/admin/v1/admin-user/list", &url.Values{"page": {"1"}, "per_page": {"5"}})
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }
@@ -92,7 +92,7 @@ func TestAdminUserProtectedGetRoutesRequireLogin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := anonymousGetRequest(tc.route, tc.query)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
@@ -116,7 +116,7 @@ func TestAdminUserProtectedPostRoutesRequireLogin(t *testing.T) {
 			body := tc.body
 			resp := anonymousPostRequest(tc.route, &body)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})

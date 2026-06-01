@@ -20,7 +20,7 @@ func TestPublicDemoRoute(t *testing.T) {
 func TestPublicFileRouteWithoutAuthorization(t *testing.T) {
 	resp := anonymousGetRequest("/admin/v1/file/not-found-uuid", nil)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
 	result := decodeResult(t, resp)
 	assert.NotEqual(t, e.NotLogin, result.Code)
 }

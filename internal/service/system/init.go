@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	taskcron.RegisterHandler(taskcron.HandlerCronResetSystemData, func(ctx context.Context, payload map[string]any) error {
+	_ = taskcron.RegisterHandler(taskcron.HandlerCronResetSystemData, func(ctx context.Context, payload map[string]any) error {
 		_ = ctx
 		_ = payload
 		return ReinitializeSystemData()

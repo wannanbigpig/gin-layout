@@ -64,7 +64,9 @@ func InitializeData() error {
 	if err := data.InitData(); err != nil {
 		return err
 	}
-	taskcron.RegisterBuiltinHandlers()
+	if err := taskcron.RegisterBuiltinHandlers(); err != nil {
+		return err
+	}
 	if err := sys_config.NewSysConfigService().WarmupRuntimeConfigIfAvailable(); err != nil {
 		return err
 	}

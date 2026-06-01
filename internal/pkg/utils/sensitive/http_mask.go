@@ -89,9 +89,7 @@ func MaskQueryString(queryString string) string {
 		}
 		maskedValues[key] = maskStringSlice(values, maskValueFn)
 	}
-	// url.Values.Encode 会将脱敏占位符 `*` 编码为 `%2A`，导致审计日志阅读时误以为没有脱敏。
-	// `*` 属于 RFC 3986 sub-delims，在 query 中可保留原文，这里还原以提升可读性。
-	return strings.ReplaceAll(maskedValues.Encode(), "%2A", "*")
+	return maskedValues.Encode()
 }
 
 func maskJSONBytes(bodyBytes []byte, sensitiveFields map[string]bool) string {

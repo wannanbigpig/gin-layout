@@ -1,5 +1,0 @@
-START TRANSACTION;
-
-DROP TABLE IF EXISTS `sys_messages`;
-
-COMMIT;

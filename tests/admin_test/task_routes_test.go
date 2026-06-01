@@ -49,7 +49,7 @@ func TestTaskCenterRunDetailNotFound(t *testing.T) {
 	requireMySQL(t)
 
 	resp := getRequest("/admin/v1/task/run/detail", &url.Values{"id": {"99999999"}})
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusNotFound, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotFound, result.Code)
 }
@@ -81,7 +81,7 @@ func TestTaskCenterRoutesRequireLogin(t *testing.T) {
 	for _, tc := range getCases {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := anonymousGetRequest(tc.route, tc.query)
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
@@ -100,7 +100,7 @@ func TestTaskCenterRoutesRequireLogin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := tc.body
 			resp := anonymousPostRequest(tc.route, &body)
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
@@ -112,19 +112,19 @@ func TestTaskCenterOperateRouteValidation(t *testing.T) {
 
 	triggerBody := `{}`
 	triggerResp := postRequest("/admin/v1/task/trigger", &triggerBody)
-	assert.Equal(t, http.StatusOK, triggerResp.Code)
+	assert.Equal(t, http.StatusBadRequest, triggerResp.Code)
 	triggerResult := decodeResult(t, triggerResp)
 	assert.Equal(t, e.InvalidParameter, triggerResult.Code)
 
 	retryBody := `{}`
 	retryResp := postRequest("/admin/v1/task/run/retry", &retryBody)
-	assert.Equal(t, http.StatusOK, retryResp.Code)
+	assert.Equal(t, http.StatusBadRequest, retryResp.Code)
 	retryResult := decodeResult(t, retryResp)
 	assert.Equal(t, e.InvalidParameter, retryResult.Code)
 
 	cancelBody := `{}`
 	cancelResp := postRequest("/admin/v1/task/run/cancel", &cancelBody)
-	assert.Equal(t, http.StatusOK, cancelResp.Code)
+	assert.Equal(t, http.StatusBadRequest, cancelResp.Code)
 	cancelResult := decodeResult(t, cancelResp)
 	assert.Equal(t, e.InvalidParameter, cancelResult.Code)
 }

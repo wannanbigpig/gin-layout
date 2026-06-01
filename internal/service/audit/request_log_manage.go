@@ -42,6 +42,9 @@ var requestLogMaskConfigNameI18n = map[string]string{
 	"en-US": "Request Log Mask Config",
 }
 
+// requestLogGetDB 可替换的 DB 获取函数，测试时注入 mock。
+var requestLogGetDB = model.GetDB
+
 var requestLogMaskConfigDiffRules = []auditdiff.FieldRule{
 	{Field: "common", Label: "通用脱敏字段"},
 	{Field: "request_header", Label: "请求头脱敏字段"},
@@ -237,6 +240,8 @@ func GenerateExportCSVWithProgress(params *form.RequestLogExport, reporter func(
 // StreamExportCSV 流式生成请求日志 CSV，按 batch (requestLogExportBatchSize) 通过 Rows()/ScanRows
 // 写入 w，每写完一批回调一次 reporter，返回生成的文件名以及流式过程中遇到的首个错误。
 //
+// 导出为实时流式生成，非快照：数据在查询时刻即时从数据库读取，不预先冻结数据集。
+//
 // 与 GenerateExportCSVWithProgress 相比，本函数不会在内存中累积全部 CSV，
 // 内存峰值取决于 batch 大小而不是总行数，适合搭配 io.Pipe 与 CreateFromReader 串接。
 func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Writer, reporter func(processed, total int) error) (string, error) {
@@ -268,7 +273,7 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 		limit = defaultRequestLogExportLimit
 	}
 
-	db, err := model.GetDB()
+	db, err := requestLogGetDB()
 	if err != nil {
 		return "", err
 	}
@@ -317,6 +322,8 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 	}
 
 	processed := 0
+	var lastCreatedAt time.Time
+	var lastID uint
 	for processed < total {
 		select {
 		case <-ctx.Done():
@@ -350,8 +357,10 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 				"created_at",
 			}).
 			Order("created_at DESC, id DESC").
-			Limit(batchLimit).
-			Offset(processed)
+			Limit(batchLimit)
+		if processed > 0 {
+			queryDB = queryDB.Where("(created_at < ?) OR (created_at = ? AND id < ?)", lastCreatedAt, lastCreatedAt, lastID)
+		}
 		if condition != "" {
 			queryDB = queryDB.Where(condition, args...)
 		}
@@ -361,11 +370,15 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 			return "", err
 		}
 
-		batchCount, scanErr := writeRequestLogRows(db, rows, writer)
+		batchCount, cursorCreatedAt, cursorID, scanErr := writeRequestLogRows(db, rows, writer)
 		// 立即关闭 rows，释放连接
 		_ = rows.Close()
 		if scanErr != nil {
 			return "", scanErr
+		}
+		if batchCount > 0 {
+			lastCreatedAt = cursorCreatedAt
+			lastID = cursorID
 		}
 		// 每批 flush 一次，让下游 reader 能尽快拿到数据，避免大批写入造成的卡顿
 		writer.Flush()
@@ -392,13 +405,15 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 	return fileName, nil
 }
 
-// writeRequestLogRows 流式扫描 rows 并将每一行写入 csv writer，返回写入行数及首个错误。
-func writeRequestLogRows(db *gorm.DB, rows *sql.Rows, writer *csv.Writer) (int, error) {
+// writeRequestLogRows 流式扫描 rows 并将每一行写入 csv writer，返回写入行数、最后一条记录的游标及首个错误。
+func writeRequestLogRows(db *gorm.DB, rows *sql.Rows, writer *csv.Writer) (int, time.Time, uint, error) {
 	count := 0
+	var lastCreatedAt time.Time
+	var lastID uint
 	for rows.Next() {
 		record := &model.RequestLogs{}
 		if err := db.ScanRows(rows, record); err != nil {
-			return count, err
+			return count, lastCreatedAt, lastID, err
 		}
 		if err := writer.Write([]string{
 			strconv.FormatUint(uint64(record.ID), 10),
@@ -419,14 +434,16 @@ func writeRequestLogRows(db *gorm.DB, rows *sql.Rows, writer *csv.Writer) (int, 
 			record.ChangeDiff,
 			record.CreatedAt.String(),
 		}); err != nil {
-			return count, err
+			return count, lastCreatedAt, lastID, err
 		}
+		lastCreatedAt = record.CreatedAt.Time
+		lastID = record.ID
 		count++
 	}
 	if err := rows.Err(); err != nil {
-		return count, err
+		return count, lastCreatedAt, lastID, err
 	}
-	return count, nil
+	return count, lastCreatedAt, lastID, nil
 }
 
 // generateRequestLogExportCSVBytes 是 StreamExportCSV 的薄包装：

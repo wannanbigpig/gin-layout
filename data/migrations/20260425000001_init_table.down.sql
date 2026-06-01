@@ -7,6 +7,10 @@ DROP TABLE IF EXISTS `sys_config_i18n`;
 DROP TABLE IF EXISTS `sys_dict_item`;
 DROP TABLE IF EXISTS `sys_dict_type`;
 DROP TABLE IF EXISTS `sys_config`;
+-- 删除每日统计与消息与导出记录表
+DROP TABLE IF EXISTS `daily_request_stats`;
+DROP TABLE IF EXISTS `sys_messages`;
+DROP TABLE IF EXISTS `sys_export_records`;
 -- 删除任务中心相关表
 DROP TABLE IF EXISTS `cron_task_states`;
 DROP TABLE IF EXISTS `task_run_events`;
@@ -50,5 +54,6 @@ DROP TABLE IF EXISTS `casbin_rule`;
 DROP TABLE IF EXISTS `upload_file_references`;
 DROP TABLE IF EXISTS `upload_file_folders`;
 DROP TABLE IF EXISTS `upload_files`;
+DROP TABLE IF EXISTS `upload_file_objects`;
 
 COMMIT;

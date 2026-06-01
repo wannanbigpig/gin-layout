@@ -46,14 +46,18 @@ var (
 	}
 )
 
-func RegisterHandler(handler string, fn HandlerFunc) {
+func RegisterHandler(handler string, fn HandlerFunc) error {
 	handler = strings.TrimSpace(handler)
 	if handler == "" || fn == nil {
-		return
+		return fmt.Errorf("handler name and function must not be empty")
 	}
 	handlersMu.Lock()
+	defer handlersMu.Unlock()
+	if _, exists := handlers[handler]; exists {
+		return fmt.Errorf("duplicate cron handler registration: %s", handler)
+	}
 	handlers[handler] = fn
-	handlersMu.Unlock()
+	return nil
 }
 
 func ExecuteHandler(ctx context.Context, handler string, payload map[string]any) error {
@@ -69,8 +73,8 @@ func ExecuteHandler(ctx context.Context, handler string, payload map[string]any)
 
 // RegisterBuiltinHandlers 集中注册系统内置 cron handler。
 // 调用方需保证此函数仅被调用一次（通常由 bootstrap 在数据源初始化完成后触发）。
-func RegisterBuiltinHandlers() {
-	RegisterHandler(HandlerCronFileAccessFlush, func(ctx context.Context, payload map[string]any) error {
+func RegisterBuiltinHandlers() error {
+	return RegisterHandler(HandlerCronFileAccessFlush, func(ctx context.Context, payload map[string]any) error {
 		_ = payload
 		return service.FlushFileAccessPending(ctx)
 	})

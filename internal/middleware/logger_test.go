@@ -243,8 +243,8 @@ func TestBuildRequestAuditLogSnapshotMarksNotificationWSAsWebSocket(t *testing.T
 	if snapshot.ExecutionTimeScope != "connection" {
 		t.Fatalf("expected websocket execution_time_scope connection, got %q", snapshot.ExecutionTimeScope)
 	}
-	if snapshot.ExecutionTimeUnit != "ms" {
-		t.Fatalf("expected websocket execution_time_unit ms, got %q", snapshot.ExecutionTimeUnit)
+	if snapshot.ExecutionTimeUnit != "s" {
+		t.Fatalf("expected websocket execution_time_unit s, got %q", snapshot.ExecutionTimeUnit)
 	}
 }
 
@@ -254,7 +254,7 @@ func TestCalculateExecutionTimeMsClampsLargeHTTPDuration(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-30*time.Hour))
 
-	got, scope := calculateExecutionTimeMeta(ctx, "http")
+	got, scope, _ := calculateExecutionTimeMeta(ctx, "http")
 	if got != requestLogExecutionTimeMaxMs {
 		t.Fatalf("expected clamped execution_time %f, got %f", requestLogExecutionTimeMaxMs, got)
 	}
@@ -284,8 +284,8 @@ func TestBuildRequestAuditLogSnapshotMarksSSEStreamRequest(t *testing.T) {
 	if snapshot.ExecutionTimeScope != "stream" {
 		t.Fatalf("expected execution_time_scope stream, got %q", snapshot.ExecutionTimeScope)
 	}
-	if snapshot.ExecutionTimeUnit != "ms" {
-		t.Fatalf("expected execution_time_unit ms, got %q", snapshot.ExecutionTimeUnit)
+	if snapshot.ExecutionTimeUnit != "s" {
+		t.Fatalf("expected execution_time_unit s, got %q", snapshot.ExecutionTimeUnit)
 	}
 	if snapshot.ExecutionTime <= 0 {
 		t.Fatalf("expected sse execution_time > 0, got %f", snapshot.ExecutionTime)

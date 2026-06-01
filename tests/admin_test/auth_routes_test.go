@@ -51,7 +51,7 @@ func TestLoginInvalidCaptcha(t *testing.T) {
 	bodyStr := string(body)
 	resp := anonymousPostRequest("/admin/v1/login", &bodyStr)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.CaptchaErr, result.Code)
 }
@@ -83,7 +83,7 @@ func TestProtectedAuthRoutesRequireLogin(t *testing.T) {
 			body := tc.body
 			resp := anonymousPostRequest(tc.route, &body)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})

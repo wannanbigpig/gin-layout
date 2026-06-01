@@ -35,10 +35,11 @@ func NewResult() *Result {
 
 // Response 响应处理器
 type Response struct {
-	httpCode int
-	result   *Result
-	msgKey   string
-	msgArgs  []any
+	httpCode     int
+	httpCodeSet  bool // true 表示通过 SetHttpCode 显式设置，SetCode 不再覆盖
+	result       *Result
+	msgKey       string
+	msgArgs      []any
 }
 
 // Resp 创建响应处理器实例
@@ -88,15 +89,19 @@ func (r *Response) WithDataSuccess(c *gin.Context, data interface{}) {
 	r.json(c)
 }
 
-// SetCode 设置返回code码
+// SetCode 设置返回code码。若未通过 SetHttpCode 显式设置 HTTP 状态码，则自动推断（成功→200，服务端故障→500，其余→400）。
 func (r *Response) SetCode(code int) *Response {
 	r.result.Code = code
+	if !r.httpCodeSet {
+		r.httpCode = errors.InferHTTPStatus(code)
+	}
 	return r
 }
 
-// SetHttpCode 设置http状态码
+// SetHttpCode 显式设置 HTTP 状态码，优先级高于 SetCode 的自动推断。
 func (r *Response) SetHttpCode(code int) *Response {
 	r.httpCode = code
+	r.httpCodeSet = true
 	return r
 }
 

@@ -40,15 +40,15 @@ VALUES (1, 0, 'other', '其他', '2025-04-26 18:00:00', '2025-04-26 18:00:00'),
        (9, 0, 'log', '日志模块', '2025-04-26 18:00:00', '2025-04-26 18:00:00');
 
 -- 初始化菜单数据
-INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name`, `component`, `animate_enter`, `animate_leave`, `animate_duration`, `is_show`, `status`, `is_auth`, `is_external_links`, `is_new_window`, `sort`, `type`, `pid`, `level`, `pids`, `children_num`, `description`, `created_at`, `updated_at`, `deleted_at`) VALUES
-(1, 'ep:menu', '', '', '/', '', 'Home', 'home/index.vue', '', '', 0.00, 1, 1, 0, 0, 0, 100, 2, 0, 1, '0', 0, '', '2024-09-27 13:36:50', '2025-11-15 14:36:40', 0),
+INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name`, `component_key`, `animate_enter`, `animate_leave`, `animate_duration`, `is_show`, `status`, `is_auth`, `is_external_links`, `is_new_window`, `sort`, `type`, `pid`, `level`, `pids`, `children_num`, `description`, `created_at`, `updated_at`, `deleted_at`) VALUES
+(1, 'ep:menu', '', '', '/', '', 'Home', 'home:index', '', '', 0.00, 1, 1, 0, 0, 0, 100, 2, 0, 1, '0', 2, '', '2024-09-27 13:36:50', '2025-11-15 14:36:40', 0),
 (2, 'ant-design:lock-outlined', '', 'permission', '/permission', 'AdminUserList', 'Permission', '', '', '', 0.00, 1, 1, 1, 0, 0, 99, 1, 0, 1, '0', 0, '', '2025-04-16 15:36:33', '2025-04-22 18:16:25', 0),
-(3, 'ant-design:api-outlined', '', 'list', '/permission/list', '', 'PermissionList', 'permission/api.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 2, 2, '0,2', 2, '', '2025-04-16 15:41:54', '2025-11-25 17:23:53', 0),
-(4, 'ant-design:menu-outlined', '', 'menu-list', '/permission/menu-list', '', 'MenuList', 'permission/menuList.vue', '', '', 0.00, 1, 1, 1, 0, 0, 105, 2, 2, 2, '0,2', 5, '', '2025-04-16 15:45:31', '2025-11-25 17:23:44', 0),
-(5, 'lucide:info', '', '/about', '/about', '', 'About', 'about/index.vue', '', '', 0.00, 1, 1, 1, 0, 0, 78, 2, 0, 1, '0', 0, '', '2025-04-16 16:47:58', '2025-04-23 15:01:05', 0),
-(7, 'ep:user', '', 'admin-user-list', '/permission/admin-user-list', '', 'AdminUserList', 'permission/adminUser.vue', '', '', 0.00, 1, 1, 1, 0, 0, 120, 2, 2, 2, '0,2', 5, '', '2025-04-19 11:19:36', '2025-11-25 17:20:23', 0),
-(8, 'ant-design:usergroup-add-outlined', '', 'role-list', '/permission/role-list', '', 'RoleList', 'permission/role.vue', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 5, '', '2025-04-21 16:51:22', '2025-11-25 17:22:21', 0),
-(9, 'tdesign:tree-square-dot', '', 'department-list', '/permission/department-list', '', 'DepartmentList', 'permission/department.vue', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 6, '', '2025-04-21 16:51:22', '2025-11-25 17:21:30', 0),
+(3, 'ant-design:api-outlined', '', 'list', '/permission/list', '', 'PermissionList', 'permission:api', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 2, 2, '0,2', 2, '', '2025-04-16 15:41:54', '2025-11-25 17:23:53', 0),
+(4, 'ant-design:menu-outlined', '', 'menu-list', '/permission/menu-list', '', 'MenuList', 'permission:menuList', '', '', 0.00, 1, 1, 1, 0, 0, 105, 2, 2, 2, '0,2', 5, '', '2025-04-16 15:45:31', '2025-11-25 17:23:44', 0),
+(5, 'lucide:info', '', '/about', '/about', '', 'About', 'about:index', '', '', 0.00, 1, 1, 1, 0, 0, 78, 2, 0, 1, '0', 0, '', '2025-04-16 16:47:58', '2025-04-23 15:01:05', 0),
+(7, 'ep:user', '', 'admin-user-list', '/permission/admin-user-list', '', 'AdminUserList', 'permission:adminUser', '', '', 0.00, 1, 1, 1, 0, 0, 120, 2, 2, 2, '0,2', 5, '', '2025-04-19 11:19:36', '2025-11-25 17:20:23', 0),
+(8, 'ant-design:usergroup-add-outlined', '', 'role-list', '/permission/role-list', '', 'RoleList', 'permission:role', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 5, '', '2025-04-21 16:51:22', '2025-11-25 17:22:21', 0),
+(9, 'tdesign:tree-square-dot', '', 'department-list', '/permission/department-list', '', 'DepartmentList', 'permission:department', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 6, '', '2025-04-21 16:51:22', '2025-11-25 17:21:30', 0),
 (10, 'ant-design:edit-filled', 'adminUser:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 7, 3, '0,2,7', 0, '', '2025-11-13 16:45:19', '2025-11-18 17:14:25', 0),
 (11, 'ant-design:plus-outlined', 'adminUser:add', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 7, 3, '0,2,7', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:22:41', 0),
 (12, 'ant-design:user-switch-outlined', 'adminUser:bindRole', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 7, 3, '0,2,7', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:20:53', 0),
@@ -68,8 +68,8 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (26, 'ant-design:edit-filled', 'api:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 3, 3, '0,2,3', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:39:39', 0),
 (28, 'ant-design:plus-circle-outlined', 'role:addChild', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 8, 3, '0,2,8', 0, '', '2025-11-17 17:46:21', '2025-11-18 17:41:45', 0),
 (29, 'ep:tickets', '', 'log', '/log', 'RequestLog', 'Log', '', '', '', 0.00, 1, 1, 1, 0, 0, 98, 1, 0, 1, '0', 3, '', '2025-11-20 16:16:47', '2025-11-20 16:17:04', 0),
-(30, 'ep:document', '', 'request-log', '/log/request-log', '', 'RequestLog', 'log/request.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 4, '', '2025-11-20 16:14:39', '2025-11-25 17:25:13', 0),
-(31, 'ep:document', '', 'admin-login-log', '/log/admin-login-log', '', 'AdminLoginLog', 'log/adminLogin.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 2, '', '2025-11-20 16:16:47', '2025-11-25 17:24:30', 0),
+(30, 'ep:document', '', 'request-log', '/log/request-log', '', 'RequestLog', 'log:request', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 4, '', '2025-11-20 16:14:39', '2025-11-25 17:25:13', 0),
+(31, 'ep:document', '', 'admin-login-log', '/log/admin-login-log', '', 'AdminLoginLog', 'log:adminLogin', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 2, '', '2025-11-20 16:16:47', '2025-11-25 17:24:30', 0),
 (32, 'ep:document', 'adminLoginLog:detail', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', '2025-11-22 11:48:10', '2025-11-22 11:48:10', 0),
 (33, 'ep:document', 'requestLog:detail', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', '2025-11-22 11:48:44', '2025-11-22 11:48:44', 0),
 (34, 'ant-design:search-outlined', 'adminUser:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 7, 3, '0,2,7', 0, '', '2025-11-25 17:20:23', '2025-11-25 17:20:23', 0),
@@ -79,9 +79,9 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (38, 'ant-design:search-outlined', 'api:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 3, 3, '0,2,3', 0, '', '2025-11-25 17:23:35', '2025-11-25 17:23:35', 0),
 (39, 'ant-design:search-outlined', 'adminLoginLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', '2025-11-25 17:24:20', '2025-11-25 17:24:20', 0),
 (40, 'ant-design:search-outlined', 'requestLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', '2025-11-25 17:25:04', '2025-11-25 17:25:04', 0),
-(42, 'ep:setting', '', 'system', '/system', 'SysConfig', 'System', '', '', '', 0.00, 1, 1, 1, 0, 0, 96, 1, 0, 1, '0', 3, '', NOW(), NOW(), 0),
-(43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system/config.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 8, '', NOW(), NOW(), 0),
-(44, 'ep:collection-tag', '', 'dict', '/system/dict', '', 'SysDict', 'system/dict.vue', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 42, 2, '0,42', 4, '', NOW(), NOW(), 0),
+(42, 'ep:setting', '', 'system', '/system', 'SysConfig', 'System', '', '', '', 0.00, 1, 1, 1, 0, 0, 96, 1, 0, 1, '0', 5, '', NOW(), NOW(), 0),
+(43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system:config', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 8, '', NOW(), NOW(), 0),
+(44, 'ep:collection-tag', '', 'dict', '/system/dict', '', 'SysDict', 'system:dict', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 42, 2, '0,42', 4, '', NOW(), NOW(), 0),
 (45, 'ant-design:search-outlined', 'sysConfig:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
 (46, 'ant-design:plus-outlined', 'sysConfig:add', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
 (47, 'ant-design:edit-filled', 'sysConfig:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
@@ -92,7 +92,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (52, 'ant-design:edit-filled', 'sysDict:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 44, 3, '0,42,44', 0, '', NOW(), NOW(), 0),
 (53, 'ant-design:delete-outlined', 'sysDict:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 44, 3, '0,42,44', 0, '', NOW(), NOW(), 0),
 (54, 'ri:task-line', '', 'task', '/task', 'TaskCenter', 'Task', '', '', '', 0.00, 1, 1, 1, 0, 0, 97, 1, 0, 1, '0', 1, '', NOW(), NOW(), 0),
-(55, 'ri:task-line', '', 'center', '/task/center', '', 'TaskCenter', 'system/task.vue', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 54, 2, '0,54', 7, '', NOW(), NOW(), 0),
+(55, 'ri:task-line', '', 'center', '/task/center', '', 'TaskCenter', 'system:task', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 54, 2, '0,54', 7, '', NOW(), NOW(), 0),
 (56, 'ant-design:search-outlined', 'task:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 55, 3, '0,54,55', 0, '', NOW(), NOW(), 0),
 (57, 'ep:video-play', 'task:trigger', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 55, 3, '0,54,55', 0, '', NOW(), NOW(), 0),
 (58, 'ep:refresh-right', 'task:retry', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 55, 3, '0,54,55', 0, '', NOW(), NOW(), 0),
@@ -100,10 +100,10 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (60, 'ep:view', 'task:detail', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 60, 3, 55, 3, '0,54,55', 0, '', NOW(), NOW(), 0),
 (61, 'ant-design:search-outlined', 'requestLog:export', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 30, 3, '0,29,30', 0, '', NOW(), NOW(), 0),
 (62, 'ep:setting', 'requestLog:maskConfig', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 30, 3, '0,29,30', 0, '', NOW(), NOW(), 0),
-(63, 'ep:folder-opened', '', 'file', '/system/file', '', 'FileResource', 'system/file.vue', '', '', 0.00, 1, 1, 1, 0, 0, 80, 2, 42, 2, '0,42', 2, '', NOW(), NOW(), 0),
+(63, 'ep:folder-opened', '', 'file', '/system/file', '', 'FileResource', 'system:file', '', '', 0.00, 1, 1, 1, 0, 0, 80, 2, 42, 2, '0,42', 2, '', NOW(), NOW(), 0),
 (64, 'ant-design:search-outlined', 'file:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
 (65, 'ant-design:delete-outlined', 'file:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
-(66, 'ep:monitor', '', 'session', '/log/session', '', 'OnlineSession', 'log/session.vue', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 29, 2, '0,29', 2, '', NOW(), NOW(), 0),
+(66, 'ep:monitor', '', 'session', '/log/session', '', 'OnlineSession', 'log:session', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 29, 2, '0,29', 2, '', NOW(), NOW(), 0),
 (67, 'ant-design:search-outlined', 'session:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 66, 3, '0,29,66', 0, '', NOW(), NOW(), 0),
 (68, 'ep:circle-close', 'session:revoke', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 66, 3, '0,29,66', 0, '', NOW(), NOW(), 0),
 (70, 'ant-design:search-outlined', 'storage:config', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 43, 3, '0,42,43', 0, '', NOW(), NOW(), 0),
@@ -113,7 +113,12 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (73, 'ep:refresh-left', 'file:restore', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
 (74, 'ant-design:delete-filled', 'file:destroy', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
 (75, 'ant-design:edit-filled', 'file:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 85, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
-(76, 'ant-design:plus-outlined', 'file:create', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 95, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0);
+(76, 'ant-design:plus-outlined', 'file:create', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 95, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
+(78, 'ep:data-line', 'dashboard:overview', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 1, 2, '0,1', 0, '', NOW(), NOW(), 0),
+(79, 'ep:trend-charts', 'dashboard:statistics', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 1, 2, '0,1', 0, '', NOW(), NOW(), 0),
+(80, 'ep:bell', '', 'notification', '/system/notification', '', 'NotificationCenter', 'system:notification', '', '', 0.00, 1, 1, 0, 0, 0, 60, 2, 42, 2, '0,42', 0, '', NOW(), NOW(), 0),
+(81, 'ep:message', '', 'notification-manage', '/system/notification-manage', '', 'NotificationManage', 'system:notificationManage', '', '', 0.00, 1, 1, 1, 0, 0, 55, 2, 42, 2, '0,42', 1, '', NOW(), NOW(), 0),
+(82, 'ep:promotion', 'notification:send', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 81, 3, '0,42,81', 0, '', NOW(), NOW(), 0);
 
 INSERT INTO `menu_i18n` (`menu_id`, `locale`, `title`, `created_at`, `updated_at`)
 SELECT `id`,
@@ -192,6 +197,11 @@ SELECT `id`,
            WHEN 74 THEN '硬删除'
            WHEN 75 THEN '编辑'
            WHEN 76 THEN '新增'
+           WHEN 78 THEN '仪表盘概览'
+           WHEN 79 THEN '仪表盘统计'
+           WHEN 80 THEN '通知中心'
+           WHEN 81 THEN '通知管理'
+           WHEN 82 THEN '发送通知'
            ELSE ''
            END,
        `created_at`,
@@ -276,6 +286,11 @@ SELECT `id`,
            WHEN 74 THEN 'Destroy'
            WHEN 75 THEN 'Edit'
            WHEN 76 THEN 'Create'
+           WHEN 78 THEN 'Dashboard Overview'
+           WHEN 79 THEN 'Dashboard Statistics'
+           WHEN 80 THEN 'Notification Center'
+           WHEN 81 THEN 'Notification Management'
+           WHEN 82 THEN 'Send Notification'
            ELSE ''
            END,
        `created_at`,

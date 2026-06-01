@@ -569,7 +569,7 @@ func TestSystemConfigProtectedRoutesRequireLogin(t *testing.T) {
 			body := tc.body
 			resp := anonymousPostRequest(tc.route, &body)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
@@ -588,7 +588,7 @@ func TestSystemConfigProtectedRoutesRequireLogin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := anonymousGetRequest(tc.route, tc.query)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
@@ -613,7 +613,7 @@ func TestSystemDictProtectedRoutesRequireLogin(t *testing.T) {
 			body := tc.body
 			resp := anonymousPostRequest(tc.route, &body)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
@@ -633,7 +633,7 @@ func TestSystemDictProtectedRoutesRequireLogin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := anonymousGetRequest(tc.route, tc.query)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})

@@ -16,6 +16,8 @@ type CasbinEnforcer struct {
 	errInit error
 	model   model.Model
 	tx      *gorm.DB
+	// txEnforcerCache 缓存同一事务内构建的 Enforcer，避免重复创建。
+	txEnforcerCache map[*gorm.DB]*casbin.Enforcer
 }
 
 var (

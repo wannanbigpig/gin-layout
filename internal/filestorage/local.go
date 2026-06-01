@@ -41,6 +41,9 @@ func (d *LocalDriver) Put(_ context.Context, input PutInput) (PutResult, error) 
 	if _, err := io.Copy(file, input.Reader); err != nil {
 		return PutResult{}, err
 	}
+	if err := file.Sync(); err != nil {
+		return PutResult{}, err
+	}
 	return PutResult{Bucket: input.Bucket, ObjectKey: input.ObjectKey}, nil
 }
 

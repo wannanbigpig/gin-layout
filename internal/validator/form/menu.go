@@ -17,7 +17,7 @@ type menuPayload struct {
 	Pid             uint              `form:"pid" json:"pid" label:"上级菜单" binding:"omitempty"`
 	Description     string            `form:"description" json:"description" label:"描述" binding:"omitempty"`
 	ApiList         []uint            `form:"api_list" json:"api_list" label:"接口列表" binding:"omitempty,dive,gt=0"`
-	Component       string            `form:"component" json:"component" label:"前端组件路径"`
+	ComponentKey    string            `form:"component_key" json:"component_key" label:"前端组件标识"`
 	Status          uint8             `form:"status" json:"status" label:"状态" binding:"omitempty,oneof=0 1"` // 0 禁用 1 启用
 	Redirect        string            `form:"redirect" json:"redirect" label:"重定向地址" binding:"omitempty"`
 	IsExternalLinks uint8             `form:"is_external_links" json:"is_external_links" label:"是否外链" binding:"omitempty,oneof=0 1"`

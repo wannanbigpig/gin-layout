@@ -14,6 +14,7 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	"go.uber.org/zap"
 )
@@ -142,6 +143,9 @@ func (s *FileResourceService) List(params *form.FileResourceList) *resources.Col
 	if params.EndTime != "" {
 		query.AddCondition("created_at <= ?", params.EndTime)
 	}
+	if params.IncludeHidden == nil || *params.IncludeHidden != global.Yes {
+		query.AddCondition("NOT EXISTS (SELECT 1 FROM upload_file_folders WHERE upload_file_folders.id = upload_files.folder_id AND upload_file_folders.is_hidden = 1)")
+	}
 	condition, args := query.Build()
 
 	transformer := resources.NewFileResourceTransformer()
@@ -264,19 +268,32 @@ func (s *FileResourceService) Destroy(id uint) error {
 	if err != nil {
 		return err
 	}
-	result := db.Unscoped().Delete(&model.UploadFiles{}, id)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return e.NewBusinessError(e.NotFound)
-	}
-	_ = db.Where("file_id = ?", id).Delete(&model.UploadFileReference{}).Error
-	if uploadFile.FileObjectID > 0 {
-		return s.deleteObjectIfUnreferenced(db, uploadFile.FileObjectID)
-	}
-	if err := s.deletePhysicalFile(uploadFile); err != nil {
+
+	// DB 操作包入事务：删除引用关系 + 删除文件记录，引用删除失败触发回滚。
+	if err := access.RunInTransaction(db, func(tx *gorm.DB) error {
+		if err := tx.Where("file_id = ?", id).Delete(&model.UploadFileReference{}).Error; err != nil {
+			return err
+		}
+		result := tx.Unscoped().Delete(&model.UploadFiles{}, id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return e.NewBusinessError(e.NotFound)
+		}
+		if uploadFile.FileObjectID > 0 {
+			return s.deleteObjectIfUnreferenced(tx, uploadFile.FileObjectID)
+		}
+		return nil
+	}); err != nil {
 		return err
+	}
+
+	// 物理文件删除在事务外执行，失败只记录日志。
+	if uploadFile.FileObjectID == 0 {
+		if err := s.deletePhysicalFile(uploadFile); err != nil {
+			log.Logger.Error("物理文件删除失败（已忽略）", zap.Error(err), zap.Uint("id", uploadFile.ID))
+		}
 	}
 	return nil
 }

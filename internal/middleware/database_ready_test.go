@@ -114,8 +114,8 @@ func disableMysqlForGuardTest(t *testing.T) func() {
 func assertDependencyNotReadyCode(t *testing.T, recorder *httptest.ResponseRecorder) {
 	t.Helper()
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
 	}
 
 	var result dependencyErrorResponse

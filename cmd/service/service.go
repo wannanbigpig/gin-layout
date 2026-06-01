@@ -17,6 +17,7 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	_ "github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/service/notification"
 )
 
@@ -51,6 +52,10 @@ func registerFlags() {
 
 // run 运行服务器
 func run() error {
+	// 注入会话强踢发布器：auth 触发强踢时经此派发到 WebSocket 连接池及跨实例广播，
+	// 保持 auth → notification 单向依赖，规避包循环依赖。
+	auth.SessionControlPublisher = notification.PublishSessionControl
+
 	notification.EnsureRealtimeDispatcherStarted()
 
 	engine, err := routers.SetRouters()

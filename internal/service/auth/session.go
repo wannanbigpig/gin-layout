@@ -90,8 +90,10 @@ func (s *LoginService) RevokeSession(ctx context.Context, id uint, reason string
 			zap.Bool("redis_unavailable", errors.Is(err, errRedisUnavailable)),
 			zap.Uint("id", id),
 			zap.String("jwt_id", loginLog.JwtID))
+		s.kickSession(loginLog.UID, loginLog.JwtID, SessionControlCodeKicked, revokeReason)
 		return nil
 	}
+	s.kickSession(loginLog.UID, loginLog.JwtID, SessionControlCodeKicked, revokeReason)
 	return nil
 }
 

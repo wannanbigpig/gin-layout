@@ -43,19 +43,15 @@ func NewSysMessageManageListQuery() *SysMessageManageList {
 
 // SysMessageSend 表示管理员手动发送通知请求。
 type SysMessageSend struct {
-	Category        string `form:"category" json:"category" binding:"required"`
-	Title           string `form:"title" json:"title" binding:"required"`
-	Content         string `form:"content" json:"content" binding:"omitempty"`
-	ActionURL       string `form:"action_url" json:"action_url" binding:"omitempty"`
-	ActionLabel     string `form:"action_label" json:"action_label" binding:"omitempty"`
-	RecipientType   string `form:"recipient_type" json:"recipient_type" binding:"required,oneof=all user"`
-	RecipientIDs    []uint `form:"recipient_ids" json:"recipient_ids" binding:"omitempty,dive,gt=0"`
-	SendAt          string `form:"send_at" json:"send_at" binding:"omitempty"`
-	SendImmediately uint8  `form:"send_immediately" json:"send_immediately" binding:"required,oneof=0 1"`
+	Title        string `form:"title" json:"title" binding:"required" label:"消息标题"`
+	Content      string `form:"message" json:"message" binding:"required" label:"消息内容"`
+	Category     string `form:"category" json:"category" label:"消息分类" binding:"omitempty"`
+	ActionURL    string `form:"action_url" json:"action_url" label:"操作链接" binding:"omitempty,max=500"`
+	ActionLabel  string `form:"action_label" json:"action_label" label:"操作按钮文案" binding:"omitempty,max=100"`
+	AudienceType string `form:"audience_type" json:"audience_type" label:"接收人类型" binding:"required,oneof=all user_ids"`
+	UserIDs      []uint `form:"user_ids" json:"user_ids" label:"接收人ID列表" binding:"omitempty,dive,gt=0"`
 }
 
 func NewSysMessageSendForm() *SysMessageSend {
-	return &SysMessageSend{
-		SendImmediately: 1,
-	}
+	return &SysMessageSend{}
 }

@@ -47,8 +47,11 @@ func (s *LoginService) Logout(accessToken string) error {
 			zap.String("jwt_id", claims.ID),
 			zap.Bool("redis_unavailable", errors.Is(err, errRedisUnavailable)),
 			zap.Error(err))
+		s.kickSession(claims.UserID, claims.ID, SessionControlCodeKicked, "用户主动登出")
 		return nil
 	}
+
+	s.kickSession(claims.UserID, claims.ID, SessionControlCodeKicked, "用户主动登出")
 
 	return nil
 }
@@ -198,7 +201,20 @@ func (s *LoginService) RevokeUserTokens(userId uint, revokedCode uint8, revokedR
 	if err := s.markTokensRevokedFn(ctx, jwtIds, revokedCode, revokedReason); err != nil {
 		return err
 	}
-	return s.addTokensToBlacklist(loginLogs)
+	blacklistErr := s.addTokensToBlacklist(loginLogs)
+	// 全端强踢：SessionID 留空，踢掉该用户全部在线连接。
+	s.kickSession(userId, "", int(revokedCode), revokedReason)
+	return blacklistErr
+}
+
+// kickSession 派发单会话强踢指令（SessionID 非空仅踢该会话）。
+func (s *LoginService) kickSession(userID uint, sessionID string, code int, reason string) {
+	publishSessionControl(context.Background(), SessionControl{
+		UserID:    userID,
+		SessionID: sessionID,
+		Code:      code,
+		Reason:    reason,
+	})
 }
 
 func collectJWTIDs(loginLogs []model.AdminLoginLogs) []string {

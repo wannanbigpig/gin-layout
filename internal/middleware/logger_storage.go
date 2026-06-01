@@ -124,7 +124,7 @@ func collectAuditRequestMeta(c *gin.Context) *auditRequestMeta {
 	ua := useragent.New(userAgentStr)
 	browser, _ := ua.Browser()
 	requestKind := resolveAuditRequestKind(c)
-	executionTime, executionScope := calculateExecutionTimeMeta(c, requestKind)
+	executionTime, executionScope, executionUnit := calculateExecutionTimeMeta(c, requestKind)
 
 	return &auditRequestMeta{
 		requestID:      requestID,
@@ -140,7 +140,7 @@ func collectAuditRequestMeta(c *gin.Context) *auditRequestMeta {
 		requestQuery:   sensitive.MaskQueryString(c.Request.URL.RawQuery),
 		requestBody:    resolveAuditRequestBody(c),
 		executionTime:  executionTime,
-		executionUnit:  model.ExecutionTimeUnitMilliseconds,
+		executionUnit:  executionUnit,
 		executionScope: executionScope,
 	}
 }
@@ -175,31 +175,40 @@ func collectAuditOperatorMeta(c *gin.Context) auditOperatorMeta {
 	}
 }
 
-func calculateExecutionTimeMeta(c *gin.Context, requestKind string) (float64, string) {
+func calculateExecutionTimeMeta(c *gin.Context, requestKind string) (float64, string, string) {
 	scope := model.ExecutionTimeScopeRequest
+	unit := model.ExecutionTimeUnitMilliseconds
+	divisor := 1000000.0
+	maxVal := requestLogExecutionTimeMaxMs
 	switch requestKind {
 	case model.RequestKindWebSocket:
 		scope = model.ExecutionTimeScopeConnection
+		unit = model.ExecutionTimeUnitSeconds
+		divisor = 1000000000.0
+		maxVal = requestLogExecutionTimeMaxMs / 1000.0
 	case model.RequestKindSSE:
 		scope = model.ExecutionTimeScopeStream
+		unit = model.ExecutionTimeUnitSeconds
+		divisor = 1000000000.0
+		maxVal = requestLogExecutionTimeMaxMs / 1000.0
 	}
 	if c == nil {
-		return 0, model.ExecutionTimeScopeNone
+		return 0, model.ExecutionTimeScopeNone, unit
 	}
 	startTime := c.GetTime(global.ContextKeyRequestStartTime)
 	if startTime.IsZero() {
-		return 0, model.ExecutionTimeScopeNone
+		return 0, model.ExecutionTimeScopeNone, unit
 	}
 	duration := time.Since(startTime)
-	executionTime := float64(duration.Nanoseconds()) / 1000000.0
+	executionTime := float64(duration.Nanoseconds()) / divisor
 	if executionTime < 0 {
-		return 0, model.ExecutionTimeScopeNone
+		return 0, model.ExecutionTimeScopeNone, unit
 	}
 	executionTime = float64(int(executionTime*10000+0.5)) / 10000.0
-	if executionTime > requestLogExecutionTimeMaxMs {
-		return requestLogExecutionTimeMaxMs, scope
+	if executionTime > maxVal {
+		return maxVal, scope, unit
 	}
-	return executionTime, scope
+	return executionTime, scope, unit
 }
 
 func resolveAuditResponseStatus(recorder *responseRecorder) int {

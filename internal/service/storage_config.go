@@ -14,7 +14,9 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -41,7 +43,9 @@ func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) 
 		settings.ActiveDriver = strings.TrimSpace(value)
 	}
 	if value, err := storageSysConfigValue(StorageConfigConfigKey); err == nil && strings.TrimSpace(value) != "" {
-		_ = json.Unmarshal([]byte(value), &settings.Config)
+		if unmarshalErr := json.Unmarshal([]byte(value), &settings.Config); unmarshalErr != nil {
+			log.Logger.Warn("存储配置 JSON 解析失败，使用默认配置", zap.Error(unmarshalErr))
+		}
 	}
 	if settings.Config.SignedURLTTLSeconds <= 0 {
 		settings.Config.SignedURLTTLSeconds = 300

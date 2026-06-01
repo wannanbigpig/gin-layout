@@ -1007,6 +1007,7 @@ func execFileResourceTestSchema(t *testing.T, db *gorm.DB) {
 			name text not null default '',
 			logical_path text not null default '/',
 			sort integer not null default 0,
+			is_hidden integer not null default 0,
 			created_by integer not null default 0,
 			updated_by integer not null default 0,
 			created_at datetime,
@@ -1510,5 +1511,214 @@ func TestFileResourceUploadLimits(t *testing.T) {
 	}
 	if !stderrors.As(err, &bizErr) || bizErr.GetCode() != e.FileMimeTypeNotAllowed {
 		t.Fatalf("expected FileMimeTypeNotAllowed (11013) error for local upload extension tamper, got: %v", err)
+	}
+}
+
+func TestEnsureExportTempFolder(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	// 第一次调用：应创建 system_temp 目录，is_hidden=1
+	folderID, err := service.ensureExportTempFolder(context.Background())
+	if err != nil {
+		t.Fatalf("first ensureExportTempFolder failed: %v", err)
+	}
+	if folderID == 0 {
+		t.Fatal("expected non-zero folder ID")
+	}
+	var folder model.UploadFileFolder
+	if err := db.First(&folder, folderID).Error; err != nil {
+		t.Fatalf("query created folder failed: %v", err)
+	}
+	if folder.Name != SystemTempFolderName {
+		t.Fatalf("expected folder name %q, got %q", SystemTempFolderName, folder.Name)
+	}
+	if folder.ParentID != 0 {
+		t.Fatalf("expected parent_id=0, got %d", folder.ParentID)
+	}
+	if folder.IsHidden != 1 {
+		t.Fatalf("expected is_hidden=1, got %d", folder.IsHidden)
+	}
+	if folder.LogicalPath != "/"+SystemTempFolderName {
+		t.Fatalf("expected logical_path /%s, got %q", SystemTempFolderName, folder.LogicalPath)
+	}
+
+	// 第二次调用：应返回同一目录
+	folderID2, err := service.ensureExportTempFolder(context.Background())
+	if err != nil {
+		t.Fatalf("second ensureExportTempFolder failed: %v", err)
+	}
+	if folderID2 != folderID {
+		t.Fatalf("expected same folder ID on second call, got %d vs %d", folderID2, folderID)
+	}
+}
+
+func TestEnsureExportTempFolderSelfHealsHiddenFlag(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	// 手动创建一个 is_hidden=0 的 system_temp 目录（模拟历史数据）
+	existing := model.UploadFileFolder{
+		ParentID:    0,
+		Name:        SystemTempFolderName,
+		LogicalPath: "/" + SystemTempFolderName,
+		IsHidden:    0,
+		CreatedBy:   0,
+		UpdatedBy:   0,
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing folder failed: %v", err)
+	}
+
+	// 调用 ensureExportTempFolder，应自愈 is_hidden=1
+	folderID, err := service.ensureExportTempFolder(context.Background())
+	if err != nil {
+		t.Fatalf("ensureExportTempFolder failed: %v", err)
+	}
+	if folderID != existing.ID {
+		t.Fatalf("expected same folder ID, got %d vs %d", folderID, existing.ID)
+	}
+	var folder model.UploadFileFolder
+	if err := db.First(&folder, folderID).Error; err != nil {
+		t.Fatalf("query folder failed: %v", err)
+	}
+	if folder.IsHidden != 1 {
+		t.Fatalf("expected is_hidden=1 after self-heal, got %d", folder.IsHidden)
+	}
+}
+
+func TestFolderTreeExcludesHiddenByDefault(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	visible := model.UploadFileFolder{Name: "visible", LogicalPath: "/visible", IsHidden: 0}
+	hidden := model.UploadFileFolder{Name: "hidden", LogicalPath: "/hidden", IsHidden: 1}
+	if err := db.Create(&visible).Error; err != nil {
+		t.Fatalf("create visible folder failed: %v", err)
+	}
+	if err := db.Create(&hidden).Error; err != nil {
+		t.Fatalf("create hidden folder failed: %v", err)
+	}
+
+	// 默认不包含隐藏
+	result, err := service.FolderTree(false)
+	if err != nil {
+		t.Fatalf("FolderTree failed: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 folder (excluding hidden), got %d", len(result))
+	}
+	if result[0].Name != "visible" {
+		t.Fatalf("expected visible folder, got %q", result[0].Name)
+	}
+}
+
+func TestFolderTreeIncludesHiddenWhenRequested(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	visible := model.UploadFileFolder{Name: "visible", LogicalPath: "/visible", IsHidden: 0}
+	hidden := model.UploadFileFolder{Name: "hidden", LogicalPath: "/hidden", IsHidden: 1}
+	if err := db.Create(&visible).Error; err != nil {
+		t.Fatalf("create visible folder failed: %v", err)
+	}
+	if err := db.Create(&hidden).Error; err != nil {
+		t.Fatalf("create hidden folder failed: %v", err)
+	}
+
+	// 显式包含隐藏
+	result, err := service.FolderTree(true)
+	if err != nil {
+		t.Fatalf("FolderTree failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 folders (including hidden), got %d", len(result))
+	}
+}
+
+func TestFileResourceListExcludesFilesInHiddenFolderByDefault(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	hiddenFolder := model.UploadFileFolder{Name: "hidden", LogicalPath: "/hidden", IsHidden: 1}
+	visibleFolder := model.UploadFileFolder{Name: "visible", LogicalPath: "/visible", IsHidden: 0}
+	if err := db.Create(&hiddenFolder).Error; err != nil {
+		t.Fatalf("create hidden folder failed: %v", err)
+	}
+	if err := db.Create(&visibleFolder).Error; err != nil {
+		t.Fatalf("create visible folder failed: %v", err)
+	}
+
+	hiddenFile := model.UploadFiles{
+		OriginName:    "hidden.txt",
+		UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()),
+		FolderID:      hiddenFolder.ID,
+		StorageDriver: model.StorageDriverLocal,
+		StorageStatus: model.StorageStatusStored,
+	}
+	visibleFile := model.UploadFiles{
+		OriginName:    "visible.txt",
+		UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()+1),
+		FolderID:      visibleFolder.ID,
+		StorageDriver: model.StorageDriverLocal,
+		StorageStatus: model.StorageStatusStored,
+	}
+	if err := db.Create(&hiddenFile).Error; err != nil {
+		t.Fatalf("create hidden file failed: %v", err)
+	}
+	if err := db.Create(&visibleFile).Error; err != nil {
+		t.Fatalf("create visible file failed: %v", err)
+	}
+
+	// 默认排除隐藏目录下的文件
+	result := service.List(&form.FileResourceList{
+		Paginate: form.Paginate{Page: 1, PerPage: 10},
+	})
+	if result.Total != 1 {
+		t.Fatalf("expected 1 file (excluding hidden folder), got %d", result.Total)
+	}
+	item, ok := result.Data[0].(*resources.FileResourceResources)
+	if !ok {
+		t.Fatalf("unexpected item type: %T", result.Data[0])
+	}
+	if item.OriginName != "visible.txt" {
+		t.Fatalf("expected visible.txt, got %q", item.OriginName)
+	}
+}
+
+func TestFileResourceListIncludesHiddenFolderFilesWhenRequested(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	hiddenFolder := model.UploadFileFolder{Name: "hidden", LogicalPath: "/hidden", IsHidden: 1}
+	if err := db.Create(&hiddenFolder).Error; err != nil {
+		t.Fatalf("create hidden folder failed: %v", err)
+	}
+
+	hiddenFile := model.UploadFiles{
+		OriginName:    "hidden.txt",
+		UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()),
+		FolderID:      hiddenFolder.ID,
+		StorageDriver: model.StorageDriverLocal,
+		StorageStatus: model.StorageStatusStored,
+	}
+	if err := db.Create(&hiddenFile).Error; err != nil {
+		t.Fatalf("create hidden file failed: %v", err)
+	}
+
+	includeHidden := uint8(1)
+	result := service.List(&form.FileResourceList{
+		Paginate:      form.Paginate{Page: 1, PerPage: 10},
+		IncludeHidden: &includeHidden,
+	})
+	if result.Total != 1 {
+		t.Fatalf("expected 1 file (include_hidden=1), got %d", result.Total)
+	}
+	item, ok := result.Data[0].(*resources.FileResourceResources)
+	if !ok {
+		t.Fatalf("unexpected item type: %T", result.Data[0])
+	}
+	if item.OriginName != "hidden.txt" {
+		t.Fatalf("expected hidden.txt, got %q", item.OriginName)
 	}
 }

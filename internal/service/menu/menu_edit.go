@@ -34,7 +34,7 @@ func (s *MenuService) Create(params *form.CreateMenu, _ string) error {
 		Pid:             params.Pid,
 		Description:     params.Description,
 		ApiList:         params.ApiList,
-		Component:       params.Component,
+		ComponentKey:       params.ComponentKey,
 		Status:          params.Status,
 		Redirect:        params.Redirect,
 		IsExternalLinks: params.IsExternalLinks,
@@ -62,7 +62,7 @@ func (s *MenuService) Update(params *form.UpdateMenu, _ string) error {
 		Pid:             params.Pid,
 		Description:     params.Description,
 		ApiList:         params.ApiList,
-		Component:       params.Component,
+		ComponentKey:       params.ComponentKey,
 		Status:          params.Status,
 		Redirect:        params.Redirect,
 		IsExternalLinks: params.IsExternalLinks,
@@ -89,7 +89,7 @@ type menuMutation struct {
 	Pid             uint    // 父菜单 ID
 	Description     string  // 描述
 	ApiList         []uint  // 关联的 API ID 列表
-	Component       string  // 组件路径
+	ComponentKey    string  // 组件路径
 	Status          uint8   // 状态
 	Redirect        string  // 重定向路径
 	IsExternalLinks uint8   // 是否外链
@@ -298,7 +298,7 @@ func (s *MenuService) assignMenuFields(menu *model.Menu, params *menuMutation) {
 	menu.Code = params.Code
 	menu.Path = params.Path
 	menu.Name = params.Name
-	menu.Component = params.Component
+	menu.ComponentKey = params.ComponentKey
 	menu.Status = params.Status
 	menu.Redirect = params.Redirect
 	menu.AnimateEnter = params.AnimateEnter

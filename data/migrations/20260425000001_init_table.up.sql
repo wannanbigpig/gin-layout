@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS `menu`
     `full_path`         varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '完整前端路由路径',
     `redirect`          varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '重定向路由名称',
     `name`              varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '前端路由名称',
-    `component`         varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '前端组件路径',
+    `component_key`     varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '前端组件标识',
     `animate_enter`     varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '进入动画，动画类参考https://animate.style/',
     `animate_leave`     varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '离开动画，动画类参考https://animate.style/',
     `animate_duration`  float(2, 2)                                            NOT NULL DEFAULT '0.00' COMMENT '动画持续时间',
@@ -408,6 +408,7 @@ CREATE TABLE IF NOT EXISTS `casbin_rule`
 CREATE TABLE IF NOT EXISTS `upload_files`
 (
     `id`          int unsigned NOT NULL AUTO_INCREMENT,
+    `file_object_id` int unsigned NOT NULL DEFAULT '0' COMMENT '物理对象ID',
     `uid`         int unsigned NOT NULL DEFAULT '0' COMMENT '用户ID',
     `folder_id`   int unsigned NOT NULL DEFAULT '0' COMMENT '逻辑目录ID',
     `logical_path` varchar(1024) NOT NULL DEFAULT '/' COMMENT '逻辑路径快照',
@@ -432,6 +433,7 @@ CREATE TABLE IF NOT EXISTS `upload_files`
     `upload_source` varchar(20) NOT NULL DEFAULT 'backend' COMMENT '上传来源:backend,direct,system',
     `upload_scene` varchar(60) NOT NULL DEFAULT '' COMMENT '上传场景',
     `upload_status` varchar(20) NOT NULL DEFAULT 'uploaded' COMMENT '上传状态:pending,uploaded,failed',
+    `expires_at`  datetime              DEFAULT NULL COMMENT '过期删除时间',
     `last_accessed_at` datetime DEFAULT NULL COMMENT '最后访问时间',
     `deleted_by`  int unsigned NOT NULL DEFAULT '0' COMMENT '删除人',
     `deleted_reason` varchar(255) NOT NULL DEFAULT '' COMMENT '删除原因',
@@ -439,6 +441,7 @@ CREATE TABLE IF NOT EXISTS `upload_files`
     `updated_at`  datetime              DEFAULT NULL COMMENT '更新时间',
     `deleted_at`  int unsigned NOT NULL DEFAULT '0' COMMENT '删除时间戳',
     PRIMARY KEY (`id`),
+    KEY `idx_file_object_id` (`file_object_id`),
     KEY `idx_uid_created_at` (`uid`, `created_at`),
     KEY `idx_folder_created_at` (`folder_id`, `created_at`),
     KEY `idx_hash_is_public` (`hash`, `is_public`),
@@ -458,6 +461,7 @@ CREATE TABLE IF NOT EXISTS `upload_file_folders`
     `name`         varchar(120) NOT NULL DEFAULT '' COMMENT '目录名称',
     `logical_path` varchar(1024) NOT NULL DEFAULT '/' COMMENT '逻辑路径',
     `sort`         int NOT NULL DEFAULT '0' COMMENT '排序',
+    `is_hidden`    tinyint unsigned NOT NULL DEFAULT '0' COMMENT '是否隐藏 0否 1是',
     `created_by`   int unsigned NOT NULL DEFAULT '0' COMMENT '创建人',
     `updated_by`   int unsigned NOT NULL DEFAULT '0' COMMENT '更新人',
     `created_at`   datetime DEFAULT NULL COMMENT '创建时间',
@@ -686,5 +690,106 @@ CREATE TABLE IF NOT EXISTS `cron_task_states`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='定时任务最近状态表';
+
+CREATE TABLE IF NOT EXISTS `upload_file_objects`
+(
+    `id`             int unsigned NOT NULL AUTO_INCREMENT,
+    `storage_driver` varchar(20)  NOT NULL DEFAULT 'local' COMMENT '存储驱动:local,aliyun_oss',
+    `storage_base`   varchar(512) NOT NULL DEFAULT '' COMMENT '存储基础位置',
+    `bucket`         varchar(128) NOT NULL DEFAULT '' COMMENT '存储桶',
+    `storage_path`   varchar(512) NOT NULL DEFAULT '' COMMENT '实际存储路径',
+    `object_key`     varchar(512) NOT NULL DEFAULT '' COMMENT '对象key',
+    `size`           int unsigned NOT NULL DEFAULT '0' COMMENT '文件大小（字节）',
+    `hash`           varchar(64)  NOT NULL DEFAULT '' COMMENT '文件SHA256哈希值',
+    `mime_type`      varchar(100) NOT NULL DEFAULT '' COMMENT 'MIME类型',
+    `etag`           varchar(128) NOT NULL DEFAULT '' COMMENT '对象ETag',
+    `status`         varchar(32)  NOT NULL DEFAULT 'stored' COMMENT '物理对象状态:stored,delete_failed',
+    `created_at`     datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at`     datetime DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uniq_driver_bucket_hash` (`storage_driver`, `bucket`, `hash`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='上传文件物理对象表';
+
+CREATE TABLE IF NOT EXISTS `sys_export_records`
+(
+    `id`              bigint unsigned NOT NULL AUTO_INCREMENT,
+    `scene`           varchar(60)     NOT NULL DEFAULT '' COMMENT '导出场景',
+    `task_run_id`     bigint unsigned NOT NULL DEFAULT '0' COMMENT '任务执行记录ID',
+    `trigger_user_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '触发人ID',
+    `status`          varchar(20)     NOT NULL DEFAULT '' COMMENT '导出状态 pending/running/success/failed/canceled/retrying',
+    `queue`           varchar(60)     NOT NULL DEFAULT '' COMMENT '队列名称',
+    `progress`        tinyint unsigned NOT NULL DEFAULT '0' COMMENT '进度 0-100',
+    `total_count`     bigint unsigned NOT NULL DEFAULT '0' COMMENT '本次导出总记录数',
+    `processed_count` bigint unsigned NOT NULL DEFAULT '0' COMMENT '本次导出已处理记录数',
+    `file_id`         bigint unsigned NOT NULL DEFAULT '0' COMMENT '导出文件ID',
+    `file_uuid`       varchar(64)     NOT NULL DEFAULT '' COMMENT '导出文件UUID',
+    `file_name`       varchar(255)    NOT NULL DEFAULT '' COMMENT '导出文件名',
+    `file_size`       bigint unsigned NOT NULL DEFAULT '0' COMMENT '导出文件大小',
+    `format`          varchar(30)     NOT NULL DEFAULT '' COMMENT '导出格式',
+    `error_message`   text                     DEFAULT NULL COMMENT '错误信息',
+    `started_at`      datetime                 DEFAULT NULL COMMENT '开始时间',
+    `finished_at`     datetime                 DEFAULT NULL COMMENT '结束时间',
+    `created_at`      datetime                 DEFAULT NULL,
+    `updated_at`      datetime                 DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ser_task_run_id` (`task_run_id`),
+    KEY `ser_scene_created_at` (`scene`, `created_at`),
+    KEY `ser_status_created_at` (`status`, `created_at`),
+    KEY `ser_trigger_user_id_created_at` (`trigger_user_id`, `created_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='统一导出记录表';
+
+CREATE TABLE IF NOT EXISTS `sys_messages`
+(
+    `id`               bigint unsigned  NOT NULL AUTO_INCREMENT,
+    `user_id`          bigint unsigned  NOT NULL DEFAULT '0' COMMENT '接收人用户ID',
+    `sender_id`        bigint unsigned  NOT NULL DEFAULT '0' COMMENT '发送人管理员ID',
+    `batch_id`         varchar(64)      NOT NULL DEFAULT '' COMMENT '发送批次ID',
+    `category`         varchar(60)      NOT NULL DEFAULT '' COMMENT '消息分类',
+    `topic`            varchar(80)      NOT NULL DEFAULT '' COMMENT '消息主题',
+    `title`            varchar(255)     NOT NULL DEFAULT '' COMMENT '消息标题',
+    `content`          text                      DEFAULT NULL COMMENT '消息内容',
+    `payload`          text                      DEFAULT NULL COMMENT '附加数据 JSON',
+    `action_url`       varchar(500)     NOT NULL DEFAULT '' COMMENT '操作跳转链接',
+    `action_label`     varchar(255)     NOT NULL DEFAULT '' COMMENT '操作按钮文案',
+    `recipient_type`   varchar(30)      NOT NULL DEFAULT '' COMMENT '接收人类型',
+    `recipient_ids`    text                      DEFAULT NULL COMMENT '接收人ID列表 JSON',
+    `send_immediately` tinyint unsigned NOT NULL DEFAULT '1' COMMENT '是否立即发送 0否 1是',
+    `send_at`          datetime                  DEFAULT NULL COMMENT '计划发送时间',
+    `sent_at`          datetime                  DEFAULT NULL COMMENT '实际发送时间',
+    `is_read`          tinyint unsigned NOT NULL DEFAULT '0' COMMENT '是否已读 0未读 1已读',
+    `read_at`          datetime                  DEFAULT NULL COMMENT '已读时间',
+    `created_at`       datetime                  DEFAULT NULL,
+    `updated_at`       datetime                  DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    KEY `sm_user_id_is_read_created_at` (`user_id`, `is_read`, `created_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统消息表';
+
+CREATE TABLE IF NOT EXISTS `daily_request_stats`
+(
+    `id`                      bigint unsigned NOT NULL AUTO_INCREMENT,
+    `date`                    date            NOT NULL COMMENT '统计日期',
+    `total_requests`          bigint unsigned NOT NULL DEFAULT '0' COMMENT '总请求数',
+    `error_requests`          bigint unsigned NOT NULL DEFAULT '0' COMMENT '错误请求数',
+    `duration_lt_100ms`       bigint unsigned NOT NULL DEFAULT '0' COMMENT '耗时<100ms',
+    `duration_100_300ms`      bigint unsigned NOT NULL DEFAULT '0' COMMENT '耗时100-300ms',
+    `duration_300_1000ms`     bigint unsigned NOT NULL DEFAULT '0' COMMENT '耗时300-1000ms',
+    `duration_1s_3s`          bigint unsigned NOT NULL DEFAULT '0' COMMENT '耗时1s-3s',
+    `duration_gt_3s`          bigint unsigned NOT NULL DEFAULT '0' COMMENT '耗时>3s',
+    `total_duration_ms`       bigint unsigned NOT NULL DEFAULT '0' COMMENT '总耗时毫秒',
+    `http_status_distribution` text                     DEFAULT NULL COMMENT 'HTTP状态码分布 JSON',
+    `biz_status_distribution` text                     DEFAULT NULL COMMENT '业务状态码分布 JSON',
+    `created_at`              datetime        DEFAULT NULL,
+    `updated_at`              datetime        DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `drs_date` (`date`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='每日请求统计表';
 
 COMMIT;

@@ -33,7 +33,7 @@ func TestMenuListWithAuthorization(t *testing.T) {
 func TestMenuListRequiresLogin(t *testing.T) {
 	resp := anonymousGetRequest("/admin/v1/menu/list", &url.Values{"page": {"1"}, "per_page": {"5"}})
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }
@@ -55,14 +55,14 @@ func TestMenuProtectedRoutesRequireLogin(t *testing.T) {
 			body := tc.body
 			resp := anonymousPostRequest(tc.route, &body)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
 	}
 
 	resp := anonymousGetRequest("/admin/v1/menu/detail", &url.Values{"id": {"1"}})
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }
@@ -79,7 +79,7 @@ func TestMenuWriteFlow(t *testing.T) {
 		},
 		"name":      title,
 		"path":      "/" + title,
-		"component": "test/component",
+		"component_key": "test/component",
 		"sort":      10,
 		"type":      2,
 		"status":    1,
@@ -113,7 +113,7 @@ func TestMenuWriteFlow(t *testing.T) {
 		},
 		"name":      title + "-u-name",
 		"path":      "/" + title + "-u-path",
-		"component": "test/component",
+		"component_key": "test/component",
 		"sort":      20,
 		"type":      2,
 		"status":    1,
@@ -166,7 +166,7 @@ func TestMenuUpdateOmittedLocaleUsesReplaceSemantics(t *testing.T) {
 		},
 		"name":      title,
 		"path":      "/" + title,
-		"component": "test/component",
+		"component_key": "test/component",
 		"sort":      10,
 		"type":      2,
 		"status":    1,
@@ -188,7 +188,7 @@ func TestMenuUpdateOmittedLocaleUsesReplaceSemantics(t *testing.T) {
 		},
 		"name":      title + "-name-updated",
 		"path":      "/" + title + "-path-updated",
-		"component": "test/component",
+		"component_key": "test/component",
 		"sort":      20,
 		"type":      2,
 		"status":    1,

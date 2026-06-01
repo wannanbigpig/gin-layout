@@ -241,7 +241,7 @@ func createFallbackMenu(t *testing.T) uint {
 		Name:      name,
 		Path:      "/" + name,
 		FullPath:  "/" + name,
-		Component: "test/component",
+		ComponentKey: "test/component",
 		IsShow:    1,
 		Sort:      1,
 		Type:      model.MENU,

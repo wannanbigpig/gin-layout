@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -17,7 +19,6 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
-	"go.uber.org/zap"
 )
 
 var ErrMessageTableMissing = errors.New("sys_messages table is missing")
@@ -44,12 +45,34 @@ type Service struct {
 }
 
 type CreateMessageInput struct {
-	UserID   uint
-	Category string
-	Topic    string
-	Title    string
-	Content  string
-	Payload  map[string]any
+	UserID      uint
+	Category    string
+	Topic       string
+	Title       string
+	Content     string
+	ActionURL   string
+	ActionLabel string
+	Payload     map[string]any
+}
+
+// SendInput 表示管理员手动发送通知的输入参数。
+type SendInput struct {
+	Title        string
+	Content      string
+	Category     string
+	ActionURL    string
+	ActionLabel  string
+	AudienceType string
+	UserIDs      []uint
+	SenderID     uint
+}
+
+// SendResult 表示发送通知的结果。
+type SendResult struct {
+	BatchID string `json:"batch_id"`
+	Total   int    `json:"total"`
+	Success int    `json:"success"`
+	Failed  int    `json:"failed"`
 }
 
 type ExportResultInput struct {
@@ -109,6 +132,8 @@ func (s *Service) Create(ctx context.Context, input CreateMessageInput) (*model.
 	message.Topic = strings.TrimSpace(input.Topic)
 	message.Title = strings.TrimSpace(input.Title)
 	message.Content = strings.TrimSpace(input.Content)
+	message.ActionURL = strings.TrimSpace(input.ActionURL)
+	message.ActionLabel = strings.TrimSpace(input.ActionLabel)
 	message.Payload = string(payload)
 	message.IsRead = model.MessageUnread
 
@@ -154,6 +179,84 @@ func (s *Service) NotifyExportResult(ctx context.Context, input ExportResultInpu
 			"error_message":    strings.TrimSpace(input.ErrorMessage),
 		},
 	})
+}
+
+// Send 管理员手动发送系统通知，支持全员或指定用户。
+func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error) {
+	if strings.TrimSpace(input.Title) == "" {
+		return nil, fmt.Errorf("message title is required")
+	}
+	if strings.TrimSpace(input.Content) == "" {
+		return nil, fmt.Errorf("message content is required")
+	}
+
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureMessageTable(db); err != nil {
+		return nil, err
+	}
+
+	// 确定接收人列表
+	var userIDs []uint
+	switch input.AudienceType {
+	case "all":
+		userModel := model.NewAdminUsers()
+		userDB, err := userModel.GetDB(userModel)
+		if err != nil {
+			return nil, err
+		}
+		if err := userDB.Where("status = ? AND deleted_at = 0", model.AdminUserStatusEnabled).Pluck("id", &userIDs).Error; err != nil {
+			return nil, err
+		}
+	case "user_ids":
+		userIDs = input.UserIDs
+	default:
+		return nil, fmt.Errorf("invalid audience_type: %s", input.AudienceType)
+	}
+
+	batchID := uuid.New().String()
+	payload := map[string]any{}
+	if strings.TrimSpace(input.ActionURL) != "" {
+		payload["action_url"] = strings.TrimSpace(input.ActionURL)
+	}
+	if strings.TrimSpace(input.ActionLabel) != "" {
+		payload["action_label"] = strings.TrimSpace(input.ActionLabel)
+	}
+
+	result := &SendResult{BatchID: batchID, Total: len(userIDs)}
+	for _, uid := range userIDs {
+		msg, err := s.Create(ctx, CreateMessageInput{
+			UserID:      uid,
+			Category:    strings.TrimSpace(input.Category),
+			Topic:       model.MessageTopicManual,
+			Title:       input.Title,
+			Content:     input.Content,
+			ActionURL:   input.ActionURL,
+			ActionLabel: input.ActionLabel,
+			Payload:     payload,
+		})
+		if err != nil || msg == nil {
+			result.Failed++
+			if log.Logger != nil {
+				log.Logger.Warn("send notification to user failed",
+					zap.Uint("user_id", uid), zap.String("batch_id", batchID), zap.Error(err))
+			}
+			continue
+		}
+		// 更新 sender_id 和 batch_id
+		updates := map[string]any{"sender_id": input.SenderID, "batch_id": batchID}
+		if err := db.Model(&model.SysMessage{}).Where("id = ?", msg.ID).Updates(updates).Error; err != nil {
+			if log.Logger != nil {
+				log.Logger.Warn("更新通知 sender_id/batch_id 失败",
+					zap.Uint("message_id", msg.ID), zap.Error(err))
+			}
+		}
+		result.Success++
+	}
+
+	return result, nil
 }
 
 func (s *Service) List(userID uint, params *form.SysMessageList) (*resources.Collection, error) {

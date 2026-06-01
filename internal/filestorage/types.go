@@ -15,8 +15,6 @@ type Config struct {
 	MaxFileSizeMB       int             `json:"max_file_size_mb"`
 	AllowedMimeTypes    []string        `json:"allowed_mime_types"`
 	AllowedExtensions   []string        `json:"allowed_extensions"`
-	ExportDefaultFolder string          `json:"export_default_folder"`
-	ExportTempFolder    string          `json:"export_temp_folder"`
 	ExportTempFileTTL   int             `json:"export_temp_file_ttl_days"`
 }
 
@@ -74,6 +72,7 @@ type MultipartPartInput struct {
 	UploadID    string
 	PartNumber  int32
 	ContentType string
+	TTL         time.Duration // 分片签名有效期
 }
 
 // MultipartPartResult 分片签名结果。
@@ -116,8 +115,6 @@ func DefaultConfig() Config {
 		MaxFileSizeMB:       10,
 		AllowedMimeTypes:    []string{},
 		AllowedExtensions:   []string{},
-		ExportDefaultFolder: "导出",
-		ExportTempFolder:    "临时文件",
 		ExportTempFileTTL:   7,
 	}
 }

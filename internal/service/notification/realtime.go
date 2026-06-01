@@ -3,7 +3,9 @@ package notification
 import (
 	"context"
 	"encoding/json"
+	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -12,18 +14,24 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
-	"go.uber.org/zap"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
 const (
-	realtimeChannel      = "sys_messages:realtime"
-	realtimePublishTTL   = 3 * time.Second
-	realtimeWriteTimeout = 5 * time.Second
-	realtimePingPeriod   = 30 * time.Second
+	realtimeChannel       = "sys_messages:realtime"
+	sessionControlChannel = "sys:session:control"
+	realtimePublishTTL    = 3 * time.Second
+	realtimeWriteTimeout  = 5 * time.Second
+	realtimePingPeriod    = 30 * time.Second
+	// realtimeRecheckEveryPings 心跳主动反查频率：每 N 次 ping（约 N×realtimePingPeriod）
+	// 调用一次 auth.IsPrincipalValid，作为 Redis 强踢消息丢失与 token 过期的兜底层。
+	realtimeRecheckEveryPings = 10
 )
 
 type redisEventPayload struct {
@@ -31,10 +39,19 @@ type redisEventPayload struct {
 	Event  Event  `json:"event"`
 }
 
+// controlEnvelope 是会话强踢指令的跨实例传输信封，Source 用于跳过本实例自身发布的消息。
+type controlEnvelope struct {
+	Source  string              `json:"source"`
+	Control auth.SessionControl `json:"control"`
+}
+
 type wsClient struct {
-	userID uint
-	conn   *websocket.Conn
-	mu     sync.Mutex
+	userID    uint
+	sessionID string
+	claims    *token.AdminCustomClaims
+	conn      *websocket.Conn
+	mu        sync.Mutex
+	closeOnce sync.Once
 }
 
 type hub struct {
@@ -42,15 +59,21 @@ type hub struct {
 	clients map[uint]map[*wsClient]struct{}
 }
 
+// wsOriginChecker 可在测试中替换为始终允许的实现。
+var wsOriginChecker = checkWebSocketOrigin
+
 var (
 	defaultHub = &hub{clients: make(map[uint]map[*wsClient]struct{})}
 	upgrader   = websocket.Upgrader{
-		CheckOrigin: func(*http.Request) bool { return true },
+		CheckOrigin: func(r *http.Request) bool { return wsOriginChecker(r) },
 	}
 	realtimeSourceID = buildRealtimeSourceID()
+	realtimeRunner   = runRealtimeSubscriber
 	realtimeState    = struct {
 		mu      sync.Mutex
 		started bool
+		cancel  context.CancelFunc
+		done    chan struct{}
 	}{}
 )
 
@@ -64,25 +87,76 @@ func EnsureRealtimeDispatcherStarted() {
 		return
 	}
 
+	startRealtimeSubscriber(client)
+}
+
+func startRealtimeSubscriber(client *redis.Client) bool {
+	if client == nil {
+		return false
+	}
 	realtimeState.mu.Lock()
 	if realtimeState.started {
 		realtimeState.mu.Unlock()
-		return
+		return false
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	realtimeState.started = true
+	realtimeState.cancel = cancel
+	realtimeState.done = done
 	realtimeState.mu.Unlock()
 
-	go runRealtimeSubscriber(client)
+	go func() {
+		defer close(done)
+		defer func() {
+			realtimeState.mu.Lock()
+			if realtimeState.done == done {
+				realtimeState.started = false
+				realtimeState.cancel = nil
+				realtimeState.done = nil
+			}
+			realtimeState.mu.Unlock()
+		}()
+		realtimeRunner(ctx, client)
+	}()
+	return true
 }
 
-func ServeWebsocket(w http.ResponseWriter, r *http.Request, userID uint) error {
+func StopRealtimeSubscriber(timeout time.Duration) {
+	realtimeState.mu.Lock()
+	cancel := realtimeState.cancel
+	done := realtimeState.done
+	realtimeState.mu.Unlock()
+
+	if cancel == nil || done == nil {
+		return
+	}
+	cancel()
+	if timeout <= 0 {
+		<-done
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
+}
+
+// ServeWebsocket 升级请求为 WebSocket 并注册到 hub。
+// 调用方（控制器）需保证 claims 非 nil 且 UserID/jti 已校验。
+func ServeWebsocket(w http.ResponseWriter, r *http.Request, claims *token.AdminCustomClaims) error {
 	EnsureRealtimeDispatcherStarted()
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return err
 	}
-	client := &wsClient{userID: userID, conn: conn}
+	client := &wsClient{
+		userID:    claims.UserID,
+		sessionID: claims.ID,
+		claims:    claims,
+		conn:      conn,
+	}
 	defaultHub.register(client)
 
 	go client.keepalive()
@@ -123,6 +197,40 @@ func PublishEvent(ctx context.Context, event Event) error {
 	return client.Publish(publishCtx, realtimeChannel, payload).Err()
 }
 
+// PublishSessionControl 派发会话强踢指令：先在本实例立即执行，再按 Redis 开关跨实例广播。
+// 由 auth.SessionControlPublisher 注入调用，是 auth → notification 的唯一反向入口。
+func PublishSessionControl(ctx context.Context, ctrl auth.SessionControl) {
+	if ctrl.UserID == 0 {
+		return
+	}
+	defaultHub.kick(ctrl)
+
+	cfg := config.GetConfig()
+	if cfg == nil || !cfg.Redis.Enable {
+		return
+	}
+	client := data.RedisClient()
+	if client == nil {
+		return
+	}
+	payload, err := json.Marshal(controlEnvelope{
+		Source:  realtimeSourceID,
+		Control: ctrl,
+	})
+	if err != nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	publishCtx, cancel := context.WithTimeout(ctx, realtimePublishTTL)
+	defer cancel()
+	if err := client.Publish(publishCtx, sessionControlChannel, payload).Err(); err != nil && log.Logger != nil {
+		log.Logger.Warn("发布会话强踢指令失败，跨实例强踢降级为心跳反查兜底",
+			zap.Error(err), zap.Uint("user_id", ctrl.UserID), zap.String("session_id", ctrl.SessionID))
+	}
+}
+
 func decodeRealtimePayload(raw string) (redisEventPayload, bool) {
 	payload := redisEventPayload{}
 	raw = strings.TrimSpace(raw)
@@ -135,34 +243,97 @@ func decodeRealtimePayload(raw string) (redisEventPayload, bool) {
 	return payload, true
 }
 
-func runRealtimeSubscriber(client *redis.Client) {
-	ctx := context.Background()
-	pubsub := client.Subscribe(ctx, realtimeChannel)
-	defer func() {
-		_ = pubsub.Close()
-		realtimeState.mu.Lock()
-		realtimeState.started = false
-		realtimeState.mu.Unlock()
-	}()
+func decodeControlEnvelope(raw string) (controlEnvelope, bool) {
+	envelope := controlEnvelope{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return envelope, false
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return envelope, false
+	}
+	return envelope, true
+}
 
-	if _, err := pubsub.Receive(ctx); err != nil {
-		if log.Logger != nil {
-			log.Logger.Warn("订阅系统消息实时通道失败", zap.Error(err))
-		}
-		return
+func runRealtimeSubscriber(ctx context.Context, client *redis.Client) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+
 	for {
-		message, err := pubsub.ReceiveMessage(ctx)
-		if err != nil {
+		// 每次循环重新订阅，首次和重连均走此路径
+		pubsub := client.Subscribe(ctx, realtimeChannel, sessionControlChannel)
+
+		// 等待确认订阅成功
+		if _, err := pubsub.Receive(ctx); err != nil {
+			_ = pubsub.Close()
 			if log.Logger != nil {
-				log.Logger.Warn("系统消息实时订阅中断", zap.Error(err))
+				log.Logger.Warn("订阅系统消息实时通道失败，准备重试",
+					zap.Error(err), zap.Duration("backoff", backoff))
 			}
+			select {
+			case <-time.After(backoff):
+				backoff = realtimeNextBackoff(backoff, maxBackoff)
+				continue
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		// 订阅成功，重置退避间隔
+		backoff = time.Second
+
+		// 消息接收循环
+		for {
+			message, err := pubsub.ReceiveMessage(ctx)
+			if err != nil {
+				_ = pubsub.Close()
+				if log.Logger != nil {
+					log.Logger.Warn("系统消息实时订阅中断，准备重连",
+						zap.Error(err), zap.Duration("backoff", backoff))
+				}
+				break // 跳出内层循环，由外层重新订阅
+			}
+			dispatchRealtimeMessage(message.Channel, message.Payload)
+		}
+
+		// 重连前退避等待，同时检查上下文
+		select {
+		case <-time.After(backoff):
+			backoff = realtimeNextBackoff(backoff, maxBackoff)
+		case <-ctx.Done():
 			return
 		}
-		payload, ok := decodeRealtimePayload(message.Payload)
+	}
+}
+
+// realtimeNextBackoff 计算下一次退避间隔，指数递增至上限，并加随机 jitter 避免雷群效应。
+func realtimeNextBackoff(current, max time.Duration) time.Duration {
+	next := current * 2
+	if next > max {
+		next = max
+	}
+	// 添加随机 jitter：退避 + rand(0, 退避/2)，避免多实例同时重试
+	jitter := time.Duration(rand.Int63n(int64(next/2) + 1))
+	return next + jitter
+}
+
+// dispatchRealtimeMessage 按订阅频道分发消息：实时事件走广播，会话控制走本地强踢。
+func dispatchRealtimeMessage(channel, raw string) {
+	switch channel {
+	case sessionControlChannel:
+		envelope, ok := decodeControlEnvelope(raw)
+		if !ok || envelope.Source == realtimeSourceID {
+			return
+		}
+		defaultHub.kick(envelope.Control)
+	default:
+		payload, ok := decodeRealtimePayload(raw)
 		if !ok || payload.Source == realtimeSourceID {
-			continue
+			return
 		}
 		BroadcastEvent(payload.Event)
 	}
@@ -181,15 +352,16 @@ func (h *hub) unregister(client *wsClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	clients := h.clients[client.userID]
-	if clients == nil {
+	if clients != nil {
+		delete(clients, client)
+		if len(clients) == 0 {
+			delete(h.clients, client.userID)
+		}
+	}
+	// 用 sync.Once 保护连接关闭，避免多路径并发调用导致 close-of-closed
+	client.closeOnce.Do(func() {
 		_ = client.conn.Close()
-		return
-	}
-	delete(clients, client)
-	if len(clients) == 0 {
-		delete(h.clients, client.userID)
-	}
-	_ = client.conn.Close()
+	})
 }
 
 func (h *hub) broadcast(event Event) {
@@ -215,6 +387,32 @@ func (h *hub) broadcastToUser(userID uint, event Event) {
 	}
 }
 
+// kick 强制下线指定用户的连接。ctrl.SessionID 为空时踢掉该用户全部连接，
+// 非空时仅踢匹配 sessionID 的连接（支持多端精准强踢）。
+func (h *hub) kick(ctrl auth.SessionControl) {
+	if ctrl.UserID == 0 {
+		return
+	}
+	h.mu.RLock()
+	clients := h.clients[ctrl.UserID]
+	list := make([]*wsClient, 0, len(clients))
+	for client := range clients {
+		if ctrl.SessionID == "" || client.sessionID == ctrl.SessionID {
+			list = append(list, client)
+		}
+	}
+	h.mu.RUnlock()
+
+	code := ctrl.Code
+	if code == 0 {
+		code = auth.SessionControlCodeKicked
+	}
+	for _, client := range list {
+		client.closeWithCode(code, ctrl.Reason)
+		h.unregister(client)
+	}
+}
+
 func (c *wsClient) writeJSON(v any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -222,10 +420,32 @@ func (c *wsClient) writeJSON(v any) error {
 	return c.conn.WriteJSON(v)
 }
 
+// closeWithCode 向客户端发送带业务 code 的 Close 帧（如 4001 会话失效 / 4002 强制下线）。
+func (c *wsClient) closeWithCode(code int, reason string) {
+	closeMsg := websocket.FormatCloseMessage(code, reason)
+	c.mu.Lock()
+	_ = c.conn.SetWriteDeadline(time.Now().Add(realtimeWriteTimeout))
+	_ = c.conn.WriteMessage(websocket.CloseMessage, closeMsg)
+	c.mu.Unlock()
+	c.closeOnce.Do(func() { _ = c.conn.Close() })
+}
+
 func (c *wsClient) keepalive() {
 	ticker := time.NewTicker(realtimePingPeriod)
 	defer ticker.Stop()
+	pings := 0
 	for range ticker.C {
+		// 周期性主动反查会话有效性：作为 Redis 强踢消息丢失与 token 过期的兜底层。
+		pings++
+		if pings >= realtimeRecheckEveryPings {
+			pings = 0
+			if !c.sessionStillValid() {
+				c.closeWithCode(auth.SessionControlCodeExpired, "session expired")
+				defaultHub.unregister(c)
+				return
+			}
+		}
+
 		c.mu.Lock()
 		_ = c.conn.SetWriteDeadline(time.Now().Add(realtimeWriteTimeout))
 		err := c.conn.WriteMessage(websocket.PingMessage, nil)
@@ -237,10 +457,102 @@ func (c *wsClient) keepalive() {
 	}
 }
 
+// sessionStillValid 反查当前连接对应的会话是否仍有效：先判 token 是否过期，再查黑名单/撤销状态。
+func (c *wsClient) sessionStillValid() bool {
+	if c.claims == nil {
+		return false
+	}
+	if exp, err := c.claims.GetExpirationTime(); err != nil || exp == nil || !exp.Time.After(time.Now()) {
+		return false
+	}
+	return auth.NewLoginService().IsPrincipalValid(c.claims)
+}
+
 func buildRealtimeSourceID() string {
 	host, err := os.Hostname()
 	if err != nil {
 		host = "unknown"
 	}
 	return host + ":" + strconv.Itoa(os.Getpid())
+}
+
+// checkWebSocketOrigin 校验 WebSocket 请求的 Origin 是否在 CORS 白名单内。
+// 无 Origin 头或白名单为空时拒绝，防止跨站 WebSocket 劫持（CSWSH）。
+func checkWebSocketOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	cfg := config.GetConfig()
+	if cfg == nil || len(cfg.CorsOrigins) == 0 {
+		return false
+	}
+	return isOriginAllowed(origin, cfg.CorsOrigins)
+}
+
+func isOriginAllowed(origin string, allowedOrigins []string) bool {
+	originURL, originErr := url.Parse(origin)
+	for _, allowed := range allowedOrigins {
+		if allowed == "*" {
+			return true
+		}
+		if origin == allowed {
+			return true
+		}
+		if originErr == nil && originURL != nil {
+			if matchWildcardOrigin(originURL, allowed) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func matchWildcardOrigin(originURL *url.URL, allowedOrigin string) bool {
+	allowedURL, err := url.Parse(allowedOrigin)
+	if err != nil || allowedURL.Scheme == "" || allowedURL.Host == "" {
+		if strings.HasPrefix(allowedOrigin, "*.") {
+			return wildcardHostnameMatch(originURL.Hostname(), allowedOrigin)
+		}
+		return false
+	}
+	if allowedURL.Scheme != originURL.Scheme {
+		return false
+	}
+	if port := allowedURL.Port(); port != "" && port != originURL.Port() {
+		return false
+	}
+	return wildcardHostnameMatch(originURL.Hostname(), allowedURL.Hostname())
+}
+
+func wildcardHostnameMatch(originHost, allowedHost string) bool {
+	originHost = strings.ToLower(strings.TrimSpace(originHost))
+	allowedHost = strings.ToLower(strings.TrimSpace(allowedHost))
+	if originHost == "" || allowedHost == "" {
+		return false
+	}
+	if strings.HasPrefix(allowedHost, "*.") {
+		suffix := allowedHost[1:] // e.g. ".example.com"
+		return strings.HasSuffix(originHost, suffix) && originHost != allowedHost[2:]
+	}
+	return originHost == allowedHost
+}
+
+// ShutdownRealtimeDispatcher 主动关闭所有活跃的 WebSocket 连接，发送 Close 帧。
+func ShutdownRealtimeDispatcher() {
+	defaultHub.mu.Lock()
+	clients := defaultHub.clients
+	defaultHub.clients = make(map[uint]map[*wsClient]struct{})
+	defaultHub.mu.Unlock()
+
+	closeMsg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down")
+	for _, userClients := range clients {
+		for client := range userClients {
+			client.mu.Lock()
+			_ = client.conn.SetWriteDeadline(time.Now().Add(realtimeWriteTimeout))
+			_ = client.conn.WriteMessage(websocket.CloseMessage, closeMsg)
+			client.mu.Unlock()
+			client.closeOnce.Do(func() { _ = client.conn.Close() })
+		}
+	}
 }

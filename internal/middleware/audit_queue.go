@@ -139,7 +139,16 @@ func enqueueAuditLog(_ *gin.Context, kind string, snapshot *audit.AuditLogSnapsh
 
 // shouldDropBySampling 判定是否需要按采样比例丢弃当前快照。
 //
-// 命中条件（全部满足才进入采样）：is_high_risk=0 且 GET 且 OperationStatus<400 且 ResponseStatus<400。
+// 命中条件（全部满足才进入采样）：
+//   - IsHighRisk == 0（低风险）
+//   - 只读方法（GET/HEAD/OPTIONS）
+//   - ResponseStatus < 400（HTTP 层成功）
+//   - OperationStatus == 0（业务层成功）
+//
+// 新契约分工：
+//   - ResponseStatus：HTTP 状态码，4xx/5xx 表示协议层失败。
+//   - OperationStatus：业务状态码，!= 0 表示业务失败（与 HTTP 状态码无关）。
+//
 // 采样语义：保留 1/N，N<=1 表示不采样。
 func shouldDropBySampling(snapshot *audit.AuditLogSnapshot) bool {
 	if snapshot == nil {
@@ -154,7 +163,7 @@ func shouldDropBySampling(snapshot *audit.AuditLogSnapshot) bool {
 	if snapshot.ResponseStatus >= http.StatusBadRequest {
 		return false
 	}
-	if snapshot.OperationStatus >= http.StatusBadRequest {
+	if snapshot.OperationStatus != 0 {
 		return false
 	}
 
@@ -282,6 +291,14 @@ func (b *auditFallbackBuffer) dropLowRiskOldestLocked() bool {
 			continue
 		}
 		if isLowRiskReadOnly2xx(item.snapshot) {
+			snap := item.snapshot
+			log.Warn("Audit fallback buffer full, dropping low-risk oldest entry",
+				zap.String("kind", item.kind),
+				zap.String("request_id", snap.RequestID),
+				zap.String("path", snap.BaseURL),
+				zap.String("method", snap.Method),
+				zap.Int("response_status", snap.ResponseStatus),
+				zap.Int("operation_status", snap.OperationStatus))
 			b.items = append(b.items[:idx], b.items[idx+1:]...)
 			return true
 		}
@@ -289,6 +306,9 @@ func (b *auditFallbackBuffer) dropLowRiskOldestLocked() bool {
 	return false
 }
 
+// isLowRiskReadOnly2xx 判断快照是否为"低风险 + 只读 + HTTP/业务均成功"，用于缓冲满时的丢弃优先级。
+//
+// 新契约下 OperationStatus != 0 表示业务失败，不应被当作低风险可丢弃条目。
 func isLowRiskReadOnly2xx(snapshot *audit.AuditLogSnapshot) bool {
 	if snapshot == nil {
 		return false
@@ -302,7 +322,7 @@ func isLowRiskReadOnly2xx(snapshot *audit.AuditLogSnapshot) bool {
 	if snapshot.ResponseStatus != 0 && snapshot.ResponseStatus >= http.StatusBadRequest {
 		return false
 	}
-	if snapshot.OperationStatus >= http.StatusBadRequest {
+	if snapshot.OperationStatus != 0 {
 		return false
 	}
 	return true
@@ -472,4 +492,9 @@ func StopAuditLogQueueDrain(drainTimeout time.Duration) {
 func resetAuditFallbackBufferForTesting() {
 	fallbackBuffer.Stop(time.Second)
 	fallbackBuffer = newAuditFallbackBuffer()
+}
+
+// resetSampleCounterForTesting 在单元测试间重置采样计数器，避免测试间的计数串扰。
+func resetSampleCounterForTesting() {
+	atomic.StoreUint64(&auditSampleCounter, 0)
 }

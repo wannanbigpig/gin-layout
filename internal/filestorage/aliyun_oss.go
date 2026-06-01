@@ -137,13 +137,17 @@ func (d *AliyunOSSDriver) InitMultipartUpload(ctx context.Context, input Multipa
 
 func (d *AliyunOSSDriver) PresignMultipartPart(ctx context.Context, input MultipartPartInput) (MultipartPartResult, error) {
 	bucket := firstNonEmpty(input.Bucket, d.bucket)
+	ttl := input.TTL
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
 	result, err := d.client.Presign(ctx, &oss.UploadPartRequest{
 		Bucket:     oss.Ptr(bucket),
 		Key:        oss.Ptr(input.ObjectKey),
 		UploadId:   oss.Ptr(input.UploadID),
 		PartNumber: input.PartNumber,
 	}, func(opts *oss.PresignOptions) {
-		opts.Expires = 15 * time.Minute
+		opts.Expires = ttl
 	})
 	if err != nil {
 		return MultipartPartResult{}, err

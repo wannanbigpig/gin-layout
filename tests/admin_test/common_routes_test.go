@@ -13,7 +13,7 @@ func TestCommonUploadRequiresLogin(t *testing.T) {
 	body := `{}`
 	resp := anonymousPostRequest("/admin/v1/common/upload", &body)
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }

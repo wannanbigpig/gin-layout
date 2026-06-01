@@ -102,6 +102,7 @@ type UploadFileFolder struct {
 	Name        string `json:"name"`
 	LogicalPath string `json:"logical_path"`
 	Sort        int    `json:"sort"`
+	IsHidden    uint8  `json:"is_hidden"` // 是否隐藏 0否 1是
 	CreatedBy   uint   `json:"created_by"`
 	UpdatedBy   uint   `json:"updated_by"`
 }

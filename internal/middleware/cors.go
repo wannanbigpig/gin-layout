@@ -13,6 +13,19 @@ var builtInDefaultMethods = [...]string{
 	"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
 }
 
+// ValidateCORSConfig 校验 CORS 配置的合法性。
+// cors_origins 包含 "*" 且 cors_credentials 为 true 是安全风险（浏览器不允许通配符 origin + credentials），
+// 启动时应检测并告警。
+func ValidateCORSConfig(cfg *config.Conf) {
+	if cfg == nil {
+		return
+	}
+	if cfg.CorsCredentials && hasWildcardOrigin(cfg) {
+		panic("CORS 配置冲突：cors_origins 包含通配符 \"*\" 且 cors_credentials 为 true，" +
+			"浏览器不允许同时使用通配符 origin 和携带凭证，请修改配置")
+	}
+}
+
 func CorsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg := config.GetConfig()

@@ -7,6 +7,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// newEnforcerFromDBFunc 可替换的 Enforcer 构建函数，测试时注入 mock。
+var newEnforcerFromDBFunc = newEnforcerFromDB
+
 // execute 使用共享 Enforcer 或事务级 Enforcer 执行 Casbin 操作。
 func (e *CasbinEnforcer) execute(tx *gorm.DB, fn func(enforcer casbin.IEnforcer) error) error {
 	if tx == nil {
@@ -19,10 +22,22 @@ func (e *CasbinEnforcer) execute(tx *gorm.DB, fn func(enforcer casbin.IEnforcer)
 		return errors.New("请先通过 GORM 开启事务")
 	}
 
-	txEnforcer, err := newEnforcerFromDB(e.model, tx)
+	if e.txEnforcerCache != nil {
+		if cached, ok := e.txEnforcerCache[tx]; ok {
+			return fn(cached)
+		}
+	}
+
+	txEnforcer, err := newEnforcerFromDBFunc(e.model, tx)
 	if err != nil {
 		return err
 	}
+
+	if e.txEnforcerCache == nil {
+		e.txEnforcerCache = make(map[*gorm.DB]*casbin.Enforcer)
+	}
+	e.txEnforcerCache[tx] = txEnforcer
+
 	return fn(txEnforcer)
 }
 

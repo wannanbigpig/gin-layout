@@ -50,8 +50,8 @@ func TestCheckTokenWithoutAuthorization(t *testing.T) {
 
 	NewLoginController().CheckToken(ctx)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected http status 200, got %d", recorder.Code)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("expected http status 500, got %d", recorder.Code)
 	}
 	if !strings.Contains(recorder.Body.String(), `"code":500`) {
 		t.Fatalf("expected server error response, got %s", recorder.Body.String())
@@ -70,8 +70,8 @@ func TestLoginWithoutRequiredParams(t *testing.T) {
 
 	NewLoginController().Login(ctx)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected http status 200, got %d", recorder.Code)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected http status 400, got %d", recorder.Code)
 	}
 	if !strings.Contains(recorder.Body.String(), `"code":10000`) {
 		t.Fatalf("expected validation error response, got %s", recorder.Body.String())

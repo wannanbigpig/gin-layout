@@ -12,6 +12,7 @@ type FileResourceList struct {
 	IncludeSubfolder uint8  `form:"include_subfolder" json:"include_subfolder" binding:"omitempty,oneof=0 1"`
 	StorageDriver    string `form:"storage_driver" json:"storage_driver" binding:"omitempty,oneof=local aliyun_oss"`
 	StorageStatus    string `form:"storage_status" json:"storage_status" binding:"omitempty,oneof=stored delete_failed"`
+	IncludeHidden    *uint8 `form:"include_hidden" json:"include_hidden" binding:"omitempty,oneof=0 1"`
 	IsReferenced     *uint8 `form:"is_referenced" json:"is_referenced" binding:"omitempty,oneof=0 1"`
 	IsDeleted        *uint8 `form:"is_deleted" json:"is_deleted" binding:"omitempty,oneof=0 1"`
 	UID              uint   `form:"uid" json:"uid" binding:"omitempty,gt=0"`
@@ -87,6 +88,15 @@ type FileMove struct {
 
 func NewFileMoveForm() *FileMove {
 	return &FileMove{}
+}
+
+// FileFolderTree 文件目录树查询参数。
+type FileFolderTree struct {
+	IncludeHidden *uint8 `form:"include_hidden" json:"include_hidden" binding:"omitempty,oneof=0 1"`
+}
+
+func NewFileFolderTreeForm() *FileFolderTree {
+	return &FileFolderTree{}
 }
 
 type FileLocalUpload struct {

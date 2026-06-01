@@ -48,10 +48,10 @@ func adminOtherGroup(deps *ControllerDeps) RouteGroupDef {
 				},
 			},
 			{
-				Prefix:    "system/notification",
-				GroupCode: "notification",
+				Prefix:    "common",
+				GroupCode: "common_ws",
 				Routes: []RouteDef{
-					GET("ws", "消息 WebSocket", AuthModeNone, deps.Message.WS).WithDesc("通过 query token/access_token 建立消息推送连接"),
+					GET("ws", "通用实时连接 WebSocket", AuthModeNone, deps.Message.WS),
 				},
 			},
 		},
@@ -83,8 +83,8 @@ func dashboardGroup(deps *ControllerDeps) RouteGroupDef {
 		Prefix:    "dashboard",
 		GroupCode: "dashboard",
 		Routes: []RouteDef{
-			GET("overview", "仪表盘概览", AuthModeLogin, deps.Dashboard.Overview),
-			GET("statistics", "仪表盘统计", AuthModeLogin, deps.Dashboard.Statistics),
+			GET("overview", "仪表盘概览", AuthModeAuth, deps.Dashboard.Overview),
+			GET("statistics", "仪表盘统计", AuthModeAuth, deps.Dashboard.Statistics),
 		},
 	}
 }
@@ -96,6 +96,7 @@ func commonGroup(deps *ControllerDeps) RouteGroupDef {
 		GroupCode: "common",
 		Routes: []RouteDef{
 			POST("upload", "上传文件", AuthModeLogin, deps.Common.Upload),
+			POST("ws-ticket", "生成 WebSocket 临时票据", AuthModeLogin, deps.Message.GetWsTicket),
 		},
 	}
 }
@@ -288,6 +289,7 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					GET("unread-count", "系统消息未读数", AuthModeLogin, deps.Message.UnreadCount),
 					POST("read", "标记消息已读", AuthModeLogin, deps.Message.Read),
 					POST("read-all", "全部标记已读", AuthModeLogin, deps.Message.ReadAll),
+					POST("send", "发送系统通知", AuthModeAuth, deps.Message.Send),
 				},
 			},
 			{

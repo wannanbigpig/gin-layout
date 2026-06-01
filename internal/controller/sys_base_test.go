@@ -23,8 +23,8 @@ func TestApiErrMapsDBUninitializedToDependencyNotReady(t *testing.T) {
 
 	Api{}.Err(ctx, model.ErrDBUninitialized)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected http status 200, got %d", recorder.Code)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected http status 503, got %d", recorder.Code)
 	}
 	if !strings.Contains(recorder.Body.String(), `"code":10003`) {
 		t.Fatalf("expected dependency not ready response, got %s", recorder.Body.String())

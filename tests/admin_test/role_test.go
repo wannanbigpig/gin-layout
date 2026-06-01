@@ -25,7 +25,7 @@ func TestRoleListWithAuthorization(t *testing.T) {
 func TestRoleListRequiresLogin(t *testing.T) {
 	resp := anonymousGetRequest("/admin/v1/role/list", &url.Values{"page": {"1"}, "per_page": {"5"}})
 
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }
@@ -46,14 +46,14 @@ func TestRoleProtectedRoutesRequireLogin(t *testing.T) {
 			body := tc.body
 			resp := anonymousPostRequest(tc.route, &body)
 
-			assert.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			result := decodeResult(t, resp)
 			assert.Equal(t, e.NotLogin, result.Code)
 		})
 	}
 
 	resp := anonymousGetRequest("/admin/v1/role/detail", &url.Values{"id": {"1"}})
-	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, http.StatusUnauthorized, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.NotLogin, result.Code)
 }

@@ -33,7 +33,7 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	routes := CollectRouteMeta(AppRouteTree())
 
 	dashboardStatisticsCode := utils.MD5(http.MethodGet + "_/admin/v1/dashboard/statistics")
-	if route, ok := routes[dashboardStatisticsCode]; !ok || route.Auth != AuthModeLogin {
+	if route, ok := routes[dashboardStatisticsCode]; !ok || route.Auth != AuthModeAuth {
 		t.Fatalf("missing or invalid dashboard statistics route: %#v", route)
 	}
 
@@ -102,7 +102,7 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 		t.Fatalf("missing or invalid notification list route: %#v", route)
 	}
 
-	notificationWSCode := utils.MD5(http.MethodGet + "_/admin/v1/system/notification/ws")
+	notificationWSCode := utils.MD5(http.MethodGet + "_/admin/v1/common/ws")
 	if route, ok := routes[notificationWSCode]; !ok || route.Auth != AuthModeNone {
 		t.Fatalf("missing or invalid notification ws route: %#v", route)
 	}
@@ -129,7 +129,7 @@ func TestSetRoutersRegistersCriticalRoutes(t *testing.T) {
 		http.MethodGet + " /admin/v1/department/list",
 		http.MethodGet + " /admin/v1/log/request/list",
 		http.MethodGet + " /admin/v1/log/login/list",
-		http.MethodGet + " /admin/v1/system/notification/ws",
+		http.MethodGet + " /admin/v1/common/ws",
 		http.MethodGet + " /admin/v1/system/notification/list",
 		http.MethodGet + " /admin/v1/system/notification/unread-count",
 		http.MethodPost + " /admin/v1/system/notification/read",
@@ -163,8 +163,8 @@ func TestLoginRouteReturnsDependencyNotReadyWhenMysqlUnavailable(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	engine.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
 	}
 
 	var result routeResult

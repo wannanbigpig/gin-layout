@@ -33,13 +33,17 @@ import (
 	fileutils "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
-func (s *FileResourceService) FolderTree() ([]*resources.FileFolderResources, error) {
+func (s *FileResourceService) FolderTree(includeHidden bool) ([]*resources.FileFolderResources, error) {
 	db, err := s.dbOrDefault()
 	if err != nil {
 		return nil, err
 	}
+	query := db.Order("sort ASC, id ASC")
+	if !includeHidden {
+		query = query.Where("is_hidden = 0")
+	}
 	var folders []*model.UploadFileFolder
-	if err := db.Order("sort ASC, id ASC").Find(&folders).Error; err != nil {
+	if err := query.Find(&folders).Error; err != nil {
 		return nil, err
 	}
 	stats, err := s.folderStats()
@@ -1563,36 +1567,28 @@ func isMimeCompatible(actual, expected string) bool {
 	return false
 }
 
+// SystemTempFolderName 系统临时文件夹常量，对前端隐藏。
+const SystemTempFolderName = "system_temp"
+
 func (s *FileResourceService) ensureExportTempFolder(ctx context.Context) (uint, error) {
 	db, err := s.dbOrDefault()
 	if err != nil {
 		return 0, err
 	}
 
-	defaultFolderName := "导出"
-	tempFolderName := "临时文件"
-	cfgSvc := NewStorageConfigService()
-	if settings, err := cfgSvc.Get(false); err == nil {
-		if strings.TrimSpace(settings.Config.ExportDefaultFolder) != "" {
-			defaultFolderName = strings.TrimSpace(settings.Config.ExportDefaultFolder)
-		}
-		if strings.TrimSpace(settings.Config.ExportTempFolder) != "" {
-			tempFolderName = strings.TrimSpace(settings.Config.ExportTempFolder)
-		}
-	}
-
-	var parentFolder model.UploadFileFolder
-	err = db.Where("parent_id = 0 AND name = ? AND deleted_at = 0", defaultFolderName).First(&parentFolder).Error
+	var folder model.UploadFileFolder
+	err = db.Where("parent_id = 0 AND name = ?", SystemTempFolderName).First(&folder).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			parentFolder = model.UploadFileFolder{
+			folder = model.UploadFileFolder{
 				ParentID:    0,
-				Name:        defaultFolderName,
-				LogicalPath: "/" + defaultFolderName,
+				Name:        SystemTempFolderName,
+				LogicalPath: "/" + SystemTempFolderName,
+				IsHidden:    1,
 				CreatedBy:   0,
 				UpdatedBy:   0,
 			}
-			if err := db.Create(&parentFolder).Error; err != nil {
+			if err := db.Create(&folder).Error; err != nil {
 				return 0, err
 			}
 		} else {
@@ -1600,24 +1596,12 @@ func (s *FileResourceService) ensureExportTempFolder(ctx context.Context) (uint,
 		}
 	}
 
-	var tempFolder model.UploadFileFolder
-	err = db.Where("parent_id = ? AND name = ? AND deleted_at = 0", parentFolder.ID, tempFolderName).First(&tempFolder).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			tempFolder = model.UploadFileFolder{
-				ParentID:    parentFolder.ID,
-				Name:        tempFolderName,
-				LogicalPath: joinLogicalPath(parentFolder.LogicalPath, tempFolderName),
-				CreatedBy:   0,
-				UpdatedBy:   0,
-			}
-			if err := db.Create(&tempFolder).Error; err != nil {
-				return 0, err
-			}
-		} else {
+	// 自愈：历史上可能存在同名但 is_hidden=0 的目录
+	if folder.IsHidden == 0 {
+		if err := db.Model(&model.UploadFileFolder{}).Where("id = ?", folder.ID).Update("is_hidden", 1).Error; err != nil {
 			return 0, err
 		}
 	}
 
-	return tempFolder.ID, nil
+	return folder.ID, nil
 }
