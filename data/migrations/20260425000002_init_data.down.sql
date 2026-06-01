@@ -3,9 +3,9 @@ BEGIN;
 -- 回滚系统数据
 
 -- 删除任务中心/系统管理新增菜单与映射
-DELETE FROM `role_menu_map` WHERE `menu_id` BETWEEN 42 AND 76;
-DELETE FROM `menu_i18n` WHERE `menu_id` BETWEEN 42 AND 76;
-DELETE FROM `menu` WHERE `id` BETWEEN 42 AND 76;
+DELETE FROM `role_menu_map` WHERE `menu_id` BETWEEN 42 AND 82;
+DELETE FROM `menu_i18n` WHERE `menu_id` BETWEEN 42 AND 82;
+DELETE FROM `menu` WHERE `id` BETWEEN 42 AND 82;
 DELETE FROM `api_group` WHERE `code` IN ('system', 'sysConfig', 'sysDict', 'task', 'file', 'session');
 
 -- 删除系统参数/字典初始化数据
