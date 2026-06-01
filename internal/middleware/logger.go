@@ -20,8 +20,9 @@ var skipLogPaths = map[string]struct{}{
 }
 
 // websocketLoggingPaths 标识在审计日志中应识别为 WebSocket 长连接的路径。
+// 路径须与 internal/routers/admin_router.go 中 common 组注册的 "ws" 路由保持一致。
 var websocketLoggingPaths = map[string]struct{}{
-	"/admin/v1/system/notification/ws": {},
+	"/admin/v1/common/ws": {},
 }
 
 // CustomLogger 自定义日志中间件

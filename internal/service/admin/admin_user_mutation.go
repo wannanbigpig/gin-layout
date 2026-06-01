@@ -172,7 +172,9 @@ func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, pa
 	}
 	if params.CountryCode != nil {
 		adminUserModel.CountryCode = *params.CountryCode
-	} else if params.PhoneNumber != nil {
+	} else if params.PhoneNumber != nil && adminUserModel.CountryCode == "" {
+		// 仅在记录本身尚无国家区号时才默认中国；否则保留既有区号，
+		// 避免「只改手机号、未传 country_code」时把非中国区号误改成 +86。
 		adminUserModel.CountryCode = global.ChinaCountryCode
 	}
 	if params.Email != nil {

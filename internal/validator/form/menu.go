@@ -12,7 +12,7 @@ type menuPayload struct {
 	IsShow          uint8             `form:"is_show" json:"is_show" label:"是否显示" binding:"omitempty,oneof=0 1"`              // 0 否 1 是
 	IsAuth          uint8             `form:"is_auth" json:"is_auth" label:"是否需要授权" binding:"omitempty,oneof=0 1"`            // 0 否 1 是
 	IsNewWindow     uint8             `form:"is_new_window" json:"is_new_window" label:"新窗口打开" binding:"omitempty,oneof=0 1"` // 0 否 1 是
-	Sort            uint              `form:"sort" json:"sort" label:"排序" binding:"required"`
+	Sort            uint              `form:"sort" json:"sort" label:"排序" binding:"omitempty"`
 	Type            uint8             `form:"type" json:"type" label:"菜单类型" binding:"required,oneof=1 2 3"` // 1 目录 2 菜单 3 按钮
 	Pid             uint              `form:"pid" json:"pid" label:"上级菜单" binding:"omitempty"`
 	Description     string            `form:"description" json:"description" label:"描述" binding:"omitempty"`

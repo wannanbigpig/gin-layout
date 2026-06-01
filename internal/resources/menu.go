@@ -176,12 +176,27 @@ func BuildMenuTree(data []*model.Menu, rootID uint, titleByMenuID map[uint]strin
 		return []*MenuCollectionResources{}
 	}
 
+	present := make(map[uint]struct{}, len(data))
+	for _, item := range data {
+		if item != nil {
+			present[item.ID] = struct{}{}
+		}
+	}
+
 	parentMap := make(map[uint][]*model.Menu)
 	for _, item := range data {
 		if item == nil {
 			continue
 		}
-		parentMap[item.Pid] = append(parentMap[item.Pid], item)
+		pid := item.Pid
+		// 父节点不在结果集中（如父级被状态筛选过滤掉）时上提为根，
+		// 避免「父禁用、子启用」的菜单因父链断裂而从树中消失。
+		if pid != rootID {
+			if _, ok := present[pid]; !ok {
+				pid = rootID
+			}
+		}
+		parentMap[pid] = append(parentMap[pid], item)
 	}
 
 	var build func(parentID uint) []*MenuCollectionResources

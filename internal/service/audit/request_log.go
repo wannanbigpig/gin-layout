@@ -25,6 +25,7 @@ func NewRequestLogService() *RequestLogService {
 // List 分页查询请求日志列表
 func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collection {
 	query := buildRequestLogQuery(requestLogQueryInput{
+		RequestID:          params.RequestID,
 		OperatorID:         params.OperatorID,
 		OperatorAccount:    params.OperatorAccount,
 		OperationStatus:    params.OperationStatus,
@@ -106,6 +107,7 @@ func (s *RequestLogService) Detail(id uint) (any, error) {
 }
 
 type requestLogQueryInput struct {
+	RequestID          string
 	OperatorID         uint
 	OperatorAccount    string
 	OperationStatus    *int
@@ -122,9 +124,10 @@ type requestLogQueryInput struct {
 
 func buildRequestLogQuery(input requestLogQueryInput) *logListQuery {
 	query := newLogListQuery().
+		addEq("request_id", input.RequestID).
 		addEq("operator_id", uintFilterValue(input.OperatorID)).
 		addLike("operator_account", input.OperatorAccount).
-		addEq("base_url", input.BaseURL).
+		addLike("base_url", input.BaseURL).
 		addEq("request_kind", input.RequestKind).
 		addEq("execution_time_scope", input.ExecutionTimeScope).
 		addEq("method", input.Method).

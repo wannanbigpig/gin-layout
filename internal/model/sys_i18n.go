@@ -288,6 +288,34 @@ func (m *SysDictItemI18n) LocalizedLabelMapByItemIDs(itemIDs []uint, localePrior
 	return result, nil
 }
 
+// LocaleLabelMapsByItemIDs 批量返回每个字典项的全语言标签映射（不做语言优先级裁剪），用于编辑回填。
+func (m *SysDictItemI18n) LocaleLabelMapsByItemIDs(itemIDs []uint) (map[uint]map[string]string, error) {
+	result := make(map[uint]map[string]string, len(itemIDs))
+	if len(itemIDs) == 0 {
+		return result, nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var rows []SysDictItemI18n
+	if err := db.Where("dict_item_id IN ?", itemIDs).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		locale := strings.TrimSpace(row.Locale)
+		label := strings.TrimSpace(row.Label)
+		if locale == "" || label == "" {
+			continue
+		}
+		if _, ok := result[row.DictItemID]; !ok {
+			result[row.DictItemID] = make(map[string]string)
+		}
+		result[row.DictItemID][locale] = label
+	}
+	return result, nil
+}
+
 func (m *SysDictItemI18n) LocaleLabelMapByItemID(dictItemID uint) (map[string]string, error) {
 	result := make(map[string]string)
 	if dictItemID == 0 {

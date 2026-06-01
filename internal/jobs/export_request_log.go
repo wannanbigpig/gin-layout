@@ -27,6 +27,7 @@ const (
 type ExportRequestLogPayload struct {
 	TaskRunID          uint   `json:"task_run_id"`
 	TriggerUserID      uint   `json:"trigger_user_id"`
+	RequestID          string `json:"request_id"`
 	OperatorID         uint   `json:"operator_id"`
 	OperatorAccount    string `json:"operator_account"`
 	OperationStatus    *int   `json:"operation_status"`
@@ -49,6 +50,7 @@ func handleExportRequestLog(ctx context.Context, payload ExportRequestLogPayload
 	exportService := service.NewExportCenterService()
 
 	params := &form.RequestLogExport{
+		RequestID:          payload.RequestID,
 		OperatorID:         payload.OperatorID,
 		OperatorAccount:    payload.OperatorAccount,
 		OperationStatus:    payload.OperationStatus,

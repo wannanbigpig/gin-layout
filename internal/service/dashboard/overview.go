@@ -15,7 +15,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/service"
 )
 
-const notificationWSRequestPath = "/admin/v1/system/notification/ws"
+const notificationWSRequestPath = "/admin/v1/common/ws"
 
 type Metric struct {
 	Key     string  `json:"key"`

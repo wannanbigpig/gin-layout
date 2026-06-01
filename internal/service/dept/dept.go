@@ -37,11 +37,17 @@ func (s *DeptService) List(params *form.ListDept) any {
 	depts, err := model.ListE(deptModel, condition, args, model.ListOptionalParams{
 		OrderBy: "sort desc, id desc",
 	})
+	transformer := resources.NewDeptTreeTransformer()
 	if err != nil {
-		return resources.NewDeptTreeTransformer().BuildTreeByNode(nil, 0)
+		return transformer.BuildTreeByNode(nil, 0)
 	}
 
-	return resources.NewDeptTreeTransformer().BuildTreeByNode(depts, 0)
+	// 命中筛选条件时返回扁平结果：按条件过滤后再从 root=0 建树会丢失非顶层匹配项。
+	if params.Name != "" || params.Pid != nil {
+		return transformer.BuildFlat(depts)
+	}
+
+	return transformer.BuildTreeByNode(depts, 0)
 }
 
 func (s *DeptService) buildListCondition(params *form.ListDept) (string, []any) {

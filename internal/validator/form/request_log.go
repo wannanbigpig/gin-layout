@@ -3,6 +3,7 @@ package form
 // RequestLogList 请求日志列表查询表单
 type RequestLogList struct {
 	Paginate
+	RequestID          string `form:"request_id" json:"request_id" binding:"omitempty,max=64"`                                                   // 请求ID（精确匹配）
 	OperatorID         uint   `form:"operator_id" json:"operator_id" binding:"omitempty"`                                                        // 操作ID（用户ID）
 	OperatorAccount    string `form:"operator_account" json:"operator_account" binding:"omitempty"`                                              // 操作账号
 	OperationStatus    *int   `form:"operation_status" json:"operation_status" binding:"omitempty,oneof=0 1"`                                    // 操作状态：0=成功，1=失败
@@ -25,6 +26,7 @@ func NewRequestLogListQuery() *RequestLogList {
 
 // RequestLogExport 请求日志导出查询参数。
 type RequestLogExport struct {
+	RequestID          string `form:"request_id" json:"request_id" binding:"omitempty,max=64"`
 	OperatorID         uint   `form:"operator_id" json:"operator_id" binding:"omitempty"`
 	OperatorAccount    string `form:"operator_account" json:"operator_account" binding:"omitempty"`
 	OperationStatus    *int   `form:"operation_status" json:"operation_status" binding:"omitempty,oneof=0 1"`

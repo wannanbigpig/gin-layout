@@ -50,6 +50,7 @@ func (s *RoleService) List(params *form.RoleList) interface{} {
 func (s *RoleService) buildListCondition(params *form.RoleList) (string, []any) {
 	return query_builder.New().
 		AddLike("name", params.Name).
+		AddLike("code", params.Code).
 		AddEq("status", params.Status).
 		AddEq("pid", params.Pid).
 		Build()

@@ -56,6 +56,7 @@ func (api RequestLogController) Export(c *gin.Context) {
 	}
 
 	payload := map[string]any{
+		"request_id":           params.RequestID,
 		"operator_id":          params.OperatorID,
 		"operator_account":     params.OperatorAccount,
 		"operation_status":     params.OperationStatus,

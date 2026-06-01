@@ -12,6 +12,7 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	"go.uber.org/zap"
@@ -29,11 +30,11 @@ func (s *LoginService) ListSessions(params *form.SessionList) *resources.Collect
 	if params.UID > 0 {
 		query.AddEq("uid", params.UID)
 	}
-	if params.StartTime != "" {
-		query.AddCondition("created_at >= ?", params.StartTime)
+	if t, ok := utils.ParseTimeBoundary(params.StartTime); ok {
+		query.AddCondition("created_at >= ?", t)
 	}
-	if params.EndTime != "" {
-		query.AddCondition("created_at <= ?", params.EndTime)
+	if t, ok := utils.ParseTimeBoundary(params.EndTime); ok {
+		query.AddCondition("created_at <= ?", t)
 	}
 	condition, args := query.Build()
 

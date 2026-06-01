@@ -1,6 +1,9 @@
 package audit
 
-import "github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
+import (
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+)
 
 type logListQuery struct {
 	*query_builder.QueryBuilder
@@ -26,11 +29,11 @@ func (q *logListQuery) addCondition(condition string, args ...any) *logListQuery
 }
 
 func (q *logListQuery) addCreatedAtRange(startTime, endTime string) *logListQuery {
-	if startTime != "" {
-		q.QueryBuilder.AddCondition("created_at >= ?", startTime)
+	if t, ok := utils.ParseTimeBoundary(startTime); ok {
+		q.QueryBuilder.AddCondition("created_at >= ?", t)
 	}
-	if endTime != "" {
-		q.QueryBuilder.AddCondition("created_at <= ?", endTime)
+	if t, ok := utils.ParseTimeBoundary(endTime); ok {
+		q.QueryBuilder.AddCondition("created_at <= ?", t)
 	}
 	return q
 }

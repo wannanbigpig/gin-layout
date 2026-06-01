@@ -11,6 +11,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -69,11 +70,11 @@ func (s *FileResourceService) generateFileListExportCSV(params *form.FileResourc
 			query.AddCondition("NOT EXISTS (SELECT 1 FROM upload_file_references WHERE upload_file_references.file_id = upload_files.id)")
 		}
 	}
-	if params.StartTime != "" {
-		query.AddCondition("created_at >= ?", params.StartTime)
+	if t, ok := utils.ParseTimeBoundary(params.StartTime); ok {
+		query.AddCondition("created_at >= ?", t)
 	}
-	if params.EndTime != "" {
-		query.AddCondition("created_at <= ?", params.EndTime)
+	if t, ok := utils.ParseTimeBoundary(params.EndTime); ok {
+		query.AddCondition("created_at <= ?", t)
 	}
 	condition, args := query.Build()
 

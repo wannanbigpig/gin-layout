@@ -290,11 +290,16 @@ func (s *SysDictService) fillLocalizedItemLabels(items []*model.SysDictItem, loc
 	if err != nil {
 		return
 	}
+	// 同步带上全语言映射，供前端编辑回填，避免按当前语言的单一 label 重建 label_i18n 而覆盖其它语言翻译。
+	fullMap, _ := model.NewSysDictItemI18n().LocaleLabelMapsByItemIDs(ids)
 	for _, item := range items {
 		if item == nil {
 			continue
 		}
 		item.Label = labelMap[item.ID]
+		if fullMap != nil {
+			item.LabelI18n = fullMap[item.ID]
+		}
 	}
 }
 

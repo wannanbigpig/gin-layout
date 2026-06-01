@@ -1,6 +1,9 @@
 package taskcenter
 
-import "github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
+import (
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+)
 
 type listQuery struct {
 	*query_builder.QueryBuilder
@@ -21,11 +24,11 @@ func (q *listQuery) addLike(field, value string) *listQuery {
 }
 
 func (q *listQuery) addCreatedAtRange(startTime, endTime string) *listQuery {
-	if startTime != "" {
-		q.QueryBuilder.AddCondition("created_at >= ?", startTime)
+	if t, ok := utils.ParseTimeBoundary(startTime); ok {
+		q.QueryBuilder.AddCondition("created_at >= ?", t)
 	}
-	if endTime != "" {
-		q.QueryBuilder.AddCondition("created_at <= ?", endTime)
+	if t, ok := utils.ParseTimeBoundary(endTime); ok {
+		q.QueryBuilder.AddCondition("created_at <= ?", t)
 	}
 	return q
 }

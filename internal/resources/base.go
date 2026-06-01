@@ -135,6 +135,17 @@ func (tr TreeResource[T, R]) BuildTreeByNode(data []T, rootID uint) []R {
 	return build(rootID)
 }
 
+// BuildFlat 将节点转换为扁平资源列表（不构建父子层级）。
+// 用于带筛选条件的列表场景：按条件过滤后若仍强行从 root 建树，
+// 非根匹配项会因父链不在结果集中而被丢弃，改为扁平返回可确保命中项都展示。
+func (tr TreeResource[T, R]) BuildFlat(data []T) []R {
+	list := make([]R, 0, len(data))
+	for _, item := range data {
+		list = append(list, tr.ToStruct(item))
+	}
+	return list
+}
+
 // toGenericStruct 复制模型字段并补充自定义资源字段。
 func toGenericStruct[T any, R any](data T, newFunc func() R) (R, error) {
 	var resource = newFunc()

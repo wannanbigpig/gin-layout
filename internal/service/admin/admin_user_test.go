@@ -114,9 +114,8 @@ func TestAdminUserListOptionsDepartmentSelectFields(t *testing.T) {
 func TestApplyUpdateFieldsDefaultsCountryCodeWhenPhoneChanges(t *testing.T) {
 	service := NewAdminUserService()
 	phoneNumber := "13800138000"
-	adminUserModel := &model.AdminUser{
-		CountryCode: "+1",
-	}
+	// 记录本身尚无国家区号：仅改手机号时默认中国区号。
+	adminUserModel := &model.AdminUser{}
 
 	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
 		Id:          1,
@@ -129,6 +128,29 @@ func TestApplyUpdateFieldsDefaultsCountryCodeWhenPhoneChanges(t *testing.T) {
 		t.Fatalf("expected default country code %q, got %q", global.ChinaCountryCode, adminUserModel.CountryCode)
 	}
 	if adminUserModel.FullPhoneNumber != global.ChinaCountryCode+phoneNumber {
+		t.Fatalf("unexpected full phone number: %q", adminUserModel.FullPhoneNumber)
+	}
+}
+
+func TestApplyUpdateFieldsPreservesExistingCountryCodeWhenPhoneChanges(t *testing.T) {
+	service := NewAdminUserService()
+	phoneNumber := "13800138000"
+	// 记录已有非中国区号：仅改手机号、未传 country_code 时应保留既有区号，而不是被改成中国。
+	adminUserModel := &model.AdminUser{
+		CountryCode: "+1",
+	}
+
+	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
+		Id:          1,
+		PhoneNumber: &phoneNumber,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if adminUserModel.CountryCode != "+1" {
+		t.Fatalf("expected preserved country code %q, got %q", "+1", adminUserModel.CountryCode)
+	}
+	if adminUserModel.FullPhoneNumber != "+1"+phoneNumber {
 		t.Fatalf("unexpected full phone number: %q", adminUserModel.FullPhoneNumber)
 	}
 }

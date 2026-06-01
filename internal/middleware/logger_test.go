@@ -225,7 +225,7 @@ func TestBuildRequestAuditLogSnapshotMarksNotificationWSAsWebSocket(t *testing.T
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/system/notification/ws?access_token=demo", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/common/ws?access_token=demo", nil)
 	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-2*time.Second))
 	ctx.Set(global.ContextKeyRequestID, "req-ws")
 

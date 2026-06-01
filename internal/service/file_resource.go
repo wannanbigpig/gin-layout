@@ -13,6 +13,7 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -137,11 +138,11 @@ func (s *FileResourceService) List(params *form.FileResourceList) *resources.Col
 			query.AddCondition("NOT EXISTS (SELECT 1 FROM upload_file_references WHERE upload_file_references.file_id = upload_files.id)")
 		}
 	}
-	if params.StartTime != "" {
-		query.AddCondition("created_at >= ?", params.StartTime)
+	if t, ok := utils.ParseTimeBoundary(params.StartTime); ok {
+		query.AddCondition("created_at >= ?", t)
 	}
-	if params.EndTime != "" {
-		query.AddCondition("created_at <= ?", params.EndTime)
+	if t, ok := utils.ParseTimeBoundary(params.EndTime); ok {
+		query.AddCondition("created_at <= ?", t)
 	}
 	if params.IncludeHidden == nil || *params.IncludeHidden != global.Yes {
 		query.AddCondition("NOT EXISTS (SELECT 1 FROM upload_file_folders WHERE upload_file_folders.id = upload_files.folder_id AND upload_file_folders.is_hidden = 1)")
