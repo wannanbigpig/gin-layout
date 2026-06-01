@@ -51,6 +51,15 @@ func NewAdminUserListQuery() *AdminUserList {
 	return &AdminUserList{}
 }
 
+// AdminUserOptions 管理员选择器查询：按账号/昵称模糊搜索，供下拉远程搜索使用。
+type AdminUserOptions struct {
+	Keyword string `form:"keyword" json:"keyword" binding:"omitempty,max=64"`
+}
+
+func NewAdminUserOptionsQuery() *AdminUserOptions {
+	return &AdminUserOptions{}
+}
+
 type UpdateProfile struct {
 	Nickname    *string `form:"nickname" json:"nickname" label:"昵称" binding:"omitempty"`
 	Password    *string `form:"password" json:"password" label:"密码" binding:"omitempty,min=6,max=32"`

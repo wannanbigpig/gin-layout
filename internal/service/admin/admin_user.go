@@ -137,6 +137,25 @@ func (s *AdminUserService) List(params *form.AdminUserList) *resources.Collectio
 	return resources.NewAdminUserTransformer().ToCollection(params.Page, params.PerPage, total, collection)
 }
 
+// adminUserOptionsLimit 选择器远程搜索返回的最大条数。
+const adminUserOptionsLimit = 20
+
+// Options 按账号/昵称模糊搜索管理员，供前端用户选择器远程搜索（仅返回最小字段，限量返回）。
+func (s *AdminUserService) Options(keyword string) []resources.AdminUserOptionResources {
+	conditionStr, args := query_builder.New().
+		AddKeywordLike(keyword, "username", "nickname").
+		Build()
+	_, collection, err := model.ListPageE(model.NewAdminUsers(), 1, adminUserOptionsLimit, conditionStr, args, model.ListOptionalParams{
+		SelectFields: []string{"id", "username", "nickname"},
+		OrderBy:      "id asc",
+	})
+	if err != nil {
+		log.Logger.Error("查询管理员选项失败", zap.Error(err))
+		return []resources.AdminUserOptionResources{}
+	}
+	return resources.ToAdminUserOptions(collection)
+}
+
 // adminUserListOptions 返回管理员列表查询选项。
 // 列表页仅使用部门 id/name/pid，避免 Preload 全字段带来额外 IO。
 func (s *AdminUserService) adminUserListOptions() model.ListOptionalParams {

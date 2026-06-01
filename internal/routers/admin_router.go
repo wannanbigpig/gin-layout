@@ -136,6 +136,7 @@ func adminUserGroup(deps *ControllerDeps) RouteGroupDef {
 
 			// 用户管理（AuthModeAuth：需要权限）
 			GET("list", "管理员列表", AuthModeAuth, deps.AdminUser.List),
+			GET("options", "管理员选项", AuthModeAuth, deps.AdminUser.Options).WithDesc("按账号/昵称搜索管理员，供下拉选择器使用"),
 			GET("detail", "管理员详情", AuthModeAuth, deps.AdminUser.Detail),
 			GET("get-full-phone", "获取完整手机号", AuthModeAuth, deps.AdminUser.GetFullPhone).WithDesc("脱敏前完整手机号"),
 			GET("get-full-email", "获取完整邮箱", AuthModeAuth, deps.AdminUser.GetFullEmail).WithDesc("脱敏前完整邮箱"),

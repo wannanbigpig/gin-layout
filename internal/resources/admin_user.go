@@ -117,3 +117,26 @@ func (AdminUserTransformer) ToCollection(page, perPage int, total int64, data []
 
 	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
 }
+
+// AdminUserOptionResources 管理员选择器选项，仅暴露下拉所需的最小字段。
+type AdminUserOptionResources struct {
+	ID       uint   `json:"id"`
+	Username string `json:"username"`
+	Nickname string `json:"nickname"`
+}
+
+// ToAdminUserOptions 将管理员模型集合转换为选择器选项列表。
+func ToAdminUserOptions(users []*model.AdminUser) []AdminUserOptionResources {
+	options := make([]AdminUserOptionResources, 0, len(users))
+	for _, u := range users {
+		if u == nil {
+			continue
+		}
+		options = append(options, AdminUserOptionResources{
+			ID:       u.ID,
+			Username: u.Username,
+			Nickname: u.Nickname,
+		})
+	}
+	return options
+}

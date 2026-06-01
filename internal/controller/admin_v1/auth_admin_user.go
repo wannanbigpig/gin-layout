@@ -103,6 +103,17 @@ func (api AdminUserController) List(c *gin.Context) {
 	api.Success(c, result)
 }
 
+// Options 管理员选择器：按账号/昵称模糊搜索，供前端下拉远程搜索（如请求日志按操作人筛选）。
+func (api AdminUserController) Options(c *gin.Context) {
+	params := form.NewAdminUserOptionsQuery()
+	if err := validator.CheckQueryParams(c, &params); err != nil {
+		return
+	}
+
+	result := admin.NewAdminUserService().Options(params.Keyword)
+	api.Success(c, result)
+}
+
 // Delete 删除管理员
 func (api AdminUserController) Delete(c *gin.Context) {
 	params := form.NewIdForm()
