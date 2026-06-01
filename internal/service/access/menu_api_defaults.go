@@ -56,6 +56,7 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "api:list", Route: "/admin/v1/permission/list", Method: "GET"},
 	{MenuCode: "adminLoginLog:list", Route: "/admin/v1/log/login/list", Method: "GET"},
 	{MenuCode: "requestLog:list", Route: "/admin/v1/log/request/list", Method: "GET"},
+	{MenuCode: "requestLog:list", Route: "/admin/v1/admin-user/options", Method: "GET"},
 	{MenuCode: "requestLog:export", Route: "/admin/v1/log/request/export", Method: "POST"},
 	{MenuCode: "requestLog:maskConfig", Route: "/admin/v1/log/request/mask-config", Method: "GET"},
 	{MenuCode: "requestLog:maskConfig", Route: "/admin/v1/log/request/mask-config", Method: "POST"},
