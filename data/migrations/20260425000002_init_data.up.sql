@@ -116,7 +116,6 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (76, 'ant-design:plus-outlined', 'file:create', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 95, 3, 63, 3, '0,42,63', 0, '', NOW(), NOW(), 0),
 (78, 'ep:data-line', 'dashboard:overview', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 1, 2, '0,1', 0, '', NOW(), NOW(), 0),
 (79, 'ep:trend-charts', 'dashboard:statistics', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 1, 2, '0,1', 0, '', NOW(), NOW(), 0),
-(80, 'ep:bell', '', 'notification', '/system/notification', '', 'NotificationCenter', 'system:notification', '', '', 0.00, 1, 1, 0, 0, 0, 60, 2, 42, 2, '0,42', 0, '', NOW(), NOW(), 0),
 (81, 'ep:message', '', 'notification-manage', '/system/notification-manage', '', 'NotificationManage', 'system:notificationManage', '', '', 0.00, 1, 1, 1, 0, 0, 55, 2, 42, 2, '0,42', 1, '', NOW(), NOW(), 0),
 (82, 'ep:promotion', 'notification:send', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 81, 3, '0,42,81', 0, '', NOW(), NOW(), 0);
 
@@ -199,7 +198,6 @@ SELECT `id`,
            WHEN 76 THEN '新增'
            WHEN 78 THEN '仪表盘概览'
            WHEN 79 THEN '仪表盘统计'
-           WHEN 80 THEN '通知中心'
            WHEN 81 THEN '通知管理'
            WHEN 82 THEN '发送通知'
            ELSE ''
@@ -288,7 +286,6 @@ SELECT `id`,
            WHEN 76 THEN 'Create'
            WHEN 78 THEN 'Dashboard Overview'
            WHEN 79 THEN 'Dashboard Statistics'
-           WHEN 80 THEN 'Notification Center'
            WHEN 81 THEN 'Notification Management'
            WHEN 82 THEN 'Send Notification'
            ELSE ''
