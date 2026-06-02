@@ -310,11 +310,7 @@ func (api FileResourceController) UploadCredentialBatch(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	if isSSERequest(c) {
-		api.streamUploadCredentialBatch(c, params)
-		return
-	}
-	result, err := service.NewFileResourceService().UploadCredentialBatch(params, nil)
+	result, err := service.NewFileResourceService().UploadCredentialBatch(params)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -340,11 +336,7 @@ func (api FileResourceController) UploadCompleteBatch(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	if isSSERequest(c) {
-		api.streamUploadCompleteBatch(c, params, api.GetCurrentUserID(c))
-		return
-	}
-	result, err := service.NewFileResourceService().CompleteDirectUploadBatch(params, api.GetCurrentUserID(c), nil)
+	result, err := service.NewFileResourceService().CompleteDirectUploadBatch(params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return

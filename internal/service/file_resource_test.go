@@ -423,7 +423,7 @@ func TestFileResourceUploadCredentialBatchReturnsPerItemResults(t *testing.T) {
 			{ClientID: "reuse", OriginName: "existing.txt", Size: 12, MimeType: "text/plain", Hash: hash},
 			{ClientID: "fresh", OriginName: "fresh.txt", Size: 1, MimeType: "text/plain", Hash: strings.Repeat("c", 64)},
 		},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("upload credential batch failed: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestFileResourceCompleteDirectUploadBatchReturnsPerItemResults(t *testing.T
 			{ClientID: "ok", Reuse: true, FileObjectID: object.ID, OriginName: "reuse.txt"},
 			{ClientID: "bad", Reuse: true, FileObjectID: object.ID, OriginName: "reuse.pdf", FileType: "pdf,word"},
 		},
-	}, 1, nil)
+	}, 1)
 	if err != nil {
 		t.Fatalf("direct upload complete batch failed: %v", err)
 	}

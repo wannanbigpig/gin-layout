@@ -153,9 +153,6 @@ func resolveAuditRequestKind(c *gin.Context) string {
 	if _, ok := websocketLoggingPaths[path]; ok {
 		return model.RequestKindWebSocket
 	}
-	if c.Query("stream") == "1" || strings.Contains(c.GetHeader("Accept"), "text/event-stream") {
-		return model.RequestKindSSE
-	}
 	return model.RequestKindHTTP
 }
 
@@ -183,11 +180,6 @@ func calculateExecutionTimeMeta(c *gin.Context, requestKind string) (float64, st
 	switch requestKind {
 	case model.RequestKindWebSocket:
 		scope = model.ExecutionTimeScopeConnection
-		unit = model.ExecutionTimeUnitSeconds
-		divisor = 1000000000.0
-		maxVal = requestLogExecutionTimeMaxMs / 1000.0
-	case model.RequestKindSSE:
-		scope = model.ExecutionTimeScopeStream
 		unit = model.ExecutionTimeUnitSeconds
 		divisor = 1000000000.0
 		maxVal = requestLogExecutionTimeMaxMs / 1000.0

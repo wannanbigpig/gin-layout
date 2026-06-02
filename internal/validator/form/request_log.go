@@ -8,8 +8,8 @@ type RequestLogList struct {
 	OperatorAccount    string `form:"operator_account" json:"operator_account" binding:"omitempty"`                                              // 操作账号
 	OperationStatus    *int   `form:"operation_status" json:"operation_status" binding:"omitempty,oneof=0 1"`                                    // 操作状态：0=成功，1=失败
 	IsHighRisk         *uint8 `form:"is_high_risk" json:"is_high_risk" binding:"omitempty,oneof=0 1"`                                            // 是否高危操作
-	RequestKind        string `form:"request_kind" json:"request_kind" binding:"omitempty,oneof=http websocket sse"`                             // 请求类型：http/websocket/sse
-	ExecutionTimeScope string `form:"execution_time_scope" json:"execution_time_scope" binding:"omitempty,oneof=request connection stream none"` // 执行时间语义
+	RequestKind        string `form:"request_kind" json:"request_kind" binding:"omitempty,oneof=http websocket"`                             // 请求类型：http/websocket
+	ExecutionTimeScope string `form:"execution_time_scope" json:"execution_time_scope" binding:"omitempty,oneof=request connection none"` // 执行时间语义
 	Method             string `form:"method" json:"method" binding:"omitempty,oneof=GET POST PUT DELETE OPTIONS HEAD PATCH"`                     // HTTP请求方法
 	BaseURL            string `form:"base_url" json:"base_url" binding:"omitempty"`                                                              // 请求基础URL
 	OperationName      string `form:"operation_name" json:"operation_name" binding:"omitempty"`                                                  // 操作接口
@@ -31,8 +31,8 @@ type RequestLogExport struct {
 	OperatorAccount    string `form:"operator_account" json:"operator_account" binding:"omitempty"`
 	OperationStatus    *int   `form:"operation_status" json:"operation_status" binding:"omitempty,oneof=0 1"`
 	IsHighRisk         *uint8 `form:"is_high_risk" json:"is_high_risk" binding:"omitempty,oneof=0 1"`
-	RequestKind        string `form:"request_kind" json:"request_kind" binding:"omitempty,oneof=http websocket sse"`
-	ExecutionTimeScope string `form:"execution_time_scope" json:"execution_time_scope" binding:"omitempty,oneof=request connection stream none"`
+	RequestKind        string `form:"request_kind" json:"request_kind" binding:"omitempty,oneof=http websocket"`
+	ExecutionTimeScope string `form:"execution_time_scope" json:"execution_time_scope" binding:"omitempty,oneof=request connection none"`
 	Method             string `form:"method" json:"method" binding:"omitempty,oneof=GET POST PUT DELETE OPTIONS HEAD PATCH"`
 	BaseURL            string `form:"base_url" json:"base_url" binding:"omitempty"`
 	OperationName      string `form:"operation_name" json:"operation_name" binding:"omitempty"`

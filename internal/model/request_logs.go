@@ -3,14 +3,12 @@ package model
 const (
 	RequestKindHTTP      = "http"
 	RequestKindWebSocket = "websocket"
-	RequestKindSSE       = "sse"
 
 	ExecutionTimeUnitMilliseconds = "ms"
 	ExecutionTimeUnitSeconds     = "s"
 
 	ExecutionTimeScopeRequest    = "request"
 	ExecutionTimeScopeConnection = "connection"
-	ExecutionTimeScopeStream     = "stream"
 	ExecutionTimeScopeNone       = "none"
 )
 

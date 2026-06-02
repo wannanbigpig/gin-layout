@@ -111,6 +111,8 @@ func TestEnqueueAuditLogMarksUnavailableWhenPublisherUnavailable(t *testing.T) {
 	defer restoreConfig()
 
 	queueUnavailableLogged.Store(false)
+	// 复位存储熔断冷却状态，避免前序用例残留导致 enqueueAuditLog 走冷却短路分支而漏设标志位。
+	storageUnavailableSince.Store(0)
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "req-4"})
 
 	if !queueUnavailableLogged.Load() {

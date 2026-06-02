@@ -413,22 +413,9 @@ func buildBatchFailure(index int, clientID string, err error) *resources.FileUpl
 	return failure
 }
 
-// BatchProgress 描述一次批量上传中单个文件处理完成时的进度。
-type BatchProgress struct {
-	Index     int    `json:"index"`
-	Total     int    `json:"total"`
-	Completed int    `json:"completed"`
-	Success   int    `json:"success"`
-	Failed    int    `json:"failed"`
-	ClientID  string `json:"client_id,omitempty"`
-}
-
-// UploadBatchProgressFn 用于在批量上传过程中接收每个文件的处理进度。
-type UploadBatchProgressFn func(BatchProgress)
-
 const uploadBatchConcurrency = 8
 
-func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCredentialBatch, onProgress UploadBatchProgressFn) (*resources.FileUploadCredentialBatchResult, error) {
+func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCredentialBatch) (*resources.FileUploadCredentialBatchResult, error) {
 	total := len(params.Items)
 	result := &resources.FileUploadCredentialBatchResult{
 		Total: int64(total),
@@ -444,7 +431,7 @@ func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCrede
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	completed, success, failed := 0, 0, 0
+	success, failed := 0, 0
 	for index, item := range params.Items {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -468,24 +455,12 @@ func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCrede
 			}
 			mu.Lock()
 			result.Items[index] = itemResult
-			completed++
 			if itemResult.Success {
 				success++
 			} else {
 				failed++
 			}
-			progress := BatchProgress{
-				Index:     index,
-				Total:     total,
-				Completed: completed,
-				Success:   success,
-				Failed:    failed,
-				ClientID:  it.ClientID,
-			}
 			mu.Unlock()
-			if onProgress != nil {
-				onProgress(progress)
-			}
 		}(index, item)
 	}
 	wg.Wait()
@@ -629,7 +604,7 @@ func normalizeCompleteItem(parent *form.FileUploadCompleteBatch, item form.FileU
 	}
 }
 
-func (s *FileResourceService) CompleteDirectUploadBatch(params *form.FileUploadCompleteBatch, uid uint, onProgress UploadBatchProgressFn) (*resources.FileUploadCompleteBatchResult, error) {
+func (s *FileResourceService) CompleteDirectUploadBatch(params *form.FileUploadCompleteBatch, uid uint) (*resources.FileUploadCompleteBatchResult, error) {
 	total := len(params.Items)
 	result := &resources.FileUploadCompleteBatchResult{
 		Total: int64(total),
@@ -661,7 +636,7 @@ func (s *FileResourceService) CompleteDirectUploadBatch(params *form.FileUploadC
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	completed, success, failed := 0, 0, 0
+	success, failed := 0, 0
 	for index, item := range params.Items {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -685,24 +660,12 @@ func (s *FileResourceService) CompleteDirectUploadBatch(params *form.FileUploadC
 			}
 			mu.Lock()
 			result.Items[index] = itemResult
-			completed++
 			if itemResult.Success {
 				success++
 			} else {
 				failed++
 			}
-			progress := BatchProgress{
-				Index:     index,
-				Total:     total,
-				Completed: completed,
-				Success:   success,
-				Failed:    failed,
-				ClientID:  it.ClientID,
-			}
 			mu.Unlock()
-			if onProgress != nil {
-				onProgress(progress)
-			}
 		}(index, item)
 	}
 	wg.Wait()
