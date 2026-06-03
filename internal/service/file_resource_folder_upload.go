@@ -580,21 +580,33 @@ func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUplo
 	if fileUUID == "" {
 		fileUUID = strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
-	displayName := firstNonEmpty(params.DisplayName, params.OriginName)
 	fileType, err := resolveUploadFileType(params.FileType, mimeType)
 	if err != nil {
 		return nil, err
 	}
+
+	resolved, err := s.resolveUploadFileConflict(db, params.FolderID, params.OriginName, hash)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.Existing != nil {
+		s.fillObjectReuseCounts([]*model.UploadFiles{resolved.Existing})
+		return resources.NewFileResourceTransformer().ToStruct(resolved.Existing), nil
+	}
+	originName := resolved.FinalName
+	// 保留调用方设置的自定义展示名，仅在未设置时使用冲突解决后的名称
+	displayName := firstNonEmpty(params.DisplayName, originName)
+
 	uploadFile := &model.UploadFiles{
 		UID:           uid,
 		FolderID:      params.FolderID,
 		LogicalPath:   logicalPath,
 		DisplayName:   displayName,
-		OriginName:    params.OriginName,
+		OriginName:    originName,
 		Name:          firstNonEmpty(params.Name, filepath.Base(objectKey)),
 		Path:          objectKey,
 		Size:          size,
-		Ext:           firstNonEmpty(params.Ext, filepath.Ext(params.OriginName), filepath.Ext(objectKey)),
+		Ext:           firstNonEmpty(params.Ext, filepath.Ext(originName), filepath.Ext(objectKey)),
 		Hash:          hash,
 		UUID:          fileUUID,
 		MimeType:      mimeType,
@@ -832,12 +844,26 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 	if err != nil {
 		return nil, err
 	}
+
+	resolved, err := s.resolveUploadFileConflict(db, input.FolderID, input.OriginName, hash)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.Existing != nil {
+		if !reused {
+			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
+		}
+		s.fillObjectReuseCounts([]*model.UploadFiles{resolved.Existing})
+		return resolved.Existing, nil
+	}
+	originName := resolved.FinalName
+
 	uploadFile := &model.UploadFiles{
 		UID:           input.UID,
 		FolderID:      input.FolderID,
 		LogicalPath:   logicalPath,
-		DisplayName:   firstNonEmpty(input.DisplayName, input.OriginName),
-		OriginName:    input.OriginName,
+		DisplayName:   firstNonEmpty(input.DisplayName, originName),
+		OriginName:    originName,
 		Name:          fileUUID + ext,
 		Path:          object.ObjectKey,
 		Size:          uint(size),
@@ -946,16 +972,35 @@ func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params 
 	if reused {
 		cleanupStoredUpload(result.Path)
 	}
+
+	resolved, err := s.resolveUploadFileConflict(db, params.FolderID, result.OriginName, result.Sha256)
+	if err != nil {
+		if !reused {
+			cleanupStoredUpload(result.Path)
+			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
+		}
+		return nil, err
+	}
+	if resolved.Existing != nil {
+		if !reused {
+			cleanupStoredUpload(result.Path)
+			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
+		}
+		s.fillObjectReuseCounts([]*model.UploadFiles{resolved.Existing})
+		return resources.NewFileResourceTransformer().ToStruct(resolved.Existing), nil
+	}
+	originName := resolved.FinalName
+
 	uploadFile := &model.UploadFiles{
 		UID:           uid,
 		FolderID:      params.FolderID,
 		LogicalPath:   logicalPath,
-		DisplayName:   result.OriginName,
-		OriginName:    result.OriginName,
+		DisplayName:   originName,
+		OriginName:    originName,
 		Name:          result.Name,
 		Path:          object.ObjectKey,
 		Size:          uint(result.Size),
-		Ext:           result.Ext,
+		Ext:           firstNonEmpty(result.Ext, filepath.Ext(originName)),
 		Hash:          result.Sha256,
 		UUID:          result.UUID,
 		MimeType:      result.MimeType,
@@ -1184,6 +1229,7 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 	}
 	storageDriver := firstNonEmpty(params.Driver)
 	var object *model.UploadFileObject
+	var reusedObject bool
 	if shouldResolveMultipartReuse(params) {
 		object, err = s.resolveReusableMultipartObject(db, params, storageDriver)
 		if err != nil {
@@ -1220,7 +1266,7 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 		if err := mp.CompleteMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID, completeParts); err != nil {
 			return nil, err
 		}
-		object, _, err = ensureFileObject(db, uploadFileObjectInput{
+		object, reusedObject, err = ensureFileObject(db, uploadFileObjectInput{
 			StorageDriver: storageDriver,
 			StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, params.Bucket),
 			Bucket:        params.Bucket,
@@ -1249,21 +1295,40 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 	hash := firstNonEmpty(params.Hash, object.Hash)
 	mimeType := firstNonEmpty(params.MimeType, object.MimeType)
 	fileUUID := strings.ReplaceAll(uuid.NewString(), "-", "")
-	displayName := params.OriginName
 	fileType, err := resolveUploadFileType(params.FileType, mimeType)
 	if err != nil {
 		return nil, err
 	}
+
+	resolved, err := s.resolveUploadFileConflict(db, params.FolderID, params.OriginName, hash)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.Existing != nil {
+		// 非 reuse 路径下刚创建了新的云存储对象和 UploadFileObject，需清理
+		if !shouldResolveMultipartReuse(params) && !reusedObject {
+			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
+			driver, cfg, drvErr := s.storageDriverByName(context.Background(), storageDriver)
+			if drvErr == nil {
+				_ = driver.Delete(context.Background(), params.Bucket, params.ObjectKey)
+				_ = cfg // 避免未使用警告
+			}
+		}
+		s.fillObjectReuseCounts([]*model.UploadFiles{resolved.Existing})
+		return resources.NewFileResourceTransformer().ToStruct(resolved.Existing), nil
+	}
+	originName := resolved.FinalName
+
 	uploadFile := &model.UploadFiles{
 		UID:           uid,
 		FolderID:      params.FolderID,
 		LogicalPath:   logicalPath,
-		DisplayName:   displayName,
-		OriginName:    params.OriginName,
+		DisplayName:   originName,
+		OriginName:    originName,
 		Name:          filepath.Base(objectKey),
 		Path:          objectKey,
 		Size:          size,
-		Ext:           filepath.Ext(params.OriginName),
+		Ext:           filepath.Ext(originName),
 		Hash:          hash,
 		UUID:          fileUUID,
 		MimeType:      mimeType,
@@ -1611,4 +1676,71 @@ func (s *FileResourceService) ensureExportTempFolder(ctx context.Context) (uint,
 	}
 
 	return folder.ID, nil
+}
+
+const maxAutoRenameRetries = 100
+
+// uploadFileConflictResult 描述同名文件冲突检查的结果。
+// Existing 非 nil 时表示应跳过（同目录同名同 hash），直接返回已存在记录。
+// Existing 为 nil 时，FinalName 为最终应使用的文件名（可能自动加了序号后缀）。
+type uploadFileConflictResult struct {
+	Existing  *model.UploadFiles // 非 nil 表示应跳过，指向已存在的记录
+	FinalName string             // 最终应使用的文件名
+}
+
+// resolveUploadFileConflict 检查同目录下同名文件冲突。
+//
+// 规则：
+//  1. 同 folder_id + 同 origin_name + 同 hash → 跳过，返回已存在记录
+//  2. 同 folder_id + 同 origin_name + 不同 hash → 自动加序号后缀 (1), (2), ...
+//  3. 无冲突 → 返回原名称
+func (s *FileResourceService) resolveUploadFileConflict(tx *gorm.DB, folderID uint, originName string, hash string) (*uploadFileConflictResult, error) {
+	// 同目录、同名、同 hash → 跳过
+	var dup model.UploadFiles
+	err := tx.Where("folder_id = ? AND origin_name = ? AND hash = ?", folderID, originName, hash).First(&dup).Error
+	if err == nil {
+		return &uploadFileConflictResult{Existing: &dup, FinalName: originName}, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// 同目录、同名、不同 hash → 检查是否需要重命名
+	var conflict model.UploadFiles
+	err = tx.Where("folder_id = ? AND origin_name = ? AND hash <> ?", folderID, originName, hash).First(&conflict).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &uploadFileConflictResult{FinalName: originName}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 自动加序号后缀：一次 LIKE 批量查询已有重命名，内存去重替代 N 次 DB 查询
+	ext := filepath.Ext(originName)
+	base := strings.TrimSuffix(originName, ext)
+	// 转义 LIKE 通配符，避免文件名含 % _ \ 时误匹配（统一用 \ 作为 escape）
+	likePattern := escapeLikePattern(base) + " (%)" + escapeLikePattern(ext)
+	var existingNames []string
+	if err := tx.Model(&model.UploadFiles{}).
+		Where("folder_id = ? AND origin_name LIKE ? ESCAPE '\\'", folderID, likePattern).
+		Pluck("origin_name", &existingNames).Error; err != nil {
+		return nil, err
+	}
+	used := make(map[string]bool, len(existingNames))
+	for _, name := range existingNames {
+		used[name] = true
+	}
+	for i := 1; i <= maxAutoRenameRetries; i++ {
+		candidate := fmt.Sprintf("%s (%d)%s", base, i, ext)
+		if !used[candidate] {
+			return &uploadFileConflictResult{FinalName: candidate}, nil
+		}
+	}
+	return nil, fmt.Errorf("unable to resolve name conflict for '%s' after %d attempts", originName, maxAutoRenameRetries)
+}
+
+// escapeLikePattern 转义 SQL LIKE 通配符 % _ \，配合 ESCAPE '\' 使用。
+func escapeLikePattern(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
 }

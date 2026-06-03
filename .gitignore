@@ -52,3 +52,5 @@ CODE_OPTIMIZATION_REPORT.md
 # Memory (if you want to keep it local only)
 # memory/
 .aitasks
+.codegraph
+.qoder
