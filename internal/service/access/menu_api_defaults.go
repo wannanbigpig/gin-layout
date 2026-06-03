@@ -80,6 +80,7 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "file:list", Route: "/admin/v1/system/file/list", Method: "GET"},
 	{MenuCode: "file:list", Route: "/admin/v1/system/file/detail", Method: "GET"},
 	{MenuCode: "file:list", Route: "/admin/v1/system/file/folder/tree", Method: "GET"},
+	{MenuCode: "file:list", Route: "/admin/v1/system/file/folder/stats", Method: "GET"},
 	{MenuCode: "file:list", Route: "/admin/v1/system/file/trash/list", Method: "GET"},
 	{MenuCode: "file:list", Route: "/admin/v1/system/file/references", Method: "GET"},
 	{MenuCode: "file:list", Route: "/admin/v1/system/file/export", Method: "POST"},

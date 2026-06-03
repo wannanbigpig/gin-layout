@@ -94,7 +94,7 @@ func buildSysMessageBaseResources(data *model.SysMessage) SysMessageBaseResource
 		Content:     strings.TrimSpace(data.Content),
 		Payload:     decodeSysMessagePayload(data.Payload),
 		ActionURL:   resolveSysMessageActionURL(data),
-		ActionLabel: strings.TrimSpace(data.ActionLabel),
+		ActionLabel: resolveSysMessageActionLabel(data),
 		IsRead:      data.IsRead == model.MessageRead,
 		ReadAt:      data.ReadAt,
 		CreatedAt:   data.CreatedAt,
@@ -129,6 +129,17 @@ func resolveSysMessageActionURL(data *model.SysMessage) string {
 	}
 	if url, ok := payload["action_url"].(string); ok {
 		return strings.TrimSpace(url)
+	}
+	return ""
+}
+
+func resolveSysMessageActionLabel(data *model.SysMessage) string {
+	if label := strings.TrimSpace(data.ActionLabel); label != "" {
+		return label
+	}
+	payload := decodeSysMessagePayload(data.Payload)
+	if label, ok := payload["action_label"].(string); ok {
+		return strings.TrimSpace(label)
 	}
 	return ""
 }

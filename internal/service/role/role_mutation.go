@@ -126,8 +126,9 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	if err != nil {
 		return err
 	}
-	// 事务执行：保存角色、级联更新、菜单同步
-	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+	// 事务执行：保存角色、级联更新、菜单同步、受影响用户权限同步；
+	// 提交后的共享策略缓存刷新失败仅告警，不再向调用方回传“失败但数据已落库”的假象。
+	return access.NewPermissionSyncCoordinator().RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
 		role.SetDB(tx)
 
 		if err := role.Save(); err != nil {
@@ -138,7 +139,7 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 		}
 		// pids 变更时，级联更新所有子角色的 pids 路径
 		if role.Pids != originPids {
-			updateExpr := s.buildPidsUpdateExpr(originPids, role.Pids)
+			updateExpr := utils2.BuildPidsUpdateExpr(originPids, role.Pids)
 			roleModel := model.NewRole()
 			roleModel.SetDB(tx)
 			if err := roleModel.UpdateChildrenPidsByParent(role.ID, updateExpr); err != nil {
@@ -159,13 +160,12 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 			}
 		}
 
-		return s.updateRoleMenu(role.ID, menuList, tx)
+		if err := s.updateRoleMenu(role.ID, menuList, tx); err != nil {
+			return err
+		}
+		// 同步受影响角色的用户权限（纳入事务，与提交一致）
+		return access.NewPermissionSyncCoordinator().SyncUsersAffectedByRoles([]uint{role.ID}, tx)
 	})
-	if err != nil {
-		return err
-	}
-	// 同步受影响角色的用户权限缓存
-	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByRoles([]uint{role.ID})
 }
 
 func isRoleCodeDuplicateErr(err error) bool {
@@ -184,28 +184,6 @@ func isRoleCodeDuplicateErr(err error) bool {
 // generateRoleCode 生成角色唯一编码，格式：role_{uuid}。
 func (s *RoleService) generateRoleCode() string {
 	return "role_" + uuid.NewString()
-}
-
-// buildPidsUpdateExpr 构建 SQL CASE 表达式，用于级联更新子角色的 pids 路径。
-// 场景：当某角色的 pids 变更时，其所有子角色的 pids 前缀需要同步更新。
-// 参数：
-//   - originPids: 原始路径
-//   - newPids: 新路径
-//
-// 返回：SQL CASE 表达式字符串
-// 示例：originPids="1,2", newPids="1,8" 时，子角色 "1,2,3" → "1,8,3"
-func (s *RoleService) buildPidsUpdateExpr(originPids, newPids string) string {
-	if originPids == "0" {
-		return fmt.Sprintf(
-			"CASE WHEN pids = '0' THEN '%s' WHEN pids LIKE '0,%%' THEN CONCAT('%s,', SUBSTRING(pids, 3)) ELSE pids END",
-			newPids, newPids,
-		)
-	}
-
-	return fmt.Sprintf(
-		"CASE WHEN pids = '%s' THEN '%s' WHEN pids LIKE '%s,%%' THEN CONCAT('%s,', SUBSTRING(pids, %d)) ELSE pids END",
-		originPids, newPids, originPids, newPids, len(originPids)+2,
-	)
 }
 
 // updateRoleMenu 更新角色的菜单关联关系。

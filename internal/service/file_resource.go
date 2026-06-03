@@ -155,7 +155,9 @@ func (s *FileResourceService) List(params *form.FileResourceList) *resources.Col
 		log.Logger.Error("查询文件资源列表失败", zap.Error(err))
 		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
 	}
-	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	result := transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	s.fillUploaderNames(result)
+	return result
 }
 
 func normalizeFileTypeFilter(value string) []string {
@@ -188,22 +190,26 @@ func (s *FileResourceService) Detail(id uint) (any, error) {
 			items = append(items, transformer.ToStruct(ref))
 		}
 		data.References = items
+		s.fillSingleUploaderName(data)
 	}
 	return result, nil
 }
 
-// Delete 软删除文件记录。
-func (s *FileResourceService) Delete(id uint, deletedBy uint, reason string) error {
+// Delete 软删除文件记录。force=true 时跳过引用检查。
+func (s *FileResourceService) Delete(id uint, deletedBy uint, reason string, force ...bool) error {
 	uploadFile, err := s.findByID(id)
 	if err != nil {
 		return err
 	}
-	refs, err := NewFileReferenceService(s.db).ReferencesByFileID(id)
-	if err != nil {
-		return err
-	}
-	if len(refs) > 0 {
-		return NewFileReferencedDeleteError(buildFileReferenceResources(refs))
+	isForced := len(force) > 0 && force[0]
+	if !isForced {
+		refs, err := NewFileReferenceService(s.db).ReferencesByFileID(id)
+		if err != nil {
+			return err
+		}
+		if len(refs) > 0 {
+			return NewFileReferencedDeleteError(buildFileReferenceResources(refs))
+		}
 	}
 
 	if s.db != nil {
@@ -604,6 +610,76 @@ func (s *FileResourceService) fillObjectReuseCounts(rows []*model.UploadFiles) {
 		row.ObjectReuseCount = countMap[row.FileObjectID]
 		row.ObjectStatus = statusMap[row.FileObjectID]
 	}
+}
+
+// fillUploaderNames 批量填充列表中每条文件资源的上传人昵称/账号。
+func (s *FileResourceService) fillUploaderNames(result *resources.Collection) {
+	if result == nil || len(result.Data) == 0 {
+		return
+	}
+	uidSet := make(map[uint]struct{})
+	for _, item := range result.Data {
+		if r, ok := item.(*resources.FileResourceResources); ok && r.UID > 0 {
+			uidSet[r.UID] = struct{}{}
+		}
+	}
+	if len(uidSet) == 0 {
+		return
+	}
+	uids := make([]uint, 0, len(uidSet))
+	for uid := range uidSet {
+		uids = append(uids, uid)
+	}
+	nameMap := s.queryUploaderNames(uids)
+	for _, item := range result.Data {
+		if r, ok := item.(*resources.FileResourceResources); ok {
+			if info, exists := nameMap[r.UID]; exists {
+				r.UploaderName = info.Nickname
+				r.UploaderUsername = info.Username
+			}
+		}
+	}
+}
+
+// fillSingleUploaderName 填充单条文件资源详情的上传人信息。
+func (s *FileResourceService) fillSingleUploaderName(r *resources.FileResourceResources) {
+	if r == nil || r.UID == 0 {
+		return
+	}
+	nameMap := s.queryUploaderNames([]uint{r.UID})
+	if info, exists := nameMap[r.UID]; exists {
+		r.UploaderName = info.Nickname
+		r.UploaderUsername = info.Username
+	}
+}
+
+type uploaderInfo struct {
+	Nickname string
+	Username string
+}
+
+func (s *FileResourceService) queryUploaderNames(uids []uint) map[uint]uploaderInfo {
+	if len(uids) == 0 {
+		return nil
+	}
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil
+	}
+	type adminRow struct {
+		ID       uint
+		Nickname string
+		Username string
+	}
+	var rows []adminRow
+	if err := db.Model(&model.AdminUser{}).Where("id IN ?", uids).Find(&rows).Error; err != nil {
+		return nil
+	}
+	result := make(map[uint]uploaderInfo, len(rows))
+	for _, row := range rows {
+		result[row.ID] = uploaderInfo{Nickname: row.Nickname, Username: row.Username}
+	}
+	return result
 }
 
 func (s *FileResourceService) dbOrDefault() (*gorm.DB, error) {

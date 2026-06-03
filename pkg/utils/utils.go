@@ -37,6 +37,28 @@ func WouldCauseCycle(id, parentPid uint, parentPids string) bool {
 	return false
 }
 
+// BuildPidsUpdateExpr 构建 SQL CASE 表达式，用于级联更新树形子节点的 pids 路径。
+// 场景：当某节点的 pids 变更时，其所有子节点的 pids 前缀需要同步更新。
+// 参数：
+//   - originPids: 原始路径
+//   - newPids: 新路径
+//
+// 返回：SQL CASE 表达式字符串
+// 示例：originPids="1,2", newPids="1,8" 时，子节点 "1,2,3" → "1,8,3"
+func BuildPidsUpdateExpr(originPids, newPids string) string {
+	if originPids == "0" {
+		return fmt.Sprintf(
+			"CASE WHEN pids = '0' THEN '%s' WHEN pids LIKE '0,%%' THEN CONCAT('%s,', SUBSTRING(pids, 3)) ELSE pids END",
+			newPids, newPids,
+		)
+	}
+
+	return fmt.Sprintf(
+		"CASE WHEN pids = '%s' THEN '%s' WHEN pids LIKE '%s,%%' THEN CONCAT('%s,', SUBSTRING(pids, %d)) ELSE pids END",
+		originPids, newPids, originPids, newPids, len(originPids)+2,
+	)
+}
+
 // GetRunPath 获取执行目录作为默认目录
 func GetRunPath() string {
 	currentPath, err := os.Getwd()

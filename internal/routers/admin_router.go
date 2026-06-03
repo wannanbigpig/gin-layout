@@ -249,6 +249,7 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					GET("list", "文件资源列表", AuthModeAuth, deps.File.List),
 					GET("detail", "文件资源详情", AuthModeAuth, deps.File.Detail),
 					GET("folder/tree", "文件目录树", AuthModeAuth, deps.File.FolderTree),
+						GET("folder/stats", "目录统计信息", AuthModeAuth, deps.File.FolderStats),
 					POST("folder/create", "创建文件目录", AuthModeAuth, deps.File.FolderCreate),
 					POST("folder/update", "更新文件目录", AuthModeAuth, deps.File.FolderUpdate),
 					POST("folder/delete", "删除文件目录", AuthModeAuth, deps.File.FolderDelete),

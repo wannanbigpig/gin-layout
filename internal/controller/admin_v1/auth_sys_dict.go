@@ -41,45 +41,21 @@ func (api SysDictController) TypeDetail(c *gin.Context) {
 }
 
 func (api SysDictController) TypeCreate(c *gin.Context) {
-	params := form.NewCreateSysDictTypeForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-	changeDiff, err := sys_dict.NewSysDictService().CreateTypeWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewCreateSysDictTypeForm, func(p *form.CreateSysDictType) (string, error) {
+		return sys_dict.NewSysDictService().CreateTypeWithAuditDiff(p)
+	})
 }
 
 func (api SysDictController) TypeUpdate(c *gin.Context) {
-	params := form.NewUpdateSysDictTypeForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-	changeDiff, err := sys_dict.NewSysDictService().UpdateTypeWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewUpdateSysDictTypeForm, func(p *form.UpdateSysDictType) (string, error) {
+		return sys_dict.NewSysDictService().UpdateTypeWithAuditDiff(p)
+	})
 }
 
 func (api SysDictController) TypeDelete(c *gin.Context) {
-	params := form.NewIdForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-	changeDiff, err := sys_dict.NewSysDictService().DeleteTypeWithAuditDiff(params.ID)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewIdForm, func(p *form.ID) (string, error) {
+		return sys_dict.NewSysDictService().DeleteTypeWithAuditDiff(p.ID)
+	})
 }
 
 func (api SysDictController) ItemList(c *gin.Context) {
@@ -91,45 +67,21 @@ func (api SysDictController) ItemList(c *gin.Context) {
 }
 
 func (api SysDictController) ItemCreate(c *gin.Context) {
-	params := form.NewCreateSysDictItemForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-	changeDiff, err := sys_dict.NewSysDictService().CreateItemWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewCreateSysDictItemForm, func(p *form.CreateSysDictItem) (string, error) {
+		return sys_dict.NewSysDictService().CreateItemWithAuditDiff(p)
+	})
 }
 
 func (api SysDictController) ItemUpdate(c *gin.Context) {
-	params := form.NewUpdateSysDictItemForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-	changeDiff, err := sys_dict.NewSysDictService().UpdateItemWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewUpdateSysDictItemForm, func(p *form.UpdateSysDictItem) (string, error) {
+		return sys_dict.NewSysDictService().UpdateItemWithAuditDiff(p)
+	})
 }
 
 func (api SysDictController) ItemDelete(c *gin.Context) {
-	params := form.NewIdForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-	changeDiff, err := sys_dict.NewSysDictService().DeleteItemWithAuditDiff(params.ID)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewIdForm, func(p *form.ID) (string, error) {
+		return sys_dict.NewSysDictService().DeleteItemWithAuditDiff(p.ID)
+	})
 }
 
 func (api SysDictController) Options(c *gin.Context) {

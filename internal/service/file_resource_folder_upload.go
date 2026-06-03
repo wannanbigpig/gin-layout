@@ -33,6 +33,12 @@ import (
 	fileutils "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
+// FolderStatsResult 目录统计信息（供删除前确认使用）。
+type FolderStatsResult struct {
+	FileCount        int64 `json:"file_count"`
+	ChildFolderCount int64 `json:"child_folder_count"`
+}
+
 func (s *FileResourceService) FolderTree(includeHidden bool) ([]*resources.FileFolderResources, error) {
 	db, err := s.dbOrDefault()
 	if err != nil {
@@ -148,33 +154,71 @@ func (s *FileResourceService) UpdateFolder(params *form.FileFolderUpdate, uid ui
 	return resources.NewFileFolderTransformer().ToStruct(&updated), nil
 }
 
+// FolderStats 查询目录下的文件数和子目录数（供删除前确认使用）。
+func (s *FileResourceService) FolderStats(id uint) (*FolderStatsResult, error) {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	var fileCount int64
+	if err := db.Model(&model.UploadFiles{}).Where("folder_id = ?", id).Count(&fileCount).Error; err != nil {
+		return nil, err
+	}
+	var childFolderCount int64
+	if err := db.Model(&model.UploadFileFolder{}).Where("parent_id = ?", id).Count(&childFolderCount).Error; err != nil {
+		return nil, err
+	}
+	return &FolderStatsResult{FileCount: fileCount, ChildFolderCount: childFolderCount}, nil
+}
+
+// DeleteFolder 级联删除目录及其所有子目录和文件。
+// 子目录递归删除，文件走软删除（进入回收站）。
 func (s *FileResourceService) DeleteFolder(id uint) error {
 	db, err := s.dbOrDefault()
 	if err != nil {
 		return err
 	}
-	var childCount int64
-	if err := db.Model(&model.UploadFileFolder{}).Where("parent_id = ?", id).Count(&childCount).Error; err != nil {
-		return err
+	// 验证目录存在
+	var folder model.UploadFileFolder
+	if err := db.First(&folder, id).Error; err != nil {
+		return pkgErrors.NewBusinessError(pkgErrors.NotFound)
 	}
-	if childCount > 0 {
-		return pkgErrors.NewBusinessError(pkgErrors.FolderNotEmpty)
+	// 收集所有后代目录 ID（含自身）
+	allFolderIDs := s.collectDescendantFolderIDs(id)
+	return access.RunInTransaction(db, func(tx *gorm.DB) error {
+		// 软删所有目录下的文件
+		if len(allFolderIDs) > 0 {
+			if err := tx.Model(&model.UploadFiles{}).Where("folder_id IN ?", allFolderIDs).Update("deleted_at", time.Now().Unix()).Error; err != nil {
+				return err
+			}
+		}
+		// 从叶子到根删除目录记录（子目录先删，避免外键约束问题）
+		for i := len(allFolderIDs) - 1; i >= 0; i-- {
+			if err := tx.Delete(&model.UploadFileFolder{}, allFolderIDs[i]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// collectDescendantFolderIDs 递归收集目录及其所有后代目录 ID。
+func (s *FileResourceService) collectDescendantFolderIDs(rootID uint) []uint {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return []uint{rootID}
 	}
-	var fileCount int64
-	if err := db.Model(&model.UploadFiles{}).Where("folder_id = ?", id).Count(&fileCount).Error; err != nil {
-		return err
+	ids := []uint{rootID}
+	current := []uint{rootID}
+	for len(current) > 0 {
+		var children []uint
+		if err := db.Model(&model.UploadFileFolder{}).Where("parent_id IN ?", current).Pluck("id", &children).Error; err != nil || len(children) == 0 {
+			break
+		}
+		ids = append(ids, children...)
+		current = children
 	}
-	if fileCount > 0 {
-		return pkgErrors.NewBusinessError(pkgErrors.FolderNotEmpty)
-	}
-	result := db.Delete(&model.UploadFileFolder{}, id)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+	return ids
 }
 
 func (s *FileResourceService) MoveFolder(params *form.FileFolderMove, uid uint) (*resources.FileFolderResources, error) {

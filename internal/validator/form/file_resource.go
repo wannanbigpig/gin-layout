@@ -30,6 +30,7 @@ func NewFileResourceListQuery() *FileResourceList {
 type FileResourceID struct {
 	ID            uint   `form:"id" json:"id" binding:"required,gt=0"`
 	DeletedReason string `form:"deleted_reason" json:"deleted_reason" binding:"omitempty,max=255"`
+	Force         uint8  `form:"force" json:"force" binding:"omitempty,oneof=0 1"`
 }
 
 func NewFileResourceIDForm() *FileResourceID {

@@ -168,7 +168,7 @@ func (s *OverviewService) Overview() (*Overview, error) {
 			{Key: "errors", Title: "异常告警", Value: float64(errorsToday), Compare: "较昨日", Change: formatChange(errorsToday, errorsYesterday), Type: inverseChangeType(errorsToday, errorsYesterday)},
 			{Key: "tasks", Title: "任务完成率", Value: taskCompletion, Suffix: "%", Compare: "计划完成", Change: "+0.0%", Type: "primary"},
 		},
-		Activities:   buildActivities(db),
+		Activities:   buildActivities(db, s.GetAdminUserId()),
 		UserLogin:    userLogin,
 		Trend:        trend,
 		ResponseTime: responseTime,
@@ -208,7 +208,7 @@ func taskCompletionRate(db *gorm.DB, start time.Time, end time.Time) (float64, e
 	return math.Round(float64(success)*1000/float64(total)) / 10, nil
 }
 
-func buildActivities(db *gorm.DB) []ActivityItem {
+func buildActivities(db *gorm.DB, operatorID uint) []ActivityItem {
 	type row struct {
 		ID              uint
 		OperatorAccount string
@@ -219,8 +219,13 @@ func buildActivities(db *gorm.DB) []ActivityItem {
 		OperationStatus int
 	}
 	var rows []row
-	_ = db.Table("request_logs").
-		Select("id, operator_account, operation_name, method, base_url, created_at, operation_status").
+	query := db.Table("request_logs").
+		Select("id, operator_account, operation_name, method, base_url, created_at, operation_status")
+	if operatorID > 0 {
+		// 首页"最近动态"只展示当前登录用户自己的操作记录。
+		query = query.Where("operator_id = ?", operatorID)
+	}
+	_ = query.
 		Order("created_at DESC, id DESC").
 		Limit(4).
 		Scan(&rows).Error

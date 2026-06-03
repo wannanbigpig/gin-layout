@@ -66,12 +66,20 @@ func TestEnqueueAuditLogDelegatesToPublisher(t *testing.T) {
 }
 
 func TestEnqueueAuditLogFailureDoesNotPanic(t *testing.T) {
+	// 先清掉前序用例可能泄漏的 worker，保证干净起点。
+	resetAuditFallbackBufferForTesting()
 	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
 		Enqueue: func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
 			return errors.New("enqueue failed")
 		},
+		PersistBatch: func(ctx context.Context, snapshots []*auditsvc.AuditLogSnapshot) error {
+			return nil
+		},
 	})
 	defer restoreDeps()
+	// 注意 defer 为 LIFO：reset 在 restoreDeps 之前执行，确保停止 worker / drain 时仍是本用例的 no-op 依赖，
+	// 不会在依赖还原成真实落库函数后触发真实 DB 写入。
+	defer resetAuditFallbackBufferForTesting()
 
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "req-2"})
 }
@@ -98,12 +106,17 @@ func TestEnqueueAuditLogResetsUnavailableFlagAfterSuccess(t *testing.T) {
 }
 
 func TestEnqueueAuditLogMarksUnavailableWhenPublisherUnavailable(t *testing.T) {
+	resetAuditFallbackBufferForTesting()
 	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
 		Enqueue: func(ctx context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
 			return queue.ErrPublisherUnavailable
 		},
+		PersistBatch: func(ctx context.Context, snapshots []*auditsvc.AuditLogSnapshot) error {
+			return nil
+		},
 	})
 	defer restoreDeps()
+	defer resetAuditFallbackBufferForTesting()
 
 	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
 		cfg.Queue.Enable = true

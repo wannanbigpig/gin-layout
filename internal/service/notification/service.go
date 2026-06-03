@@ -198,65 +198,138 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 		return nil, err
 	}
 
-	// 确定接收人列表
+	// 确定接收人列表：去重并过滤为真实存在且启用的用户，避免向无效/禁用账号发消息
+	userIDs, err := resolveRecipients(input.AudienceType, input.UserIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	batchID := uuid.New().String()
+	result := &SendResult{BatchID: batchID, Total: len(userIDs)}
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+
+	payload, err := json.Marshal(buildSendPayload(input))
+	if err != nil {
+		return nil, err
+	}
+
+	// 一次性构建并批量插入，sender_id/batch_id 在插入时即写入，避免逐条 insert + update 的 N+1
+	messages := make([]*model.SysMessage, 0, len(userIDs))
+	for _, uid := range userIDs {
+		msg := model.NewSysMessage()
+		msg.UserID = uid
+		msg.SenderID = input.SenderID
+		msg.BatchID = batchID
+		msg.Category = strings.TrimSpace(input.Category)
+		msg.Topic = model.MessageTopicManual
+		msg.Title = strings.TrimSpace(input.Title)
+		msg.Content = strings.TrimSpace(input.Content)
+		msg.ActionURL = strings.TrimSpace(input.ActionURL)
+		msg.ActionLabel = strings.TrimSpace(input.ActionLabel)
+		msg.Payload = string(payload)
+		msg.IsRead = model.MessageUnread
+		messages = append(messages, msg)
+	}
+	if err := db.CreateInBatches(messages, 200).Error; err != nil {
+		return nil, err
+	}
+	result.Success = len(messages)
+
+	// 一次分组统计各接收人未读数，再逐个分发实时事件（广播/Redis publish 为内存或轻量操作）
+	unreadCounts := s.unreadCountsByUsers(db, userIDs)
+	transformer := resources.NewSysMessageTransformer()
+	for _, msg := range messages {
+		s.dispatch(ctx, Event{
+			Event:       "message_created",
+			UserID:      msg.UserID,
+			Message:     transformer.ToStruct(msg),
+			MessageID:   msg.ID,
+			Category:    msg.Category,
+			UnreadCount: unreadCounts[msg.UserID],
+		})
+	}
+
+	return result, nil
+}
+
+// resolveRecipients 根据接收人类型返回去重后的有效接收人 ID 列表。
+func resolveRecipients(audienceType string, requested []uint) ([]uint, error) {
+	userModel := model.NewAdminUsers()
+	userDB, err := userModel.GetDB(userModel)
+	if err != nil {
+		return nil, err
+	}
 	var userIDs []uint
-	switch input.AudienceType {
+	switch audienceType {
 	case "all":
-		userModel := model.NewAdminUsers()
-		userDB, err := userModel.GetDB(userModel)
-		if err != nil {
-			return nil, err
-		}
 		if err := userDB.Where("status = ? AND deleted_at = 0", model.AdminUserStatusEnabled).Pluck("id", &userIDs).Error; err != nil {
 			return nil, err
 		}
 	case "user_ids":
-		userIDs = input.UserIDs
+		ids := dedupIDs(requested)
+		if len(ids) == 0 {
+			return nil, nil
+		}
+		if err := userDB.Where("id IN ? AND status = ? AND deleted_at = 0", ids, model.AdminUserStatusEnabled).Pluck("id", &userIDs).Error; err != nil {
+			return nil, err
+		}
 	default:
-		return nil, fmt.Errorf("invalid audience_type: %s", input.AudienceType)
+		return nil, fmt.Errorf("invalid audience_type: %s", audienceType)
 	}
+	return userIDs, nil
+}
 
-	batchID := uuid.New().String()
+// buildSendPayload 构建手动通知的 payload，仅包含非空的操作字段。
+func buildSendPayload(input SendInput) map[string]any {
 	payload := map[string]any{}
-	if strings.TrimSpace(input.ActionURL) != "" {
-		payload["action_url"] = strings.TrimSpace(input.ActionURL)
+	if v := strings.TrimSpace(input.ActionURL); v != "" {
+		payload["action_url"] = v
 	}
-	if strings.TrimSpace(input.ActionLabel) != "" {
-		payload["action_label"] = strings.TrimSpace(input.ActionLabel)
+	if v := strings.TrimSpace(input.ActionLabel); v != "" {
+		payload["action_label"] = v
 	}
+	return payload
+}
 
-	result := &SendResult{BatchID: batchID, Total: len(userIDs)}
-	for _, uid := range userIDs {
-		msg, err := s.Create(ctx, CreateMessageInput{
-			UserID:      uid,
-			Category:    strings.TrimSpace(input.Category),
-			Topic:       model.MessageTopicManual,
-			Title:       input.Title,
-			Content:     input.Content,
-			ActionURL:   input.ActionURL,
-			ActionLabel: input.ActionLabel,
-			Payload:     payload,
-		})
-		if err != nil || msg == nil {
-			result.Failed++
-			if log.Logger != nil {
-				log.Logger.Warn("send notification to user failed",
-					zap.Uint("user_id", uid), zap.String("batch_id", batchID), zap.Error(err))
-			}
+// dedupIDs 去重并剔除 0 值 ID。
+func dedupIDs(ids []uint) []uint {
+	seen := make(map[uint]struct{}, len(ids))
+	out := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
 			continue
 		}
-		// 更新 sender_id 和 batch_id
-		updates := map[string]any{"sender_id": input.SenderID, "batch_id": batchID}
-		if err := db.Model(&model.SysMessage{}).Where("id = ?", msg.ID).Updates(updates).Error; err != nil {
-			if log.Logger != nil {
-				log.Logger.Warn("更新通知 sender_id/batch_id 失败",
-					zap.Uint("message_id", msg.ID), zap.Error(err))
-			}
+		if _, ok := seen[id]; ok {
+			continue
 		}
-		result.Success++
+		seen[id] = struct{}{}
+		out = append(out, id)
 	}
+	return out
+}
 
-	return result, nil
+// unreadCountsByUsers 一次查询批量统计指定用户的未读消息数。
+func (s *Service) unreadCountsByUsers(db *gorm.DB, userIDs []uint) map[uint]int64 {
+	counts := make(map[uint]int64, len(userIDs))
+	if len(userIDs) == 0 {
+		return counts
+	}
+	type row struct {
+		UserID uint
+		Cnt    int64
+	}
+	var rows []row
+	_ = db.Model(&model.SysMessage{}).
+		Select("user_id, COUNT(*) AS cnt").
+		Where("user_id IN ? AND is_read = ?", userIDs, model.MessageUnread).
+		Group("user_id").
+		Scan(&rows).Error
+	for _, r := range rows {
+		counts[r.UserID] = r.Cnt
+	}
+	return counts
 }
 
 func (s *Service) List(userID uint, params *form.SysMessageList) (*resources.Collection, error) {
@@ -300,7 +373,7 @@ func (s *Service) List(userID uint, params *form.SysMessageList) (*resources.Col
 	list := make([]*model.SysMessage, 0)
 	err = base.Select([]string{
 		"id", "user_id", "category", "topic", "title", "content",
-		"payload", "is_read", "read_at", "created_at", "updated_at",
+		"payload", "action_url", "action_label", "is_read", "read_at", "created_at", "updated_at",
 	}).Order("id desc").Offset((normalizedPage - 1) * normalizedPerPage).Limit(normalizedPerPage).Find(&list).Error
 	if err != nil {
 		log.Logger.Warn("list sys messages failed", zap.Uint("user_id", userID), zap.Error(err))

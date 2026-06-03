@@ -208,12 +208,15 @@ func (s CommonService) GetFileAccessPath(fileUUID string, variant string, checkA
 		return FileAccessResult{}, e.NewBusinessError(e.FileIdentifierInvalid)
 	}
 
-	uploadFile := model.NewUploadFiles()
-	if s.db != nil {
-		uploadFile.SetDB(s.db)
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return FileAccessResult{}, err
 	}
+
+	uploadFile := model.NewUploadFiles()
+	uploadFile.SetDB(db)
 	// 通过UUID查询（更短，适合URL）
-	err := uploadFile.GetDetail("uuid = ?", fileUUID)
+	err = db.Where("uuid = ?", fileUUID).First(uploadFile).Error
 	if err != nil {
 		return FileAccessResult{}, e.NewBusinessError(e.NotFound)
 	}
@@ -232,7 +235,6 @@ func (s CommonService) GetFileAccessPath(fileUUID string, variant string, checkA
 	bucket := uploadFile.Bucket
 	objectKey := firstNonEmpty(uploadFile.ObjectKey, uploadFile.StoragePath, uploadFile.Path)
 	objectMimeType := uploadFile.MimeType
-	db, _ := s.dbOrDefault()
 	if uploadFile.FileObjectID > 0 {
 		if db != nil {
 			var object model.UploadFileObject

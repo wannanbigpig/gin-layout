@@ -34,18 +34,9 @@ func (api AdminUserController) GetUserInfo(c *gin.Context) {
 // UpdateProfile 更新个人资料（只能更新自己的手机号、邮箱、密码、昵称）
 func (api AdminUserController) UpdateProfile(c *gin.Context) {
 	uid := api.GetCurrentUserID(c)
-	params := form.NewUpdateProfile()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := admin.NewAdminUserService().UpdateProfileWithAuditDiff(uid, params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewUpdateProfile, func(p *form.UpdateProfile) (string, error) {
+		return admin.NewAdminUserService().UpdateProfileWithAuditDiff(uid, p)
+	})
 }
 
 // GetUserMenuInfo 获取当前登录用户权限信息
@@ -62,34 +53,16 @@ func (api AdminUserController) GetUserMenuInfo(c *gin.Context) {
 
 // Create 新增管理员
 func (api AdminUserController) Create(c *gin.Context) {
-	params := form.NewCreateAdminUser()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := admin.NewAdminUserService().CreateWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewCreateAdminUser, func(p *form.CreateAdminUser) (string, error) {
+		return admin.NewAdminUserService().CreateWithAuditDiff(p)
+	})
 }
 
 // Update 更新管理员
 func (api AdminUserController) Update(c *gin.Context) {
-	params := form.NewUpdateAdminUser()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := admin.NewAdminUserService().UpdateWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewUpdateAdminUser, func(p *form.UpdateAdminUser) (string, error) {
+		return admin.NewAdminUserService().UpdateWithAuditDiff(p)
+	})
 }
 
 // List 分页查询管理员用户列表
@@ -116,34 +89,16 @@ func (api AdminUserController) Options(c *gin.Context) {
 
 // Delete 删除管理员
 func (api AdminUserController) Delete(c *gin.Context) {
-	params := form.NewIdForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := admin.NewAdminUserService().DeleteWithAuditDiff(params.ID)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewIdForm, func(p *form.ID) (string, error) {
+		return admin.NewAdminUserService().DeleteWithAuditDiff(p.ID)
+	})
 }
 
 // BindRole 管理员绑定角色
 func (api AdminUserController) BindRole(c *gin.Context) {
-	params := form.NewBindRole()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := admin.NewAdminUserService().BindRoleWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewBindRole, func(p *form.BindRole) (string, error) {
+		return admin.NewAdminUserService().BindRoleWithAuditDiff(p)
+	})
 }
 
 // Detail 获取管理员详情

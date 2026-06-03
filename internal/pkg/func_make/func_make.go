@@ -2,6 +2,7 @@ package func_make
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 )
 
@@ -47,7 +48,7 @@ func (f FuncMap) Call(name string, params ...any) (result []reflect.Value, err e
 
 	defer func() {
 		if e := recover(); e != nil {
-			err = errors.New("call " + name + " method fail. " + e.(string))
+			err = fmt.Errorf("call %s method fail. %v", name, e)
 		}
 	}()
 

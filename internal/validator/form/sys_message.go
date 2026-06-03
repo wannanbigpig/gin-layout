@@ -49,7 +49,7 @@ type SysMessageSend struct {
 	ActionURL    string `form:"action_url" json:"action_url" label:"操作链接" binding:"omitempty,max=500"`
 	ActionLabel  string `form:"action_label" json:"action_label" label:"操作按钮文案" binding:"omitempty,max=100"`
 	AudienceType string `form:"audience_type" json:"audience_type" label:"接收人类型" binding:"required,oneof=all user_ids"`
-	UserIDs      []uint `form:"user_ids" json:"user_ids" label:"接收人ID列表" binding:"omitempty,dive,gt=0"`
+	UserIDs      []uint `form:"user_ids" json:"user_ids" label:"接收人ID列表" binding:"required_if=AudienceType user_ids,omitempty,dive,gt=0"`
 }
 
 func NewSysMessageSendForm() *SysMessageSend {

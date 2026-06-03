@@ -36,7 +36,7 @@ func ParseTimeBoundary(value string) (time.Time, bool) {
 
 // MarshalJSON 以固定格式输出 JSON 时间字符串。
 func (t FormatDate) MarshalJSON() ([]byte, error) {
-	if &t == nil || t.IsZero() {
+	if t.IsZero() {
 		return []byte("null"), nil
 	}
 	return []byte(fmt.Sprintf("\"%s\"", t.Format(timeFormat))), nil

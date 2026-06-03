@@ -23,34 +23,18 @@ func NewMenuController() *MenuController {
 
 // Create 新增菜单
 func (api MenuController) Create(c *gin.Context) {
-	params := form.NewCreateMenuForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := menu.NewMenuService().CreateWithAuditDiff(params, middleware.LocaleFromContext(c))
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	locale := middleware.LocaleFromContext(c)
+	handleAuditWrite(api.Api, c, form.NewCreateMenuForm, func(p *form.CreateMenu) (string, error) {
+		return menu.NewMenuService().CreateWithAuditDiff(p, locale)
+	})
 }
 
 // Update 更新菜单
 func (api MenuController) Update(c *gin.Context) {
-	params := form.NewUpdateMenuForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := menu.NewMenuService().UpdateWithAuditDiff(params, middleware.LocaleFromContext(c))
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	locale := middleware.LocaleFromContext(c)
+	handleAuditWrite(api.Api, c, form.NewUpdateMenuForm, func(p *form.UpdateMenu) (string, error) {
+		return menu.NewMenuService().UpdateWithAuditDiff(p, locale)
+	})
 }
 
 // UpdateAllMenuPermissions 批量更新菜单权限到casbin
@@ -96,16 +80,7 @@ func (api MenuController) List(c *gin.Context) {
 
 // Delete 删除菜单
 func (api MenuController) Delete(c *gin.Context) {
-	params := form.NewIdForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := menu.NewMenuService().DeleteWithAuditDiff(params.ID)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewIdForm, func(p *form.ID) (string, error) {
+		return menu.NewMenuService().DeleteWithAuditDiff(p.ID)
+	})
 }

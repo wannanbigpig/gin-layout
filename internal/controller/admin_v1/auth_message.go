@@ -3,7 +3,6 @@ package admin_v1
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -105,7 +104,7 @@ func (api SysMessageController) ReadAll(c *gin.Context) {
 func (api SysMessageController) GetWsTicket(c *gin.Context) {
 	principal := auth.GetAuthPrincipal(c)
 	if principal == nil || principal.UserID == 0 {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": e.NotLogin, "msg": "unauthorized"})
+		api.FailCode(c, e.NotLogin)
 		return
 	}
 
@@ -114,13 +113,22 @@ func (api SysMessageController) GetWsTicket(c *gin.Context) {
 
 	rdb := data.RedisClient()
 	if rdb == nil {
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"code": e.ServiceDependencyNotReady, "msg": "redis unavailable"})
+		api.FailCode(c, e.ServiceDependencyNotReady)
 		return
 	}
-	principalJSON, _ := json.Marshal(principal)
-	err := rdb.Set(c.Request.Context(), redisKey, principalJSON, 30*time.Second).Err()
+	principalJSON, err := json.Marshal(principal)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"code": e.ServerErr, "msg": "failed to generate ticket"})
+		if log.Logger != nil {
+			log.Logger.Error("websocket ticket: marshal principal failed",
+				zap.Uint("user_id", principal.UserID),
+				zap.Error(err),
+			)
+		}
+		api.FailCode(c, e.ServerErr)
+		return
+	}
+	if err := rdb.Set(c.Request.Context(), redisKey, principalJSON, 30*time.Second).Err(); err != nil {
+		api.FailCode(c, e.ServerErr)
 		return
 	}
 
@@ -174,7 +182,7 @@ func (api SysMessageController) WS(c *gin.Context) {
 				zap.String("ticket", ticket),
 			)
 		}
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": e.NotLogin, "msg": "invalid or expired token/ticket"})
+		api.FailCode(c, e.NotLogin)
 		return
 	}
 

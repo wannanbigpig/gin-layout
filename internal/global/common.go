@@ -5,6 +5,8 @@ const (
 	Version = "0.9.2"
 	// PerPage is the default per page size
 	PerPage = 10
+	// MaxPerPage 是每页条数上限，防止超大 LIMIT 拖库
+	MaxPerPage = 200
 	// Yes is the value of yes
 	Yes uint8 = 1
 	// No is the value of no

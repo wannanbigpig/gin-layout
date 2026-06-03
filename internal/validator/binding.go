@@ -1,10 +1,7 @@
 package validator
 
 import (
-	"encoding/json"
 	"errors"
-	"regexp"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	ut "github.com/go-playground/universal-translator"
@@ -12,16 +9,6 @@ import (
 
 	errcode "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	r "github.com/wannanbigpig/gin-layout/internal/pkg/response"
-)
-
-const (
-	eofErrorPattern         = `^multipart:nextpart:eof$`
-	typeConvertErrorPattern = `parsing .*?: invalid syntax`
-)
-
-var (
-	eofRegex         = regexp.MustCompile(eofErrorPattern)
-	typeConvertRegex = regexp.MustCompile(typeConvertErrorPattern)
 )
 
 // ResponseError 处理错误并返回给前端。
@@ -58,45 +45,8 @@ func translateFieldError(fieldErr validator.FieldError, primary, fallback ut.Tra
 	return fieldErr.Error()
 }
 
-func handleBindingError(c *gin.Context, err error) {
-	var typeErr *json.UnmarshalTypeError
-	var syntaxErr *json.SyntaxError
-	switch {
-	case errors.As(err, &typeErr):
-		r.Resp().FailCode(c, errcode.InvalidParameter)
-	case errors.As(err, &syntaxErr):
-		r.Resp().FailCode(c, errcode.InvalidParameter)
-	default:
-		errStr := err.Error()
-		switch {
-		case isEOFError(errStr):
-			r.Resp().FailCode(c, errcode.InvalidParameter)
-		case isConvertError(errStr):
-			r.Resp().FailCode(c, errcode.InvalidParameter)
-		default:
-			r.Resp().FailCode(c, errcode.InvalidParameter)
-		}
-	}
-}
-
-func isEOFError(errStr string) bool {
-	if len(errStr) == 0 {
-		return false
-	}
-	if errStr[0] == ' ' || errStr[len(errStr)-1] == ' ' {
-		return eofRegex.MatchString(strings.TrimSpace(errStr))
-	}
-	return eofRegex.MatchString(errStr)
-}
-
-func isConvertError(errStr string) bool {
-	if len(errStr) == 0 {
-		return false
-	}
-	if errStr[0] == ' ' || errStr[len(errStr)-1] == ' ' {
-		return typeConvertRegex.MatchString(strings.TrimSpace(errStr))
-	}
-	return typeConvertRegex.MatchString(errStr)
+func handleBindingError(c *gin.Context, _ error) {
+	r.Resp().FailCode(c, errcode.InvalidParameter)
 }
 
 // CheckParams 检查请求参数。

@@ -13,6 +13,8 @@ type FileResourceResources struct {
 	ID                uint             `json:"id"`
 	FileObjectID      uint             `json:"file_object_id"`
 	UID               uint             `json:"uid"`
+	UploaderName      string           `json:"uploader_name"`
+	UploaderUsername  string           `json:"uploader_username"`
 	FolderID          uint             `json:"folder_id"`
 	LogicalPath       string           `json:"logical_path"`
 	DisplayName       string           `json:"display_name"`

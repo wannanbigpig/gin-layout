@@ -20,6 +20,9 @@ func (m *BaseModel) Paginate(page, pageSize int) func(db *gorm.DB) *gorm.DB {
 		if pageSize > 0 {
 			limit = pageSize
 		}
+		if limit > global.MaxPerPage {
+			limit = global.MaxPerPage
+		}
 
 		offset := (page - 1) * limit
 		return db.Offset(offset).Limit(limit)

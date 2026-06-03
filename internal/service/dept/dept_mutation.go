@@ -103,7 +103,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 		}
 		// pids 变更时，级联更新所有子部门的 pids 路径
 		if dept.Pids != originPids {
-			updateExpr := s.buildPidsUpdateExpr(originPids, dept.Pids)
+			updateExpr := utils2.BuildPidsUpdateExpr(originPids, dept.Pids)
 			deptModel := model.NewDepartment()
 			deptModel.SetDB(tx)
 			if err := deptModel.UpdateChildrenPidsByParent(dept.ID, updateExpr); err != nil {
@@ -133,28 +133,6 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 // generateDeptCode 生成部门唯一编码，格式：dept_{uuid}。
 func (s *DeptService) generateDeptCode() string {
 	return "dept_" + uuid.NewString()
-}
-
-// buildPidsUpdateExpr 构建 SQL CASE 表达式，用于级联更新子部门的 pids 路径。
-// 场景：当某部门的 pids 变更时，其所有子部门的 pids 前缀需要同步更新。
-// 参数：
-//   - originPids: 原始路径
-//   - newPids: 新路径
-//
-// 返回：SQL CASE 表达式字符串
-// 示例：originPids="1,2", newPids="1,8" 时，子部门 "1,2,3" → "1,8,3"
-func (s *DeptService) buildPidsUpdateExpr(originPids, newPids string) string {
-	if originPids == "0" {
-		return fmt.Sprintf(
-			"CASE WHEN pids = '0' THEN '%s' WHEN pids LIKE '0,%%' THEN CONCAT('%s,', SUBSTRING(pids, 3)) ELSE pids END",
-			newPids, newPids,
-		)
-	}
-
-	return fmt.Sprintf(
-		"CASE WHEN pids = '%s' THEN '%s' WHEN pids LIKE '%s,%%' THEN CONCAT('%s,', SUBSTRING(pids, %d)) ELSE pids END",
-		originPids, newPids, originPids, newPids, len(originPids)+2,
-	)
 }
 
 // executeDeleteTransaction 执行部门删除事务。

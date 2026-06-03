@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/api_permission"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -22,18 +21,9 @@ func NewApiController() *ApiController {
 
 // Update 更新API权限
 func (api ApiController) Update(c *gin.Context) {
-	params := form.NewUpdateApiForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := api_permission.NewApiService().UpdateWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewUpdateApiForm, func(p *form.UpdatePermission) (string, error) {
+		return api_permission.NewApiService().UpdateWithAuditDiff(p)
+	})
 }
 
 // List 分页查询API权限列表

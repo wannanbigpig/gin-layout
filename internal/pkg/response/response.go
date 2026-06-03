@@ -141,14 +141,16 @@ func (r *Response) SetMessageKey(key string, args ...any) *Response {
 
 // json 返回 gin 框架的 JSON 响应
 func (r *Response) json(c *gin.Context) {
+	// 没有上下文时无法写出响应，直接返回，避免后续 c.GetTime/AbortWithStatusJSON 空指针
+	if c == nil {
+		return
+	}
 	// 如果消息为空，使用错误码对应的默认消息
 	if r.result.Msg == "" {
 		language := config.GetConfig().Language
-		if c != nil {
-			if locale, exists := c.Get(global.ContextKeyLocale); exists {
-				if localeText, ok := locale.(string); ok {
-					language = i18n.ToErrorLanguage(localeText)
-				}
+		if locale, exists := c.Get(global.ContextKeyLocale); exists {
+			if localeText, ok := locale.(string); ok {
+				language = i18n.ToErrorLanguage(localeText)
 			}
 		}
 		errorText := errors.NewErrorText(language)

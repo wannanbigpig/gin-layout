@@ -22,6 +22,10 @@ func CleanExpiredFilesHandler(ctx context.Context, _ map[string]any) error {
 	if err != nil {
 		return err
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	db = db.WithContext(ctx)
 
 	now := time.Now()
 	var lastID uint
@@ -31,6 +35,11 @@ func CleanExpiredFilesHandler(ctx context.Context, _ map[string]any) error {
 
 	// 基于 ID 游标的分批扫描，避免一次性加载全部过期文件导致 OOM
 	for {
+		// 响应 cron 取消/超时，及时中断长扫描
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			log.Logger.Warn("清理过期文件任务被取消", zap.Error(ctxErr), zap.Int("scanned", totalScanned))
+			return ctxErr
+		}
 		var files []model.UploadFiles
 		err = db.Unscoped().Model(&model.UploadFiles{}).
 			Where("id > ? AND expires_at IS NOT NULL AND expires_at <= ?", lastID, now).

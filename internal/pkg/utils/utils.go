@@ -1,10 +1,9 @@
 package utils
 
 import (
-	"math/rand"
+	"crypto/rand"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/samber/lo"
 )
@@ -37,29 +36,33 @@ func CalculateChanges[T comparable](existingIds, ids []T) (toDelete, toAdd, rema
 	return
 }
 
-// RandString 生成随机字符串
+// RandString 生成长度为 n 的随机字符串。使用 crypto/rand 保证并发安全且不可预测，
+// 通过拒绝采样消除取模偏置，适用于 token、文件名等需要避免碰撞的场景。
 func RandString(n int) string {
-	letterBytes := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-	var src = rand.NewSource(time.Now().UnixNano())
-
-	const (
-		letterIdxBits = 6
-		letterIdxMask = 1<<letterIdxBits - 1
-		letterIdxMax  = 63 / letterIdxBits
-	)
-	b := make([]byte, n)
-	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
-		if remain == 0 {
-			cache, remain = src.Int63(), letterIdxMax
-		}
-		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
-			b[i] = letterBytes[idx]
-			i--
-		}
-		cache >>= letterIdxBits
-		remain--
+	const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	if n <= 0 {
+		return ""
 	}
-	return string(b)
+	// 拒绝阈值：丢弃 >= maxByte 的字节，使剩余取值能被字符集长度整除，避免偏置
+	maxByte := 256 - (256 % len(letterBytes))
+	result := make([]byte, n)
+	buf := make([]byte, n)
+	for i := 0; i < n; {
+		if _, err := rand.Read(buf); err != nil {
+			panic("utils.RandString: crypto/rand unavailable: " + err.Error())
+		}
+		for _, c := range buf {
+			if int(c) >= maxByte {
+				continue
+			}
+			result[i] = letterBytes[int(c)%len(letterBytes)]
+			i++
+			if i == n {
+				break
+			}
+		}
+	}
+	return string(result)
 }
 
 // TrimPrefixAndSuffixAND 去除字符串前后的 AND（不区分大小写，忽略多余空白）

@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/role"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -33,50 +32,23 @@ func (api RoleController) List(c *gin.Context) {
 
 // Create 新增角色
 func (api RoleController) Create(c *gin.Context) {
-	params := form.NewCreateRoleForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := role.NewRoleService().CreateWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewCreateRoleForm, func(p *form.CreateRole) (string, error) {
+		return role.NewRoleService().CreateWithAuditDiff(p)
+	})
 }
 
 // Update 更新角色
 func (api RoleController) Update(c *gin.Context) {
-	params := form.NewUpdateRoleForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := role.NewRoleService().UpdateWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewUpdateRoleForm, func(p *form.UpdateRole) (string, error) {
+		return role.NewRoleService().UpdateWithAuditDiff(p)
+	})
 }
 
 // Delete 删除角色
 func (api RoleController) Delete(c *gin.Context) {
-	params := form.NewIdForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := role.NewRoleService().DeleteWithAuditDiff(params.ID)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewIdForm, func(p *form.ID) (string, error) {
+		return role.NewRoleService().DeleteWithAuditDiff(p.ID)
+	})
 }
 
 // Detail 获取角色详情

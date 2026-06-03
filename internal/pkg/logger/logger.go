@@ -16,12 +16,50 @@ import (
 	"github.com/wannanbigpig/gin-layout/config"
 )
 
+// swappableCore 是一个可在运行时原子替换底层 zapcore.Core 的包装。
+// 借助它，全局 Logger 只需构建一次且永不重新赋值，热重载/测试替换只切换内部 core，
+// 从而消除对导出变量 Logger 的并发读写竞争，同时保留 reload 对所有调用点生效。
+type swappableCore struct {
+	inner atomic.Pointer[zapcore.Core]
+}
+
+func (s *swappableCore) load() zapcore.Core {
+	if c := s.inner.Load(); c != nil {
+		return *c
+	}
+	return zapcore.NewNopCore()
+}
+
+func (s *swappableCore) store(core zapcore.Core) {
+	if core == nil {
+		core = zapcore.NewNopCore()
+	}
+	s.inner.Store(&core)
+}
+
+func (s *swappableCore) Enabled(level zapcore.Level) bool { return s.load().Enabled(level) }
+
+func (s *swappableCore) With(fields []zapcore.Field) zapcore.Core { return s.load().With(fields) }
+
+func (s *swappableCore) Check(entry zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if s.load().Enabled(entry.Level) {
+		return ce.AddCore(entry, s)
+	}
+	return ce
+}
+
+func (s *swappableCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+	return s.load().Write(entry, fields)
+}
+
+func (s *swappableCore) Sync() error { return s.load().Sync() }
+
 var (
-	nopLogger = zap.NewNop()
-	Logger    = nopLogger
+	rootCore = &swappableCore{}
+	// Logger 仅构建一次，底层 core 通过 rootCore 原子替换；调用点可安全并发读取。
+	Logger = zap.New(rootCore, zap.AddCaller())
 
 	loggerOnce sync.Once
-	loggerVal  atomic.Value
 	loggerMu   sync.Mutex
 	initErr    error
 )
@@ -29,62 +67,50 @@ var (
 // InitLogger 初始化全局日志实例。
 func InitLogger() error {
 	loggerOnce.Do(func() {
-		logger, err := buildLogger(config.GetConfig())
+		core, err := buildCore(config.GetConfig())
 		if err != nil {
 			initErr = fmt.Errorf("创建zap日志包失败: %w", err)
 			return
 		}
-		setLogger(logger)
+		loggerMu.Lock()
+		rootCore.store(core)
+		loggerMu.Unlock()
 	})
 	return initErr
 }
 
-// ReloadLogger 根据新配置重建全局日志实例。
+// ReloadLogger 根据新配置重建底层日志 core。
 func ReloadLogger(cfg *config.Conf) error {
-	loggerMu.Lock()
-	defer loggerMu.Unlock()
-
-	next, err := buildLogger(cfg)
+	core, err := buildCore(cfg)
 	if err != nil {
 		return err
 	}
-
-	old := current()
-	setLogger(next)
-	if old != nil {
-		_ = old.Sync()
-	}
+	loggerMu.Lock()
+	old := rootCore.load()
+	rootCore.store(core)
+	loggerMu.Unlock()
+	_ = old.Sync()
 	return nil
 }
 
 func current() *zap.Logger {
-	if logger, ok := loggerVal.Load().(*zap.Logger); ok && logger != nil {
-		return logger
-	}
-	if Logger != nil {
-		return Logger
-	}
-	return nopLogger
+	return Logger
 }
 
-func setLogger(logger *zap.Logger) {
-	if logger == nil {
-		logger = nopLogger
-	}
-	Logger = logger
-	loggerVal.Store(logger)
-}
-
-// ReplaceLoggerForTesting 临时替换全局 logger，并返回恢复函数。
+// ReplaceLoggerForTesting 临时替换全局 logger 的底层 core，并返回恢复函数。
 func ReplaceLoggerForTesting(logger *zap.Logger) func() {
 	loggerMu.Lock()
-	previous := current()
-	setLogger(logger)
+	previous := rootCore.load()
+	if logger != nil {
+		rootCore.store(logger.Core())
+	} else {
+		rootCore.store(zapcore.NewNopCore())
+	}
 	loggerMu.Unlock()
 
 	return func() {
 		loggerMu.Lock()
-		setLogger(previous)
+		rootCore.store(previous)
 		loggerMu.Unlock()
 	}
 }
@@ -102,6 +128,14 @@ func Error(msg string, fields ...zap.Field) {
 // Warn 使用当前全局 logger 记录 warn 日志。
 func Warn(msg string, fields ...zap.Field) {
 	current().Warn(msg, fields...)
+}
+
+func buildCore(cfg *config.Conf) (zapcore.Core, error) {
+	l, err := buildLogger(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return l.Core(), nil
 }
 
 // buildLogger 初始化 zap 日志

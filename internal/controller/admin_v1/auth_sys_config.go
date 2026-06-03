@@ -87,17 +87,9 @@ func (api SysConfigController) Update(c *gin.Context) {
 }
 
 func (api SysConfigController) Delete(c *gin.Context) {
-	params := form.NewIdForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-	changeDiff, err := sys_config.NewSysConfigService().DeleteWithAuditDiff(params.ID)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewIdForm, func(p *form.ID) (string, error) {
+		return sys_config.NewSysConfigService().DeleteWithAuditDiff(p.ID)
+	})
 }
 
 func (api SysConfigController) Refresh(c *gin.Context) {

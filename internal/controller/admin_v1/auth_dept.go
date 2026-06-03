@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
-	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/dept"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -33,50 +32,23 @@ func (api DeptController) List(c *gin.Context) {
 
 // Create 新增部门
 func (api DeptController) Create(c *gin.Context) {
-	params := form.NewCreateDeptForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := dept.NewDeptService().CreateWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewCreateDeptForm, func(p *form.CreateDept) (string, error) {
+		return dept.NewDeptService().CreateWithAuditDiff(p)
+	})
 }
 
 // Update 更新部门
 func (api DeptController) Update(c *gin.Context) {
-	params := form.NewUpdateDeptForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := dept.NewDeptService().UpdateWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewUpdateDeptForm, func(p *form.UpdateDept) (string, error) {
+		return dept.NewDeptService().UpdateWithAuditDiff(p)
+	})
 }
 
 // Delete 删除部门
 func (api DeptController) Delete(c *gin.Context) {
-	params := form.NewIdForm()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := dept.NewDeptService().DeleteWithAuditDiff(params.ID)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewIdForm, func(p *form.ID) (string, error) {
+		return dept.NewDeptService().DeleteWithAuditDiff(p.ID)
+	})
 }
 
 // Detail 获取部门详情
@@ -97,16 +69,7 @@ func (api DeptController) Detail(c *gin.Context) {
 
 // BindRole 绑定角色到部门
 func (api DeptController) BindRole(c *gin.Context) {
-	params := form.NewDeptBindRole()
-	if err := validator.CheckPostParams(c, &params); err != nil {
-		return
-	}
-
-	changeDiff, err := dept.NewDeptService().BindRoleWithAuditDiff(params)
-	if err != nil {
-		api.Err(c, err)
-		return
-	}
-	middleware.SetAuditChangeDiffRaw(c, changeDiff)
-	api.Success(c, nil)
+	handleAuditWrite(api.Api, c, form.NewDeptBindRole, func(p *form.DeptBindRole) (string, error) {
+		return dept.NewDeptService().BindRoleWithAuditDiff(p)
+	})
 }

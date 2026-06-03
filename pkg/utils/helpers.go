@@ -15,7 +15,7 @@ const passwordHashCost = 12
 // maskNumber 需要脱敏长度
 // maskChars 掩饰字符串，替代需要脱敏处理的字符串
 func MaskSensitiveInfo(s string, start int, maskNumber int, maskChars ...string) string {
-	// 将字符串s的[start, end)区间用maskChar替换，并返回替换后的结果。
+	// 将字符串 s 的 [start, end) 区间用 maskChar 替换。按 rune 处理，避免中文/emoji 等多字节字符被截断。
 	maskChar := "*"
 	if len(maskChars) > 0 && maskChars[0] != "" {
 		maskChar = maskChars[0]
@@ -23,19 +23,21 @@ func MaskSensitiveInfo(s string, start int, maskNumber int, maskChars ...string)
 	if maskNumber <= 0 || len(s) == 0 {
 		return s
 	}
+	runes := []rune(s)
+	length := len(runes)
 	// 处理起始位置超出边界的情况
 	if start < 0 {
 		start = 0
 	}
-	if start > len(s) {
-		start = len(s)
+	if start > length {
+		start = length
 	}
 	// 处理结束位置超出边界的情况
 	end := start + maskNumber
-	if end > len(s) {
-		end = len(s)
+	if end > length {
+		end = length
 	}
-	return s[:start] + strings.Repeat(maskChar, end-start) + s[end:]
+	return string(runes[:start]) + strings.Repeat(maskChar, end-start) + string(runes[end:])
 }
 
 // PasswordHash 密码hash并自动加盐
