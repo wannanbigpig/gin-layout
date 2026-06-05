@@ -8,9 +8,9 @@ import (
 // TestPersistAuditLogsBatchHandlesEmptyAndNil 验证批量落库在边界输入下不会触发 DB 调用。
 //
 // 设计要点：
-// - 当 snapshots 为空、全部 nil 或缺少 RequestID 时，函数应直接返回 nil；
-//   这避免了在 DB 未初始化的测试环境里因调用 model.GetDB() 而失败。
-// - DB 集成路径由 middleware 层通过依赖注入的 PersistBatch 测试覆盖，本处仅做边界校验。
+//   - 当 snapshots 为空、全部 nil 或缺少 RequestID 时，函数应直接返回 nil；
+//     这避免了在 DB 未初始化的测试环境里因调用 model.GetDB() 而失败。
+//   - DB 集成路径由 middleware 层通过依赖注入的 PersistBatch 测试覆盖，本处仅做边界校验。
 func TestPersistAuditLogsBatchHandlesEmptyAndNil(t *testing.T) {
 	if err := PersistAuditLogsBatch(context.Background(), nil); err != nil {
 		t.Fatalf("nil input should not error, got %v", err)
@@ -54,8 +54,7 @@ func TestSnapshotToRequestLogMapsAllFields(t *testing.T) {
 		ResponseStatus:     200,
 		ResponseBody:       "{r}",
 		ResponseHeader:     "{rh}",
-		ExecutionTime:      12.34,
-		ExecutionTimeUnit:  "ms",
+		ExecutionTimeUs:    12340,
 		ExecutionTimeScope: "request",
 	}
 	row := snapshotToRequestLog(snap)
@@ -80,7 +79,7 @@ func TestSnapshotToRequestLogMapsAllFields(t *testing.T) {
 	if row.ResponseStatus != snap.ResponseStatus || row.ResponseBody != snap.ResponseBody || row.ResponseHeader != snap.ResponseHeader {
 		t.Fatalf("response payload fields mismatch: %#v", row)
 	}
-	if row.ExecutionTime != snap.ExecutionTime || row.ExecutionTimeUnit != snap.ExecutionTimeUnit || row.ExecutionTimeScope != snap.ExecutionTimeScope {
+	if row.ExecutionTimeUs != snap.ExecutionTimeUs || row.ExecutionTimeScope != snap.ExecutionTimeScope {
 		t.Fatalf("execution time fields mismatch: %#v", row)
 	}
 }

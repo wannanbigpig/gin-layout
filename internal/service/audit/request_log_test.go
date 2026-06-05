@@ -13,15 +13,15 @@ func TestResolveRequestLogOrderByDefaultsToCreatedAtDesc(t *testing.T) {
 }
 
 func TestResolveRequestLogOrderByAppendsStableTieBreaker(t *testing.T) {
-	orderBy := resolveRequestLogOrderBy("execution_time desc")
-	if orderBy != "execution_time desc, id DESC" {
+	orderBy := resolveRequestLogOrderBy("execution_time_us desc")
+	if orderBy != "execution_time_us desc, id DESC" {
 		t.Fatalf("unexpected order by: %s", orderBy)
 	}
 }
 
 func TestRequestLogOrderAllowMapIncludesExecutionTime(t *testing.T) {
-	if _, ok := requestLogOrderAllowMap["execution_time"]; !ok {
-		t.Fatal("expected execution_time to be sortable")
+	if _, ok := requestLogOrderAllowMap["execution_time_us"]; !ok {
+		t.Fatal("expected execution_time_us to be sortable")
 	}
 }
 

@@ -45,21 +45,20 @@ func buildPanicAuditLogSnapshot(c *gin.Context, panicMessage string) *auditsvc.A
 }
 
 type auditRequestMeta struct {
-	requestID      string
-	method         string
-	path           string
-	ip             string
-	userAgent      string
-	os             string
-	browser        string
-	requestKind    string
-	operationName  string
-	requestHeaders string
-	requestQuery   string
-	requestBody    string
-	executionTime  float64
-	executionUnit  string
-	executionScope string
+	requestID       string
+	method          string
+	path            string
+	ip              string
+	userAgent       string
+	os              string
+	browser         string
+	requestKind     string
+	operationName   string
+	requestHeaders  string
+	requestQuery    string
+	requestBody     string
+	executionTimeUs int64
+	executionScope  string
 }
 
 type auditOperatorMeta struct {
@@ -69,7 +68,7 @@ type auditOperatorMeta struct {
 	operatorName    string
 }
 
-const requestLogExecutionTimeMaxMs = 99999999.9999
+const requestLogExecutionTimeMaxUs int64 = 99999999999999
 
 // buildAuditLogSnapshot 组装审计快照（仅负责编排，不包含具体字段提取细节）。
 func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operationStatus int, responseBody string, responseHeader string) *auditsvc.AuditLogSnapshot {
@@ -105,8 +104,7 @@ func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operation
 		ResponseStatus:     resolveAuditResponseStatus(recorder),
 		ResponseBody:       responseBody,
 		ResponseHeader:     responseHeader,
-		ExecutionTime:      requestMeta.executionTime,
-		ExecutionTimeUnit:  requestMeta.executionUnit,
+		ExecutionTimeUs:    requestMeta.executionTimeUs,
 		ExecutionTimeScope: requestMeta.executionScope,
 	}
 }
@@ -124,24 +122,23 @@ func collectAuditRequestMeta(c *gin.Context) *auditRequestMeta {
 	ua := useragent.New(userAgentStr)
 	browser, _ := ua.Browser()
 	requestKind := resolveAuditRequestKind(c)
-	executionTime, executionScope, executionUnit := calculateExecutionTimeMeta(c, requestKind)
+	executionTimeUs, executionScope := calculateExecutionTimeMeta(c, requestKind)
 
 	return &auditRequestMeta{
-		requestID:      requestID,
-		method:         method,
-		path:           path,
-		ip:             c.ClientIP(),
-		userAgent:      userAgentStr,
-		os:             ua.OS(),
-		browser:        browser,
-		requestKind:    requestKind,
-		operationName:  getOperationName(path, method, c.GetHeader("X-Operation-Name")),
-		requestHeaders: sensitive.GetMaskedRequestHeaders(c.Request.Header),
-		requestQuery:   sensitive.MaskQueryString(c.Request.URL.RawQuery),
-		requestBody:    resolveAuditRequestBody(c),
-		executionTime:  executionTime,
-		executionUnit:  executionUnit,
-		executionScope: executionScope,
+		requestID:       requestID,
+		method:          method,
+		path:            path,
+		ip:              c.ClientIP(),
+		userAgent:       userAgentStr,
+		os:              ua.OS(),
+		browser:         browser,
+		requestKind:     requestKind,
+		operationName:   getOperationName(path, method, c.GetHeader("X-Operation-Name")),
+		requestHeaders:  sensitive.GetMaskedRequestHeaders(c.Request.Header),
+		requestQuery:    sensitive.MaskQueryString(c.Request.URL.RawQuery),
+		requestBody:     resolveAuditRequestBody(c),
+		executionTimeUs: executionTimeUs,
+		executionScope:  executionScope,
 	}
 }
 
@@ -172,35 +169,28 @@ func collectAuditOperatorMeta(c *gin.Context) auditOperatorMeta {
 	}
 }
 
-func calculateExecutionTimeMeta(c *gin.Context, requestKind string) (float64, string, string) {
+func calculateExecutionTimeMeta(c *gin.Context, requestKind string) (int64, string) {
 	scope := model.ExecutionTimeScopeRequest
-	unit := model.ExecutionTimeUnitMilliseconds
-	divisor := 1000000.0
-	maxVal := requestLogExecutionTimeMaxMs
 	switch requestKind {
 	case model.RequestKindWebSocket:
 		scope = model.ExecutionTimeScopeConnection
-		unit = model.ExecutionTimeUnitSeconds
-		divisor = 1000000000.0
-		maxVal = requestLogExecutionTimeMaxMs / 1000.0
 	}
 	if c == nil {
-		return 0, model.ExecutionTimeScopeNone, unit
+		return 0, model.ExecutionTimeScopeNone
 	}
 	startTime := c.GetTime(global.ContextKeyRequestStartTime)
 	if startTime.IsZero() {
-		return 0, model.ExecutionTimeScopeNone, unit
+		return 0, model.ExecutionTimeScopeNone
 	}
 	duration := time.Since(startTime)
-	executionTime := float64(duration.Nanoseconds()) / divisor
-	if executionTime < 0 {
-		return 0, model.ExecutionTimeScopeNone, unit
+	executionTimeUs := duration.Microseconds()
+	if executionTimeUs < 0 {
+		return 0, model.ExecutionTimeScopeNone
 	}
-	executionTime = float64(int(executionTime*10000+0.5)) / 10000.0
-	if executionTime > maxVal {
-		return maxVal, scope, unit
+	if executionTimeUs > requestLogExecutionTimeMaxUs {
+		return requestLogExecutionTimeMaxUs, scope
 	}
-	return executionTime, scope, unit
+	return executionTimeUs, scope
 }
 
 func resolveAuditResponseStatus(recorder *responseRecorder) int {

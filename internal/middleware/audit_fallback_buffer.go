@@ -33,11 +33,11 @@ type bufferedAuditItem struct {
 // auditFallbackBuffer 是有界内存环形缓冲。
 //
 // 设计要点：
-// - 容量来自配置（默认 1024），首次写入时按当时配置初始化 worker。
-// - 满时优先丢弃“低风险只读 2xx”的最旧条目，腾出空间接纳新条目；
-//   找不到可丢弃条目时返回 false，调用方走同步 INSERT 兜底。
-// - 单个后台 worker 拉取最多 batchSize 条或等待最长 flushInterval 时间后批量落库。
-// - 退出阶段调用 Stop() 阻塞至缓冲清空或达到 drain 超时。
+//   - 容量来自配置（默认 1024），首次写入时按当时配置初始化 worker。
+//   - 满时优先丢弃“低风险只读 2xx”的最旧条目，腾出空间接纳新条目；
+//     找不到可丢弃条目时返回 false，调用方走同步 INSERT 兜底。
+//   - 单个后台 worker 拉取最多 batchSize 条或等待最长 flushInterval 时间后批量落库。
+//   - 退出阶段调用 Stop() 阻塞至缓冲清空或达到 drain 超时。
 type auditFallbackBuffer struct {
 	mu      sync.Mutex
 	items   []*bufferedAuditItem

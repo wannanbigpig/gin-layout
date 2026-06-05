@@ -58,8 +58,7 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 			"operator_account",
 			"operator_name",
 			"response_status",
-			"execution_time",
-			"execution_time_unit",
+			"execution_time_us",
 			"execution_time_scope",
 			"created_at",
 		},
@@ -80,11 +79,11 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 }
 
 var requestLogOrderAllowMap = map[string]struct{}{
-	"id":               {},
-	"created_at":       {},
-	"execution_time":   {},
-	"response_status":  {},
-	"operation_status": {},
+	"id":                {},
+	"created_at":        {},
+	"execution_time_us": {},
+	"response_status":   {},
+	"operation_status":  {},
 }
 
 func resolveRequestLogOrderBy(orderBy string) string {

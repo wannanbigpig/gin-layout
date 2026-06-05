@@ -16,7 +16,7 @@ type RequestLogList struct {
 	IP                 string `form:"ip" json:"ip" binding:"omitempty"`                                                                          // 操作IP
 	StartTime          string `form:"start_time" json:"start_time" binding:"omitempty"`                                                          // 开始时间
 	EndTime            string `form:"end_time" json:"end_time" binding:"omitempty"`                                                              // 结束时间
-	OrderBy            string `form:"order_by" json:"order_by" binding:"omitempty,max=64"`                                                       // 排序字段，例如 execution_time desc
+	OrderBy            string `form:"order_by" json:"order_by" binding:"omitempty,max=64"`                                                       // 排序字段，例如 execution_time_us desc
 }
 
 // NewRequestLogListQuery 创建请求日志列表查询表单

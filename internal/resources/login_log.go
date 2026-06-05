@@ -36,13 +36,13 @@ type AdminLoginLogListResources struct {
 // AdminLoginLogResources 表示登录日志详情响应。
 type AdminLoginLogResources struct {
 	AdminLoginLogBaseResources
-	JwtID            string            `json:"jwt_id"`                  // JWT 唯一标识 (jti claim)
-	UserAgent        string            `json:"user_agent"`              // 用户代理（浏览器/设备信息）
-	TokenHash        string            `json:"token_hash"`              // Token 的 SHA256 哈希值
-	RefreshTokenHash string            `json:"refresh_token_hash"`      // Refresh Token 的哈希值
-	TokenExpires     *utils.FormatDate `json:"token_expires"`           // Token 过期时间
-	RefreshExpires   *utils.FormatDate `json:"refresh_expires"`         // Refresh Token 过期时间
-	UpdatedAt        utils.FormatDate  `json:"updated_at"`              // 更新时间
+	JwtID            string            `json:"jwt_id"`             // JWT 唯一标识 (jti claim)
+	UserAgent        string            `json:"user_agent"`         // 用户代理（浏览器/设备信息）
+	TokenHash        string            `json:"token_hash"`         // Token 的 SHA256 哈希值
+	RefreshTokenHash string            `json:"refresh_token_hash"` // Refresh Token 的哈希值
+	TokenExpires     *utils.FormatDate `json:"token_expires"`      // Token 过期时间
+	RefreshExpires   *utils.FormatDate `json:"refresh_expires"`    // Refresh Token 过期时间
+	UpdatedAt        utils.FormatDate  `json:"updated_at"`         // 更新时间
 }
 
 // AdminLoginLogTransformer 负责登录日志资源转换。

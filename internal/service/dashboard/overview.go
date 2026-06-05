@@ -396,7 +396,7 @@ var responseTimeBucketDefs = []struct {
 	{Label: "gt_3s", LowerMs: 3000, UpperMs: 0},
 }
 
-// buildResponseTimeStats 聚合今日 request_logs.execution_time（毫秒）的分桶分布与平均耗时。
+// buildResponseTimeStats 聚合今日 request_logs.execution_time_us（微秒）的分桶分布与平均耗时（输出毫秒）。
 //
 // 单次扫描：用 SUM(CASE WHEN ...) 一并算出各分桶计数与 AVG，避免“每桶一条 COUNT + 一条 AVG”
 // 造成对 request_logs 的多次全窗口扫描（原实现每次调用要扫 6 遍，dashboard 热路径开销翻倍）。
@@ -410,10 +410,10 @@ func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *Respon
 		// LowerMs/UpperMs 均为内部定义的 int 常量，非外部输入，可安全内联。
 		conds := make([]string, 0, 2)
 		if def.LowerMs > 0 {
-			conds = append(conds, fmt.Sprintf("execution_time >= %d", def.LowerMs))
+			conds = append(conds, fmt.Sprintf("execution_time_us >= %d", def.LowerMs*1000))
 		}
 		if def.UpperMs > 0 {
-			conds = append(conds, fmt.Sprintf("execution_time < %d", def.UpperMs))
+			conds = append(conds, fmt.Sprintf("execution_time_us < %d", def.UpperMs*1000))
 		}
 		when := "1=1"
 		if len(conds) > 0 {
@@ -421,7 +421,7 @@ func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *Respon
 		}
 		selectParts = append(selectParts, fmt.Sprintf("COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) AS b%d", when, i))
 	}
-	selectParts = append(selectParts, "COALESCE(AVG(execution_time), 0) AS avg_ms")
+	selectParts = append(selectParts, "COALESCE(AVG(execution_time_us), 0) / 1000.0 AS avg_ms")
 
 	row := requestLogLatencyStatsQuery(db, start, end).
 		Select(strings.Join(selectParts, ", ")).

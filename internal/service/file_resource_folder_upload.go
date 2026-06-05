@@ -19,6 +19,7 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"go.uber.org/zap"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
@@ -283,16 +284,25 @@ func (s *FileResourceService) MoveFiles(params *form.FileMove) (*resources.FileM
 	if err != nil {
 		return nil, err
 	}
-	result := db.Model(&model.UploadFiles{}).Where("id IN ?", params.IDs).Updates(map[string]any{
-		"folder_id":    params.FolderID,
-		"logical_path": logicalPath,
-		"updated_at":   time.Now(),
-	})
-	if result.Error != nil {
-		return nil, result.Error
+	// 逐文件移动：唯一索引 uniq_folder_name_deleted 下，目标目录已有同名活跃记录时单条 UPDATE 会冲突，
+	// 跳过该文件而非让整批失败。
+	var moved int64
+	for _, id := range params.IDs {
+		res := db.Model(&model.UploadFiles{}).Where("id = ?", id).Updates(map[string]any{
+			"folder_id":    params.FolderID,
+			"logical_path": logicalPath,
+			"updated_at":   time.Now(),
+		})
+		if res.Error != nil {
+			if isUploadNameDuplicateErr(res.Error) {
+				continue // 目标目录已存在同名文件，跳过
+			}
+			return nil, res.Error
+		}
+		moved += res.RowsAffected
 	}
 	total := int64(len(params.IDs))
-	return &resources.FileMoveResult{Total: total, Moved: result.RowsAffected, Skipped: total - result.RowsAffected}, nil
+	return &resources.FileMoveResult{Total: total, Moved: moved, Skipped: total - moved}, nil
 }
 
 func (s *FileResourceService) UploadLocal(files []*multipart.FileHeader, params *form.FileLocalUpload, uid uint) (*resources.FileLocalUploadBatchResult, error) {
@@ -585,48 +595,42 @@ func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUplo
 		return nil, err
 	}
 
-	resolved, err := s.resolveUploadFileConflict(db, params.FolderID, params.OriginName, hash)
+	uploadFile, existing, err := s.createUploadFileWithConflict(db, params.FolderID, params.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+		originName := resolved.FinalName
+		uf := &model.UploadFiles{
+			UID:         uid,
+			FolderID:    params.FolderID,
+			LogicalPath: logicalPath,
+			// 保留调用方设置的自定义展示名，仅在未设置时使用冲突解决后的名称
+			DisplayName:   firstNonEmpty(params.DisplayName, originName),
+			OriginName:    originName,
+			Name:          firstNonEmpty(params.Name, filepath.Base(objectKey)),
+			Path:          objectKey,
+			Size:          size,
+			Ext:           firstNonEmpty(params.Ext, filepath.Ext(originName), filepath.Ext(objectKey)),
+			Hash:          hash,
+			UUID:          fileUUID,
+			MimeType:      mimeType,
+			FileType:      fileType,
+			IsPublic:      params.IsPublic,
+			StorageDriver: storageDriver,
+			StorageBase:   bucket,
+			Bucket:        bucket,
+			StoragePath:   objectKey,
+			ObjectKey:     objectKey,
+			ETag:          etag,
+			StorageStatus: model.StorageStatusStored,
+			UploadSource:  model.UploadSourceDirect,
+			UploadScene:   params.UploadScene,
+			UploadStatus:  model.UploadStatusUploaded,
+		}
+		applyObjectToUploadFile(uf, object)
+		return uf
+	})
 	if err != nil {
 		return nil, err
 	}
-	if resolved.Existing != nil {
-		s.fillObjectReuseCounts([]*model.UploadFiles{resolved.Existing})
-		return resources.NewFileResourceTransformer().ToStruct(resolved.Existing), nil
-	}
-	originName := resolved.FinalName
-	// 保留调用方设置的自定义展示名，仅在未设置时使用冲突解决后的名称
-	displayName := firstNonEmpty(params.DisplayName, originName)
-
-	uploadFile := &model.UploadFiles{
-		UID:           uid,
-		FolderID:      params.FolderID,
-		LogicalPath:   logicalPath,
-		DisplayName:   displayName,
-		OriginName:    originName,
-		Name:          firstNonEmpty(params.Name, filepath.Base(objectKey)),
-		Path:          objectKey,
-		Size:          size,
-		Ext:           firstNonEmpty(params.Ext, filepath.Ext(originName), filepath.Ext(objectKey)),
-		Hash:          hash,
-		UUID:          fileUUID,
-		MimeType:      mimeType,
-		FileType:      fileType,
-		IsPublic:      params.IsPublic,
-		StorageDriver: storageDriver,
-		StorageBase:   bucket,
-		Bucket:        bucket,
-		StoragePath:   objectKey,
-		ObjectKey:     objectKey,
-		ETag:          etag,
-		StorageStatus: model.StorageStatusStored,
-		UploadSource:  model.UploadSourceDirect,
-		UploadScene:   params.UploadScene,
-		UploadStatus:  model.UploadStatusUploaded,
-	}
-	applyObjectToUploadFile(uploadFile, object)
-	if err := db.Create(uploadFile).Error; err != nil {
-		return nil, err
-	}
+	_ = existing // 此路径 object 为复用或已 ensure，跳过时无需额外清理
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
 }
@@ -845,49 +849,48 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		return nil, err
 	}
 
-	resolved, err := s.resolveUploadFileConflict(db, input.FolderID, input.OriginName, hash)
+	uploadFile, existing, err := s.createUploadFileWithConflict(db, input.FolderID, input.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+		originName := resolved.FinalName
+		uf := &model.UploadFiles{
+			UID:           input.UID,
+			FolderID:      input.FolderID,
+			LogicalPath:   logicalPath,
+			DisplayName:   firstNonEmpty(input.DisplayName, originName),
+			OriginName:    originName,
+			Name:          fileUUID + ext,
+			Path:          object.ObjectKey,
+			Size:          uint(size),
+			Ext:           ext,
+			Hash:          hash,
+			UUID:          fileUUID,
+			MimeType:      input.MimeType,
+			FileType:      classifyUploadFileType(input.MimeType),
+			IsPublic:      input.IsPublic,
+			StorageDriver: activeDriver,
+			StorageBase:   object.StorageBase,
+			Bucket:        object.Bucket,
+			StoragePath:   object.StoragePath,
+			ObjectKey:     object.ObjectKey,
+			ETag:          object.ETag,
+			StorageStatus: model.StorageStatusStored,
+			UploadSource:  model.UploadSourceSystem,
+			UploadScene:   input.UploadScene,
+			UploadStatus:  model.UploadStatusUploaded,
+			ExpiresAt:     dateutils.FormatDate{Time: expiresAtVal},
+		}
+		applyObjectToUploadFile(uf, object)
+		return uf
+	})
 	if err != nil {
 		return nil, err
 	}
-	if resolved.Existing != nil {
+	if existing {
+		// 命中已存在记录，本次新建的物理对象成为孤儿，需清理（复用对象除外）
 		if !reused {
 			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
 		}
-		s.fillObjectReuseCounts([]*model.UploadFiles{resolved.Existing})
-		return resolved.Existing, nil
-	}
-	originName := resolved.FinalName
-
-	uploadFile := &model.UploadFiles{
-		UID:           input.UID,
-		FolderID:      input.FolderID,
-		LogicalPath:   logicalPath,
-		DisplayName:   firstNonEmpty(input.DisplayName, originName),
-		OriginName:    originName,
-		Name:          fileUUID + ext,
-		Path:          object.ObjectKey,
-		Size:          uint(size),
-		Ext:           ext,
-		Hash:          hash,
-		UUID:          fileUUID,
-		MimeType:      input.MimeType,
-		FileType:      classifyUploadFileType(input.MimeType),
-		IsPublic:      input.IsPublic,
-		StorageDriver: activeDriver,
-		StorageBase:   object.StorageBase,
-		Bucket:        object.Bucket,
-		StoragePath:   object.StoragePath,
-		ObjectKey:     object.ObjectKey,
-		ETag:          object.ETag,
-		StorageStatus: model.StorageStatusStored,
-		UploadSource:  model.UploadSourceSystem,
-		UploadScene:   input.UploadScene,
-		UploadStatus:  model.UploadStatusUploaded,
-		ExpiresAt:     dateutils.FormatDate{Time: expiresAtVal},
-	}
-	applyObjectToUploadFile(uploadFile, object)
-	if err := db.Create(uploadFile).Error; err != nil {
-		return nil, err
+		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
+		return uploadFile, nil
 	}
 	return uploadFile, nil
 }
@@ -973,7 +976,37 @@ func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params 
 		cleanupStoredUpload(result.Path)
 	}
 
-	resolved, err := s.resolveUploadFileConflict(db, params.FolderID, result.OriginName, result.Sha256)
+	uploadFile, existing, err := s.createUploadFileWithConflict(db, params.FolderID, result.OriginName, result.Sha256, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+		originName := resolved.FinalName
+		uf := &model.UploadFiles{
+			UID:           uid,
+			FolderID:      params.FolderID,
+			LogicalPath:   logicalPath,
+			DisplayName:   originName,
+			OriginName:    originName,
+			Name:          result.Name,
+			Path:          object.ObjectKey,
+			Size:          uint(result.Size),
+			Ext:           firstNonEmpty(result.Ext, filepath.Ext(originName)),
+			Hash:          result.Sha256,
+			UUID:          result.UUID,
+			MimeType:      result.MimeType,
+			FileType:      classifyUploadFileType(result.MimeType),
+			IsPublic:      params.IsPublic,
+			StorageDriver: model.StorageDriverLocal,
+			StorageBase:   object.StorageBase,
+			Bucket:        object.Bucket,
+			StoragePath:   object.StoragePath,
+			ObjectKey:     object.ObjectKey,
+			ETag:          object.ETag,
+			StorageStatus: model.StorageStatusStored,
+			UploadSource:  model.UploadSourceBackend,
+			UploadScene:   params.UploadScene,
+			UploadStatus:  model.UploadStatusUploaded,
+		}
+		applyObjectToUploadFile(uf, object)
+		return uf
+	})
 	if err != nil {
 		if !reused {
 			cleanupStoredUpload(result.Path)
@@ -981,49 +1014,14 @@ func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params 
 		}
 		return nil, err
 	}
-	if resolved.Existing != nil {
+	if existing {
+		// 命中已存在记录，本次落盘的物理文件与新建对象成为孤儿，需清理（复用对象除外）
 		if !reused {
 			cleanupStoredUpload(result.Path)
 			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
 		}
-		s.fillObjectReuseCounts([]*model.UploadFiles{resolved.Existing})
-		return resources.NewFileResourceTransformer().ToStruct(resolved.Existing), nil
-	}
-	originName := resolved.FinalName
-
-	uploadFile := &model.UploadFiles{
-		UID:           uid,
-		FolderID:      params.FolderID,
-		LogicalPath:   logicalPath,
-		DisplayName:   originName,
-		OriginName:    originName,
-		Name:          result.Name,
-		Path:          object.ObjectKey,
-		Size:          uint(result.Size),
-		Ext:           firstNonEmpty(result.Ext, filepath.Ext(originName)),
-		Hash:          result.Sha256,
-		UUID:          result.UUID,
-		MimeType:      result.MimeType,
-		FileType:      classifyUploadFileType(result.MimeType),
-		IsPublic:      params.IsPublic,
-		StorageDriver: model.StorageDriverLocal,
-		StorageBase:   object.StorageBase,
-		Bucket:        object.Bucket,
-		StoragePath:   object.StoragePath,
-		ObjectKey:     object.ObjectKey,
-		ETag:          object.ETag,
-		StorageStatus: model.StorageStatusStored,
-		UploadSource:  model.UploadSourceBackend,
-		UploadScene:   params.UploadScene,
-		UploadStatus:  model.UploadStatusUploaded,
-	}
-	applyObjectToUploadFile(uploadFile, object)
-	if err := db.Create(uploadFile).Error; err != nil {
-		if !reused {
-			cleanupStoredUpload(result.Path)
-			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
-		}
-		return nil, err
+		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
+		return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
 	}
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
@@ -1300,12 +1298,41 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 		return nil, err
 	}
 
-	resolved, err := s.resolveUploadFileConflict(db, params.FolderID, params.OriginName, hash)
+	uploadFile, existing, err := s.createUploadFileWithConflict(db, params.FolderID, params.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+		originName := resolved.FinalName
+		uf := &model.UploadFiles{
+			UID:           uid,
+			FolderID:      params.FolderID,
+			LogicalPath:   logicalPath,
+			DisplayName:   originName,
+			OriginName:    originName,
+			Name:          filepath.Base(objectKey),
+			Path:          objectKey,
+			Size:          size,
+			Ext:           filepath.Ext(originName),
+			Hash:          hash,
+			UUID:          fileUUID,
+			MimeType:      mimeType,
+			FileType:      fileType,
+			IsPublic:      params.IsPublic,
+			StorageDriver: storageDriver,
+			StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, bucket),
+			Bucket:        bucket,
+			StoragePath:   objectKey,
+			ObjectKey:     objectKey,
+			ETag:          "",
+			StorageStatus: model.StorageStatusStored,
+			UploadSource:  model.UploadSourceDirect,
+			UploadStatus:  model.UploadStatusUploaded,
+		}
+		applyObjectToUploadFile(uf, object)
+		return uf
+	})
 	if err != nil {
 		return nil, err
 	}
-	if resolved.Existing != nil {
-		// 非 reuse 路径下刚创建了新的云存储对象和 UploadFileObject，需清理
+	if existing {
+		// 命中已存在记录：非 reuse 路径下刚创建了新的云存储对象和 UploadFileObject，需清理
 		if !shouldResolveMultipartReuse(params) && !reusedObject {
 			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
 			driver, cfg, drvErr := s.storageDriverByName(context.Background(), storageDriver)
@@ -1314,39 +1341,8 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 				_ = cfg // 避免未使用警告
 			}
 		}
-		s.fillObjectReuseCounts([]*model.UploadFiles{resolved.Existing})
-		return resources.NewFileResourceTransformer().ToStruct(resolved.Existing), nil
-	}
-	originName := resolved.FinalName
-
-	uploadFile := &model.UploadFiles{
-		UID:           uid,
-		FolderID:      params.FolderID,
-		LogicalPath:   logicalPath,
-		DisplayName:   originName,
-		OriginName:    originName,
-		Name:          filepath.Base(objectKey),
-		Path:          objectKey,
-		Size:          size,
-		Ext:           filepath.Ext(originName),
-		Hash:          hash,
-		UUID:          fileUUID,
-		MimeType:      mimeType,
-		FileType:      fileType,
-		IsPublic:      params.IsPublic,
-		StorageDriver: storageDriver,
-		StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, bucket),
-		Bucket:        bucket,
-		StoragePath:   objectKey,
-		ObjectKey:     objectKey,
-		ETag:          "",
-		StorageStatus: model.StorageStatusStored,
-		UploadSource:  model.UploadSourceDirect,
-		UploadStatus:  model.UploadStatusUploaded,
-	}
-	applyObjectToUploadFile(uploadFile, object)
-	if err := db.Create(uploadFile).Error; err != nil {
-		return nil, err
+		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
+		return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
 	}
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
@@ -1537,16 +1533,16 @@ func (s *FileResourceService) validateFileLimit(fileName string, size int64, mim
 		if matchedPattern != "*" && matchedPattern != "" {
 			if expectedMime := mime.TypeByExtension(matchedPattern); expectedMime != "" {
 				expectedMime = strings.ToLower(strings.TrimSpace(strings.Split(expectedMime, ";")[0]))
-				
+
 				cleanMime := strings.ToLower(strings.TrimSpace(mimeType))
 				cleanMime = strings.Split(cleanMime, ";")[0] // 去除参数部分
-				
+
 				if cleanMime == "" && fileName != "" {
 					if guessedMime := mime.TypeByExtension(fileExt); guessedMime != "" {
 						cleanMime = strings.ToLower(strings.TrimSpace(strings.Split(guessedMime, ";")[0]))
 					}
 				}
-				
+
 				if cleanMime == "" {
 					cleanMime = "application/octet-stream"
 				}
@@ -1743,4 +1739,71 @@ func (s *FileResourceService) resolveUploadFileConflict(tx *gorm.DB, folderID ui
 func escapeLikePattern(s string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return replacer.Replace(s)
+}
+
+// maxUploadConflictRetries 并发插入命中唯一索引时的重试次数。
+// 每次重试都会重新解析冲突（可能转为复用或重命名），覆盖并发窗口内被其他请求抢先插入的场景。
+const maxUploadConflictRetries = 5
+
+// uploadFileConflictBuilder 根据冲突解析结果构造待插入记录。
+// resolved.Existing 非 nil 时跳过插入直接复用；否则用 resolved.FinalName 作为最终文件名。
+type uploadFileConflictBuilder func(resolved *uploadFileConflictResult) *model.UploadFiles
+
+// createUploadFileWithConflict 在事务内原子地完成「解析同名冲突 → 插入记录」，
+// 由 DB 唯一索引 uniq_folder_name_deleted 兜底并发竞态：检查与插入间被其他请求抢先插入时，
+// Create 触发唯一冲突，重新进入下一轮解析（转为复用或继续重命名），消除 TOCTOU。
+//
+// 返回值 existing 为 true 表示命中已存在记录（复用，未新建）；此时调用方需自行清理本次新建的物理对象/文件。
+func (s *FileResourceService) createUploadFileWithConflict(
+	db *gorm.DB,
+	folderID uint,
+	originName string,
+	hash string,
+	build uploadFileConflictBuilder,
+) (file *model.UploadFiles, existing bool, err error) {
+	for attempt := 0; attempt < maxUploadConflictRetries; attempt++ {
+		txErr := access.RunInTransaction(db, func(tx *gorm.DB) error {
+			resolved, rErr := s.resolveUploadFileConflict(tx, folderID, originName, hash)
+			if rErr != nil {
+				return rErr
+			}
+			if resolved.Existing != nil {
+				file = resolved.Existing
+				existing = true
+				return nil
+			}
+			existing = false
+			uploadFile := build(resolved)
+			if cErr := tx.Create(uploadFile).Error; cErr != nil {
+				return cErr
+			}
+			file = uploadFile
+			return nil
+		})
+		if txErr == nil {
+			return file, existing, nil
+		}
+		if isUploadNameDuplicateErr(txErr) {
+			continue // 并发抢先插入，重新解析冲突
+		}
+		return nil, false, txErr
+	}
+	return nil, false, fmt.Errorf("unable to create upload file for '%s' after %d attempts due to name conflict", originName, maxUploadConflictRetries)
+}
+
+// isUploadNameDuplicateErr 识别 upload_files 同目录同名唯一索引冲突（MySQL 1062 / SQLite UNIQUE constraint）。
+func isUploadNameDuplicateErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1062 && strings.Contains(mysqlErr.Message, "uniq_folder_name_deleted")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "Duplicate entry") && strings.Contains(msg, "uniq_folder_name_deleted") {
+		return true
+	}
+	// SQLite：UNIQUE constraint failed: upload_files.folder_id, upload_files.origin_name, upload_files.deleted_at
+	return strings.Contains(msg, "UNIQUE constraint failed") && strings.Contains(msg, "upload_files.origin_name")
 }

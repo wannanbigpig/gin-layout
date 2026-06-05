@@ -8,31 +8,30 @@ import (
 
 // AuditLogSnapshot 表示请求结束时提取出的审计日志快照。
 type AuditLogSnapshot struct {
-	RequestID          string  `json:"request_id"`
-	JwtID              string  `json:"jwt_id"`
-	OperatorID         uint    `json:"operator_id"`
-	OperatorAccount    string  `json:"operator_account"`
-	OperatorName       string  `json:"operator_name"`
-	IP                 string  `json:"ip"`
-	UserAgent          string  `json:"user_agent"`
-	OS                 string  `json:"os"`
-	Browser            string  `json:"browser"`
-	RequestKind        string  `json:"request_kind"`
-	Method             string  `json:"method"`
-	BaseURL            string  `json:"base_url"`
-	OperationName      string  `json:"operation_name"`
-	OperationStatus    int     `json:"operation_status"`
-	IsHighRisk         uint8   `json:"is_high_risk"`
-	RequestHeaders     string  `json:"request_headers"`
-	RequestQuery       string  `json:"request_query"`
-	RequestBody        string  `json:"request_body"`
-	ChangeDiff         string  `json:"change_diff"`
-	ResponseStatus     int     `json:"response_status"`
-	ResponseBody       string  `json:"response_body"`
-	ResponseHeader     string  `json:"response_header"`
-	ExecutionTime      float64 `json:"execution_time"`
-	ExecutionTimeUnit  string  `json:"execution_time_unit"`
-	ExecutionTimeScope string  `json:"execution_time_scope"`
+	RequestID          string `json:"request_id"`
+	JwtID              string `json:"jwt_id"`
+	OperatorID         uint   `json:"operator_id"`
+	OperatorAccount    string `json:"operator_account"`
+	OperatorName       string `json:"operator_name"`
+	IP                 string `json:"ip"`
+	UserAgent          string `json:"user_agent"`
+	OS                 string `json:"os"`
+	Browser            string `json:"browser"`
+	RequestKind        string `json:"request_kind"`
+	Method             string `json:"method"`
+	BaseURL            string `json:"base_url"`
+	OperationName      string `json:"operation_name"`
+	OperationStatus    int    `json:"operation_status"`
+	IsHighRisk         uint8  `json:"is_high_risk"`
+	RequestHeaders     string `json:"request_headers"`
+	RequestQuery       string `json:"request_query"`
+	RequestBody        string `json:"request_body"`
+	ChangeDiff         string `json:"change_diff"`
+	ResponseStatus     int    `json:"response_status"`
+	ResponseBody       string `json:"response_body"`
+	ResponseHeader     string `json:"response_header"`
+	ExecutionTimeUs    int64  `json:"execution_time_us"`
+	ExecutionTimeScope string `json:"execution_time_scope"`
 }
 
 // PersistAuditLog 将请求审计日志快照写入数据库。
@@ -102,8 +101,7 @@ func snapshotToRequestLog(snapshot *AuditLogSnapshot) *model.RequestLogs {
 	requestLog.ResponseStatus = snapshot.ResponseStatus
 	requestLog.ResponseBody = snapshot.ResponseBody
 	requestLog.ResponseHeader = snapshot.ResponseHeader
-	requestLog.ExecutionTime = snapshot.ExecutionTime
-	requestLog.ExecutionTimeUnit = snapshot.ExecutionTimeUnit
+	requestLog.ExecutionTimeUs = snapshot.ExecutionTimeUs
 	requestLog.ExecutionTimeScope = snapshot.ExecutionTimeScope
 	return requestLog
 }

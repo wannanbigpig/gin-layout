@@ -313,8 +313,8 @@ func TestFileResourceDestroyKeepsPhysicalObjectUntilLastRecord(t *testing.T) {
 	if err := db.Create(&object).Error; err != nil {
 		t.Fatalf("create object failed: %v", err)
 	}
-	first := model.UploadFiles{FileObjectID: object.ID, UUID: fmt.Sprintf("%032x", time.Now().UnixNano()), StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored}
-	second := model.UploadFiles{FileObjectID: object.ID, UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+1), StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored}
+	first := model.UploadFiles{FileObjectID: object.ID, OriginName: "shared-a.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()), StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored}
+	second := model.UploadFiles{FileObjectID: object.ID, OriginName: "shared-b.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+1), StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored}
 	if err := db.Create(&first).Error; err != nil {
 		t.Fatalf("create first file failed: %v", err)
 	}
@@ -442,13 +442,13 @@ func TestFileResourceUploadCredentialBatchReturnsPerItemResults(t *testing.T) {
 func TestFileResourceCompleteDirectUploadRejectsMultiFileType(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	object := model.UploadFileObject{
-		Bucket:        "assets",
-		StoragePath:   "uploads/reuse.pdf",
-		ObjectKey:     "uploads/reuse.pdf",
-		Size:          12,
-		Hash:          strings.Repeat("f", 64),
-		MimeType:      "application/pdf",
-		Status:        model.StorageStatusStored,
+		Bucket:      "assets",
+		StoragePath: "uploads/reuse.pdf",
+		ObjectKey:   "uploads/reuse.pdf",
+		Size:        12,
+		Hash:        strings.Repeat("f", 64),
+		MimeType:    "application/pdf",
+		Status:      model.StorageStatusStored,
 	}
 	if err := db.Create(&object).Error; err != nil {
 		t.Fatalf("create object failed: %v", err)
@@ -461,10 +461,10 @@ func TestFileResourceCompleteDirectUploadRejectsMultiFileType(t *testing.T) {
 	})
 
 	_, err := service.CompleteDirectUpload(&form.FileUploadComplete{
-		Reuse:         true,
-		FileObjectID:  object.ID,
-		OriginName:    "reuse.pdf",
-		FileType:      "pdf,word",
+		Reuse:        true,
+		FileObjectID: object.ID,
+		OriginName:   "reuse.pdf",
+		FileType:     "pdf,word",
 	}, 1)
 	if err == nil {
 		t.Fatal("expected multi file_type direct complete to fail")
@@ -667,14 +667,14 @@ func TestFileResourceMultipartCompleteReuseCreatesUploadRecord(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	hash := strings.Repeat("d", 64)
 	object := model.UploadFileObject{
-		Bucket:        "assets",
-		StoragePath:   "uploads/reuse.txt",
-		ObjectKey:     "uploads/reuse.txt",
-		Size:          12,
-		Hash:          hash,
-		MimeType:      "text/plain",
-		ETag:          "etag-reuse",
-		Status:        model.StorageStatusStored,
+		Bucket:      "assets",
+		StoragePath: "uploads/reuse.txt",
+		ObjectKey:   "uploads/reuse.txt",
+		Size:        12,
+		Hash:        hash,
+		MimeType:    "text/plain",
+		ETag:        "etag-reuse",
+		Status:      model.StorageStatusStored,
 	}
 	if err := db.Create(&object).Error; err != nil {
 		t.Fatalf("create object failed: %v", err)
@@ -733,13 +733,13 @@ func TestFileResourceMultipartCompleteImplicitReuseCreatesUploadRecord(t *testin
 func TestFileResourceMultipartCompleteRejectsMultiFileType(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	object := model.UploadFileObject{
-		Bucket:        "assets",
-		StoragePath:   "uploads/reuse.pdf",
-		ObjectKey:     "uploads/reuse.pdf",
-		Size:          12,
-		Hash:          strings.Repeat("7", 64),
-		MimeType:      "application/pdf",
-		Status:        model.StorageStatusStored,
+		Bucket:      "assets",
+		StoragePath: "uploads/reuse.pdf",
+		ObjectKey:   "uploads/reuse.pdf",
+		Size:        12,
+		Hash:        strings.Repeat("7", 64),
+		MimeType:    "application/pdf",
+		Status:      model.StorageStatusStored,
 	}
 	if err := db.Create(&object).Error; err != nil {
 		t.Fatalf("create object failed: %v", err)
@@ -795,8 +795,8 @@ func TestFileResourceDeletePhysicalUsesFileStorageDriver(t *testing.T) {
 		},
 	})
 	err := service.deletePhysicalFile(&model.UploadFiles{
-		Bucket:        "bucket",
-		ObjectKey:     "old/object.txt",
+		Bucket:    "bucket",
+		ObjectKey: "old/object.txt",
 	})
 	if err != nil {
 		t.Fatalf("delete physical file failed: %v", err)
@@ -1074,6 +1074,8 @@ func execFileResourceTestSchema(t *testing.T, db *gorm.DB) {
 			created_at datetime,
 			updated_at datetime
 		)`,
+		// 与生产迁移 uniq_folder_name_deleted 对齐：同目录同名活跃记录唯一。
+		`CREATE UNIQUE INDEX uniq_folder_name_deleted ON upload_files (folder_id, origin_name, deleted_at)`,
 	}
 	for _, statement := range statements {
 		if err := db.Exec(statement).Error; err != nil {

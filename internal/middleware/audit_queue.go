@@ -12,6 +12,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	perrors "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
@@ -19,8 +20,9 @@ import (
 )
 
 const (
-	auditEnqueueTimeout            = 2 * time.Second
-	defaultAuditSampleGetKeepEvery = 10
+	auditEnqueueTimeout                   = 2 * time.Second
+	defaultAuditSampleGetKeepEvery        = 10
+	defaultAuditSampleSlowKeepThresholdMs = 1000
 	// auditStorageRetryCooldown 是存储不可用后的熔断冷却期：冷却期内短路，过后放行一次探测，
 	// 避免 DB 短暂故障被永久判定为不可用（探测成功即复位，失败则重新计时）。
 	auditStorageRetryCooldown = 30 * time.Second
@@ -189,9 +191,15 @@ func markAuditStorageAvailable() {
 //   - ResponseStatus：HTTP 状态码，4xx/5xx 表示协议层失败。
 //   - OperationStatus：业务状态码，!= 0 表示业务失败（与 HTTP 状态码无关）。
 //
+// 慢请求豁免：即便命中上述采样候选，若执行耗时 >= 阈值（默认 1s）也强制保留，避免慢请求被采样丢弃。
+//
 // 采样语义：保留 1/N，N<=1 表示不采样。
 func shouldDropBySampling(snapshot *audit.AuditLogSnapshot) bool {
 	if snapshot == nil {
+		return false
+	}
+	// WebSocket 建连为低频且具运维价值的事件，不参与只读请求采样，始终保留。
+	if snapshot.RequestKind == model.RequestKindWebSocket {
 		return false
 	}
 	if snapshot.IsHighRisk != 0 {
@@ -204,6 +212,10 @@ func shouldDropBySampling(snapshot *audit.AuditLogSnapshot) bool {
 		return false
 	}
 	if snapshot.OperationStatus != 0 {
+		return false
+	}
+	// 慢请求即便是低风险只读成功，也具备性能排查价值，豁免采样始终保留。
+	if thresholdUs := resolveAuditSampleSlowThresholdUs(); thresholdUs > 0 && snapshot.ExecutionTimeUs >= thresholdUs {
 		return false
 	}
 
@@ -234,6 +246,16 @@ func resolveAuditSampleKeepEvery() int {
 		return defaultAuditSampleGetKeepEvery
 	}
 	return cfg.Queue.AuditSampleGetKeepEvery
+}
+
+// resolveAuditSampleSlowThresholdUs 返回慢请求豁免阈值（微秒），耗时 >= 该值的低风险只读请求豁免采样。
+// 配置 >0 时按配置值，否则用默认 1000ms。
+func resolveAuditSampleSlowThresholdUs() int64 {
+	thresholdMs := defaultAuditSampleSlowKeepThresholdMs
+	if cfg := config.GetConfig(); cfg != nil && cfg.Queue.AuditSampleSlowKeepThresholdMs > 0 {
+		thresholdMs = cfg.Queue.AuditSampleSlowKeepThresholdMs
+	}
+	return int64(thresholdMs) * 1000
 }
 
 // enqueueIntoFallbackBuffer 将快照投递到降级缓冲，缓冲满时回退到同步 INSERT 兜底。

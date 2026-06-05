@@ -25,7 +25,7 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 			execution_time_scope text,
 			response_status integer,
 			operation_status integer,
-			execution_time real
+			execution_time_us integer
 		)`,
 		`CREATE TABLE upload_files (
 			id integer primary key autoincrement,
@@ -63,16 +63,16 @@ func insertRequestLog(t *testing.T, db *gorm.DB, createdAt time.Time, baseURL st
 		requestKind = "websocket"
 		executionScope = "connection"
 	}
-	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, base_url, request_kind, execution_time_scope, response_status, operation_status, execution_time) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
-		createdAt, createdAt, baseURL, requestKind, executionScope, responseStatus, execMs).Error; err != nil {
+	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, base_url, request_kind, execution_time_scope, response_status, operation_status, execution_time_us) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+		createdAt, createdAt, baseURL, requestKind, executionScope, responseStatus, int64(execMs*1000)).Error; err != nil {
 		t.Fatalf("insert request_log failed: %v", err)
 	}
 }
 
 func insertStreamRequestLog(t *testing.T, db *gorm.DB, createdAt time.Time, baseURL string, execMs float64, responseStatus int) {
 	t.Helper()
-	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, base_url, request_kind, execution_time_scope, response_status, operation_status, execution_time) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
-		createdAt, createdAt, baseURL, "sse", "stream", responseStatus, execMs).Error; err != nil {
+	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, base_url, request_kind, execution_time_scope, response_status, operation_status, execution_time_us) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+		createdAt, createdAt, baseURL, "sse", "stream", responseStatus, int64(execMs*1000)).Error; err != nil {
 		t.Fatalf("insert sse request_log failed: %v", err)
 	}
 }

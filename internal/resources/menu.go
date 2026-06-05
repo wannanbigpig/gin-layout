@@ -22,11 +22,11 @@ type MenuBaseResources struct {
 	Sort            uint             `json:"sort"`                  // 排序，数字越大，排名越靠前
 	Type            uint8            `json:"type"`                  // 菜单类型，1目录，2菜单，3按钮
 	TypeName        string           `json:"type_name,omitempty"`
-	Pid             uint             `json:"pid"`          // 上级菜单id
-	ChildrenNum     uint             `json:"children_num"` // 子集数量
-	Description     string           `json:"description"`  // 描述
+	Pid             uint             `json:"pid"`           // 上级菜单id
+	ChildrenNum     uint             `json:"children_num"`  // 子集数量
+	Description     string           `json:"description"`   // 描述
 	ComponentKey    string           `json:"component_key"` // 前端组件标识
-	Redirect        string           `json:"redirect"`     // 重定向地址
+	Redirect        string           `json:"redirect"`      // 重定向地址
 	FullPath        string           `json:"full_path"`
 	CreatedAt       utils.FormatDate `json:"created_at"`
 	UpdatedAt       utils.FormatDate `json:"updated_at"`

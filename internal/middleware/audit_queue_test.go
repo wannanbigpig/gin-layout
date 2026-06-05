@@ -310,6 +310,51 @@ func TestShouldDropBySamplingDoesNotDropHighRiskOrWrites(t *testing.T) {
 	}
 }
 
+// TestShouldDropBySamplingKeepsSlowReadOnlyRequests 验证低风险只读慢请求即便命中采样也始终保留。
+func TestShouldDropBySamplingKeepsSlowReadOnlyRequests(t *testing.T) {
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.AuditSampleGetKeepEvery = 4
+		cfg.Queue.AuditSampleSlowKeepThresholdMs = 1000 // 慢请求阈值 1s
+	})
+	defer restoreConfig()
+
+	atomicResetSampleCounter()
+	// 耗时 1.5s（1_500_000 μs）的低风险只读成功请求，超过阈值，应永不被丢弃。
+	slow := &auditsvc.AuditLogSnapshot{
+		RequestID:       "req-slow",
+		Method:          http.MethodGet,
+		IsHighRisk:      0,
+		ResponseStatus:  http.StatusOK,
+		OperationStatus: 0,
+		ExecutionTimeUs: 1_500_000,
+	}
+	for i := 0; i < 12; i++ {
+		if shouldDropBySampling(slow) {
+			t.Fatalf("slow read-only request must not be sampled out (iteration %d)", i)
+		}
+	}
+
+	// 同条件但耗时仅 10ms 的快请求仍按 1/4 采样。
+	atomicResetSampleCounter()
+	fast := &auditsvc.AuditLogSnapshot{
+		RequestID:       "req-fast",
+		Method:          http.MethodGet,
+		IsHighRisk:      0,
+		ResponseStatus:  http.StatusOK,
+		OperationStatus: 0,
+		ExecutionTimeUs: 10_000,
+	}
+	kept := 0
+	for i := 0; i < 12; i++ {
+		if !shouldDropBySampling(fast) {
+			kept++
+		}
+	}
+	if kept != 3 {
+		t.Fatalf("expected 3 kept out of 12 for fast requests with keep_every=4, got %d", kept)
+	}
+}
+
 // TestFallbackBufferBatchesAndDrains 验证缓冲会聚合后批量落库，并在停止时 drain 完所有条目。
 func TestFallbackBufferBatchesAndDrains(t *testing.T) {
 	resetAuditFallbackBufferForTesting()

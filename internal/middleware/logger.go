@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 )
 
 const (
@@ -70,6 +71,12 @@ func shouldSkipRequestLogging(c *gin.Context, recorder *responseRecorder) bool {
 		return true
 	}
 
+	// WebSocket 已由 handler 在断开后主动调用 LogWebSocketConnection 记录（含连接时长）。
+	// 中间件收尾路径若再记一条，会产生重复（且其 statusCode 停留在 hijack 前的默认 200）。
+	if _, ws := websocketLoggingPaths[c.Request.URL.Path]; ws {
+		return true
+	}
+
 	// 404 请求不记录日志（避免过多无效请求干扰日志分析）
 	return recorder.statusCode == http.StatusNotFound
 }
@@ -79,5 +86,29 @@ func publishRequestAuditLog(c *gin.Context, recorder *responseRecorder) {
 	// 先提取不可变快照，再发布审计日志，避免在日志中间件内耦合过多细节。
 	resp := parseResponse(c, recorder)
 	snapshot := buildRequestAuditLogSnapshot(c, recorder, resp)
+	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
+}
+
+// LogWebSocketConnection 记录一次 WebSocket 连接的审计日志。
+//
+// WebSocket 经 gorilla upgrader.Upgrade → Hijack 接管底层连接，握手响应与后续帧
+// 完全旁路 CustomLogger 的 responseRecorder；同时 handler 在连接存活期间阻塞，
+// c.Next() 不返回，中间件无法收尾。故由 handler 在 ServeWebsocket 返回（连接断开）后主动调用本函数。
+//
+// 调用时机为断开后：执行时长经 calculateExecutionTimeMeta 按 WebSocket 类型计为
+// 请求开始至断开的连接全程时长（ExecutionTimeScopeConnection，单位秒）。
+// OperationStatus 取 0（业务成功，对应展示层"成功"）；ResponseStatus 取 HTTP 101
+// （Switching Protocols，贴合真实握手语义，不参与成功/失败判定）。
+// 采样丢弃由 shouldDropBySampling 对 WebSocket 类型显式放行。
+func LogWebSocketConnection(c *gin.Context) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	snapshot := buildAuditLogSnapshot(c, nil, 0, "", "")
+	if snapshot == nil {
+		return
+	}
+	snapshot.RequestKind = model.RequestKindWebSocket
+	snapshot.ResponseStatus = http.StatusSwitchingProtocols
 	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }

@@ -21,8 +21,7 @@ type RequestLogBaseResources struct {
 	OperatorAccount     string           `json:"operator_account"`      // 操作账号
 	OperatorName        string           `json:"operator_name"`         // 操作人员
 	ResponseStatus      int              `json:"response_status"`       // 响应状态码
-	ExecutionTime       float64          `json:"execution_time"`        // 执行时间（毫秒，支持小数，最多4位）
-	ExecutionTimeUnit   string           `json:"execution_time_unit"`   // 执行时间单位
+	ExecutionTimeUs     int64            `json:"execution_time_us"`     // 执行时间（微秒，统一单位）
 	ExecutionTimeScope  string           `json:"execution_time_scope"`  // 执行时间语义
 	CreatedAt           utils.FormatDate `json:"created_at"`            // 创建时间
 }
@@ -81,8 +80,7 @@ func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResourc
 		OperatorAccount:     data.OperatorAccount,
 		OperatorName:        data.OperatorName,
 		ResponseStatus:      data.ResponseStatus,
-		ExecutionTime:       data.ExecutionTime,
-		ExecutionTimeUnit:   data.ExecutionTimeUnit,
+		ExecutionTimeUs:     data.ExecutionTimeUs,
 		ExecutionTimeScope:  data.ExecutionTimeScope,
 		CreatedAt:           data.CreatedAt,
 	}

@@ -23,10 +23,10 @@ func TestStreamExportCSVUsesKeysetPaginationWhenNewRowsInserted(t *testing.T) {
 		if err := db.Exec(`INSERT INTO request_logs (
 			id, request_id, operator_account, operator_name, ip, request_kind, execution_time_scope,
 			method, base_url, operation_name, operation_status, is_high_risk, response_status,
-			execution_time, execution_time_unit, change_diff, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			execution_time_us, change_diff, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			i+1, "req-"+strconv.Itoa(i+1), "admin", "管理员", "127.0.0.1", "http", "request",
-			"GET", "/api/demo", "demo", 0, 0, 200, 10.5, "ms", "[]", createdAt, createdAt,
+			"GET", "/api/demo", "demo", 0, 0, 200, 10500, "[]", createdAt, createdAt,
 		).Error; err != nil {
 			t.Fatalf("insert request log %d failed: %v", i+1, err)
 		}
@@ -50,10 +50,10 @@ func TestStreamExportCSVUsesKeysetPaginationWhenNewRowsInserted(t *testing.T) {
 			return db.Exec(`INSERT INTO request_logs (
 				id, request_id, operator_account, operator_name, ip, request_kind, execution_time_scope,
 				method, base_url, operation_name, operation_status, is_high_risk, response_status,
-				execution_time, execution_time_unit, change_diff, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				execution_time_us, change_diff, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				9999, "req-newest", "admin", "管理员", "127.0.0.1", "http", "request",
-				"GET", "/api/demo", "demo", 0, 0, 200, 10.5, "ms", "[]", createdAt, createdAt,
+				"GET", "/api/demo", "demo", 0, 0, 200, 10500, "[]", createdAt, createdAt,
 			).Error
 		}
 		return nil
@@ -111,8 +111,7 @@ func newRequestLogExportTestDB(t *testing.T) *gorm.DB {
 		operation_status integer,
 		is_high_risk integer,
 		response_status integer,
-		execution_time real,
-		execution_time_unit text,
+		execution_time_us integer,
 		change_diff text,
 		created_at datetime,
 		updated_at datetime

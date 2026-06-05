@@ -12,6 +12,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
@@ -186,9 +187,15 @@ func (api SysMessageController) WS(c *gin.Context) {
 		return
 	}
 
-	if err := notification.ServeWebsocket(c.Writer, c.Request, principal.Claims); err != nil {
+	// ServeWebsocket 阻塞至连接断开才返回：err == nil 表示成功建连并正常断开。
+	// WS 经 Hijack 旁路了 CustomLogger，故在此主动补记一条审计日志，
+	// 执行时长取请求开始至断开的连接全程时长（ExecutionTimeScopeConnection）。
+	err := notification.ServeWebsocket(c.Writer, c.Request, principal.Claims)
+	if err != nil {
 		if !c.Writer.Written() {
 			api.Fail(c, e.InvalidParameter, err.Error())
 		}
+		return
 	}
+	middleware.LogWebSocketConnection(c)
 }

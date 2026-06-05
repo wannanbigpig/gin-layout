@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,9 +11,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
+	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/jobs"
+	"github.com/wannanbigpig/gin-layout/internal/model"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	auditsvc "github.com/wannanbigpig/gin-layout/internal/service/audit"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
@@ -237,14 +244,11 @@ func TestBuildRequestAuditLogSnapshotMarksNotificationWSAsWebSocket(t *testing.T
 	if snapshot.RequestKind != "websocket" {
 		t.Fatalf("expected request kind websocket, got %q", snapshot.RequestKind)
 	}
-	if snapshot.ExecutionTime <= 0 {
-		t.Fatalf("expected websocket execution_time > 0, got %f", snapshot.ExecutionTime)
+	if snapshot.ExecutionTimeUs <= 0 {
+		t.Fatalf("expected websocket execution_time_us > 0, got %d", snapshot.ExecutionTimeUs)
 	}
 	if snapshot.ExecutionTimeScope != "connection" {
 		t.Fatalf("expected websocket execution_time_scope connection, got %q", snapshot.ExecutionTimeScope)
-	}
-	if snapshot.ExecutionTimeUnit != "s" {
-		t.Fatalf("expected websocket execution_time_unit s, got %q", snapshot.ExecutionTimeUnit)
 	}
 }
 
@@ -252,11 +256,11 @@ func TestCalculateExecutionTimeMsClampsLargeHTTPDuration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-30*time.Hour))
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-30000*time.Hour))
 
-	got, scope, _ := calculateExecutionTimeMeta(ctx, "http")
-	if got != requestLogExecutionTimeMaxMs {
-		t.Fatalf("expected clamped execution_time %f, got %f", requestLogExecutionTimeMaxMs, got)
+	got, scope := calculateExecutionTimeMeta(ctx, "http")
+	if got != requestLogExecutionTimeMaxUs {
+		t.Fatalf("expected clamped execution_time_us %d, got %d", requestLogExecutionTimeMaxUs, got)
 	}
 	if scope != "request" {
 		t.Fatalf("expected request scope, got %q", scope)
@@ -341,5 +345,112 @@ func TestBuildRequestAuditLogSnapshotGetRequestIsNotHighRiskByDefault(t *testing
 	}
 	if snapshot.ChangeDiff != "" {
 		t.Fatalf("expected empty change diff for get request, got %s", snapshot.ChangeDiff)
+	}
+}
+
+// TestLogWebSocketConnectionEnqueuesWebSocketSnapshot 验证 WS 建连日志被记录，
+// 且标记为 websocket、状态为 101，即使在会丢弃普通低风险 GET 的高采样率下也不被采样丢弃。
+func TestLogWebSocketConnectionEnqueuesWebSocketSnapshot(t *testing.T) {
+	var captured *auditsvc.AuditLogSnapshot
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Enqueue: func(_ context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
+			if kind == jobs.AuditLogKindRequest {
+				captured = snapshot
+			}
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	// keepEvery=2：普通低风险 GET 会被 1/2 采样，但 WS 应凭类型放行绕过采样。
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.Enable = true
+		cfg.Queue.AuditSampleGetKeepEvery = 2
+	})
+	defer restoreConfig()
+
+	restoreLogger := log.ReplaceLoggerForTesting(zap.NewNop())
+	defer restoreLogger()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/common/ws", nil)
+	ctx.Set(global.ContextKeyRequestID, "ws-req-1")
+	// 模拟连接已存活一段时间：记录点在断开后，执行时长应为请求开始至断开的连接全程时长。
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-50*time.Millisecond))
+
+	// 连续多次调用，确认每次都被记录（绕过采样的稳定性，而非偶发命中保留计数）。
+	for i := 0; i < 5; i++ {
+		captured = nil
+		LogWebSocketConnection(ctx)
+		if captured == nil {
+			t.Fatalf("attempt %d: expected websocket audit log to be enqueued", i)
+		}
+		if captured.RequestKind != model.RequestKindWebSocket {
+			t.Fatalf("attempt %d: expected request kind %q, got %q", i, model.RequestKindWebSocket, captured.RequestKind)
+		}
+		if captured.ResponseStatus != http.StatusSwitchingProtocols {
+			t.Fatalf("attempt %d: expected response status 101, got %d", i, captured.ResponseStatus)
+		}
+		if captured.OperationStatus != 0 {
+			t.Fatalf("attempt %d: expected operation status 0 (success), got %d", i, captured.OperationStatus)
+		}
+		if captured.BaseURL != "/admin/v1/common/ws" {
+			t.Fatalf("attempt %d: unexpected base url %q", i, captured.BaseURL)
+		}
+		// 记录点在断开后：执行时长应为连接全程时长，按 WebSocket 类型计为 connection scope（微秒）。
+		if captured.ExecutionTimeScope != model.ExecutionTimeScopeConnection {
+			t.Fatalf("attempt %d: expected connection scope, got %q", i, captured.ExecutionTimeScope)
+		}
+		if captured.ExecutionTimeUs <= 0 {
+			t.Fatalf("attempt %d: expected positive connection duration, got %v", i, captured.ExecutionTimeUs)
+		}
+	}
+}
+
+// TestFinalizeRequestLoggingSkipsWebSocketPath 验证中间件收尾路径对 WS 路径跳过记录，
+// 避免与 handler 主动记录的连接日志重复。
+func TestFinalizeRequestLoggingSkipsWebSocketPath(t *testing.T) {
+	called := false
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Enqueue: func(_ context.Context, _ string, _ *auditsvc.AuditLogSnapshot) error {
+			called = true
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	restoreLogger := log.ReplaceLoggerForTesting(zap.NewNop())
+	defer restoreLogger()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/common/ws", nil)
+	ctx.Set(global.ContextKeyRequestID, "ws-req-skip")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+
+	respRecorder := createResponseRecorder(ctx)
+	logRequest(ctx, respRecorder)
+	if called {
+		t.Fatal("expected middleware finalize to skip websocket path (handler records it)")
+	}
+}
+
+// TestLogWebSocketConnectionNilContextIsNoop 验证空上下文不触发投递、不 panic。
+func TestLogWebSocketConnectionNilContextIsNoop(t *testing.T) {
+	called := false
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Enqueue: func(_ context.Context, _ string, _ *auditsvc.AuditLogSnapshot) error {
+			called = true
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	LogWebSocketConnection(nil)
+	if called {
+		t.Fatal("expected no enqueue for nil context")
 	}
 }
