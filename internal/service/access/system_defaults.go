@@ -134,9 +134,6 @@ func (s *SystemDefaultsService) ensureSuperAdminRole(tx *gorm.DB) (*model.Role, 
 
 		role.Code = global.SuperAdminRoleCode
 		role.IsSystem = global.Yes
-		role.Pid = 0
-		role.Pids = "0"
-		role.Level = 1
 		role.Name = "超级管理员"
 		role.Description = "系统默认超级管理员角色"
 		role.Sort = 100
@@ -153,15 +150,6 @@ func (s *SystemDefaultsService) ensureSuperAdminRole(tx *gorm.DB) (*model.Role, 
 	}
 	if role.Code != global.SuperAdminRoleCode {
 		updates["code"] = global.SuperAdminRoleCode
-	}
-	if role.Pid != 0 {
-		updates["pid"] = 0
-	}
-	if role.Pids != "0" {
-		updates["pids"] = "0"
-	}
-	if role.Level != 1 {
-		updates["level"] = 1
 	}
 	if role.Name != "超级管理员" {
 		updates["name"] = "超级管理员"
@@ -238,9 +226,7 @@ func (s *SystemDefaultsService) ensureSuperAdminUserRole(tx *gorm.DB, roleID uin
 }
 
 func (s *SystemDefaultsService) ensureSuperAdminRoleMenusWithTx(tx *gorm.DB, roleID uint) error {
-	menuModel := model.NewMenu()
-	menuModel.SetDB(tx)
-	allMenuIDs, err := menuModel.AllIds()
+	allMenuIDs, err := NewRoleMenuAssignmentService().AllAssignableMenuIDs(tx)
 	if err != nil {
 		return err
 	}

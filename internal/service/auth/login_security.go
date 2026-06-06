@@ -67,7 +67,9 @@ func (s *LoginService) ensureLoginAllowed(username string) error {
 	if state.LockUntil == nil || !state.LockUntil.Time.After(now) {
 		// 锁已过期后清空状态，避免残留失败计数影响后续判断。
 		if state.FailCount > 0 || state.LockUntil != nil {
-			_ = s.clearLoginFailState(username)
+			if clearErr := s.clearLoginFailState(username); clearErr != nil {
+				log.Warn("清除登录锁定状态失败", zap.String("username", username), zap.Error(clearErr))
+			}
 		}
 		return nil
 	}

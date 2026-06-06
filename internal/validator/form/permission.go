@@ -46,3 +46,13 @@ type ListPermission struct {
 func NewListApiQuery() *ListPermission {
 	return &ListPermission{}
 }
+
+// PermissionOptions 接口权限选择器查询：按名称/路由模糊搜索，供菜单编辑时下拉选择器使用。
+type PermissionOptions struct {
+	Keyword string `form:"keyword" json:"keyword" binding:"omitempty,max=64"`
+	IsAuth  *int8  `form:"is_auth" json:"is_auth" binding:"omitempty,api_auth_mode"`
+}
+
+func NewPermissionOptionsQuery() *PermissionOptions {
+	return &PermissionOptions{}
+}

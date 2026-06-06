@@ -28,7 +28,9 @@ func (api RequestLogController) List(c *gin.Context) {
 		return
 	}
 
-	result := audit.NewRequestLogService().List(params)
+	svc := audit.NewRequestLogService()
+	svc.SetCtx(c)
+	result := svc.List(params)
 	api.Success(c, result)
 }
 
@@ -39,7 +41,9 @@ func (api RequestLogController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := audit.NewRequestLogService().Detail(query.ID)
+	svc := audit.NewRequestLogService()
+	svc.SetCtx(c)
+	detail, err := svc.Detail(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return

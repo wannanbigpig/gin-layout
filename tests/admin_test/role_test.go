@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
@@ -63,12 +64,18 @@ func TestRoleWriteFlow(t *testing.T) {
 
 	name := uniqueTestName("role")
 	cleanupRoles(t, testResourcePrefix+"role")
+	homeMenu := findMenuByTitle(t, "首页")
+	permissionMenu := findMenuByTitle(t, "权限管理")
+	adminUserMenu := findMenuByTitle(t, "管理员")
+	adminUserListMenu := findMenuByCode(t, "adminUser:list")
+	dashboardOverviewMenu := findMenuByCode(t, "dashboard:overview")
+	dashboardStatisticsMenu := findMenuByCode(t, "dashboard:statistics")
 
 	createBody := map[string]any{
 		"name":      name,
 		"status":    1,
 		"sort":      10,
-		"menu_list": []uint{firstActiveMenuID(t)},
+		"menu_list": []uint{homeMenu.ID, permissionMenu.ID, adminUserMenu.ID, adminUserListMenu.ID},
 	}
 	createBytes, _ := json.Marshal(createBody)
 	createPayload := string(createBytes)
@@ -81,6 +88,12 @@ func TestRoleWriteFlow(t *testing.T) {
 	detailResp := getRequest("/admin/v1/role/detail", &url.Values{"id": {strconv.FormatUint(uint64(role.ID), 10)}})
 	detailResult := decodeResult(t, detailResp)
 	assert.Equal(t, e.SUCCESS, detailResult.Code)
+	detailData := detailResult.Data.(map[string]any)
+	assert.ElementsMatch(t, []any{float64(adminUserListMenu.ID)}, detailData["menu_list"])
+
+	storedMenuIDs, err := model.NewRoleMenuMap().MenuIdsByRoleIds([]uint{role.ID})
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []uint{adminUserListMenu.ID}, storedMenuIDs)
 
 	updateBody := map[string]any{
 		"id":          role.ID,
@@ -88,13 +101,23 @@ func TestRoleWriteFlow(t *testing.T) {
 		"description": "测试角色-更新",
 		"status":      1,
 		"sort":        20,
-		"menu_list":   []uint{firstActiveMenuID(t)},
+		"menu_list":   []uint{homeMenu.ID, dashboardOverviewMenu.ID, dashboardStatisticsMenu.ID},
 	}
 	updateBytes, _ := json.Marshal(updateBody)
 	updatePayload := string(updateBytes)
 	updateResp := postRequest("/admin/v1/role/update", &updatePayload)
 	updateResult := decodeResult(t, updateResp)
 	assert.Equal(t, e.SUCCESS, updateResult.Code)
+
+	detailResp = getRequest("/admin/v1/role/detail", &url.Values{"id": {strconv.FormatUint(uint64(role.ID), 10)}})
+	detailResult = decodeResult(t, detailResp)
+	assert.Equal(t, e.SUCCESS, detailResult.Code)
+	detailData = detailResult.Data.(map[string]any)
+	assert.ElementsMatch(t, []any{float64(dashboardOverviewMenu.ID), float64(dashboardStatisticsMenu.ID)}, detailData["menu_list"])
+
+	storedMenuIDs, err = model.NewRoleMenuMap().MenuIdsByRoleIds([]uint{role.ID})
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []uint{dashboardOverviewMenu.ID, dashboardStatisticsMenu.ID}, storedMenuIDs)
 
 	deleteBytes, _ := json.Marshal(map[string]any{"id": role.ID})
 	deletePayload := string(deleteBytes)

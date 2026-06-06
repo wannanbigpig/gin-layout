@@ -22,6 +22,28 @@ func NewApiService() *ApiService {
 	return &ApiService{}
 }
 
+// apiOptionsLimit 选择器返回的最大条数。
+const apiOptionsLimit = 500
+
+// Options 接口权限选择器：按名称/路由模糊搜索，供菜单编辑时下拉选择器使用。
+func (s *ApiService) Options(keyword string, isAuth *int8) []resources.ApiOptionResources {
+	qb := query_builder.New()
+	if keyword != "" {
+		qb.AddCondition("(name like ? OR route like ? OR code = ?)", "%"+keyword+"%", "%"+keyword+"%", keyword)
+	}
+	qb.AddEq("is_auth", isAuth)
+	conditionStr, args := qb.Build()
+
+	_, collection, err := model.ListPageE(model.NewApi(), 1, apiOptionsLimit, conditionStr, args, model.ListOptionalParams{
+		SelectFields: []string{"id", "name", "code", "method", "route"},
+		OrderBy:      "sort desc, id desc",
+	})
+	if err != nil {
+		return []resources.ApiOptionResources{}
+	}
+	return resources.ToApiOptions(collection)
+}
+
 // Update 更新 API 权限。
 func (s *ApiService) Update(params *form.UpdatePermission) error {
 	apiModel := model.NewApi()

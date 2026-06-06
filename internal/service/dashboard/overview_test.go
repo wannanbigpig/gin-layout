@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -42,6 +43,26 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 			created_at datetime,
 			updated_at datetime,
 			deleted_at integer default 0
+		)`,
+		`CREATE TABLE task_runs (
+			id integer primary key autoincrement,
+			created_at datetime,
+			updated_at datetime,
+			task_code text,
+			kind text,
+			source text,
+			source_id text,
+			queue text,
+			trigger_user_id integer,
+			trigger_account text,
+			status text,
+			attempt integer,
+			max_retry integer,
+			payload text,
+			error_message text,
+			started_at datetime,
+			finished_at datetime,
+			duration_ms real
 		)`,
 	}
 	for _, statement := range statements {
@@ -337,5 +358,66 @@ func TestBuildStatisticsAggregatesSummaryAndTrend(t *testing.T) {
 	}
 	if stats.Storage == nil || stats.Storage.TotalCount != 2 {
 		t.Fatalf("unexpected storage stats: %#v", stats.Storage)
+	}
+}
+
+func insertTaskRun(t *testing.T, db *gorm.DB, createdAt time.Time, status string) {
+	t.Helper()
+	if err := db.Exec(`INSERT INTO task_runs (created_at, updated_at, task_code, status) VALUES (?, ?, ?, ?)`,
+		createdAt, createdAt, "test_task", status).Error; err != nil {
+		t.Fatalf("insert task_run failed: %v", err)
+	}
+}
+
+func TestTaskCompletionRateNoTasks(t *testing.T) {
+	db := newDashboardTestDB(t)
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+
+	rate, err := taskCompletionRate(db, todayStart, tomorrowStart)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rate != 0 {
+		t.Fatalf("expected 0%% when no tasks exist, got %v%%", rate)
+	}
+}
+
+func TestTaskCompletionRatePartialCompletion(t *testing.T) {
+	db := newDashboardTestDB(t)
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+
+	insertTaskRun(t, db, todayStart.Add(time.Hour), model.TaskRunStatusSuccess)
+	insertTaskRun(t, db, todayStart.Add(time.Hour), model.TaskRunStatusSuccess)
+	insertTaskRun(t, db, todayStart.Add(time.Hour), model.TaskRunStatusFailed)
+	insertTaskRun(t, db, todayStart.Add(time.Hour), model.TaskRunStatusFailed)
+
+	rate, err := taskCompletionRate(db, todayStart, tomorrowStart)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rate != 50 {
+		t.Fatalf("expected 50%% completion rate, got %v%%", rate)
+	}
+}
+
+func TestTaskCompletionRateFullCompletion(t *testing.T) {
+	db := newDashboardTestDB(t)
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+
+	insertTaskRun(t, db, todayStart.Add(time.Hour), model.TaskRunStatusSuccess)
+	insertTaskRun(t, db, todayStart.Add(time.Hour), model.TaskRunStatusSuccess)
+
+	rate, err := taskCompletionRate(db, todayStart, tomorrowStart)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rate != 100 {
+		t.Fatalf("expected 100%% completion rate, got %v%%", rate)
 	}
 }

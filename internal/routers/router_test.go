@@ -47,6 +47,11 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 		t.Fatalf("missing or invalid update-profile route: %#v", route)
 	}
 
+	commonUploadCode := utils.MD5(http.MethodPost + "_/admin/v1/common/upload")
+	if route, ok := routes[commonUploadCode]; !ok || route.Auth != AuthModeLogin {
+		t.Fatalf("missing or invalid common upload route: %#v", route)
+	}
+
 	fileCode := utils.MD5(http.MethodGet + "_/admin/v1/file/:uuid")
 	if route, ok := routes[fileCode]; !ok || route.Auth != AuthModeNone {
 		t.Fatalf("missing or invalid file route: %#v", route)

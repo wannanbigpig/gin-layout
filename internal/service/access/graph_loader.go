@@ -55,12 +55,7 @@ func (s *UserPermissionSyncService) collectPoliciesForUsers(userIDs []uint, tx *
 		return result, err
 	}
 
-	roleStatusMap, err := s.loadRoleStatusMap(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	userExpandedRoles, allRoleIDs := expandUserRoles(userRoleMap, roleStatusMap)
+	userExpandedRoles, allRoleIDs := expandUserRoles(userRoleMap)
 	if len(allRoleIDs) == 0 {
 		return result, nil
 	}
@@ -138,32 +133,11 @@ func (s *UserPermissionSyncService) userRoleIDs(userID uint, tx ...*gorm.DB) ([]
 		return nil, err
 	}
 
-	roleIDs := UniqueUintSlice(append(directRoleIDs, deptRoleIDs...))
-	return s.expandRoleIDs(roleIDs, tx...)
-}
-
-func (s *UserPermissionSyncService) expandRoleIDs(roleIDs []uint, tx ...*gorm.DB) ([]uint, error) {
-	if len(roleIDs) == 0 {
-		return nil, nil
-	}
-
 	roleModel := model.NewRole()
 	if t := FirstTx(tx); t != nil {
 		roleModel.SetDB(t)
 	}
-
-	roles, err := roleModel.FindPidsByIds(roleIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	roleSet := buildAncestorSet(roleIDs, func(add func(uint)) {
-		for _, role := range roles {
-			addAncestorIDs(role.Pids, add)
-		}
-	})
-
-	return roleModel.EnabledIdsByIds(roleSet)
+	return roleModel.EnabledIdsByIds(UniqueUintSlice(append(directRoleIDs, deptRoleIDs...)))
 }
 
 // RoleMenuIDs 根据角色列表解析出启用状态的菜单 ID。
@@ -262,12 +236,6 @@ func (s *UserPermissionSyncService) UserKey(userID uint) string {
 
 // -------------------- 角色 / 菜单聚合上下文 --------------------
 
-type roleStatusInfo struct {
-	ID     uint
-	Pids   string
-	Status uint8
-}
-
 type roleMenuIDMap map[uint][]uint
 
 func (m roleMenuIDMap) AllMenuIDs() []uint {
@@ -331,25 +299,6 @@ func (s *UserPermissionSyncService) departmentRoleMap(deptIDs []uint, tx *gorm.D
 	deptRoleMapModel := model.NewDeptRoleMap()
 	deptRoleMapModel.SetDB(tx)
 	return deptRoleMapModel.DeptRoleMapByDeptIds(deptIDs)
-}
-
-func (s *UserPermissionSyncService) loadRoleStatusMap(tx *gorm.DB) (map[uint]roleStatusInfo, error) {
-	roleModel := model.NewRole()
-	roleModel.SetDB(tx)
-	rows, err := roleModel.AllRoleStatusInfos()
-	if err != nil {
-		return nil, err
-	}
-
-	roleMap := make(map[uint]roleStatusInfo, len(rows))
-	for _, row := range rows {
-		roleMap[row.ID] = roleStatusInfo{
-			ID:     row.ID,
-			Pids:   row.Pids,
-			Status: row.Status,
-		}
-	}
-	return roleMap, nil
 }
 
 func (s *UserPermissionSyncService) roleMenuMap(roleIDs []uint, tx *gorm.DB) (roleMenuIDMap, error) {
@@ -444,11 +393,11 @@ func isSyncableUser(userInfo *model.AdminUser) bool {
 		userInfo.ID != global.SuperAdminId
 }
 
-func expandUserRoles(userRoleMap map[uint][]uint, roleStatusMap map[uint]roleStatusInfo) (map[uint][]uint, []uint) {
+func expandUserRoles(userRoleMap map[uint][]uint) (map[uint][]uint, []uint) {
 	userExpandedRoles := make(map[uint][]uint, len(userRoleMap))
 	allRoleIDs := make([]uint, 0, len(userRoleMap)*2)
 	for userID, roleIDs := range userRoleMap {
-		expanded := expandRoleAncestors(roleIDs, roleStatusMap)
+		expanded := UniqueUintSlice(roleIDs)
 		userExpandedRoles[userID] = expanded
 		allRoleIDs = append(allRoleIDs, expanded...)
 	}
@@ -489,26 +438,4 @@ func dedupePolicies(menuSet map[uint]struct{}, menuPolicies map[uint][][]string)
 		}
 	}
 	return policies
-}
-
-func expandRoleAncestors(roleIDs []uint, roleStatusMap map[uint]roleStatusInfo) []uint {
-	roleSet := make(map[uint]struct{})
-	for _, roleID := range UniqueUintSlice(roleIDs) {
-		role, ok := roleStatusMap[roleID]
-		if !ok || role.Status != global.Yes {
-			continue
-		}
-		roleSet[roleID] = struct{}{}
-		addAncestorIDs(role.Pids, func(ancestorID uint) {
-			if ancestor, ok := roleStatusMap[ancestorID]; ok && ancestor.Status == global.Yes {
-				roleSet[ancestorID] = struct{}{}
-			}
-		})
-	}
-
-	result := make([]uint, 0, len(roleSet))
-	for roleID := range roleSet {
-		result = append(result, roleID)
-	}
-	return UniqueUintSlice(result)
 }

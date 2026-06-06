@@ -59,17 +59,32 @@ func TestUserPermissionSyncSyncUsersSkipsEmptyUserSet(t *testing.T) {
 	}
 }
 
-func TestExpandRoleAncestorsSkipsDisabledRoles(t *testing.T) {
-	roleMap := map[uint]roleStatusInfo{
-		1: {ID: 1, Status: 1},
-		2: {ID: 2, Pids: "1", Status: 1},
-		3: {ID: 3, Pids: "1,2", Status: 0},
-	}
+func TestExpandUserRolesKeepsOnlyDirectAndDeptRoles(t *testing.T) {
+	got, allRoleIDs := expandUserRoles(map[uint][]uint{
+		10: {2, 3, 2},
+		11: {4},
+	})
 
-	got := expandRoleAncestors([]uint{2, 3}, roleMap)
-	want := []uint{2, 1}
-	if !reflect.DeepEqual(got, want) && !reflect.DeepEqual(got, []uint{1, 2}) {
-		t.Fatalf("unexpected expanded roles: got %v want %v", got, want)
+	if !reflect.DeepEqual(got[10], []uint{2, 3}) {
+		t.Fatalf("unexpected roles for user 10: %v", got[10])
+	}
+	if !reflect.DeepEqual(got[11], []uint{4}) {
+		t.Fatalf("unexpected roles for user 11: %v", got[11])
+	}
+	roleSet := make(map[uint]struct{}, len(allRoleIDs))
+	for _, roleID := range allRoleIDs {
+		roleSet[roleID] = struct{}{}
+	}
+	if len(roleSet) != 3 {
+		t.Fatalf("unexpected all role ids: %v", allRoleIDs)
+	}
+	for _, roleID := range []uint{2, 3, 4} {
+		if _, ok := roleSet[roleID]; !ok {
+			t.Fatalf("unexpected all role ids: %v", allRoleIDs)
+		}
+	}
+	if len(allRoleIDs) != 3 {
+		t.Fatalf("unexpected all role ids: %v", allRoleIDs)
 	}
 }
 

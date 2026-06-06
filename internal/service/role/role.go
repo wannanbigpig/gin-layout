@@ -12,11 +12,6 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
-const (
-	maxRoleLevel      = 2
-	maxChildrenPerTop = 5
-)
-
 // RoleService 角色服务。
 type RoleService struct {
 	service.Base
@@ -25,6 +20,24 @@ type RoleService struct {
 // NewRoleService 创建角色服务实例。
 func NewRoleService() *RoleService {
 	return &RoleService{}
+}
+
+// roleOptionsLimit 选择器返回的最大条数。
+const roleOptionsLimit = 200
+
+// Options 角色选择器：按名称/编码模糊搜索，供前端下拉选择器使用。
+func (s *RoleService) Options(keyword string) []resources.RoleOptionResources {
+	conditionStr, args := query_builder.New().
+		AddKeywordLike(keyword, "name", "code").
+		Build()
+	_, collection, err := model.ListPageE(model.NewRole(), 1, roleOptionsLimit, conditionStr, args, model.ListOptionalParams{
+		SelectFields: []string{"id", "name", "code"},
+		OrderBy:      "sort desc, id desc",
+	})
+	if err != nil {
+		return []resources.RoleOptionResources{}
+	}
+	return resources.ToRoleOptions(collection)
 }
 
 // List 分页查询角色列表。
@@ -52,7 +65,6 @@ func (s *RoleService) buildListCondition(params *form.RoleList) (string, []any) 
 		AddLike("name", params.Name).
 		AddLike("code", params.Code).
 		AddEq("status", params.Status).
-		AddEq("pid", params.Pid).
 		Build()
 }
 
@@ -63,7 +75,6 @@ func (s *RoleService) Create(params *form.CreateRole) error {
 		Name:        params.Name,
 		Description: params.Description,
 		Status:      params.Status,
-		Pid:         params.Pid,
 		Sort:        params.Sort,
 		MenuList:    params.MenuList,
 	})
@@ -76,7 +87,6 @@ func (s *RoleService) Update(params *form.UpdateRole) error {
 		Name:        params.Name,
 		Description: params.Description,
 		Status:      params.Status,
-		Pid:         params.Pid,
 		Sort:        params.Sort,
 		MenuList:    params.MenuList,
 	})
@@ -91,9 +101,6 @@ func (s *RoleService) Delete(id uint) error {
 	if access.NewSystemDefaultsService().IsProtectedRole(role) {
 		return e.NewBusinessError(e.SuperAdminCannotDelete)
 	}
-	if role.ChildrenNum > 0 {
-		return e.NewBusinessError(e.RoleHasChildren)
-	}
 
 	return s.executeDeleteTransaction(role, id)
 }
@@ -104,7 +111,13 @@ func (s *RoleService) Detail(id uint) (any, error) {
 	if err := role.GetAllById(id); err != nil || role.ID == 0 {
 		return nil, e.NewBusinessError(e.RoleNotFound)
 	}
-	return resources.NewRoleTransformer().ToStruct(role), nil
+	resource := resources.NewRoleTransformer().ToStruct(role)
+	menuIDs, err := access.NewRoleMenuAssignmentService().NormalizeMenuIDs(resource.MenuList)
+	if err != nil {
+		return nil, err
+	}
+	resource.MenuList = menuIDs
+	return resource, nil
 }
 
 // GetRoleMenus 获取角色的所有菜单标识列表。
@@ -116,6 +129,10 @@ func (s *RoleService) GetRoleMenus(roleId uint) ([]string, error) {
 	}
 
 	menuIDs, err := access.NewUserPermissionSyncService().RoleMenuIDs([]uint{roleId})
+	if err != nil {
+		return nil, e.NewBusinessError(e.FAILURE)
+	}
+	menuIDs, err = access.NewRoleMenuAssignmentService().NormalizeMenuIDs(menuIDs)
 	if err != nil {
 		return nil, e.NewBusinessError(e.FAILURE)
 	}

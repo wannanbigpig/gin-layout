@@ -285,21 +285,27 @@ func (s *FileResourceService) MoveFiles(params *form.FileMove) (*resources.FileM
 		return nil, err
 	}
 	// 逐文件移动：唯一索引 uniq_folder_name_deleted 下，目标目录已有同名活跃记录时单条 UPDATE 会冲突，
-	// 跳过该文件而非让整批失败。
+	// 跳过该文件而非让整批失败。整体包裹在事务中保证原子性。
 	var moved int64
-	for _, id := range params.IDs {
-		res := db.Model(&model.UploadFiles{}).Where("id = ?", id).Updates(map[string]any{
-			"folder_id":    params.FolderID,
-			"logical_path": logicalPath,
-			"updated_at":   time.Now(),
-		})
-		if res.Error != nil {
-			if isUploadNameDuplicateErr(res.Error) {
-				continue // 目标目录已存在同名文件，跳过
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+		for _, id := range params.IDs {
+			res := tx.Model(&model.UploadFiles{}).Where("id = ?", id).Updates(map[string]any{
+				"folder_id":    params.FolderID,
+				"logical_path": logicalPath,
+				"updated_at":   time.Now(),
+			})
+			if res.Error != nil {
+				if isUploadNameDuplicateErr(res.Error) {
+					continue // 目标目录已存在同名文件，跳过
+				}
+				return res.Error
 			}
-			return nil, res.Error
+			moved += res.RowsAffected
 		}
-		moved += res.RowsAffected
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	total := int64(len(params.IDs))
 	return &resources.FileMoveResult{Total: total, Moved: moved, Skipped: total - moved}, nil
@@ -549,6 +555,7 @@ func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUplo
 		return nil, err
 	}
 	var object *model.UploadFileObject
+	var reused bool
 	if params.FileObjectID > 0 {
 		object, err = findFileObjectByID(db, params.FileObjectID)
 		if err != nil {
@@ -561,7 +568,7 @@ func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUplo
 		if strings.TrimSpace(params.ObjectKey) == "" {
 			return nil, fmt.Errorf("object_key is required")
 		}
-		object, _, err = ensureFileObject(db, uploadFileObjectInput{
+		object, reused, err = ensureFileObject(db, uploadFileObjectInput{
 			StorageDriver: storageDriver,
 			StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, params.Bucket),
 			Bucket:        params.Bucket,
@@ -630,7 +637,16 @@ func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUplo
 	if err != nil {
 		return nil, err
 	}
-	_ = existing // 此路径 object 为复用或已 ensure，跳过时无需额外清理
+	if existing {
+		// 命中已存在记录，本次新建的物理对象成为孤儿，需清理（复用对象除外）
+		if !reused {
+			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
+				log.Warn("清理孤儿 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(delErr))
+			}
+		}
+		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
+		return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
+	}
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
 }
@@ -775,9 +791,13 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 	closed := false
 	defer func() {
 		if !closed {
-			_ = tmpFile.Close()
+			if closeErr := tmpFile.Close(); closeErr != nil {
+				log.Warn("关闭临时文件失败", zap.String("path", tmpPath), zap.Error(closeErr))
+			}
 		}
-		_ = os.Remove(tmpPath)
+		if rmErr := os.Remove(tmpPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			log.Warn("清理临时文件失败", zap.String("path", tmpPath), zap.Error(rmErr))
+		}
 	}()
 	hasher := sha256.New()
 	size, err := io.Copy(io.MultiWriter(hasher, tmpFile), input.Reader)
@@ -823,7 +843,9 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 			ContentType: input.MimeType,
 		})
 		if err != nil {
-			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
+			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
+				log.Warn("清理 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(delErr))
+			}
 			return nil, err
 		}
 		updates := map[string]any{
@@ -842,7 +864,9 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		object.ETag = firstNonEmpty(putResult.ETag, hash)
 	}
 	// 上传完成后立即关闭临时文件句柄，defer 仍负责 Remove。
-	_ = tmpFile.Close()
+	if closeErr := tmpFile.Close(); closeErr != nil {
+		log.Warn("关闭临时文件失败", zap.String("path", tmpPath), zap.Error(closeErr))
+	}
 	closed = true
 	logicalPath, err := s.folderLogicalPath(input.FolderID)
 	if err != nil {
@@ -887,7 +911,9 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 	if existing {
 		// 命中已存在记录，本次新建的物理对象成为孤儿，需清理（复用对象除外）
 		if !reused {
-			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
+			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
+				log.Warn("清理孤儿 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(delErr))
+			}
 		}
 		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 		return uploadFile, nil
@@ -1010,7 +1036,9 @@ func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params 
 	if err != nil {
 		if !reused {
 			cleanupStoredUpload(result.Path)
-			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
+			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
+				log.Warn("清理 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(delErr))
+			}
 		}
 		return nil, err
 	}
@@ -1018,7 +1046,9 @@ func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params 
 		// 命中已存在记录，本次落盘的物理文件与新建对象成为孤儿，需清理（复用对象除外）
 		if !reused {
 			cleanupStoredUpload(result.Path)
-			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
+			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
+				log.Warn("清理孤儿 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(delErr))
+			}
 		}
 		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 		return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
@@ -1197,7 +1227,11 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 			PartNumber: int32(i),
 		})
 		if err != nil {
-			_ = mp.AbortMultipartUpload(context.Background(), bucket, objectKey, initResult.UploadID)
+			if abortErr := mp.AbortMultipartUpload(context.Background(), bucket, objectKey, initResult.UploadID); abortErr != nil {
+				log.Warn("中止分片上传失败",
+					zap.String("bucket", bucket), zap.String("object_key", objectKey),
+					zap.String("upload_id", initResult.UploadID), zap.Error(abortErr))
+			}
 			return nil, err
 		}
 		parts = append(parts, &resources.MultipartPartResource{
@@ -1334,11 +1368,16 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 	if existing {
 		// 命中已存在记录：非 reuse 路径下刚创建了新的云存储对象和 UploadFileObject，需清理
 		if !shouldResolveMultipartReuse(params) && !reusedObject {
-			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
-			driver, cfg, drvErr := s.storageDriverByName(context.Background(), storageDriver)
+			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
+				log.Warn("multipart orphan cleanup: delete UploadFileObject failed",
+					zap.Uint("object_id", object.ID), zap.Error(delErr))
+			}
+			driver, _, drvErr := s.storageDriverByName(context.Background(), storageDriver)
 			if drvErr == nil {
-				_ = driver.Delete(context.Background(), params.Bucket, params.ObjectKey)
-				_ = cfg // 避免未使用警告
+				if delErr := driver.Delete(context.Background(), params.Bucket, params.ObjectKey); delErr != nil {
+					log.Warn("multipart orphan cleanup: delete object failed",
+						zap.String("bucket", params.Bucket), zap.String("object_key", params.ObjectKey), zap.Error(delErr))
+				}
 			}
 		}
 		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
@@ -1691,25 +1730,20 @@ type uploadFileConflictResult struct {
 //  2. 同 folder_id + 同 origin_name + 不同 hash → 自动加序号后缀 (1), (2), ...
 //  3. 无冲突 → 返回原名称
 func (s *FileResourceService) resolveUploadFileConflict(tx *gorm.DB, folderID uint, originName string, hash string) (*uploadFileConflictResult, error) {
-	// 同目录、同名、同 hash → 跳过
-	var dup model.UploadFiles
-	err := tx.Where("folder_id = ? AND origin_name = ? AND hash = ?", folderID, originName, hash).First(&dup).Error
-	if err == nil {
-		return &uploadFileConflictResult{Existing: &dup, FinalName: originName}, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	// 同目录、同名、不同 hash → 检查是否需要重命名
-	var conflict model.UploadFiles
-	err = tx.Where("folder_id = ? AND origin_name = ? AND hash <> ?", folderID, originName, hash).First(&conflict).Error
+	// 同目录、同名：单条查询替代两次顺序 SELECT，在 Go 层按 hash 判断走复用还是重命名。
+	var existing model.UploadFiles
+	err := tx.Where("folder_id = ? AND origin_name = ?", folderID, originName).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return &uploadFileConflictResult{FinalName: originName}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	if existing.Hash == hash {
+		// 同 hash → 跳过，返回已存在记录
+		return &uploadFileConflictResult{Existing: &existing, FinalName: originName}, nil
+	}
+	// 不同 hash → 需要重命名，继续下方自动加序号逻辑
 
 	// 自动加序号后缀：一次 LIKE 批量查询已有重命名，内存去重替代 N 次 DB 查询
 	ext := filepath.Ext(originName)

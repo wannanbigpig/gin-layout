@@ -33,12 +33,17 @@ func AdminRouteTree(deps *ControllerDeps) RouteGroupDef {
 
 // adminOtherGroup 其他路由组（公开接口、登录等）
 func adminOtherGroup(deps *ControllerDeps) RouteGroupDef {
+	routes := []RouteDef{
+		GET("file/:uuid", "获取文件", AuthModeNone, middleware.DatabaseReadyGuard(), deps.Common.GetFile),
+	}
+	if gin.Mode() != gin.ReleaseMode {
+		routes = append([]RouteDef{
+			GET("demo", "Demo 示例", AuthModeNone, deps.Demo.HelloWorld).WithDesc("Demo 示例备注"),
+		}, routes...)
+	}
 	return RouteGroupDef{
 		GroupCode: "other",
-		Routes: []RouteDef{
-			GET("demo", "Demo 示例", AuthModeNone, deps.Demo.HelloWorld).WithDesc("Demo 示例备注"),
-			GET("file/:uuid", "获取文件", AuthModeNone, middleware.DatabaseReadyGuard(), deps.Common.GetFile),
-		},
+		Routes:    routes,
 		Children: []RouteGroupDef{
 			{
 				GroupCode: "login",
@@ -156,6 +161,7 @@ func permissionGroup(deps *ControllerDeps) RouteGroupDef {
 		Routes: []RouteDef{
 			POST("update", "更新接口", AuthModeAuth, deps.Api.Update),
 			GET("list", "接口列表", AuthModeAuth, deps.Api.List),
+			GET("options", "接口选项", AuthModeAuth, deps.Api.Options).WithDesc("按名称/路由搜索接口权限，供菜单编辑时下拉选择器使用"),
 		},
 	}
 }
@@ -183,6 +189,7 @@ func roleGroup(deps *ControllerDeps) RouteGroupDef {
 		GroupCode: "role",
 		Routes: []RouteDef{
 			GET("list", "角色列表", AuthModeAuth, deps.Role.List),
+			GET("options", "角色选项", AuthModeAuth, deps.Role.Options).WithDesc("按名称/编码搜索角色，供下拉选择器使用"),
 			POST("create", "新增角色", AuthModeAuth, deps.Role.Create),
 			POST("update", "更新角色", AuthModeAuth, deps.Role.Update),
 			GET("detail", "角色详情", AuthModeAuth, deps.Role.Detail),

@@ -2,7 +2,6 @@ package role
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -14,7 +13,6 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
-	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
 // roleMutation 角色变更参数，用于封装新增/更新角色的请求数据。
@@ -24,7 +22,6 @@ type roleMutation struct {
 	Name        string // 角色名称
 	Description string // 角色描述
 	Status      uint8  // 角色状态
-	Pid         uint   // 父角色 ID，0 表示顶级角色
 	Sort        uint   // 排序权重
 	MenuList    []uint // 关联的菜单 ID 列表
 }
@@ -33,65 +30,20 @@ type roleMutation struct {
 // 处理逻辑：
 // 1. 验证角色是否存在（更新时）
 // 2. 检查受保护角色（系统默认角色不可修改）
-// 3. 验证并构建树形路径（pids, level）
-// 4. 填充角色基础字段
-// 5. 验证菜单列表
-// 6. 事务保存：角色数据、级联更新子角色 pids、更新子角色数量、同步菜单关联
-// 7. 同步受影响角色的用户权限缓存
+// 3. 填充角色基础字段
+// 4. 验证菜单列表
+// 5. 事务保存：角色数据、菜单关联、同步受影响用户权限
+// 6. 同步受影响角色的用户权限缓存
 func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	role := model.NewRole()
-	originPids := "0"
-	originPid := uint(0)
-	// 更新场景：加载现有角色数据，记录原始 pids 用于后续级联判断
 	if params.Id > 0 {
 		if err := role.GetById(params.Id); err != nil || role.ID == 0 {
 			return e.NewBusinessError(e.RoleNotFound)
 		}
-		originPids = role.Pids
-		originPid = role.Pid
 	}
 	// 检查是否为受保护角色（系统默认角色不可修改）
 	if params.Id > 0 && access.NewSystemDefaultsService().IsProtectedRole(role) {
 		return e.NewBusinessError(e.SuperAdminCannotModify)
-	}
-
-	// 处理父角色变更：验证父角色、检测环路、计算层级和路径
-	if params.Pid > 0 && params.Pid != role.Pid {
-		parentRole := model.NewRole()
-		if err := parentRole.GetById(params.Pid); err != nil || parentRole.ID == 0 {
-			return e.NewBusinessError(e.ParentRoleNotExists)
-		}
-
-		// 环路检测：当前角色若已在父角色的祖先路径上，选择该父角色会形成环
-		if role.ID > 0 && utils2.WouldCauseCycle(role.ID, params.Pid, parentRole.Pids) {
-			return e.NewBusinessError(e.ParentRoleInvalid)
-		}
-
-		// 限制顶级角色的子角色数量
-		if parentRole.Pid == 0 && (role.ID == 0 || role.Pid != params.Pid) && parentRole.ChildrenNum >= maxChildrenPerTop {
-			return e.NewBusinessError(e.MaxChildRoles)
-		}
-
-		// 构建新的层级和路径：父层级 +1，pids = 父 pids + 父 ID
-		role.Level = parentRole.Level + 1
-		if parentRole.Pids == "0" || parentRole.Pids == "" {
-			role.Pids = fmt.Sprintf("%d", parentRole.ID)
-		} else {
-			role.Pids = fmt.Sprintf("%s,%d", parentRole.Pids, parentRole.ID)
-		}
-		role.Pid = params.Pid
-	} else if params.Pid == 0 {
-		// 设置为顶级角色
-		role.Level = 1
-		role.Pids = "0"
-		role.Pid = 0
-	} else {
-		// 父角色未变更，仅同步 pid 字段
-		role.Pid = params.Pid
-	}
-	// 检查角色层级深度是否超限
-	if role.Level > maxRoleLevel {
-		return e.NewBusinessError(e.MaxRoleDepth)
 	}
 
 	trimmedCode := strings.TrimSpace(params.Code)
@@ -116,10 +68,14 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	role.Status = params.Status
 	role.Sort = params.Sort
 
-	// 验证所有菜单 ID 是否存在
+	// 验证所有菜单 ID 是否存在，再按真实授权节点规则过滤。
 	menuList, err := model.VerifyExistingIDs(model.NewMenu(), params.MenuList)
 	if err != nil {
 		return e.NewBusinessError(e.MenuNotFound)
+	}
+	menuList, err = access.NewRoleMenuAssignmentService().NormalizeMenuIDs(menuList)
+	if err != nil {
+		return err
 	}
 
 	db, err := role.GetDB()
@@ -136,28 +92,6 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 				return e.NewBusinessError(e.RoleExists)
 			}
 			return err
-		}
-		// pids 变更时，级联更新所有子角色的 pids 路径
-		if role.Pids != originPids {
-			updateExpr := utils2.BuildPidsUpdateExpr(originPids, role.Pids)
-			roleModel := model.NewRole()
-			roleModel.SetDB(tx)
-			if err := roleModel.UpdateChildrenPidsByParent(role.ID, updateExpr); err != nil {
-				return err
-			}
-		}
-
-		// 原父角色的子角色数量减 1
-		if originPid > 0 && originPid != role.Pid {
-			if err := model.UpdateChildrenNum(model.NewRole(), originPid, tx); err != nil {
-				return err
-			}
-		}
-		// 新父角色的子角色数量加 1
-		if role.Pid > 0 && role.Pid != originPid {
-			if err := model.UpdateChildrenNum(model.NewRole(), role.Pid, tx); err != nil {
-				return err
-			}
 		}
 
 		if err := s.updateRoleMenu(role.ID, menuList, tx); err != nil {
@@ -229,8 +163,7 @@ func (s *RoleService) updateRoleMenu(roleId uint, menuList []uint, tx ...*gorm.D
 // 处理逻辑：
 // 1. 删除角色 - 菜单关联
 // 2. 删除角色记录
-// 3. 更新原父角色的子角色数量
-// 4. 同步受影响用户的权限缓存
+// 3. 同步受影响用户的权限缓存
 func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error {
 	db, err := role.GetDB()
 	if err != nil {
@@ -262,15 +195,8 @@ func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error 
 		}
 
 		// 删除角色记录
-		parentId := role.Pid
 		if _, err := role.DeleteByID(id); err != nil {
 			return err
-		}
-		// 更新原父角色的子角色数量（减 1）
-		if parentId > 0 {
-			if err := model.UpdateChildrenNum(model.NewRole(), parentId, tx); err != nil {
-				return err
-			}
 		}
 		return coordinator.SyncUsers(affectedUserIDs, tx)
 	})

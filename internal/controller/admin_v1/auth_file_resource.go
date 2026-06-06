@@ -204,7 +204,9 @@ func (api FileResourceController) References(c *gin.Context) {
 
 func (api FileResourceController) FolderTree(c *gin.Context) {
 	params := form.NewFileFolderTreeForm()
-	_ = validator.CheckQueryParams(c, &params)
+	if err := validator.CheckQueryParams(c, &params); err != nil {
+		return
+	}
 	includeHidden := params.IncludeHidden != nil && *params.IncludeHidden == global.Yes
 	result, err := service.NewFileResourceService().FolderTree(includeHidden)
 	if err != nil {

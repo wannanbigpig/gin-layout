@@ -16,9 +16,8 @@ INSERT INTO `department` (`id`, `code`, `is_system`, `pid`, `pids`, `name`, `des
 VALUES (1, 'default_department', 1, 0, '0', '默认部门', '系统默认部门', 1, 100, 0, 1,
         '2023-05-01 00:00:00', '2023-05-01 00:00:00', 0);
 
-INSERT INTO `role` (`id`, `code`, `is_system`, `pid`, `pids`, `name`, `description`, `level`, `sort`, `children_num`,
-                    `status`, `created_at`, `updated_at`, `deleted_at`)
-VALUES (1, 'super_admin', 1, 0, '0', '超级管理员', '系统默认超级管理员角色', 1, 100, 0, 1,
+INSERT INTO `role` (`id`, `code`, `is_system`, `name`, `description`, `sort`, `status`, `created_at`, `updated_at`, `deleted_at`)
+VALUES (1, 'super_admin', 1, '超级管理员', '系统默认超级管理员角色', 100, 1,
         '2023-05-01 00:00:00', '2023-05-01 00:00:00', 0);
 
 INSERT INTO `admin_user_department_map` (`uid`, `dept_id`, `is_admin`, `created_at`, `updated_at`)

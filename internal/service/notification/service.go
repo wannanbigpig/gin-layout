@@ -321,11 +321,14 @@ func (s *Service) unreadCountsByUsers(db *gorm.DB, userIDs []uint) map[uint]int6
 		Cnt    int64
 	}
 	var rows []row
-	_ = db.Model(&model.SysMessage{}).
+	if err := db.Model(&model.SysMessage{}).
 		Select("user_id, COUNT(*) AS cnt").
 		Where("user_id IN ? AND is_read = ?", userIDs, model.MessageUnread).
 		Group("user_id").
-		Scan(&rows).Error
+		Scan(&rows).Error; err != nil {
+		log.Warn("query unread message counts failed", zap.Error(err))
+		return counts
+	}
 	for _, r := range rows {
 		counts[r.UserID] = r.Cnt
 	}

@@ -2,6 +2,8 @@ package resources
 
 import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
 
@@ -11,7 +13,7 @@ type RequestLogBaseResources struct {
 	RequestID           string           `json:"request_id"`            // 请求唯一标识
 	OperatorID          uint             `json:"operator_id"`           // 操作ID（用户ID）
 	IP                  string           `json:"ip"`                    // 客户端IP地址
-	RequestKind         string           `json:"request_kind"`          // 请求类型：http/websocket/sse
+	RequestKind         string           `json:"request_kind"`          // 请求类型：http/websocket
 	Method              string           `json:"method"`                // HTTP请求方法（GET/POST等）
 	BaseURL             string           `json:"base_url"`              // 请求基础URL
 	OperationName       string           `json:"operation_name"`        // 操作名称
@@ -50,21 +52,24 @@ type RequestLogResources struct {
 // RequestLogTransformer 负责请求日志资源转换。
 type RequestLogTransformer struct {
 	BaseResources[*model.RequestLogs, *RequestLogResources]
+	language string
 }
 
 // NewRequestLogTransformer 创建请求日志资源转换器。
-func NewRequestLogTransformer() RequestLogTransformer {
+// locale 为空时使用默认语言。
+func NewRequestLogTransformer(locale string) RequestLogTransformer {
 	return RequestLogTransformer{
 		BaseResources: BaseResources[*model.RequestLogs, *RequestLogResources]{
 			NewResource: func() *RequestLogResources {
 				return &RequestLogResources{}
 			},
 		},
+		language: i18n.ToErrorLanguage(locale),
 	}
 }
 
 // buildRequestLogBaseResources 提取请求日志公共字段。
-func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResources {
+func buildRequestLogBaseResources(data *model.RequestLogs, language string) RequestLogBaseResources {
 	return RequestLogBaseResources{
 		ID:                  data.ID,
 		RequestID:           data.RequestID,
@@ -75,7 +80,7 @@ func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResourc
 		BaseURL:             data.BaseURL,
 		OperationName:       data.OperationName,
 		OperationStatus:     data.OperationStatus,
-		OperationStatusName: getOperationStatusName(data.OperationStatus),
+		OperationStatusName: getOperationStatusName(data.OperationStatus, language),
 		IsHighRisk:          data.IsHighRisk,
 		OperatorAccount:     data.OperatorAccount,
 		OperatorName:        data.OperatorName,
@@ -88,7 +93,7 @@ func buildRequestLogBaseResources(data *model.RequestLogs) RequestLogBaseResourc
 
 // ToStruct 将请求日志模型转换为详情响应。
 func (r RequestLogTransformer) ToStruct(data *model.RequestLogs) *RequestLogResources {
-	base := buildRequestLogBaseResources(data)
+	base := buildRequestLogBaseResources(data, r.language)
 	return &RequestLogResources{
 		RequestLogBaseResources: base,
 		JwtID:                   data.JwtID,
@@ -109,7 +114,7 @@ func (r RequestLogTransformer) ToStruct(data *model.RequestLogs) *RequestLogReso
 func (r RequestLogTransformer) ToCollection(page, perPage int, total int64, data []*model.RequestLogs) *Collection {
 	response := make([]any, 0, len(data))
 	for _, v := range data {
-		base := buildRequestLogBaseResources(v)
+		base := buildRequestLogBaseResources(v, r.language)
 		response = append(response, &RequestLogListResources{
 			RequestLogBaseResources: base,
 		})
@@ -117,8 +122,15 @@ func (r RequestLogTransformer) ToCollection(page, perPage int, total int64, data
 	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
 }
 
-// getOperationStatusName 将业务码映射为结果名称。
-func getOperationStatusName(code int) string {
+// getOperationStatusName 将业务码映射为国际化结果名称。
+func getOperationStatusName(code int, language string) string {
+	key := e.MsgKeyRequestLogOpStatusSuccess
+	if code != 0 {
+		key = e.MsgKeyRequestLogOpStatusFailure
+	}
+	if text, ok := e.NewErrorText(language).TextByKey(key); ok {
+		return text
+	}
 	if code == 0 {
 		return "成功"
 	}

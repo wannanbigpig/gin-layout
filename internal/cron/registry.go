@@ -24,11 +24,13 @@ const (
 	TaskCodeCronResetSystemData   = "cron:reset-system-data"
 	TaskCodeCronFileAccessFlush   = "cron:file-access-flush"
 	TaskCodeCronCleanExpiredFiles = "cron:clean-expired-files"
+	TaskCodeCronCleanAuditLogs    = "cron:clean-audit-logs"
 
 	HandlerCronDemo              = "cron.demo"
 	HandlerCronResetSystemData   = "cron.reset-system-data"
 	HandlerCronFileAccessFlush   = "cron.file-access-flush"
 	HandlerCronCleanExpiredFiles = "cron.clean-expired-files"
+	HandlerCronCleanAuditLogs    = "cron.clean-audit-logs"
 )
 
 const cronLogTimeFormat = "2006-01-02 15:04:05"
@@ -43,6 +45,7 @@ var (
 			return nil
 		},
 		HandlerCronCleanExpiredFiles: CleanExpiredFilesHandler,
+		HandlerCronCleanAuditLogs:    CleanAuditLogsHandler,
 	}
 )
 
@@ -184,6 +187,19 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 			AllowRetry:  model.TaskRetryNotAllowed,
 			IsHighRisk:  model.TaskNotHighRisk,
 			Remark:      "自动物理清理系统内所有已过期的临时导出/上传文件及物理介质",
+		},
+		{
+			Code:        TaskCodeCronCleanAuditLogs,
+			Name:        "自动清理过期审计日志",
+			Kind:        model.TaskKindCron,
+			Queue:       "",
+			CronSpec:    "0 0 4 * * *",
+			Handler:     HandlerCronCleanAuditLogs,
+			Status:      model.TaskStatusEnabled,
+			AllowManual: model.TaskManualAllowed,
+			AllowRetry:  model.TaskRetryNotAllowed,
+			IsHighRisk:  model.TaskNotHighRisk,
+			Remark:      "每天凌晨 4 点自动清理超过保留天数的请求日志和登录日志",
 		},
 	}
 }

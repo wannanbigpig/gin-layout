@@ -19,7 +19,7 @@ type RequestLogs struct {
 	UserAgent          string `json:"user_agent"`           // 用户代理（浏览器/设备信息）
 	OS                 string `json:"os"`                   // 操作系统
 	Browser            string `json:"browser"`              // 浏览器
-	RequestKind        string `json:"request_kind"`         // 请求类型：http/websocket/sse
+	RequestKind        string `json:"request_kind"`         // 请求类型：http/websocket
 	Method             string `json:"method"`               // HTTP请求方法（GET/POST等）
 	BaseURL            string `json:"base_url"`             // 请求基础URL
 	OperationName      string `json:"operation_name"`       // 操作名称

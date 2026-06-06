@@ -63,7 +63,7 @@ func TestInstanceMethodReturnsBindingErrorBeforeDBError(t *testing.T) {
 
 func TestCountReturnsBindingErrorBeforeDBError(t *testing.T) {
 	var role Role
-	_, err := role.Count("pid = ?", 1)
+	_, err := role.Count("status = ?", 1)
 	if !errors.Is(err, ErrModelPtrNotImplemented) {
 		t.Fatalf("expected ErrModelPtrNotImplemented, got %v", err)
 	}
@@ -71,7 +71,7 @@ func TestCountReturnsBindingErrorBeforeDBError(t *testing.T) {
 
 func TestBoundCountReturnsDBErrorWhenUninitialized(t *testing.T) {
 	role := NewRole()
-	_, err := role.Count("pid = ?", 1)
+	_, err := role.Count("status = ?", 1)
 	if !errors.Is(err, ErrDBUninitialized) {
 		t.Fatalf("expected ErrDBUninitialized, got %v", err)
 	}

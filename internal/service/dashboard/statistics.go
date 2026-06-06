@@ -3,9 +3,11 @@ package dashboard
 import (
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 )
 
 const statisticsWindowDays = 7
@@ -134,14 +136,16 @@ func buildErrorDistribution(db *gorm.DB, start time.Time, end time.Time) ErrorDi
 		BizFailed int64
 	}
 	var counts categoryCount
-	_ = db.Table("request_logs").
+	if err := db.Table("request_logs").
 		Select(`
 			COALESCE(SUM(CASE WHEN response_status >= 400 AND response_status < 500 THEN 1 ELSE 0 END), 0) AS four_xx,
 			COALESCE(SUM(CASE WHEN response_status >= 500 THEN 1 ELSE 0 END), 0) AS five_xx,
 			COALESCE(SUM(CASE WHEN operation_status <> 0 AND response_status < 400 THEN 1 ELSE 0 END), 0) AS biz_failed
 		`).
 		Where("created_at >= ? AND created_at < ?", start, end).
-		Scan(&counts).Error
+		Scan(&counts).Error; err != nil {
+		logger.Warn("query request_logs error distribution failed", zap.Error(err))
+	}
 
 	distribution.Categories[0].Count = counts.FourXX
 	distribution.Categories[1].Count = counts.FiveXX

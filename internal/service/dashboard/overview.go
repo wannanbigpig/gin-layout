@@ -199,7 +199,7 @@ func taskCompletionRate(db *gorm.DB, start time.Time, end time.Time) (float64, e
 		return 0, err
 	}
 	if total == 0 {
-		return 100, nil
+		return 0, nil
 	}
 	success, err := countRows(db.Table("task_runs").Where("created_at >= ? AND created_at < ? AND status = ?", start, end, model.TaskRunStatusSuccess))
 	if err != nil {
@@ -225,10 +225,12 @@ func buildActivities(db *gorm.DB, operatorID uint) []ActivityItem {
 		// 首页"最近动态"只展示当前登录用户自己的操作记录。
 		query = query.Where("operator_id = ?", operatorID)
 	}
-	_ = query.
+	if err := query.
 		Order("created_at DESC, id DESC").
 		Limit(4).
-		Scan(&rows).Error
+		Scan(&rows).Error; err != nil {
+		log.Warn("查询最近动态失败", zap.Error(err))
+	}
 
 	activities := make([]ActivityItem, 0, len(rows))
 	for _, item := range rows {
@@ -369,17 +371,21 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 }
 
 func requestLogDateExpr(db *gorm.DB) string {
-	if db != nil && db.Dialector != nil {
-		switch db.Dialector.Name() {
-		case "sqlite":
-			return "strftime('%Y-%m-%d', created_at)"
-		}
+	if db == nil || db.Dialector == nil {
+		panic("requestLogDateExpr: db or db.Dialector is nil")
 	}
 
-	// DSN 启用 parseTime=true 后，DATE() 会被驱动转为 time.Time，Scan 到 string 字段时会被
-	// database/sql 用 RFC3339Nano 序列化为 "2006-01-02T00:00:00+08:00"，无法匹配下方按
-	// "2006-01-02" 构造的 map key。MySQL 下使用 DATE_FORMAT 直接返回字符串规避此行为。
-	return "DATE_FORMAT(created_at, '%Y-%m-%d')"
+	switch db.Dialector.Name() {
+	case "sqlite":
+		return "strftime('%Y-%m-%d', created_at)"
+	case "mysql":
+		// DSN 启用 parseTime=true 后，DATE() 会被驱动转为 time.Time，Scan 到 string 字段时会被
+		// database/sql 用 RFC3339Nano 序列化为 "2006-01-02T00:00:00+08:00"，无法匹配下方按
+		// "2006-01-02" 构造的 map key。MySQL 下使用 DATE_FORMAT 直接返回字符串规避此行为。
+		return "DATE_FORMAT(created_at, '%Y-%m-%d')"
+	default:
+		panic(fmt.Sprintf("requestLogDateExpr: unsupported database driver: %s", db.Dialector.Name()))
+	}
 }
 
 // responseTimeBucketDefs 定义耗时分桶边界，遵循左闭右开规则，最后一个桶为开区间。

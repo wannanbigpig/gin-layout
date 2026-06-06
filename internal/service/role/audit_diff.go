@@ -7,6 +7,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -23,9 +24,6 @@ var roleDiffRules = []auditdiff.FieldRule{
 			"1": "启用",
 		},
 	},
-	{Field: "pid", Label: "上级角色ID"},
-	{Field: "pids", Label: "上级路径"},
-	{Field: "level", Label: "层级"},
 	{Field: "sort", Label: "排序"},
 	{Field: "menu_list", Label: "菜单ID列表"},
 }
@@ -98,6 +96,10 @@ func (s *RoleService) snapshotRoleByID(id uint) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	menuIDs, err = access.NewRoleMenuAssignmentService().NormalizeMenuIDs(menuIDs)
+	if err != nil {
+		return nil, err
+	}
 	sort.Slice(menuIDs, func(i, j int) bool {
 		return menuIDs[i] < menuIDs[j]
 	})
@@ -107,9 +109,6 @@ func (s *RoleService) snapshotRoleByID(id uint) (map[string]any, error) {
 		"name":        role.Name,
 		"description": role.Description,
 		"status":      role.Status,
-		"pid":         role.Pid,
-		"pids":        role.Pids,
-		"level":       role.Level,
 		"sort":        role.Sort,
 		"menu_list":   menuIDs,
 	}, nil

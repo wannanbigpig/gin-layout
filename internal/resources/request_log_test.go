@@ -7,7 +7,7 @@ import (
 )
 
 func TestRequestLogTransformerCarriesRequestKind(t *testing.T) {
-	result := NewRequestLogTransformer().ToStruct(&model.RequestLogs{
+	result := NewRequestLogTransformer("zh-CN").ToStruct(&model.RequestLogs{
 		RequestID:          "req-1",
 		RequestKind:        model.RequestKindWebSocket,
 		ExecutionTimeUs:    21110000,

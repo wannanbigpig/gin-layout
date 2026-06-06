@@ -64,6 +64,9 @@ type QueueConfig struct {
 	// AuditSampleSlowKeepThresholdMs 低风险只读请求即便命中采样，若执行耗时 >= 该阈值（毫秒）也强制保留，
 	// 避免慢请求被采样丢弃而漏掉性能问题线索。<=0 时使用默认值 1000（即 >=1s 的慢请求始终保留）。
 	AuditSampleSlowKeepThresholdMs int `mapstructure:"audit_sample_slow_keep_threshold_ms" yaml:"audit_sample_slow_keep_threshold_ms"`
+	// AuditLogRetentionDays 审计日志保留天数，超过此天数的 request_logs 和 admin_login_logs 将被清理。
+	// 最小值 7 天，<=0 时使用默认值 30。
+	AuditLogRetentionDays int `mapstructure:"audit_log_retention_days" yaml:"audit_log_retention_days"`
 }
 
 // Queue 队列默认配置。
@@ -99,4 +102,5 @@ var Queue = QueueConfig{
 	AuditFallbackFlushIntervalMs:   1000, // 批量 INSERT 最长等待间隔（毫秒）
 	AuditSampleGetKeepEvery:        10,   // 低风险只读请求保留 1/10
 	AuditSampleSlowKeepThresholdMs: 1000, // 慢请求（>=1s）即便命中采样也强制保留
+	AuditLogRetentionDays:          30,    // 审计日志默认保留 30 天
 }

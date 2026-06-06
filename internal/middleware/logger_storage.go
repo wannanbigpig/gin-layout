@@ -68,7 +68,9 @@ type auditOperatorMeta struct {
 	operatorName    string
 }
 
-const requestLogExecutionTimeMaxUs int64 = 99999999999999
+// requestLogExecutionTimeMaxUs 执行时间记录上限（微秒），约 7 天。
+// 用于截断因时钟跳变、goroutine 泄漏等产生的异常超长 duration，同时支持合理的长连接场景。
+const requestLogExecutionTimeMaxUs int64 = 604800_000_000
 
 // buildAuditLogSnapshot 组装审计快照（仅负责编排，不包含具体字段提取细节）。
 func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operationStatus int, responseBody string, responseHeader string) *auditsvc.AuditLogSnapshot {

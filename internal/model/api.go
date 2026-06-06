@@ -28,6 +28,8 @@ func NewApi() *Api {
 	return BindModel(&Api{})
 }
 
+var apiRegisterConflictUpdateColumns = []string{"name", "description", "method", "route", "func", "group_code", "func_path", "is_auth", "is_effective", "updated_at"}
+
 // TableName 获取表名
 func (m *Api) TableName() string {
 	return "api"
@@ -46,7 +48,7 @@ func (m *Api) InitRegisters(data []map[string]any, date string) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "code"}},
-			DoUpdates: clause.AssignmentColumns([]string{"func", "group_code", "func_path", "is_effective", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns(apiRegisterConflictUpdateColumns),
 		}).Create(data).Error
 		if err != nil {
 			return err

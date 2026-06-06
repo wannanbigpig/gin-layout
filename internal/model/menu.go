@@ -156,6 +156,15 @@ type MenuTreeNode struct {
 	Pids string
 }
 
+// RolePermissionMenuInfo 描述角色菜单规范化所需的最小信息。
+type RolePermissionMenuInfo struct {
+	ID     uint
+	Pids   string
+	Type   uint8
+	IsAuth uint8
+	Status uint8
+}
+
 // FindPidsByIds 根据 ID 列表查询未删除菜单的 id 和 pids 信息。
 func (m *Menu) FindPidsByIds(ids []uint) ([]MenuTreeNode, error) {
 	if len(ids) == 0 {
@@ -167,6 +176,22 @@ func (m *Menu) FindPidsByIds(ids []uint) ([]MenuTreeNode, error) {
 	}
 	var rows []MenuTreeNode
 	if err := db.Table(m.TableName()).Select("id,pids").Where("id IN ? AND deleted_at = 0", ids).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// AllRolePermissionInfos 查询角色菜单规范化所需的全部菜单信息。
+func (m *Menu) AllRolePermissionInfos() ([]RolePermissionMenuInfo, error) {
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var rows []RolePermissionMenuInfo
+	if err := db.Table(m.TableName()).
+		Select("id,pids,type,is_auth,status").
+		Where("deleted_at = 0").
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil

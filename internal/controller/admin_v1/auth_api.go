@@ -36,3 +36,14 @@ func (api ApiController) List(c *gin.Context) {
 	result := api_permission.NewApiService().ListPage(params)
 	api.Success(c, result)
 }
+
+// Options 接口权限选择器：按名称/路由模糊搜索，供菜单编辑时下拉选择器使用。
+func (api ApiController) Options(c *gin.Context) {
+	params := form.NewPermissionOptionsQuery()
+	if err := validator.CheckQueryParams(c, &params); err != nil {
+		return
+	}
+
+	result := api_permission.NewApiService().Options(params.Keyword, params.IsAuth)
+	api.Success(c, result)
+}

@@ -83,11 +83,6 @@ func (r *AffectedUsersResolver) userIDsByRoles(roleIDs []uint, tx ...*gorm.DB) (
 		return nil, nil
 	}
 
-	expandedRoleIDs, err := r.expandRoleSubtree(roleIDs, tx...)
-	if err != nil {
-		return nil, err
-	}
-
 	roleMapModel := model.NewAdminUserRoleMap()
 	deptRoleMapModel := model.NewDeptRoleMap()
 	deptMapModel := model.NewAdminUserDeptMap()
@@ -97,12 +92,12 @@ func (r *AffectedUsersResolver) userIDsByRoles(roleIDs []uint, tx ...*gorm.DB) (
 		deptMapModel.SetDB(t)
 	}
 
-	userIDs, err := roleMapModel.UidsByRoleIds(expandedRoleIDs)
+	userIDs, err := roleMapModel.UidsByRoleIds(roleIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	deptIDs, err := deptRoleMapModel.DeptIdsByRoleIds(expandedRoleIDs)
+	deptIDs, err := deptRoleMapModel.DeptIdsByRoleIds(roleIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -116,21 +111,4 @@ func (r *AffectedUsersResolver) userIDsByRoles(roleIDs []uint, tx ...*gorm.DB) (
 	}
 
 	return UniqueUintSlice(append(userIDs, deptUserIDs...)), nil
-}
-
-func (r *AffectedUsersResolver) expandRoleSubtree(roleIDs []uint, tx ...*gorm.DB) ([]uint, error) {
-	roleIDs = UniqueUintSlice(roleIDs)
-	if len(roleIDs) == 0 {
-		return nil, nil
-	}
-
-	roleModel := model.NewRole()
-	if t := FirstTx(tx); t != nil {
-		roleModel.SetDB(t)
-	}
-	subtreeIDs, err := roleModel.SubtreeIdsByRootIds(roleIDs)
-	if err != nil {
-		return nil, err
-	}
-	return UniqueUintSlice(append(subtreeIDs, roleIDs...)), nil
 }

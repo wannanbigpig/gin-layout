@@ -66,3 +66,30 @@ func (ApiTransformer) ToCollection(page, perPage int, total int64, data []*model
 	}
 	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
 }
+
+// ApiOptionResources 接口权限选择器选项，仅暴露下拉所需的最小字段。
+type ApiOptionResources struct {
+	ID     uint   `json:"id"`
+	Name   string `json:"name"`
+	Code   string `json:"code"`
+	Method string `json:"method"`
+	Route  string `json:"route"`
+}
+
+// ToApiOptions 将 API 模型集合转换为选择器选项列表。
+func ToApiOptions(apis []*model.Api) []ApiOptionResources {
+	options := make([]ApiOptionResources, 0, len(apis))
+	for _, a := range apis {
+		if a == nil {
+			continue
+		}
+		options = append(options, ApiOptionResources{
+			ID:     a.ID,
+			Name:   a.Name,
+			Code:   a.Code,
+			Method: a.Method,
+			Route:  a.Route,
+		})
+	}
+	return options
+}

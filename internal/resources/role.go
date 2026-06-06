@@ -12,12 +12,9 @@ type RoleResources struct {
 	ID          uint             `json:"id"`
 	Code        string           `json:"code"`
 	IsSystem    uint8            `json:"is_system"`
-	Pid         uint             `json:"pid"`
 	Name        string           `json:"name"`
 	Description string           `json:"description"`
-	Level       uint8            `json:"level"`
 	Sort        uint16           `json:"sort"`
-	ChildrenNum uint             `json:"children_num"`
 	Status      uint8            `json:"status"`
 	StatusName  string           `json:"status_name"` // 状态名称
 	MenuList    []uint           `json:"menu_list"`
@@ -28,11 +25,6 @@ type RoleResources struct {
 // GetID 返回当前角色节点 ID。
 func (r *RoleResources) GetID() uint {
 	return r.ID
-}
-
-// GetPID 返回当前角色节点父级 ID。
-func (r *RoleResources) GetPID() uint {
-	return r.Pid
 }
 
 // SetCustomFields 填充角色资源的扩展字段。
@@ -64,4 +56,27 @@ func NewRoleTransformer() RoleTransformer {
 			},
 		},
 	}
+}
+
+// RoleOptionResources 角色选择器选项，仅暴露下拉所需的最小字段。
+type RoleOptionResources struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+	Code string `json:"code"`
+}
+
+// ToRoleOptions 将角色模型集合转换为选择器选项列表。
+func ToRoleOptions(roles []*model.Role) []RoleOptionResources {
+	options := make([]RoleOptionResources, 0, len(roles))
+	for _, r := range roles {
+		if r == nil {
+			continue
+		}
+		options = append(options, RoleOptionResources{
+			ID:   r.ID,
+			Name: r.Name,
+			Code: r.Code,
+		})
+	}
+	return options
 }

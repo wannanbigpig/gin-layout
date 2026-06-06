@@ -93,6 +93,20 @@ func findMenuByTitle(t *testing.T, title string) *model.Menu {
 	return menu
 }
 
+// findMenuByCode 根据菜单 code 查找菜单。
+func findMenuByCode(t *testing.T, code string) *model.Menu {
+	t.Helper()
+	menu := model.NewMenu()
+	db, err := menu.GetDB()
+	if err != nil {
+		t.Fatalf("查询菜单失败: %v", err)
+	}
+	if err := db.Where("code = ?", code).First(menu).Error; err != nil {
+		t.Fatalf("查询菜单失败: %v", err)
+	}
+	return menu
+}
+
 // cleanupAdminUsers 清理指定前缀创建的管理员测试数据。
 func cleanupAdminUsers(t *testing.T, usernamePrefix string) {
 	t.Helper()
@@ -219,8 +233,6 @@ func createFallbackRole(t *testing.T) uint {
 	role := &model.Role{
 		Name:   name,
 		Status: 1,
-		Level:  1,
-		Pids:   "0",
 		Sort:   1,
 	}
 	db, err := role.GetDB()
@@ -238,17 +250,17 @@ func createFallbackMenu(t *testing.T) uint {
 	t.Helper()
 	name := uniqueCompactTestName("menu")
 	menu := &model.Menu{
-		Name:      name,
-		Path:      "/" + name,
-		FullPath:  "/" + name,
+		Name:         name,
+		Path:         "/" + name,
+		FullPath:     "/" + name,
 		ComponentKey: "test/component",
-		IsShow:    1,
-		Sort:      1,
-		Type:      model.MENU,
-		Level:     1,
-		Pids:      "0",
-		IsAuth:    1,
-		Status:    1,
+		IsShow:       1,
+		Sort:         1,
+		Type:         model.MENU,
+		Level:        1,
+		Pids:         "0",
+		IsAuth:       1,
+		Status:       1,
 	}
 	db, err := menu.GetDB()
 	if err != nil {

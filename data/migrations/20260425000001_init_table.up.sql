@@ -168,13 +168,9 @@ CREATE TABLE IF NOT EXISTS `role`
     `id`          int unsigned                                           NOT NULL AUTO_INCREMENT,
     `code`        varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '角色业务编码',
     `is_system`   tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否系统保留对象,1是 0否',
-    `pid`         int unsigned                                           NOT NULL DEFAULT '0' COMMENT '上级id',
-    `pids`        varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '上级id路径链',
     `name`        varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '角色名称',
     `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '描述',
-    `level`       tinyint                                                NOT NULL DEFAULT '1' COMMENT '层级',
     `sort`        mediumint                                              NOT NULL DEFAULT '0' COMMENT '排序',
-    `children_num` int unsigned                                          NOT NULL DEFAULT '0' COMMENT '子集数量',
     `status`      tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否启用状态,1是，0否',
     `created_at`  datetime                                                        DEFAULT NULL,
     `updated_at`  datetime                                                        DEFAULT NULL,
@@ -183,9 +179,8 @@ CREATE TABLE IF NOT EXISTS `role`
     UNIQUE KEY `uniq_code_deleted_at` (`code`, `deleted_at`),
     KEY `idx_name_deleted_at` (`name`, `deleted_at`),
     KEY `idx_is_system_deleted_at` (`is_system`, `deleted_at`),
-    KEY `idx_pid_deleted_at_sort_id` (`pid`, `deleted_at`, `sort`, `id`),
     KEY `idx_status_deleted_at` (`status`, `deleted_at`),
-    KEY `idx_pids_deleted_at` (`pids`, `deleted_at`)
+    KEY `idx_deleted_at_sort_id` (`deleted_at`, `sort`, `id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin

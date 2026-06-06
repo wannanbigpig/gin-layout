@@ -3,8 +3,12 @@ package audit
 import (
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
@@ -65,7 +69,8 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 		OrderBy:       resolveRequestLogOrderBy(params.OrderBy),
 		OrderAllowMap: requestLogOrderAllowMap,
 	}
-	transformer := resources.NewRequestLogTransformer()
+	locale := localeFromCtx(s.GetCtx())
+	transformer := resources.NewRequestLogTransformer(locale)
 
 	// 分页查询（只查询列表需要的字段）
 	total, collection, err := model.ListPageE(requestLogModel, params.Page, params.PerPage, conditionStr, args, listOptionalParams)
@@ -94,6 +99,19 @@ func resolveRequestLogOrderBy(orderBy string) string {
 	return orderBy + ", id DESC"
 }
 
+// localeFromCtx 从 gin.Context 中读取归一化语言，用于资源层国际化。
+func localeFromCtx(c *gin.Context) string {
+	if c == nil {
+		return i18n.DefaultLocale
+	}
+	if locale, exists := c.Get(global.ContextKeyLocale); exists {
+		if localeText, ok := locale.(string); ok {
+			return i18n.NormalizeLocale(localeText)
+		}
+	}
+	return i18n.DefaultLocale
+}
+
 // Detail 获取请求日志详情
 func (s *RequestLogService) Detail(id uint) (any, error) {
 	requestLog := model.NewRequestLogs()
@@ -101,7 +119,8 @@ func (s *RequestLogService) Detail(id uint) (any, error) {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	// 使用资源类转换，详情包含所有字段
-	transformer := resources.NewRequestLogTransformer()
+	locale := localeFromCtx(s.GetCtx())
+	transformer := resources.NewRequestLogTransformer(locale)
 	return transformer.ToStruct(requestLog), nil
 }
 

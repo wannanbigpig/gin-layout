@@ -30,6 +30,17 @@ func (api RoleController) List(c *gin.Context) {
 	api.Success(c, result)
 }
 
+// Options 角色选择器：按名称/编码模糊搜索，供前端下拉选择器使用。
+func (api RoleController) Options(c *gin.Context) {
+	params := form.NewRoleOptionsQuery()
+	if err := validator.CheckQueryParams(c, &params); err != nil {
+		return
+	}
+
+	result := role.NewRoleService().Options(params.Keyword)
+	api.Success(c, result)
+}
+
 // Create 新增角色
 func (api RoleController) Create(c *gin.Context) {
 	handleAuditWrite(api.Api, c, form.NewCreateRoleForm, func(p *form.CreateRole) (string, error) {

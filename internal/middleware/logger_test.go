@@ -256,7 +256,7 @@ func TestCalculateExecutionTimeMsClampsLargeHTTPDuration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-30000*time.Hour))
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-8*24*time.Hour))
 
 	got, scope := calculateExecutionTimeMeta(ctx, "http")
 	if got != requestLogExecutionTimeMaxUs {

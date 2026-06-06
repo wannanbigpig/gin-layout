@@ -215,7 +215,9 @@ func (s *FileResourceService) Delete(id uint, deletedBy uint, reason string, for
 	if s.db != nil {
 		uploadFile.SetDB(s.db)
 	}
-	_ = uploadFile.UpdateById(id, map[string]any{"deleted_by": deletedBy, "deleted_reason": reason})
+	if err := uploadFile.UpdateById(id, map[string]any{"deleted_by": deletedBy, "deleted_reason": reason}); err != nil {
+		log.Logger.Warn("更新文件删除审计信息失败", zap.Error(err), zap.Uint("id", id), zap.Uint("deleted_by", deletedBy))
+	}
 	rowsAffected, err := uploadFile.DeleteByID(id)
 	if err != nil {
 		log.Logger.Error("删除文件资源记录失败", zap.Error(err), zap.Uint("id", id))
