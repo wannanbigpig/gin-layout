@@ -55,6 +55,11 @@ func (s CommonService) UploadImages(files []*multipart.FileHeader, path string) 
 
 // UploadImage 上传单张图片并保存文件记录。
 func (s CommonService) UploadImage(fileHeader *multipart.FileHeader, isPublic bool, path string) (*utils.FileInfo, error) {
+	return s.UploadImageEx(fileHeader, isPublic, path, 0, "common")
+}
+
+// UploadImageEx 扩展上传单张图片，支持指定 FolderID 和 UploadScene
+func (s CommonService) UploadImageEx(fileHeader *multipart.FileHeader, isPublic bool, path string, folderID uint, uploadScene string) (*utils.FileInfo, error) {
 	fileInfo := initUploadResult(fileHeader)
 	isPublicFlag := visibilityFlag(isPublic)
 	basePath := storageBasePath(isPublic)
@@ -157,7 +162,7 @@ func (s CommonService) UploadImage(fileHeader *multipart.FileHeader, isPublic bo
 
 	uploadFileModel := model.NewUploadFiles()
 	uploadFileModel.UID = s.GetAdminUserId()
-	uploadFileModel.FolderID = 0
+	uploadFileModel.FolderID = folderID
 	uploadFileModel.LogicalPath = "/"
 	uploadFileModel.DisplayName = result.OriginName
 	uploadFileModel.OriginName = result.OriginName
@@ -178,7 +183,7 @@ func (s CommonService) UploadImage(fileHeader *multipart.FileHeader, isPublic bo
 	uploadFileModel.ETag = object.ETag
 	uploadFileModel.StorageStatus = model.StorageStatusStored
 	uploadFileModel.UploadSource = model.UploadSourceBackend
-	uploadFileModel.UploadScene = "common"
+	uploadFileModel.UploadScene = uploadScene
 	uploadFileModel.UploadStatus = model.UploadStatusUploaded
 	applyObjectToUploadFile(uploadFileModel, object)
 

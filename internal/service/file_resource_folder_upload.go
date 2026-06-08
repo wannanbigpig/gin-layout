@@ -1677,6 +1677,9 @@ func isMimeCompatible(actual, expected string) bool {
 // SystemTempFolderName 系统临时文件夹常量，对前端隐藏。
 const SystemTempFolderName = "system_temp"
 
+// SystemAvatarsFolderName 系统头像文件夹常量，对前端隐藏。
+const SystemAvatarsFolderName = "system_avatars"
+
 func (s *FileResourceService) ensureExportTempFolder(ctx context.Context) (uint, error) {
 	db, err := s.dbOrDefault()
 	if err != nil {
@@ -1691,6 +1694,42 @@ func (s *FileResourceService) ensureExportTempFolder(ctx context.Context) (uint,
 				ParentID:    0,
 				Name:        SystemTempFolderName,
 				LogicalPath: "/" + SystemTempFolderName,
+				IsHidden:    1,
+				CreatedBy:   0,
+				UpdatedBy:   0,
+			}
+			if err := db.Create(&folder).Error; err != nil {
+				return 0, err
+			}
+		} else {
+			return 0, err
+		}
+	}
+
+	// 自愈：历史上可能存在同名但 is_hidden=0 的目录
+	if folder.IsHidden == 0 {
+		if err := db.Model(&model.UploadFileFolder{}).Where("id = ?", folder.ID).Update("is_hidden", 1).Error; err != nil {
+			return 0, err
+		}
+	}
+
+	return folder.ID, nil
+}
+
+func (s *FileResourceService) EnsureAvatarFolder(ctx context.Context) (uint, error) {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return 0, err
+	}
+
+	var folder model.UploadFileFolder
+	err = db.Where("parent_id = 0 AND name = ?", SystemAvatarsFolderName).First(&folder).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			folder = model.UploadFileFolder{
+				ParentID:    0,
+				Name:        SystemAvatarsFolderName,
+				LogicalPath: "/" + SystemAvatarsFolderName,
 				IsHidden:    1,
 				CreatedBy:   0,
 				UpdatedBy:   0,

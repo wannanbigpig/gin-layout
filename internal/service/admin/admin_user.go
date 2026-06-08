@@ -1,7 +1,12 @@
 package admin
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"mime/multipart"
+	"path/filepath"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -17,6 +22,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
 // AdminUserService 授权服务。
@@ -226,4 +232,36 @@ type adminUserEditParams struct {
 	Status      *uint8  // 状态
 	Avatar      *string // 头像
 	DeptIds     *[]uint // 关联的部门 ID 列表
+}
+
+// UploadAvatar 专门用于上传用户头像。
+// 注意：
+// 1. 此接口会将文件统一存放至隐藏目录 (system_avatars)。
+// 2. 结合后端的 FileReferenceService 机制，当用户更换新头像时，系统仅会释放对旧头像的“引用计数”。
+// 3. 目前系统出于防误删策略，并未配置针对“无引用闲置图片”的自动物理清理定时任务。
+//    这意味着被替换掉的旧头将会作为历史闲置数据长期保留在数据库及存储介质中。
+//    若业务对存储空间敏感，未来需自行补充如 `cron:clean-unused-files` 的定时扫描和物理清理任务。
+func (s *AdminUserService) UploadAvatar(ctx context.Context, uid uint, fileHeader *multipart.FileHeader) (*utils.FileInfo, error) {
+	fileResourceService := service.NewFileResourceService()
+	folderID, err := fileResourceService.EnsureAvatarFolder(ctx)
+	if err != nil {
+		log.Logger.Error("获取头像存储目录失败", zap.Error(err))
+		return nil, e.NewBusinessError(e.ServerErr)
+	}
+
+	commonService := service.NewCommonService()
+	commonService.SetAdminUserId(uid)
+
+	// 为解决同一个系统隐藏目录下同名文件冲突 (uniq_folder_name_deleted 唯一索引)
+	// 在上传前强行将文件名改为基于 uid 和时间戳的唯一名。
+	ext := filepath.Ext(fileHeader.Filename)
+	fileHeader.Filename = fmt.Sprintf("avatar_%d_%d%s", uid, time.Now().UnixNano(), ext)
+
+	// 调用 CommonService 的扩展上传方法，强制指定 isPublic=1, uploadScene="avatar"
+	fileInfo, err := commonService.UploadImageEx(fileHeader, true, "avatar", folderID, "avatar")
+	if err != nil {
+		log.Logger.Error("头像上传保存失败", zap.Error(err))
+		return nil, err
+	}
+	return fileInfo, nil
 }

@@ -138,6 +138,7 @@ func adminUserGroup(deps *ControllerDeps) RouteGroupDef {
 			GET("get", "获取当前用户信息", AuthModeLogin, deps.AdminUser.GetUserInfo),
 			GET("user-menu-info", "获取用户权限信息", AuthModeLogin, deps.AdminUser.GetUserMenuInfo),
 			POST("update-profile", "更新个人资料", AuthModeLogin, deps.AdminUser.UpdateProfile),
+			POST("avatar/upload", "上传头像", AuthModeLogin, deps.AdminUser.UploadAvatar),
 
 			// 用户管理（AuthModeAuth：需要权限）
 			GET("list", "管理员列表", AuthModeAuth, deps.AdminUser.List),

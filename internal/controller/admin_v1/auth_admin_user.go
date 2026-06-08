@@ -5,6 +5,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/service/admin"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -151,4 +152,20 @@ func (api AdminUserController) GetFullEmail(c *gin.Context) {
 	api.Success(c, map[string]string{
 		"email": userInfo.Email,
 	})
+}
+
+// UploadAvatar 上传头像
+func (api AdminUserController) UploadAvatar(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		api.FailCode(c, errors.InvalidParameter)
+		return
+	}
+	uid := api.GetCurrentUserID(c)
+	fileInfo, err := admin.NewAdminUserService().UploadAvatar(c.Request.Context(), uid, fileHeader)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, fileInfo)
 }
