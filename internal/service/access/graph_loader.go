@@ -59,6 +59,14 @@ func (s *UserPermissionSyncService) collectPoliciesForUsers(userIDs []uint, tx *
 	if len(allRoleIDs) == 0 {
 		return result, nil
 	}
+	enabledRoles, err := s.enabledRoleSet(allRoleIDs, tx)
+	if err != nil {
+		return nil, err
+	}
+	userExpandedRoles, allRoleIDs = filterUserRolesByEnabledSet(userExpandedRoles, enabledRoles)
+	if len(allRoleIDs) == 0 {
+		return result, nil
+	}
 
 	roleMenuMap, err := s.roleMenuMap(allRoleIDs, tx)
 	if err != nil || len(roleMenuMap) == 0 {
@@ -273,7 +281,44 @@ func (s *UserPermissionSyncService) userBaseRoleMap(userIDs []uint, tx *gorm.DB)
 		userRoleMap[userID] = UniqueUintSlice(userRoleMap[userID])
 	}
 
+	if err := s.keepEnabledRoles(userRoleMap, tx); err != nil {
+		return nil, err
+	}
+
 	return userRoleMap, nil
+}
+
+func (s *UserPermissionSyncService) keepEnabledRoles(userRoleMap map[uint][]uint, tx *gorm.DB) error {
+	allRoleIDs := make([]uint, 0)
+	for _, roleIDs := range userRoleMap {
+		allRoleIDs = append(allRoleIDs, roleIDs...)
+	}
+	allRoleIDs = UniqueUintSlice(allRoleIDs)
+	if len(allRoleIDs) == 0 {
+		return nil
+	}
+
+	roleModel := model.NewRole()
+	roleModel.SetDB(tx)
+	enabledRoleIDs, err := roleModel.EnabledIdsByIds(allRoleIDs)
+	if err != nil {
+		return err
+	}
+	enabledSet := make(map[uint]struct{}, len(enabledRoleIDs))
+	for _, roleID := range enabledRoleIDs {
+		enabledSet[roleID] = struct{}{}
+	}
+
+	for userID, roleIDs := range userRoleMap {
+		filtered := make([]uint, 0, len(roleIDs))
+		for _, roleID := range roleIDs {
+			if _, ok := enabledSet[roleID]; ok {
+				filtered = append(filtered, roleID)
+			}
+		}
+		userRoleMap[userID] = UniqueUintSlice(filtered)
+	}
+	return nil
 }
 
 func (s *UserPermissionSyncService) appendDirectRoles(userRoleMap map[uint][]uint, userIDs []uint, tx *gorm.DB) error {
@@ -309,6 +354,25 @@ func (s *UserPermissionSyncService) roleMenuMap(roleIDs []uint, tx *gorm.DB) (ro
 		return nil, err
 	}
 	return roleMenuIDMap(m), nil
+}
+
+func (s *UserPermissionSyncService) enabledRoleSet(roleIDs []uint, tx *gorm.DB) (map[uint]struct{}, error) {
+	roleIDs = UniqueUintSlice(roleIDs)
+	result := make(map[uint]struct{}, len(roleIDs))
+	if len(roleIDs) == 0 {
+		return result, nil
+	}
+
+	roleModel := model.NewRole()
+	roleModel.SetDB(tx)
+	enabledRoleIDs, err := roleModel.EnabledIdsByIds(roleIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, roleID := range enabledRoleIDs {
+		result[roleID] = struct{}{}
+	}
+	return result, nil
 }
 
 func (s *UserPermissionSyncService) enabledMenuSet(menuIDs []uint, tx *gorm.DB) (map[uint]struct{}, error) {
@@ -402,6 +466,21 @@ func expandUserRoles(userRoleMap map[uint][]uint) (map[uint][]uint, []uint) {
 		allRoleIDs = append(allRoleIDs, expanded...)
 	}
 	return userExpandedRoles, UniqueUintSlice(allRoleIDs)
+}
+
+func filterUserRolesByEnabledSet(userRoles map[uint][]uint, enabled map[uint]struct{}) (map[uint][]uint, []uint) {
+	filtered := make(map[uint][]uint, len(userRoles))
+	allRoleIDs := make([]uint, 0, len(userRoles))
+	for userID, roleIDs := range userRoles {
+		for _, roleID := range roleIDs {
+			if _, ok := enabled[roleID]; !ok {
+				continue
+			}
+			filtered[userID] = append(filtered[userID], roleID)
+			allRoleIDs = append(allRoleIDs, roleID)
+		}
+	}
+	return filtered, UniqueUintSlice(allRoleIDs)
 }
 
 func buildUserPolicies(roleIDs []uint, roleMenuMap roleMenuIDMap, enabledMenus map[uint]struct{}, menuPolicies map[uint][][]string) [][]string {

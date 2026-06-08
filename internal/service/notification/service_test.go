@@ -160,6 +160,49 @@ func TestServiceNotifyExportResultBuildsMessage(t *testing.T) {
 	}
 }
 
+func TestServiceSendUsesInjectedDBForRecipients(t *testing.T) {
+	db := newMessageTestDB(t)
+	if err := db.Exec(`INSERT INTO admin_user (id, username, status, deleted_at) VALUES
+		(7, 'enabled', 1, 0),
+		(8, 'disabled', 0, 0)`).Error; err != nil {
+		t.Fatalf("seed admin_user failed: %v", err)
+	}
+
+	var broadcasted []Event
+	svc := NewServiceWithDeps(ServiceDeps{
+		DB: db,
+		BroadcastFn: func(event Event) {
+			broadcasted = append(broadcasted, event)
+		},
+		PublishFn: func(context.Context, Event) error { return nil },
+	})
+
+	result, err := svc.Send(context.Background(), SendInput{
+		Title:        "系统通知",
+		Content:      "请查看",
+		AudienceType: "user_ids",
+		UserIDs:      []uint{7, 8, 7},
+		SenderID:     1,
+	})
+	if err != nil {
+		t.Fatalf("send failed: %v", err)
+	}
+	if result.Total != 1 || result.Success != 1 {
+		t.Fatalf("unexpected send result: %#v", result)
+	}
+
+	var messages []model.SysMessage
+	if err := db.Find(&messages).Error; err != nil {
+		t.Fatalf("query sys_messages failed: %v", err)
+	}
+	if len(messages) != 1 || messages[0].UserID != 7 {
+		t.Fatalf("expected one message for enabled user 7, got %#v", messages)
+	}
+	if len(broadcasted) != 1 || broadcasted[0].UserID != 7 {
+		t.Fatalf("expected one broadcast for user 7, got %#v", broadcasted)
+	}
+}
+
 func TestDecodeRealtimePayload(t *testing.T) {
 	payload, ok := decodeRealtimePayload(`{"source":"node-1","event":{"event":"message_created","user_id":7,"unread_count":2}}`)
 	if !ok {
@@ -206,6 +249,14 @@ func newMessageTestDB(t *testing.T) *gorm.DB {
 		updated_at datetime
 	)`).Error; err != nil {
 		t.Fatalf("create sys_messages table failed: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE admin_user (
+		id integer primary key autoincrement,
+		username text NOT NULL DEFAULT '',
+		status integer NOT NULL DEFAULT 1,
+		deleted_at integer NOT NULL DEFAULT 0
+	)`).Error; err != nil {
+		t.Fatalf("create admin_user table failed: %v", err)
 	}
 	return db
 }

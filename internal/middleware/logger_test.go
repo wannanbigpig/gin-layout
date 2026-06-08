@@ -17,6 +17,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	auditsvc "github.com/wannanbigpig/gin-layout/internal/service/audit"
@@ -452,5 +453,49 @@ func TestLogWebSocketConnectionNilContextIsNoop(t *testing.T) {
 	LogWebSocketConnection(nil)
 	if called {
 		t.Fatal("expected no enqueue for nil context")
+	}
+}
+
+func TestLogWebSocketConnectionCanRecordUpgradeFailure(t *testing.T) {
+	var captured *auditsvc.AuditLogSnapshot
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Enqueue: func(_ context.Context, kind string, snapshot *auditsvc.AuditLogSnapshot) error {
+			if kind == jobs.AuditLogKindRequest {
+				captured = snapshot
+			}
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.Enable = true
+	})
+	defer restoreConfig()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/common/ws", nil)
+	ctx.Set(global.ContextKeyRequestID, "ws-req-failed")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-10*time.Millisecond))
+
+	LogWebSocketConnection(ctx, WebSocketAuditOptions{
+		OperationStatus: e.InvalidParameter,
+		ResponseStatus:  http.StatusBadRequest,
+		ResponseBody:    "upgrade failed",
+	})
+
+	if captured == nil {
+		t.Fatal("expected websocket failure audit log to be enqueued")
+	}
+	if captured.OperationStatus != e.InvalidParameter {
+		t.Fatalf("expected operation status InvalidParameter, got %d", captured.OperationStatus)
+	}
+	if captured.ResponseStatus != http.StatusBadRequest {
+		t.Fatalf("expected response status 400, got %d", captured.ResponseStatus)
+	}
+	if captured.ResponseBody != "upgrade failed" {
+		t.Fatalf("unexpected response body: %q", captured.ResponseBody)
 	}
 }

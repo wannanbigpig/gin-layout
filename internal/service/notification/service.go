@@ -199,7 +199,7 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 	}
 
 	// 确定接收人列表：去重并过滤为真实存在且启用的用户，避免向无效/禁用账号发消息
-	userIDs, err := resolveRecipients(input.AudienceType, input.UserIDs)
+	userIDs, err := resolveRecipients(db, input.AudienceType, input.UserIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -255,12 +255,11 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 }
 
 // resolveRecipients 根据接收人类型返回去重后的有效接收人 ID 列表。
-func resolveRecipients(audienceType string, requested []uint) ([]uint, error) {
-	userModel := model.NewAdminUsers()
-	userDB, err := userModel.GetDB(userModel)
-	if err != nil {
-		return nil, err
+func resolveRecipients(db *gorm.DB, audienceType string, requested []uint) ([]uint, error) {
+	if db == nil {
+		return nil, model.ErrDBUninitialized
 	}
+	userDB := db.Model(&model.AdminUser{})
 	var userIDs []uint
 	switch audienceType {
 	case "all":

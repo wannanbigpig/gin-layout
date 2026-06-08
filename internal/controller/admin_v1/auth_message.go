@@ -147,21 +147,28 @@ func (api SysMessageController) WS(c *gin.Context) {
 		redisKey := fmt.Sprintf("ws:ticket:%s", ticket)
 		rdb := data.RedisClient()
 
-		// 管道执行：读取并即刻删除 Ticket
-		pipe := rdb.Pipeline()
-		getCmd := pipe.Get(c.Request.Context(), redisKey)
-		pipe.Del(c.Request.Context(), redisKey)
-		_, err := pipe.Exec(c.Request.Context())
+		if rdb != nil {
+			// 管道执行：读取并即刻删除 Ticket
+			pipe := rdb.Pipeline()
+			getCmd := pipe.Get(c.Request.Context(), redisKey)
+			pipe.Del(c.Request.Context(), redisKey)
+			_, err := pipe.Exec(c.Request.Context())
 
-		if err == nil {
-			var cachedPrincipal auth.AuthPrincipal
-			if err := json.Unmarshal([]byte(getCmd.Val()), &cachedPrincipal); err == nil && cachedPrincipal.UserID != 0 {
-				// 在 Redis 消费 Ticket 时，反查一次主登录 Session 的存活状态（黑名单与撤销检测）
-				if auth.NewLoginService().IsPrincipalValid(cachedPrincipal.Claims) {
-					principal = &cachedPrincipal
-					ok = true
+			if err == nil {
+				var cachedPrincipal auth.AuthPrincipal
+				if err := json.Unmarshal([]byte(getCmd.Val()), &cachedPrincipal); err == nil && cachedPrincipal.UserID != 0 {
+					// 在 Redis 消费 Ticket 时，反查一次主登录 Session 的存活状态（黑名单与撤销检测）
+					if auth.NewLoginService().IsPrincipalValid(cachedPrincipal.Claims) {
+						principal = &cachedPrincipal
+						ok = true
+					}
 				}
 			}
+		} else if log.Logger != nil {
+			log.Logger.Warn("websocket ws: redis unavailable while consuming ticket",
+				zap.String("remote_addr", c.ClientIP()),
+				zap.String("ticket", ticket),
+			)
 		}
 	}
 
@@ -190,12 +197,18 @@ func (api SysMessageController) WS(c *gin.Context) {
 	// ServeWebsocket 阻塞至连接断开才返回：err == nil 表示成功建连并正常断开。
 	// WS 经 Hijack 旁路了 CustomLogger，故在此主动补记一条审计日志，
 	// 执行时长取请求开始至断开的连接全程时长（ExecutionTimeScopeConnection）。
-	// 无论连接正常断开还是因读写错误断开，均记录审计日志（断开原因可通过 err 区分）。
+	// 升级失败记录为业务失败；成功建连后正常断开记录为 101 成功连接。
 	err := notification.ServeWebsocket(c.Writer, c.Request, principal.Claims)
-	middleware.LogWebSocketConnection(c)
 	if err != nil {
+		middleware.LogWebSocketConnection(c, middleware.WebSocketAuditOptions{
+			OperationStatus: e.InvalidParameter,
+			ResponseStatus:  e.InferHTTPStatus(e.InvalidParameter),
+			ResponseBody:    err.Error(),
+		})
 		if !c.Writer.Written() {
 			api.Fail(c, e.InvalidParameter, err.Error())
 		}
+		return
 	}
+	middleware.LogWebSocketConnection(c)
 }

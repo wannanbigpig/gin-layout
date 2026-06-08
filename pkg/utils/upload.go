@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/h2non/filetype"
-	"github.com/h2non/filetype/types"
 )
 
 // FileInfo 描述上传文件的存储结果和对外展示字段。
@@ -103,6 +102,16 @@ func GetFileSha256AndSizeFromHeader(file io.ReadSeeker) (string, int64, error) {
 
 // IsAllowedImage 判断文件头是否匹配允许的图片类型。
 func IsAllowedImage(file io.ReadSeeker) (string, bool, error) {
+	return IsAllowedImageMIME(file, map[string]bool{
+		"image/jpeg": true,
+		"image/png":  true,
+		"image/gif":  true,
+		"image/webp": true,
+	})
+}
+
+// IsAllowedImageMIME 判断文件头是否匹配指定图片 MIME 白名单。
+func IsAllowedImageMIME(file io.ReadSeeker, allowedMIMETypes map[string]bool) (string, bool, error) {
 	head := make([]byte, fileHeaderSampleSize)
 	n, err := file.Read(head)
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -115,7 +124,7 @@ func IsAllowedImage(file io.ReadSeeker) (string, bool, error) {
 		return "", false, nil
 	}
 
-	ext, allowed, _, err := detectAllowedImage(head[:n])
+	ext, allowed, _, err := detectAllowedImageMIME(head[:n], allowedMIMETypes)
 	if err != nil {
 		return "", false, fmt.Errorf("检测文件类型失败: %w", err)
 	}
@@ -324,6 +333,15 @@ func detectMimeType(header []byte) (string, string, error) {
 }
 
 func detectAllowedImage(header []byte) (string, bool, string, error) {
+	return detectAllowedImageMIME(header, map[string]bool{
+		"image/jpeg": true,
+		"image/png":  true,
+		"image/gif":  true,
+		"image/webp": true,
+	})
+}
+
+func detectAllowedImageMIME(header []byte, allowedMIMETypes map[string]bool) (string, bool, string, error) {
 	if len(header) == 0 {
 		return "", false, "", nil
 	}
@@ -336,17 +354,8 @@ func detectAllowedImage(header []byte) (string, bool, string, error) {
 		return "", false, "", nil
 	}
 
-	allowed := map[string]types.Type{
-		"jpg":  filetype.GetType("jpg"),
-		"jpeg": filetype.GetType("jpeg"),
-		"png":  filetype.GetType("png"),
-		"gif":  filetype.GetType("gif"),
-	}
-
-	for _, imageType := range allowed {
-		if kind.MIME.Value == imageType.MIME.Value {
-			return kind.Extension, true, kind.MIME.Value, nil
-		}
+	if allowedMIMETypes[kind.MIME.Value] {
+		return kind.Extension, true, kind.MIME.Value, nil
 	}
 	return kind.Extension, false, kind.MIME.Value, nil
 }

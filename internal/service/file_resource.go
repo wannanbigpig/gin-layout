@@ -61,7 +61,6 @@ type FileBatchDestroyFailure struct {
 	Message string `json:"message"`
 }
 
-
 func NewFileReferencedDeleteError(references []*resources.FileReferenceResources) *FileReferencedDeleteError {
 	return &FileReferencedDeleteError{
 		businessErr: e.NewBusinessError(e.FileReferenced),
@@ -254,18 +253,27 @@ func (s *FileResourceService) Restore(id uint) error {
 	if err != nil {
 		return err
 	}
-	result := db.Unscoped().Model(&model.UploadFiles{}).Where("id = ? AND deleted_at <> 0", id).Updates(map[string]any{
-		"deleted_at":     0,
-		"deleted_by":     0,
-		"deleted_reason": "",
+	return access.RunInTransaction(db, func(tx *gorm.DB) error {
+		var uploadFile model.UploadFiles
+		if err := tx.Unscoped().Where("id = ? AND deleted_at <> 0", id).First(&uploadFile).Error; err != nil {
+			return e.NewBusinessError(e.NotFound)
+		}
+		if err := restoreFolderAncestors(tx, uploadFile.FolderID); err != nil {
+			return err
+		}
+		result := tx.Unscoped().Model(&model.UploadFiles{}).Where("id = ? AND deleted_at <> 0", id).Updates(map[string]any{
+			"deleted_at":     0,
+			"deleted_by":     0,
+			"deleted_reason": "",
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return e.NewBusinessError(e.NotFound)
+		}
+		return nil
 	})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return e.NewBusinessError(e.NotFound)
-	}
-	return nil
 }
 
 func (s *FileResourceService) Destroy(id uint) error {
@@ -317,18 +325,40 @@ func (s *FileResourceService) BatchRestore(ids []uint) error {
 	if err != nil {
 		return err
 	}
-	result := db.Unscoped().Model(&model.UploadFiles{}).Where("id IN ? AND deleted_at <> 0", ids).Updates(map[string]any{
-		"deleted_at":     0,
-		"deleted_by":     0,
-		"deleted_reason": "",
+	return access.RunInTransaction(db, func(tx *gorm.DB) error {
+		var files []model.UploadFiles
+		if err := tx.Unscoped().Where("id IN ? AND deleted_at <> 0", ids).Find(&files).Error; err != nil {
+			return err
+		}
+		if len(files) == 0 {
+			return e.NewBusinessError(e.NotFound)
+		}
+		restoredFolders := make(map[uint]struct{})
+		for _, file := range files {
+			if file.FolderID == 0 {
+				continue
+			}
+			if _, ok := restoredFolders[file.FolderID]; ok {
+				continue
+			}
+			if err := restoreFolderAncestors(tx, file.FolderID); err != nil {
+				return err
+			}
+			restoredFolders[file.FolderID] = struct{}{}
+		}
+		result := tx.Unscoped().Model(&model.UploadFiles{}).Where("id IN ? AND deleted_at <> 0", ids).Updates(map[string]any{
+			"deleted_at":     0,
+			"deleted_by":     0,
+			"deleted_reason": "",
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return e.NewBusinessError(e.NotFound)
+		}
+		return nil
 	})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return e.NewBusinessError(e.NotFound)
-	}
-	return nil
 }
 
 func (s *FileResourceService) BatchDestroy(ids []uint) (*FileBatchDestroyResult, error) {
@@ -350,7 +380,6 @@ func (s *FileResourceService) BatchDestroy(ids []uint) (*FileBatchDestroyResult,
 	result.Failed = len(result.Failures)
 	return result, nil
 }
-
 
 func (s *FileResourceService) References(params *form.FileReferenceList) *resources.Collection {
 	return NewFileReferenceService(s.db).List(params)
@@ -405,6 +434,35 @@ func buildFileBatchDestroyFailure(id uint, err error) *FileBatchDestroyFailure {
 	return failure
 }
 
+func restoreFolderAncestors(tx *gorm.DB, folderID uint) error {
+	if folderID == 0 {
+		return nil
+	}
+	chain := make([]model.UploadFileFolder, 0)
+	seen := make(map[uint]struct{})
+	for currentID := folderID; currentID > 0; {
+		if _, ok := seen[currentID]; ok {
+			return errors.New("folder parent cycle detected")
+		}
+		seen[currentID] = struct{}{}
+
+		var folder model.UploadFileFolder
+		if err := tx.Unscoped().First(&folder, currentID).Error; err != nil {
+			return e.NewBusinessError(e.NotFound)
+		}
+		chain = append(chain, folder)
+		currentID = folder.ParentID
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		if chain[i].DeletedAt == 0 {
+			continue
+		}
+		if err := tx.Unscoped().Model(&model.UploadFileFolder{}).Where("id = ? AND deleted_at <> 0", chain[i].ID).Update("deleted_at", 0).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func errMessage(err error) string {
 	if err == nil {

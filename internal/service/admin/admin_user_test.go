@@ -1,7 +1,10 @@
 package admin
 
 import (
+	"bytes"
 	"errors"
+	"mime/multipart"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -195,4 +198,95 @@ func TestApplyUpdateFieldsRejectsSuperAdminPasswordChange(t *testing.T) {
 	})
 
 	assertBusinessErrorMessage(t, err, e.SuperAdminCannotModify, "系统默认超级管理员不允许修改密码")
+}
+
+func TestValidateAvatarFileAllowsRealJPGPNGAndWebP(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		content  []byte
+	}{
+		{name: "jpeg content with misleading gif extension", filename: "avatar.gif", content: testJPEGContent()},
+		{name: "png content", filename: "avatar.png", content: testPNGContent()},
+		{name: "webp content", filename: "avatar.txt", content: testWebPContent()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			header := newAdminMultipartFileHeader(t, tt.filename, tt.content)
+
+			if err := validateAvatarFile(header); err != nil {
+				t.Fatalf("expected avatar to pass validation, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateAvatarFileRejectsOversizeAvatar(t *testing.T) {
+	content := append(testJPEGContent(), bytes.Repeat([]byte{0}, int(maxAvatarSize)+1)...)
+	header := newAdminMultipartFileHeader(t, "avatar.jpg", content)
+
+	err := validateAvatarFile(header)
+
+	assertBusinessErrorMessage(t, err, e.InvalidParameter, "头像大小不能大于2MB")
+}
+
+func TestValidateAvatarFileRejectsGIFAndNonImage(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		content  []byte
+	}{
+		{name: "gif content", filename: "avatar.jpg", content: []byte("GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00")},
+		{name: "plain text", filename: "avatar.png", content: []byte("not an image")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			header := newAdminMultipartFileHeader(t, tt.filename, tt.content)
+
+			err := validateAvatarFile(header)
+
+			assertBusinessErrorMessage(t, err, e.InvalidParameter, "仅支持jpg/jpeg/png/webp头像")
+		})
+	}
+}
+
+func newAdminMultipartFileHeader(t *testing.T, filename string, content []byte) *multipart.FileHeader {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("create multipart file failed: %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("write multipart file failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer failed: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "/", body)
+	if err != nil {
+		t.Fatalf("create request failed: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if err := req.ParseMultipartForm(int64(len(content) + 1024)); err != nil {
+		t.Fatalf("parse multipart form failed: %v", err)
+	}
+	return req.MultipartForm.File["file"][0]
+}
+
+func testJPEGContent() []byte {
+	return []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00, 0x01, 0x01, 0x00}
+}
+
+func testPNGContent() []byte {
+	return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R'}
+}
+
+func testWebPContent() []byte {
+	return []byte{'R', 'I', 'F', 'F', 0x10, 0x00, 0x00, 0x00, 'W', 'E', 'B', 'P', 'V', 'P', '8', ' ', 0x00, 0x00, 0x00, 0x00}
 }

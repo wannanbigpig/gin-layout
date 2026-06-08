@@ -37,13 +37,13 @@ func CleanAuditLogsHandler(ctx context.Context, _ map[string]any) error {
 
 	cutoffExpr := buildCutoffExpr(db, retentionDays)
 
-	requestLogDeleted, err := batchDeleteByCutoff(db, &model.RequestLogs{}, "request_logs", cutoffExpr, ctx)
+	requestLogDeleted, err := batchDeleteByCutoff(db, &model.RequestLogs{}, "request_logs", cutoffExpr, ctx, false)
 	if err != nil {
 		log.Logger.Error("清理 request_logs 失败", zap.Error(err))
 		return err
 	}
 
-	loginLogDeleted, err := batchDeleteByCutoff(db, &model.AdminLoginLogs{}, "admin_login_logs", cutoffExpr, ctx)
+	loginLogDeleted, err := batchDeleteByCutoff(db, &model.AdminLoginLogs{}, "admin_login_logs", cutoffExpr, ctx, true)
 	if err != nil {
 		log.Logger.Error("清理 admin_login_logs 失败", zap.Error(err))
 		return err
@@ -70,6 +70,7 @@ func getAuditLogRetentionDays() int {
 		if days > 0 {
 			log.Logger.Warn("审计日志保留天数低于最小值，使用最小值",
 				zap.Int("configured", days), zap.Int("minimum", auditLogMinRetentionDays))
+			return auditLogMinRetentionDays
 		}
 		return auditLogDefaultRetention
 	}
@@ -89,7 +90,7 @@ func buildCutoffExpr(db *gorm.DB, retentionDays int) interface{} {
 
 // batchDeleteByCutoff 分批删除指定表中 created_at 早于 cutoff 的记录。
 // 先查询 ID 列表再按 ID 删除，避免 DELETE ... LIMIT 在 SQLite 下不兼容的问题。
-func batchDeleteByCutoff(db *gorm.DB, modelPtr interface{}, tableName string, cutoff interface{}, ctx context.Context) (int64, error) {
+func batchDeleteByCutoff(db *gorm.DB, modelPtr interface{}, tableName string, cutoff interface{}, ctx context.Context, physicalDelete bool) (int64, error) {
 	var totalDeleted int64
 
 	for {
@@ -99,7 +100,11 @@ func batchDeleteByCutoff(db *gorm.DB, modelPtr interface{}, tableName string, cu
 		}
 
 		var ids []uint
-		err := db.Model(modelPtr).
+		queryDB := db.Model(modelPtr)
+		if physicalDelete {
+			queryDB = queryDB.Unscoped()
+		}
+		err := queryDB.
 			Where("created_at < ?", cutoff).
 			Limit(auditLogBatchSize).
 			Pluck("id", &ids).Error
@@ -111,7 +116,11 @@ func batchDeleteByCutoff(db *gorm.DB, modelPtr interface{}, tableName string, cu
 			break
 		}
 
-		result := db.Where("id IN ?", ids).Delete(modelPtr)
+		deleteDB := db.Where("id IN ?", ids)
+		if physicalDelete {
+			deleteDB = deleteDB.Unscoped()
+		}
+		result := deleteDB.Delete(modelPtr)
 		if result.Error != nil {
 			return totalDeleted, fmt.Errorf("delete %s: %w", tableName, result.Error)
 		}

@@ -34,6 +34,7 @@ const (
 	menuQuerySuperAdmin = "status = ?"
 	menuQueryNoAuth     = "status = ? AND is_auth = ?"
 	menuQueryWithAuth   = "status = ? AND (is_auth = ? OR (is_auth = ? AND id IN (?)))"
+	maxAvatarSize       = 2 * 1024 * 1024
 )
 
 // NewAdminUserService 创建管理员用户服务实例。
@@ -236,12 +237,16 @@ type adminUserEditParams struct {
 
 // UploadAvatar 专门用于上传用户头像。
 // 注意：
-// 1. 此接口会将文件统一存放至隐藏目录 (system_avatars)。
-// 2. 结合后端的 FileReferenceService 机制，当用户更换新头像时，系统仅会释放对旧头像的“引用计数”。
-// 3. 目前系统出于防误删策略，并未配置针对“无引用闲置图片”的自动物理清理定时任务。
-//    这意味着被替换掉的旧头将会作为历史闲置数据长期保留在数据库及存储介质中。
-//    若业务对存储空间敏感，未来需自行补充如 `cron:clean-unused-files` 的定时扫描和物理清理任务。
+//  1. 此接口会将文件统一存放至隐藏目录 (system_avatars)。
+//  2. 结合后端的 FileReferenceService 机制，当用户更换新头像时，系统仅会释放对旧头像的“引用计数”。
+//  3. 目前系统出于防误删策略，并未配置针对“无引用闲置图片”的自动物理清理定时任务。
+//     这意味着被替换掉的旧头将会作为历史闲置数据长期保留在数据库及存储介质中。
+//     若业务对存储空间敏感，未来需自行补充如 `cron:clean-unused-files` 的定时扫描和物理清理任务。
 func (s *AdminUserService) UploadAvatar(ctx context.Context, uid uint, fileHeader *multipart.FileHeader) (*utils.FileInfo, error) {
+	if err := validateAvatarFile(fileHeader); err != nil {
+		return nil, err
+	}
+
 	fileResourceService := service.NewFileResourceService()
 	folderID, err := fileResourceService.EnsureAvatarFolder(ctx)
 	if err != nil {
@@ -264,4 +269,30 @@ func (s *AdminUserService) UploadAvatar(ctx context.Context, uid uint, fileHeade
 		return nil, err
 	}
 	return fileInfo, nil
+}
+
+func validateAvatarFile(fileHeader *multipart.FileHeader) error {
+	if fileHeader == nil {
+		return e.NewBusinessError(e.InvalidParameter, "头像文件不能为空")
+	}
+	if fileHeader.Size > maxAvatarSize {
+		return e.NewBusinessError(e.InvalidParameter, "头像大小不能大于2MB")
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		return e.NewBusinessError(e.InvalidParameter, "头像文件读取失败")
+	}
+	defer file.Close()
+
+	if _, allowed, err := utils.IsAllowedImageMIME(file, map[string]bool{
+		"image/jpeg": true,
+		"image/png":  true,
+		"image/webp": true,
+	}); err != nil {
+		return e.NewBusinessError(e.InvalidParameter, "头像文件类型检测失败")
+	} else if !allowed {
+		return e.NewBusinessError(e.InvalidParameter, "仅支持jpg/jpeg/png/webp头像")
+	}
+	return nil
 }

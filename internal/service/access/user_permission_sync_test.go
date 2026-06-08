@@ -88,6 +88,26 @@ func TestExpandUserRolesKeepsOnlyDirectAndDeptRoles(t *testing.T) {
 	}
 }
 
+func TestFilterUserRolesByEnabledSetDropsDisabledRoles(t *testing.T) {
+	got, allRoleIDs := filterUserRolesByEnabledSet(map[uint][]uint{
+		10: {2, 3, 4},
+		11: {4, 5},
+	}, map[uint]struct{}{
+		2: {},
+		4: {},
+	})
+
+	if !reflect.DeepEqual(got[10], []uint{2, 4}) {
+		t.Fatalf("unexpected roles for user 10: %v", got[10])
+	}
+	if !reflect.DeepEqual(got[11], []uint{4}) {
+		t.Fatalf("unexpected roles for user 11: %v", got[11])
+	}
+	if !reflect.DeepEqual(allRoleIDs, []uint{2, 4}) {
+		t.Fatalf("unexpected all role ids: %v", allRoleIDs)
+	}
+}
+
 func TestPermissionSyncCoordinatorRunAfterCommitReloadsOnce(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {

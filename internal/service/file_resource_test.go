@@ -983,6 +983,114 @@ func TestFileResourceListFolderIDIncludeSubfolderJoinsDescendants(t *testing.T) 
 	}
 }
 
+func TestFolderStatsCountsDescendants(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	parent := model.UploadFileFolder{Name: "parent", LogicalPath: "/parent"}
+	if err := db.Create(&parent).Error; err != nil {
+		t.Fatalf("create parent folder failed: %v", err)
+	}
+	child := model.UploadFileFolder{ParentID: parent.ID, Name: "child", LogicalPath: "/parent/child"}
+	if err := db.Create(&child).Error; err != nil {
+		t.Fatalf("create child folder failed: %v", err)
+	}
+	grandChild := model.UploadFileFolder{ParentID: child.ID, Name: "grand", LogicalPath: "/parent/child/grand"}
+	if err := db.Create(&grandChild).Error; err != nil {
+		t.Fatalf("create grand child folder failed: %v", err)
+	}
+
+	files := []model.UploadFiles{
+		{OriginName: "parent.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()), FolderID: parent.ID, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{OriginName: "child.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+1), FolderID: child.ID, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{OriginName: "grand.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+2), FolderID: grandChild.ID, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{
+			OriginName:    "deleted.txt",
+			UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()+3),
+			FolderID:      child.ID,
+			StorageDriver: model.StorageDriverLocal,
+			StorageStatus: model.StorageStatusStored,
+			ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+				DeletedAt: soft_delete.DeletedAt(time.Now().Unix()),
+			},
+		},
+	}
+	if err := db.Create(&files).Error; err != nil {
+		t.Fatalf("create upload files failed: %v", err)
+	}
+
+	stats, err := service.FolderStats(parent.ID)
+	if err != nil {
+		t.Fatalf("FolderStats failed: %v", err)
+	}
+	if stats.FileCount != 3 || stats.ChildFolderCount != 2 {
+		t.Fatalf("expected recursive file_count=3 child_folder_count=2, got %#v", stats)
+	}
+}
+
+func TestDeleteFolderAndRestoreFileRestoresParentFolders(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	parent := model.UploadFileFolder{Name: "parent", LogicalPath: "/parent"}
+	if err := db.Create(&parent).Error; err != nil {
+		t.Fatalf("create parent folder failed: %v", err)
+	}
+	child := model.UploadFileFolder{ParentID: parent.ID, Name: "child", LogicalPath: "/parent/child"}
+	if err := db.Create(&child).Error; err != nil {
+		t.Fatalf("create child folder failed: %v", err)
+	}
+	file := model.UploadFiles{
+		OriginName:    "avatar.png",
+		UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()),
+		FolderID:      child.ID,
+		StorageDriver: model.StorageDriverLocal,
+		StorageStatus: model.StorageStatusStored,
+	}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatalf("create upload file failed: %v", err)
+	}
+
+	if err := service.DeleteFolder(parent.ID); err != nil {
+		t.Fatalf("DeleteFolder failed: %v", err)
+	}
+	var deletedParent, deletedChild model.UploadFileFolder
+	if err := db.Unscoped().First(&deletedParent, parent.ID).Error; err != nil {
+		t.Fatalf("query deleted parent failed: %v", err)
+	}
+	if err := db.Unscoped().First(&deletedChild, child.ID).Error; err != nil {
+		t.Fatalf("query deleted child failed: %v", err)
+	}
+	if deletedParent.DeletedAt == 0 || deletedChild.DeletedAt == 0 {
+		t.Fatalf("expected parent and child folders to be soft deleted, parent=%d child=%d", deletedParent.DeletedAt, deletedChild.DeletedAt)
+	}
+	var deletedFile model.UploadFiles
+	if err := db.Unscoped().First(&deletedFile, file.ID).Error; err != nil {
+		t.Fatalf("query deleted file failed: %v", err)
+	}
+	if deletedFile.DeletedAt == 0 {
+		t.Fatal("expected file to be soft deleted")
+	}
+
+	if err := service.Restore(file.ID); err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+	var restoredParent, restoredChild model.UploadFileFolder
+	if err := db.First(&restoredParent, parent.ID).Error; err != nil {
+		t.Fatalf("expected parent folder restored: %v", err)
+	}
+	if err := db.First(&restoredChild, child.ID).Error; err != nil {
+		t.Fatalf("expected child folder restored: %v", err)
+	}
+	var restoredFile model.UploadFiles
+	if err := db.First(&restoredFile, file.ID).Error; err != nil {
+		t.Fatalf("expected file restored: %v", err)
+	}
+	if restoredFile.DeletedAt != 0 || restoredFile.FolderID != child.ID {
+		t.Fatalf("unexpected restored file: %#v", restoredFile)
+	}
+}
+
 func newFileResourceSQLiteDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

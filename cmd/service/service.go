@@ -14,6 +14,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/cmd/bootstrapx"
 	"github.com/wannanbigpig/gin-layout/data"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	_ "github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
@@ -25,6 +26,7 @@ const (
 	defaultHost            = "0.0.0.0"
 	defaultPort            = 9001
 	gracefulShutdownTimout = 10 * time.Second
+	auditDrainTimeout      = 5 * time.Second
 )
 
 var (
@@ -101,6 +103,7 @@ func waitForShutdown(server *http.Server, errChan <-chan error) error {
 	if err := server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutdown http server failed: %w", err)
 	}
+	middleware.StopAuditLogQueueDrain(auditDrainTimeout)
 	if err := data.Shutdown(); err != nil {
 		return fmt.Errorf("shutdown data resources failed: %w", err)
 	}

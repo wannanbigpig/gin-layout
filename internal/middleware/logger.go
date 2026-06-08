@@ -26,6 +26,13 @@ var websocketLoggingPaths = map[string]struct{}{
 	"/admin/v1/common/ws": {},
 }
 
+// WebSocketAuditOptions 覆盖 WebSocket 连接审计的结果状态。
+type WebSocketAuditOptions struct {
+	OperationStatus int
+	ResponseStatus  int
+	ResponseBody    string
+}
+
 // CustomLogger 自定义日志中间件
 func CustomLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -100,15 +107,25 @@ func publishRequestAuditLog(c *gin.Context, recorder *responseRecorder) {
 // OperationStatus 取 0（业务成功，对应展示层"成功"）；ResponseStatus 取 HTTP 101
 // （Switching Protocols，贴合真实握手语义，不参与成功/失败判定）。
 // 采样丢弃由 shouldDropBySampling 对 WebSocket 类型显式放行。
-func LogWebSocketConnection(c *gin.Context) {
+func LogWebSocketConnection(c *gin.Context, opts ...WebSocketAuditOptions) {
 	if c == nil || c.Request == nil {
 		return
 	}
-	snapshot := buildAuditLogSnapshot(c, nil, 0, "", "")
+	option := WebSocketAuditOptions{
+		OperationStatus: 0,
+		ResponseStatus:  http.StatusSwitchingProtocols,
+	}
+	if len(opts) > 0 {
+		option = opts[0]
+		if option.ResponseStatus == 0 {
+			option.ResponseStatus = http.StatusSwitchingProtocols
+		}
+	}
+	snapshot := buildAuditLogSnapshot(c, nil, option.OperationStatus, option.ResponseBody, "")
 	if snapshot == nil {
 		return
 	}
 	snapshot.RequestKind = model.RequestKindWebSocket
-	snapshot.ResponseStatus = http.StatusSwitchingProtocols
+	snapshot.ResponseStatus = option.ResponseStatus
 	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }
