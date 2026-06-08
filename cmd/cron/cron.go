@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
@@ -27,13 +28,17 @@ var (
 	}, bootstrapx.Requirements{Data: true})
 )
 
+const cronShutdownTimeout = 10 * time.Second
+
 // Start 启动定时任务服务
 func Start() error {
 	crontab, err := newScheduler()
 	if err != nil {
 		return err
 	}
-	if err := registerTasks(crontab); err != nil {
+	cronCtx, cancelCron := context.WithCancel(context.Background())
+	defer cancelCron()
+	if err := registerTasks(crontab, cronCtx); err != nil {
 		log.Logger.Error("定时任务启动失败", zap.Error(err))
 		return fmt.Errorf("定时任务启动失败: %w", err)
 	}
@@ -45,13 +50,43 @@ func Start() error {
 
 	// 优雅关闭
 	waitForShutdown()
-	stopCtx := crontab.Stop()
-	<-stopCtx.Done()
+	if err := stopScheduler(crontab, cancelCron, cronShutdownTimeout); err != nil {
+		log.Logger.Warn("Cron scheduler shutdown timed out", zap.Error(err), zap.Duration("timeout", cronShutdownTimeout))
+	}
 	if err := data.Shutdown(); err != nil {
 		return fmt.Errorf("shutdown data resources failed: %w", err)
 	}
 	log.Logger.Info("Cron service stopped gracefully")
 	return nil
+}
+
+func stopScheduler(crontab *cron.Cron, cancel context.CancelFunc, timeout time.Duration) error {
+	if cancel != nil {
+		cancel()
+	}
+	if crontab == nil {
+		return nil
+	}
+	stopCtx := crontab.Stop()
+	return waitForCronStop(stopCtx, timeout)
+}
+
+func waitForCronStop(stopCtx context.Context, timeout time.Duration) error {
+	if stopCtx == nil {
+		return nil
+	}
+	if timeout <= 0 {
+		<-stopCtx.Done()
+		return nil
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-stopCtx.Done():
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("cron jobs did not stop within %s", timeout)
+	}
 }
 
 func newScheduler() (*cron.Cron, error) {

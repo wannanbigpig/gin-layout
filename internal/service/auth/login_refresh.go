@@ -75,7 +75,7 @@ func (s *LoginService) shouldRefreshToken(principal *AuthPrincipal) bool {
 	}
 
 	refreshTTL := cfg.Jwt.RefreshTTL * time.Second
-	return exp.Time.Sub(time.Now()) < refreshTTL
+	return time.Until(exp.Time) < refreshTTL
 }
 
 // buildRefreshLockKey 构建刷新锁 key。

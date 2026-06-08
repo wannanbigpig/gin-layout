@@ -1,8 +1,11 @@
 package access
 
 import (
+	"errors"
+	"fmt"
+	"time"
+
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 )
@@ -24,6 +27,8 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "adminUser:bindRole", Route: "/admin/v1/role/list", Method: "GET"},
 	{MenuCode: "adminUser:bindRole", Route: "/admin/v1/role/options", Method: "GET"},
 	{MenuCode: "adminUser:delete", Route: "/admin/v1/admin-user/delete", Method: "POST"},
+	{MenuCode: "adminUser:list", Route: "/admin/v1/admin-user/get-full-phone", Method: "GET"},
+	{MenuCode: "adminUser:list", Route: "/admin/v1/admin-user/get-full-email", Method: "GET"},
 	{MenuCode: "menu:add", Route: "/admin/v1/menu/create", Method: "POST"},
 	{MenuCode: "menu:add", Route: "/admin/v1/permission/list", Method: "GET"},
 	{MenuCode: "menu:add", Route: "/admin/v1/permission/options", Method: "GET"},
@@ -32,6 +37,7 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "menu:addChild", Route: "/admin/v1/permission/options", Method: "GET"},
 	{MenuCode: "menu:update", Route: "/admin/v1/menu/detail", Method: "GET"},
 	{MenuCode: "menu:update", Route: "/admin/v1/menu/update", Method: "POST"},
+	{MenuCode: "menu:update", Route: "/admin/v1/menu/update-all-menu-permissions", Method: "POST"},
 	{MenuCode: "menu:update", Route: "/admin/v1/permission/list", Method: "GET"},
 	{MenuCode: "menu:update", Route: "/admin/v1/permission/options", Method: "GET"},
 	{MenuCode: "menu:delete", Route: "/admin/v1/menu/delete", Method: "POST"},
@@ -173,33 +179,36 @@ func cloneMenuAPIBindings(source []defaultMenuAPIBinding) []defaultMenuAPIBindin
 	return cloned
 }
 
-// Sync 将默认菜单接口映射写入数据库。
+// Sync 将默认菜单接口映射同步到数据库，补齐新增默认关系并删除过期默认关系。
 func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
-	bindings := s.bindings
-	if len(bindings) == 0 {
-		return nil
-	}
-
 	db, err := defaultMenuAPIDB(FirstTx(tx))
 	if err != nil {
 		return err
 	}
 
-	menuCodes, routes, methods := collectMenuAPIBindingKeys(bindings)
-	targets, err := loadDefaultMenuAPITargets(db, menuCodes, routes, methods)
-	if err != nil {
-		return err
+	if FirstTx(tx) != nil {
+		return s.syncWithDB(db)
 	}
+	return db.Transaction(func(execTx *gorm.DB) error {
+		return s.syncWithDB(execTx)
+	})
+}
 
-	mappings := buildDefaultMenuAPIMappings(bindings, targets)
-	if len(mappings) == 0 {
-		return nil
+func (s *MenuAPIDefaultsService) syncWithDB(db *gorm.DB) error {
+	bindings := s.bindings
+	var mappings []*model.MenuApiMap
+	if len(bindings) > 0 {
+		menuCodes, routes, methods := collectMenuAPIBindingKeys(bindings)
+		targets, err := loadDefaultMenuAPITargets(db, menuCodes, routes, methods)
+		if err != nil {
+			return fmt.Errorf("load default menu/api targets: %w", err)
+		}
+		mappings = buildDefaultMenuAPIMappings(bindings, targets)
 	}
-
-	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "menu_id"}, {Name: "api_id"}},
-		DoNothing: true,
-	}).Create(&mappings).Error
+	if err := reconcileDefaultMenuAPIMappings(db, mappings); err != nil {
+		return fmt.Errorf("reconcile default menu/api mappings: %w", err)
+	}
+	return nil
 }
 
 func defaultMenuAPIDB(tx *gorm.DB) (*gorm.DB, error) {
@@ -282,4 +291,106 @@ func buildDefaultMenuAPIMappings(bindings []defaultMenuAPIBinding, targets defau
 		})
 	}
 	return mappings
+}
+
+type defaultMenuAPIMappingKey struct {
+	menuID uint
+	apiID  uint
+}
+
+type defaultMenuAPIRow struct {
+	ID     uint
+	MenuID uint `gorm:"column:menu_id"`
+	APIID  uint `gorm:"column:api_id"`
+}
+
+func (defaultMenuAPIRow) TableName() string {
+	return "menu_api_map"
+}
+
+type defaultMenuAPIWriteRow struct {
+	ID        uint
+	MenuID    uint      `gorm:"column:menu_id"`
+	APIID     uint      `gorm:"column:api_id"`
+	IsDefault uint8     `gorm:"column:is_default"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+}
+
+func (defaultMenuAPIWriteRow) TableName() string {
+	return "menu_api_map"
+}
+
+func reconcileDefaultMenuAPIMappings(db *gorm.DB, mappings []*model.MenuApiMap) error {
+	desiredSet := make(map[defaultMenuAPIMappingKey]struct{}, len(mappings))
+	now := time.Now()
+	for _, mapping := range mappings {
+		if mapping == nil || mapping.MenuId == 0 || mapping.ApiId == 0 {
+			continue
+		}
+		key := defaultMenuAPIMappingKey{menuID: mapping.MenuId, apiID: mapping.ApiId}
+		if _, ok := desiredSet[key]; ok {
+			continue
+		}
+		desiredSet[key] = struct{}{}
+		if err := upsertDefaultMenuAPIMapping(db, mapping.MenuId, mapping.ApiId, now); err != nil {
+			return fmt.Errorf("upsert default mapping menu_id=%d api_id=%d: %w", mapping.MenuId, mapping.ApiId, err)
+		}
+	}
+
+	var existing []defaultMenuAPIRow
+	if err := db.Table("menu_api_map").
+		Select("id", "menu_id", "api_id").
+		Where("is_default = ?", 1).
+		Find(&existing).Error; err != nil {
+		return fmt.Errorf("load existing default mappings: %w", err)
+	}
+
+	staleIDs := make([]uint, 0)
+	for _, row := range existing {
+		key := defaultMenuAPIMappingKey{menuID: row.MenuID, apiID: row.APIID}
+		if _, ok := desiredSet[key]; !ok {
+			staleIDs = append(staleIDs, row.ID)
+		}
+	}
+	if len(staleIDs) == 0 {
+		return nil
+	}
+	if err := db.Where("id IN ?", staleIDs).Delete(&defaultMenuAPIRow{}).Error; err != nil {
+		return fmt.Errorf("delete stale default mappings: %w", err)
+	}
+	return nil
+}
+
+func upsertDefaultMenuAPIMapping(db *gorm.DB, menuID, apiID uint, now time.Time) error {
+	var existing defaultMenuAPIRow
+	err := db.Where("menu_id = ? AND api_id = ?", menuID, apiID).First(&existing).Error
+	if err == nil {
+		return db.Model(&defaultMenuAPIWriteRow{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]any{"is_default": 1, "updated_at": now}).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return db.Create(&defaultMenuAPIWriteRow{
+		MenuID:    menuID,
+		APIID:     apiID,
+		IsDefault: 1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}).Error
+}
+
+func defaultMenuAPIBindingRouteSet(bindings []defaultMenuAPIBinding) map[string]struct{} {
+	result := make(map[string]struct{}, len(bindings))
+	for _, binding := range bindings {
+		result[binding.Method+" "+binding.Route] = struct{}{}
+	}
+	return result
+}
+
+// DefaultMenuAPIBindingRouteSet 返回内置默认菜单/API 绑定的 method+route 集合。
+func DefaultMenuAPIBindingRouteSet() map[string]struct{} {
+	return defaultMenuAPIBindingRouteSet(defaultMenuAPIBindings())
 }

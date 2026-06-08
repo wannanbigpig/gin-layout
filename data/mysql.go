@@ -23,11 +23,11 @@ import (
 
 var (
 	mysqlDB        *gorm.DB
-	mysqlOnce      sync.Once
 	mysqlInitError error
 	mysqlValue     atomic.Value
 	mysqlMu        sync.Mutex
 	mysqlHealth    = newRuntimeHealthCache(defaultRuntimeHealthTTL)
+	openMysqlFunc  = openMysql
 )
 
 type mysqlSlot struct {
@@ -101,16 +101,41 @@ func GenerateDSN(cfg *c.Conf) string {
 	return dsn + "?" + params.Encode()
 }
 
-// initMysql 初始化当前配置下的 MySQL 连接。
-func initMysql() error {
-	return reloadMysql(c.GetConfig())
+func ensureMysqlInitialized(cfg *c.Conf) error {
+	if currentMysql() != nil {
+		return nil
+	}
+
+	mysqlMu.Lock()
+	defer mysqlMu.Unlock()
+
+	if currentMysql() != nil {
+		return nil
+	}
+
+	next, err := openMysqlFunc(cfg)
+	if err != nil {
+		mysqlInitError = err
+		mysqlHealth.Reset()
+		return err
+	}
+
+	mysqlDB = next
+	mysqlValue.Store(mysqlSlot{db: next})
+	mysqlInitError = nil
+	if next != nil {
+		mysqlHealth.SeedReady()
+	} else {
+		mysqlHealth.Reset()
+	}
+	return nil
 }
 
 func reloadMysql(cfg *c.Conf) error {
 	mysqlMu.Lock()
 	defer mysqlMu.Unlock()
 
-	next, err := openMysql(cfg)
+	next, err := openMysqlFunc(cfg)
 	if err != nil {
 		return err
 	}
@@ -191,11 +216,7 @@ func MysqlDB() *gorm.DB {
 	if db := currentMysql(); db != nil {
 		return db
 	}
-	if mysqlDB == nil {
-		mysqlOnce.Do(func() {
-			mysqlInitError = initMysql()
-		})
-	}
+	_ = ensureMysqlInitialized(c.GetConfig())
 	return currentMysql()
 }
 

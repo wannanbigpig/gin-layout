@@ -48,6 +48,31 @@ func TestRecordedJobRecordsCallEFailure(t *testing.T) {
 	}
 }
 
+func TestRecordedJobPassesSchedulerContext(t *testing.T) {
+	fake := &fakeCronRunRecorder{}
+	restore := taskcenter.SetRecorderForTesting(fake)
+	defer restore()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var observed context.Context
+	schedule := NewScheduleWithContext(ctx, &cronLogger{})
+	builder := schedule.CallContextE("demo", func(runCtx context.Context) error {
+		observed = runCtx
+		return runCtx.Err()
+	}).EveryFiveSeconds()
+
+	schedule.recordedJob(builder.task).Run()
+
+	if observed != ctx {
+		t.Fatal("expected job to receive scheduler context")
+	}
+	if len(fake.finishes) != 1 || !errors.Is(fake.finishes[0].Error, context.Canceled) {
+		t.Fatalf("expected context canceled finish error, got %#v", fake.finishes)
+	}
+}
+
 func TestCalculateNextRunAtInvalidSpec(t *testing.T) {
 	nextRunAt, err := calculateNextRunAt("bad spec", time.Now())
 	if err == nil {

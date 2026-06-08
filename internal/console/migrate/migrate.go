@@ -271,7 +271,7 @@ func runUp(args []string) error {
 			return err
 		}
 		if n <= 0 {
-			return fmt.Errorf("N must be greater than 0")
+			return fmt.Errorf("n must be greater than 0")
 		}
 		steps = n
 	}
@@ -301,7 +301,7 @@ func runUp(args []string) error {
 
 func runDown(args []string) error {
 	if downAll && len(args) > 0 {
-		return fmt.Errorf("cannot use N with --all")
+		return fmt.Errorf("cannot use n with --all")
 	}
 
 	steps := 1
@@ -311,7 +311,7 @@ func runDown(args []string) error {
 			return err
 		}
 		if n <= 0 {
-			return fmt.Errorf("N must be greater than 0")
+			return fmt.Errorf("n must be greater than 0")
 		}
 		steps = n
 	}

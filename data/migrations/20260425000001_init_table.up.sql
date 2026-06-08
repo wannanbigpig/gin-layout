@@ -209,10 +209,12 @@ CREATE TABLE IF NOT EXISTS `menu_api_map`
     `id`         int unsigned NOT NULL AUTO_INCREMENT,
     `menu_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '菜单id,对应menu表id',
     `api_id`     int unsigned NOT NULL DEFAULT '0' COMMENT '接口id,对应api表id',
+    `is_default` tinyint      NOT NULL DEFAULT '0' COMMENT '是否系统默认绑定，1是，0否',
     `created_at` datetime              DEFAULT NULL,
     `updated_at` datetime              DEFAULT NULL,
     PRIMARY KEY (`id`) USING BTREE,
     UNIQUE KEY `idx_menu_id_api_id` (`menu_id`, `api_id`),
+    KEY `idx_is_default` (`is_default`),
     KEY `idx_api_id_menu_id` (`api_id`, `menu_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
@@ -316,8 +318,10 @@ CREATE TABLE IF NOT EXISTS `admin_login_logs`
     `updated_at`         datetime                  DEFAULT NULL,
     `deleted_at`         int              NOT NULL DEFAULT '0' COMMENT '删除时间戳',
     PRIMARY KEY (`id`),
+    KEY `aall_created_at` (`created_at`),
     KEY `aall_deleted_at_created_at` (`deleted_at`, `created_at`),
     KEY `aall_login_status_deleted_at_created_at` (`login_status`, `deleted_at`, `created_at`),
+    KEY `aall_deleted_at_is_revoked_revoked_at` (`deleted_at`, `is_revoked`, `revoked_at`),
     KEY `aall_uid_deleted_at_is_revoked_login_status_token_expires` (`uid`, `deleted_at`, `is_revoked`, `login_status`, `token_expires`),
     KEY `aall_jwt_id_deleted_at_is_revoked` (`jwt_id`, `deleted_at`, `is_revoked`)
 ) ENGINE = InnoDB
@@ -367,8 +371,7 @@ CREATE TABLE IF NOT EXISTS `request_logs`
     `response_status` int(11)      NOT NULL DEFAULT '0' COMMENT '响应状态码',
     `response_body`   text                  DEFAULT NULL COMMENT '响应体',
     `response_header` text                  DEFAULT NULL COMMENT '响应头',
-    `execution_time`  DECIMAL(12,4) NOT NULL DEFAULT '0.0000' COMMENT '执行时间（毫秒，支持小数，最多4位）',
-    `execution_time_unit` varchar(16) NOT NULL DEFAULT 'ms' COMMENT '执行时间单位：ms',
+    `execution_time_us` bigint NOT NULL DEFAULT '0' COMMENT '执行时间（微秒，统一单位）',
     `execution_time_scope` varchar(16) NOT NULL DEFAULT 'request' COMMENT '执行时间语义：request/connection/stream/none',
     `created_at`      datetime              DEFAULT NULL COMMENT '创建时间',
     `updated_at`      datetime              DEFAULT NULL COMMENT '更新时间',
@@ -443,6 +446,7 @@ CREATE TABLE IF NOT EXISTS `upload_files`
     KEY `idx_file_type_created_at` (`file_type`, `created_at`),
     KEY `idx_storage_driver_status` (`storage_driver`, `storage_status`),
     KEY `idx_deleted_at_created_at` (`deleted_at`, `created_at`),
+    UNIQUE KEY `uniq_folder_name_deleted` (`folder_id`, `origin_name`, `deleted_at`),
     UNIQUE KEY `idx_uuid` (`uuid`),
     KEY `idx_is_public_uuid` (`is_public`, `uuid`)
 ) ENGINE = InnoDB
@@ -694,6 +698,8 @@ CREATE TABLE IF NOT EXISTS `upload_file_objects`
     `bucket`         varchar(128) NOT NULL DEFAULT '' COMMENT '存储桶',
     `storage_path`   varchar(512) NOT NULL DEFAULT '' COMMENT '实际存储路径',
     `object_key`     varchar(512) NOT NULL DEFAULT '' COMMENT '对象key',
+    `owner_uid`      int unsigned NOT NULL DEFAULT '0' COMMENT '私有对象所属用户ID，公开对象为0',
+    `is_public`      tinyint unsigned NOT NULL DEFAULT '0' COMMENT '是否公开对象 0否 1是',
     `size`           int unsigned NOT NULL DEFAULT '0' COMMENT '文件大小（字节）',
     `hash`           varchar(64)  NOT NULL DEFAULT '' COMMENT '文件SHA256哈希值',
     `mime_type`      varchar(100) NOT NULL DEFAULT '' COMMENT 'MIME类型',
@@ -702,10 +708,46 @@ CREATE TABLE IF NOT EXISTS `upload_file_objects`
     `created_at`     datetime DEFAULT NULL COMMENT '创建时间',
     `updated_at`     datetime DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uniq_driver_bucket_hash` (`storage_driver`, `bucket`, `hash`)
+    UNIQUE KEY `uniq_driver_bucket_hash_owner_scope` (`storage_driver`, `bucket`, `hash`, `owner_uid`, `is_public`),
+    KEY `idx_owner_uid_created_at` (`owner_uid`, `created_at`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='上传文件物理对象表';
+
+CREATE TABLE IF NOT EXISTS `upload_sessions`
+(
+    `id`                  int unsigned NOT NULL AUTO_INCREMENT,
+    `complete_token_hash` char(64)     NOT NULL DEFAULT '' COMMENT '完成令牌SHA256哈希',
+    `upload_type`         varchar(20)  NOT NULL DEFAULT '' COMMENT '上传类型:direct,multipart,reuse',
+    `status`              varchar(20)  NOT NULL DEFAULT 'pending' COMMENT '状态:pending,completed,expired',
+    `storage_driver`      varchar(20)  NOT NULL DEFAULT 'local' COMMENT '存储驱动:local,aliyun_oss',
+    `storage_base`        varchar(512) NOT NULL DEFAULT '' COMMENT '存储基础位置',
+    `bucket`              varchar(128) NOT NULL DEFAULT '' COMMENT '存储桶',
+    `storage_path`        varchar(512) NOT NULL DEFAULT '' COMMENT '实际存储路径',
+    `object_key`          varchar(512) NOT NULL DEFAULT '' COMMENT '对象key',
+    `upload_id`           varchar(255) NOT NULL DEFAULT '' COMMENT '分片上传ID',
+    `file_object_id`      int unsigned NOT NULL DEFAULT '0' COMMENT '复用的物理对象ID',
+    `file_id`             int unsigned NOT NULL DEFAULT '0' COMMENT '完成生成的文件ID',
+    `owner_uid`           int unsigned NOT NULL DEFAULT '0' COMMENT '发起用户ID',
+    `folder_id`           int unsigned NOT NULL DEFAULT '0' COMMENT '目标目录ID',
+    `origin_name`         varchar(255) NOT NULL DEFAULT '' COMMENT '原始文件名',
+    `size`                int unsigned NOT NULL DEFAULT '0' COMMENT '文件大小（字节）',
+    `hash`                varchar(64)  NOT NULL DEFAULT '' COMMENT '文件SHA256哈希值',
+    `mime_type`           varchar(100) NOT NULL DEFAULT '' COMMENT 'MIME类型',
+    `etag`                varchar(128) NOT NULL DEFAULT '' COMMENT '对象ETag',
+    `is_public`           tinyint unsigned NOT NULL DEFAULT '0' COMMENT '是否公开 0否 1是',
+    `upload_scene`        varchar(60) NOT NULL DEFAULT '' COMMENT '上传场景',
+    `expires_at`          datetime DEFAULT NULL COMMENT '令牌过期时间',
+    `completed_at`        datetime DEFAULT NULL COMMENT '完成时间',
+    `created_at`          datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at`          datetime DEFAULT NULL COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uniq_complete_token_hash` (`complete_token_hash`),
+    KEY `idx_owner_status_expires` (`owner_uid`, `status`, `expires_at`),
+    KEY `idx_upload_id` (`upload_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='上传会话表';
 
 CREATE TABLE IF NOT EXISTS `sys_export_records`
 (

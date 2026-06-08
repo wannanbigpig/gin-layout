@@ -9,6 +9,20 @@ func TestCreateSysDictTypeRejectsInvalidStatus(t *testing.T) {
 	}
 }
 
+func TestUpdateSysDictTypeRejectsTypeCode(t *testing.T) {
+	body := `{"id":1,"type_code":"new_type","type_name_i18n":{"zh-CN":"测试字典"},"status":1}`
+	if err := bindJSONBody(t, body, NewUpdateSysDictTypeForm()); err == nil {
+		t.Fatal("expected update sys dict type_code to fail validation")
+	}
+}
+
+func TestUpdateSysDictTypeAllowsOmittedTypeCode(t *testing.T) {
+	body := `{"id":1,"type_name_i18n":{"zh-CN":"测试字典"},"status":1}`
+	if err := bindJSONBody(t, body, NewUpdateSysDictTypeForm()); err != nil {
+		t.Fatalf("expected update sys dict type without type_code to pass validation, got %v", err)
+	}
+}
+
 func TestCreateSysDictItemAllowsValidBinaryFlags(t *testing.T) {
 	body := `{"type_code":"test_type","label_i18n":{"zh-CN":"启用","en-US":"Enabled"},"value":"1","is_default":1,"status":0}`
 	if err := bindJSONBody(t, body, NewCreateSysDictItemForm()); err != nil {

@@ -30,8 +30,8 @@ func defineSchedule(schedule *Scheduler) {
 				zap.String("schedule", definition.CronSpec),
 			)
 		}
-		schedule.CallE(taskName, func() error {
-			return taskcron.ExecuteHandler(context.Background(), handler, nil)
+		schedule.CallContextE(taskName, func(ctx context.Context) error {
+			return taskcron.ExecuteHandler(ctx, handler, nil)
 		}).
 			Cron(definition.CronSpec).
 			WithoutOverlapping()

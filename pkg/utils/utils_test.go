@@ -38,11 +38,11 @@ func TestGetCurrentFileDirectory(t *testing.T) {
 }
 
 func TestIf(t *testing.T) {
-	if 3 != If(false, 1, 3) {
+	if If(false, 1, 3) != 3 {
 		t.Error("模拟三元操作失败")
 	}
 
-	if 1 != If(true, 1, 3) {
+	if If(true, 1, 3) != 1 {
 		t.Error("模拟三元操作失败")
 	}
 }

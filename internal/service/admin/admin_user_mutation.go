@@ -139,8 +139,12 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 	if err := s.handleMutationError(err, mutationFailedCode); err != nil {
 		return err
 	}
-	s.revokeUserTokensAfterCommit(pendingRevocations)
-	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithCode(mutationFailedCode)
+	revokeErr := s.revokeUserTokensAfterCommit(pendingRevocations)
+	reloadErr := access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithCode(mutationFailedCode)
+	if reloadErr != nil {
+		return reloadErr
+	}
+	return s.handleMutationError(revokeErr, mutationFailedCode)
 }
 
 // applyUpdateFields 应用更新场景的字段变更。
@@ -332,8 +336,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	if err := s.handleMutationError(err, e.UpdateUserFailed); err != nil {
 		return err
 	}
-	s.revokeUserTokensAfterCommit(pendingRevocations)
-	return nil
+	return s.handleMutationError(s.revokeUserTokensAfterCommit(pendingRevocations), e.UpdateUserFailed)
 }
 
 // validateUniqueFieldsWithLock 验证唯一字段（用户名、手机号、邮箱），使用数据库锁防止并发冲突。
@@ -438,6 +441,10 @@ func (s *AdminUserService) Delete(id uint) error {
 		return e.NewBusinessError(e.DeleteUserFailed)
 	}
 
-	s.revokeUserTokensAfterCommit(pendingRevocations)
-	return access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithCode(e.DeleteUserFailed)
+	revokeErr := s.revokeUserTokensAfterCommit(pendingRevocations)
+	reloadErr := access.NewPermissionSyncCoordinator().ReloadPolicyCacheWithCode(e.DeleteUserFailed)
+	if reloadErr != nil {
+		return reloadErr
+	}
+	return s.handleMutationError(revokeErr, e.DeleteUserFailed)
 }

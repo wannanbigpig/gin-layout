@@ -46,7 +46,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (4, 'ant-design:menu-outlined', '', 'menu-list', '/permission/menu-list', '', 'MenuList', 'permission:menuList', '', '', 0.00, 1, 1, 1, 0, 0, 105, 2, 2, 2, '0,2', 5, '', '2025-04-16 15:45:31', '2025-11-25 17:23:44', 0),
 (5, 'lucide:info', '', '/about', '/about', '', 'About', 'about:index', '', '', 0.00, 1, 1, 1, 0, 0, 78, 2, 0, 1, '0', 0, '', '2025-04-16 16:47:58', '2025-04-23 15:01:05', 0),
 (7, 'ep:user', '', 'admin-user-list', '/permission/admin-user-list', '', 'AdminUserList', 'permission:adminUser', '', '', 0.00, 1, 1, 1, 0, 0, 120, 2, 2, 2, '0,2', 5, '', '2025-04-19 11:19:36', '2025-11-25 17:20:23', 0),
-(8, 'ant-design:usergroup-add-outlined', '', 'role-list', '/permission/role-list', '', 'RoleList', 'permission:role', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 5, '', '2025-04-21 16:51:22', '2025-11-25 17:22:21', 0),
+(8, 'ant-design:usergroup-add-outlined', '', 'role-list', '/permission/role-list', '', 'RoleList', 'permission:role', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 4, '', '2025-04-21 16:51:22', '2025-11-25 17:22:21', 0),
 (9, 'tdesign:tree-square-dot', '', 'department-list', '/permission/department-list', '', 'DepartmentList', 'permission:department', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 6, '', '2025-04-21 16:51:22', '2025-11-25 17:21:30', 0),
 (10, 'ant-design:edit-filled', 'adminUser:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 7, 3, '0,2,7', 0, '', '2025-11-13 16:45:19', '2025-11-18 17:14:25', 0),
 (11, 'ant-design:plus-outlined', 'adminUser:add', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 7, 3, '0,2,7', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:22:41', 0),
@@ -65,7 +65,6 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (24, 'ant-design:user-switch-outlined', 'department:bindRole', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 9, 3, '0,2,9', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:27:57', 0),
 (25, 'ant-design:delete-outlined', 'department:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 9, 3, '0,2,9', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:26:52', 0),
 (26, 'ant-design:edit-filled', 'api:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 3, 3, '0,2,3', 0, '', '2025-11-15 10:06:52', '2025-11-18 17:39:39', 0),
-(28, 'ant-design:plus-circle-outlined', 'role:addChild', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 8, 3, '0,2,8', 0, '', '2025-11-17 17:46:21', '2025-11-18 17:41:45', 0),
 (29, 'ep:tickets', '', 'log', '/log', 'RequestLog', 'Log', '', '', '', 0.00, 1, 1, 1, 0, 0, 98, 1, 0, 1, '0', 3, '', '2025-11-20 16:16:47', '2025-11-20 16:17:04', 0),
 (30, 'ep:document', '', 'request-log', '/log/request-log', '', 'RequestLog', 'log:request', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 4, '', '2025-11-20 16:14:39', '2025-11-25 17:25:13', 0),
 (31, 'ep:document', '', 'admin-login-log', '/log/admin-login-log', '', 'AdminLoginLog', 'log:adminLogin', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 2, '', '2025-11-20 16:16:47', '2025-11-25 17:24:30', 0),
@@ -147,7 +146,6 @@ SELECT `id`,
            WHEN 24 THEN '绑定角色'
            WHEN 25 THEN '删除'
            WHEN 26 THEN '编辑'
-           WHEN 28 THEN '新增'
            WHEN 29 THEN '日志管理'
            WHEN 30 THEN '请求日志'
            WHEN 31 THEN '管理员登录日志'
@@ -235,7 +233,6 @@ SELECT `id`,
            WHEN 24 THEN 'Bind Roles'
            WHEN 25 THEN 'Delete'
            WHEN 26 THEN 'Edit'
-           WHEN 28 THEN 'Add'
            WHEN 29 THEN 'Log Management'
            WHEN 30 THEN 'Request Logs'
            WHEN 31 THEN 'Admin Login Logs'
@@ -295,9 +292,26 @@ FROM `menu`
 WHERE `deleted_at` = 0;
 
 INSERT INTO `role_menu_map` (`role_id`, `menu_id`, `created_at`, `updated_at`)
-SELECT 1, `id`, '2023-05-01 00:00:00', '2023-05-01 00:00:00'
-FROM `menu`
-WHERE `deleted_at` = 0;
+SELECT 1, m.`id`, '2023-05-01 00:00:00', '2023-05-01 00:00:00'
+FROM `menu` m
+WHERE m.`deleted_at` = 0
+  AND m.`status` = 1
+  AND m.`is_auth` = 1
+  AND (
+    m.`type` = 3
+        OR (
+        m.`type` = 2
+            AND NOT EXISTS (
+            SELECT 1
+            FROM `menu` child
+            WHERE child.`deleted_at` = 0
+              AND child.`status` = 1
+              AND child.`is_auth` = 1
+              AND child.`type` IN (2, 3)
+              AND FIND_IN_SET(m.`id`, child.`pids`) > 0
+        )
+    )
+    );
 
 INSERT INTO `sys_config` (`config_key`, `config_value`, `value_type`, `group_code`, `is_system`,
                           `is_sensitive`, `is_visible`, `manage_tab`, `status`, `sort`, `remark`, `created_at`, `updated_at`, `deleted_at`)

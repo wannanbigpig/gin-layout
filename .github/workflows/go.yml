@@ -10,14 +10,27 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root1234
+          MYSQL_DATABASE: go_layout_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot1234"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     strategy:
       matrix:
         go-version: [ '1.26.x' ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Go ${{ matrix.go-version }}
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
 
@@ -27,5 +40,52 @@ jobs:
       - name: Build
         run: go build -v ./...
 
-      - name: Test
+      - name: Unit tests
         run: go test $(go list ./... | grep -v /tests/)
+
+      - name: Staticcheck targeted packages
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./internal/service/role ./internal/service/sys_dict ./internal/validator/form ./tests/...
+
+      - name: Prepare MySQL integration config
+        run: |
+          cat > config.yaml <<'YAML'
+          app:
+            app_env: local
+            debug: true
+            language: zh_CN
+          jwt:
+            ttl: 7200
+            refresh_ttl: 3600
+            secret_key: ci-secret-key-for-go-layout-tests
+          mysql:
+            enable: true
+            host: 127.0.0.1
+            port: 3306
+            database: go_layout_test
+            username: root
+            password: root1234
+            charset: utf8mb4
+            table_prefix: ""
+            max_idle_conns: 10
+            max_open_conns: 100
+            max_lifetime: 3600s
+            print_sql: false
+          redis:
+            enable: false
+          queue:
+            enable: false
+          logger:
+            output: stderr
+          storage:
+            active_driver: local
+          YAML
+
+      - name: Initialize MySQL schema and seed data
+        run: go run main.go -c ./config.yaml command init-system -y
+        env:
+          GO_LAYOUT_MIGRATIONS_PATH: ${{ github.workspace }}/data/migrations
+
+      - name: MySQL integration tests
+        run: go test ./tests/...

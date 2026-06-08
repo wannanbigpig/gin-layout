@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	accesssvc "github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
@@ -110,6 +112,31 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	notificationWSCode := utils.MD5(http.MethodGet + "_/admin/v1/common/ws")
 	if route, ok := routes[notificationWSCode]; !ok || route.Auth != AuthModeNone {
 		t.Fatalf("missing or invalid notification ws route: %#v", route)
+	}
+}
+
+func TestAuthModeAuthRoutesHaveDefaultMenuAPIBindingOrExemption(t *testing.T) {
+	routes := CollectRouteMeta(AppRouteTree())
+	bindings := accesssvc.DefaultMenuAPIBindingRouteSet()
+	exemptions := map[string]string{}
+
+	var missing []string
+	for _, route := range routes {
+		if route.Auth != AuthModeAuth {
+			continue
+		}
+		key := route.Method + " " + route.Path
+		if _, ok := bindings[key]; ok {
+			continue
+		}
+		if _, ok := exemptions[key]; ok {
+			continue
+		}
+		missing = append(missing, key)
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Fatalf("missing default menu API bindings or explicit exemptions:\n%s", strings.Join(missing, "\n"))
 	}
 }
 

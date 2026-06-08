@@ -204,7 +204,7 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	}
 
 	claims := s.newAdminCustomClaims(adminUser)
-	accessToken, err := token.Generate(claims)
+	accessToken, err := s.generateAccessToken(claims)
 	if err != nil {
 		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
 		s.HandleLoginFailure(username, "生成Token失败", logInfo, false)
@@ -307,7 +307,7 @@ func (s *LoginService) Refresh(id uint, logInfo LoginLogInfo) (*TokenResponse, e
 	}
 
 	claims := s.newAdminCustomClaims(adminUserModel)
-	accessToken, err := token.Refresh(claims)
+	accessToken, err := s.generateAccessToken(claims)
 	if err != nil {
 		return nil, e.NewBusinessError(e.TokenGenerateFailed)
 	}

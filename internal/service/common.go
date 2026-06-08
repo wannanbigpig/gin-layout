@@ -144,6 +144,8 @@ func (s CommonService) UploadImageEx(fileHeader *multipart.FileHeader, isPublic 
 		Bucket:        bucket,
 		StoragePath:   objectKey,
 		ObjectKey:     objectKey,
+		OwnerUID:      s.GetAdminUserId(),
+		IsPublic:      isPublicFlag,
 		Size:          uint(result.Size),
 		Hash:          result.Sha256,
 		MimeType:      result.MimeType,
@@ -224,6 +226,10 @@ func (s CommonService) GetFileAccessPath(fileUUID string, variant string, checkA
 	err = db.Where("uuid = ?", fileUUID).First(uploadFile).Error
 	if err != nil {
 		return FileAccessResult{}, e.NewBusinessError(e.NotFound)
+	}
+
+	if !uploadFile.ExpiresAt.IsZero() && !uploadFile.ExpiresAt.Time.After(time.Now()) {
+		return FileAccessResult{}, e.NewBusinessError(e.FileAccessDenied)
 	}
 
 	if uploadFile.IsPublic == global.No {

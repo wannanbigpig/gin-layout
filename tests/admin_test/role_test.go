@@ -63,6 +63,7 @@ func TestRoleWriteFlow(t *testing.T) {
 	requireWritableDB(t)
 
 	name := uniqueTestName("role")
+	roleCode := uniqueCompactTestName("rolecode")
 	cleanupRoles(t, testResourcePrefix+"role")
 	homeMenu := findMenuByTitle(t, "首页")
 	permissionMenu := findMenuByTitle(t, "权限管理")
@@ -72,6 +73,7 @@ func TestRoleWriteFlow(t *testing.T) {
 	dashboardStatisticsMenu := findMenuByCode(t, "dashboard:statistics")
 
 	createBody := map[string]any{
+		"code":      roleCode,
 		"name":      name,
 		"status":    1,
 		"sort":      10,
@@ -84,6 +86,7 @@ func TestRoleWriteFlow(t *testing.T) {
 	assert.Equal(t, e.SUCCESS, createResult.Code)
 
 	role := findRoleByName(t, name)
+	assert.Equal(t, roleCode, role.Code)
 
 	detailResp := getRequest("/admin/v1/role/detail", &url.Values{"id": {strconv.FormatUint(uint64(role.ID), 10)}})
 	detailResult := decodeResult(t, detailResp)
@@ -94,6 +97,23 @@ func TestRoleWriteFlow(t *testing.T) {
 	storedMenuIDs, err := model.NewRoleMenuMap().MenuIdsByRoleIds([]uint{role.ID})
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []uint{adminUserListMenu.ID}, storedMenuIDs)
+
+	rejectCodeUpdateBody := map[string]any{
+		"id":        role.ID,
+		"code":      roleCode + "_new",
+		"name":      name,
+		"status":    1,
+		"sort":      20,
+		"menu_list": []uint{dashboardOverviewMenu.ID},
+	}
+	rejectCodeUpdateBytes, _ := json.Marshal(rejectCodeUpdateBody)
+	rejectCodeUpdatePayload := string(rejectCodeUpdateBytes)
+	rejectCodeUpdateResp := postRequest("/admin/v1/role/update", &rejectCodeUpdatePayload)
+	rejectCodeUpdateResult := decodeResult(t, rejectCodeUpdateResp)
+	assert.Equal(t, e.InvalidParameter, rejectCodeUpdateResult.Code)
+
+	role = findRoleByName(t, name)
+	assert.Equal(t, roleCode, role.Code)
 
 	updateBody := map[string]any{
 		"id":          role.ID,
@@ -108,6 +128,9 @@ func TestRoleWriteFlow(t *testing.T) {
 	updateResp := postRequest("/admin/v1/role/update", &updatePayload)
 	updateResult := decodeResult(t, updateResp)
 	assert.Equal(t, e.SUCCESS, updateResult.Code)
+
+	role = findRoleByName(t, name)
+	assert.Equal(t, roleCode, role.Code)
 
 	detailResp = getRequest("/admin/v1/role/detail", &url.Values{"id": {strconv.FormatUint(uint64(role.ID), 10)}})
 	detailResult = decodeResult(t, detailResp)

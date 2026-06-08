@@ -65,7 +65,7 @@ func (t *FormatDate) String() string {
 	if t == nil || t.IsZero() {
 		return ""
 	}
-	return fmt.Sprintf("%s", t.Time.Format(timeFormat))
+	return t.Time.Format(timeFormat)
 }
 
 // UnmarshalJSON 解析固定格式的 JSON 时间字符串。

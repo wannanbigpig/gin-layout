@@ -1,9 +1,13 @@
 package role
 
 import (
+	"errors"
 	"testing"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
+
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
 func TestGenerateRoleCodeUsesUniqueDefaultPrefix(t *testing.T) {
@@ -40,5 +44,18 @@ func TestIsRoleCodeDuplicateErrIgnoresOtherErrors(t *testing.T) {
 	}
 	if isRoleCodeDuplicateErr(err) {
 		t.Fatal("expected non-role duplicate error to be ignored")
+	}
+}
+
+func TestUpdateRejectsImmutableCodeBeforeDBLookup(t *testing.T) {
+	code := "auditor_new"
+	err := NewRoleService().Update(&form.UpdateRole{Id: 1, Code: &code})
+
+	var businessErr *e.BusinessError
+	if !errors.As(err, &businessErr) {
+		t.Fatalf("expected business error, got %T: %v", err, err)
+	}
+	if businessErr.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected code %d, got %d", e.InvalidParameter, businessErr.GetCode())
 	}
 }

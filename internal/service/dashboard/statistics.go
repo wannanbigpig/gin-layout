@@ -176,10 +176,7 @@ func buildBizStatusCodeStats(db *gorm.DB, start time.Time, end time.Time) []Erro
 
 	buckets := make([]ErrorCodeBucket, 0, len(rows))
 	for _, r := range rows {
-		buckets = append(buckets, ErrorCodeBucket{
-			StatusCode: r.StatusCode,
-			Count:      r.Count,
-		})
+		buckets = append(buckets, ErrorCodeBucket(r))
 	}
 	return buckets
 }

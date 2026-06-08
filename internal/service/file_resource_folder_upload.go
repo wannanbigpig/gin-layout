@@ -179,7 +179,7 @@ func (s *FileResourceService) FolderStats(id uint) (*FolderStatsResult, error) {
 
 // DeleteFolder 级联删除目录及其所有子目录和文件。
 // 子目录递归删除，文件走软删除（进入回收站）。
-func (s *FileResourceService) DeleteFolder(id uint) error {
+func (s *FileResourceService) DeleteFolder(id uint, deletedBy uint, reason string) error {
 	db, err := s.dbOrDefault()
 	if err != nil {
 		return err
@@ -193,9 +193,26 @@ func (s *FileResourceService) DeleteFolder(id uint) error {
 		if err != nil {
 			return err
 		}
-		// 软删所有目录下的文件
 		if len(allFolderIDs) > 0 {
-			if err := tx.Model(&model.UploadFiles{}).Where("folder_id IN ?", allFolderIDs).Update("deleted_at", time.Now().Unix()).Error; err != nil {
+			var fileIDs []uint
+			if err := tx.Model(&model.UploadFiles{}).Where("folder_id IN ?", allFolderIDs).Pluck("id", &fileIDs).Error; err != nil {
+				return err
+			}
+			if len(fileIDs) > 0 {
+				var refs []*model.UploadFileReference
+				if err := tx.Where("file_id IN ?", fileIDs).Find(&refs).Error; err != nil {
+					return err
+				}
+				if len(refs) > 0 {
+					return NewFileReferencedDeleteError(buildFileReferenceResources(refs))
+				}
+			}
+			updates := map[string]any{
+				"deleted_at":     time.Now().Unix(),
+				"deleted_by":     deletedBy,
+				"deleted_reason": reason,
+			}
+			if err := tx.Model(&model.UploadFiles{}).Where("folder_id IN ?", allFolderIDs).Updates(updates).Error; err != nil {
 				return err
 			}
 		}
@@ -350,10 +367,20 @@ func buildLocalUploadFailureItem(index int, file *multipart.FileHeader, err erro
 	return item
 }
 
-func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential) (*resources.FileUploadCredentialResources, error) {
+func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential, uidArg ...uint) (*resources.FileUploadCredentialResources, error) {
+	uid := firstUint(uidArg...)
 	fileName := firstNonEmpty(params.FileName, params.OriginName)
 	if err := s.validateFileLimit(fileName, params.Size, params.MimeType); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(params.Hash) == "" {
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "hash is required")
+	}
+	if params.Size <= 0 {
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "size is required")
+	}
+	if strings.TrimSpace(params.MimeType) == "" {
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "mime_type is required")
 	}
 	_, cfg, activeDriver, err := s.activeStorageDriver(context.Background())
 	if err != nil {
@@ -370,7 +397,33 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 	if err != nil {
 		return nil, err
 	}
-	if object, err := findReusableFileObject(db, activeDriver, bucket, params.Hash); err == nil {
+	ttl := time.Duration(cfg.SignedURLTTLSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	if object, err := findReusableFileObject(db, activeDriver, bucket, params.Hash, uid, params.IsPublic); err == nil {
+		completeToken, _, err := createUploadSession(db, uploadSessionInput{
+			UploadType:    model.UploadSessionTypeDirect,
+			StorageDriver: activeDriver,
+			StorageBase:   object.StorageBase,
+			Bucket:        object.Bucket,
+			StoragePath:   object.StoragePath,
+			ObjectKey:     object.ObjectKey,
+			FileObjectID:  object.ID,
+			OwnerUID:      uid,
+			FolderID:      params.FolderID,
+			OriginName:    firstNonEmpty(params.OriginName, params.FileName),
+			Size:          object.Size,
+			Hash:          object.Hash,
+			MimeType:      object.MimeType,
+			ETag:          object.ETag,
+			IsPublic:      params.IsPublic,
+			UploadScene:   params.UploadScene,
+			ExpiresAt:     time.Now().Add(ttl),
+		})
+		if err != nil {
+			return nil, err
+		}
 		return &resources.FileUploadCredentialResources{
 			StorageDriver:   activeDriver,
 			Driver:          activeDriver,
@@ -383,7 +436,8 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 			MimeType:        object.MimeType,
 			ETag:            object.ETag,
 			ObjectStatus:    object.Status,
-			CompletePayload: buildCredentialCompletePayload(params, activeDriver, object.Bucket, object.ObjectKey, true, object.ID),
+			CompleteToken:   completeToken,
+			CompletePayload: buildCredentialCompletePayload(completeToken),
 		}, nil
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -392,16 +446,26 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 	if err != nil {
 		return nil, err
 	}
-	fileName = firstNonEmpty(params.FileName, params.OriginName)
-	if strings.TrimSpace(fileName) == "" {
-		return nil, fmt.Errorf("file name is required")
-	}
 	objectKey := buildUploadObjectKey(fileName)
-	ttl := time.Duration(cfg.SignedURLTTLSeconds) * time.Second
-	if ttl <= 0 {
-		ttl = 5 * time.Minute
-	}
 	url, err := driver.PresignPutObject(context.Background(), bucket, objectKey, params.MimeType, ttl)
+	if err != nil {
+		return nil, err
+	}
+	completeToken, _, err := createUploadSession(db, uploadSessionInput{
+		UploadType:    model.UploadSessionTypeDirect,
+		StorageDriver: activeDriver,
+		Bucket:        bucket,
+		ObjectKey:     objectKey,
+		OwnerUID:      uid,
+		FolderID:      params.FolderID,
+		OriginName:    firstNonEmpty(params.OriginName, params.FileName),
+		Size:          uint(params.Size),
+		Hash:          params.Hash,
+		MimeType:      params.MimeType,
+		IsPublic:      params.IsPublic,
+		UploadScene:   params.UploadScene,
+		ExpiresAt:     time.Now().Add(ttl),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -419,27 +483,14 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 		Size:            uint(params.Size),
 		Hash:            params.Hash,
 		MimeType:        params.MimeType,
-		CompletePayload: buildCredentialCompletePayload(params, activeDriver, bucket, objectKey, false, 0),
+		CompleteToken:   completeToken,
+		CompletePayload: buildCredentialCompletePayload(completeToken),
 	}, nil
 }
 
-func buildCredentialCompletePayload(params *form.FileUploadCredential, driver, bucket, objectKey string, reuse bool, fileObjectID uint) map[string]any {
+func buildCredentialCompletePayload(completeToken string) map[string]any {
 	return map[string]any{
-		"folder_id":      params.FolderID,
-		"reuse":          reuse,
-		"file_object_id": fileObjectID,
-		"origin_name":    firstNonEmpty(params.OriginName, params.FileName),
-		"display_name":   firstNonEmpty(params.OriginName, params.FileName),
-		"name":           filepath.Base(objectKey),
-		"size":           params.Size,
-		"hash":           params.Hash,
-		"mime_type":      params.MimeType,
-		"is_public":      params.IsPublic,
-		"storage_driver": driver,
-		"driver":         driver,
-		"bucket":         bucket,
-		"object_key":     objectKey,
-		"upload_scene":   params.UploadScene,
+		"complete_token": completeToken,
 	}
 }
 
@@ -477,7 +528,8 @@ func buildBatchFailure(index int, clientID string, err error) *resources.FileUpl
 
 const uploadBatchConcurrency = 8
 
-func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCredentialBatch) (*resources.FileUploadCredentialBatchResult, error) {
+func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCredentialBatch, uidArg ...uint) (*resources.FileUploadCredentialBatchResult, error) {
+	uid := firstUint(uidArg...)
 	total := len(params.Items)
 	result := &resources.FileUploadCredentialBatchResult{
 		Total: int64(total),
@@ -500,7 +552,7 @@ func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCrede
 		go func(index int, it form.FileUploadCredentialBatchItem) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			data, err := s.UploadCredential(normalizeCredentialItem(params, it))
+			data, err := s.UploadCredential(normalizeCredentialItem(params, it), uid)
 			var itemResult *resources.FileUploadCredentialBatchItemResult
 			if err != nil {
 				itemResult = &resources.FileUploadCredentialBatchItemResult{
@@ -540,114 +592,122 @@ func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUplo
 	if err != nil {
 		return nil, err
 	}
-	storageDriver := firstNonEmpty(params.StorageDriver, params.Driver)
-	if storageDriver == "" {
-		return nil, fmt.Errorf("storage driver is required")
-	}
-	if _, _, err := s.storageDriverByName(context.Background(), storageDriver); err != nil {
-		return nil, err
-	}
-	var logicalPath string
-	if pathResolver != nil {
-		logicalPath, err = pathResolver(params.FolderID)
-	} else {
-		logicalPath, err = s.folderLogicalPath(params.FolderID)
-	}
-	if err != nil {
-		return nil, err
-	}
-	var object *model.UploadFileObject
-	var reused bool
-	if params.FileObjectID > 0 {
-		object, err = findFileObjectByID(db, params.FileObjectID)
+	var uploadFile *model.UploadFiles
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+		session, err := findPendingUploadSession(tx, params.CompleteToken, model.UploadSessionTypeDirect, uid)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if object.StorageDriver != storageDriver {
-			return nil, fmt.Errorf("file object storage driver mismatch")
+		if err := validateDirectCompleteSession(session, params, uid); err != nil {
+			return err
 		}
-	} else {
-		if strings.TrimSpace(params.ObjectKey) == "" {
-			return nil, fmt.Errorf("object_key is required")
+		if err := requireUploadSessionObject(session); err != nil {
+			return err
 		}
-		object, reused, err = ensureFileObject(db, uploadFileObjectInput{
-			StorageDriver: storageDriver,
-			StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, params.Bucket),
-			Bucket:        params.Bucket,
-			StoragePath:   params.ObjectKey,
-			ObjectKey:     params.ObjectKey,
-			Size:          params.Size,
-			Hash:          params.Hash,
-			MimeType:      params.MimeType,
-			ETag:          params.ETag,
-			Status:        model.StorageStatusStored,
+		storageDriver := session.StorageDriver
+		if _, _, err := s.storageDriverByName(context.Background(), storageDriver); err != nil {
+			return err
+		}
+		var logicalPath string
+		if pathResolver != nil {
+			logicalPath, err = pathResolver(session.FolderID)
+		} else {
+			logicalPath, err = folderLogicalPathTx(tx, session.FolderID)
+		}
+		if err != nil {
+			return err
+		}
+		var object *model.UploadFileObject
+		var reused bool
+		if session.FileObjectID > 0 {
+			object, err = findFileObjectByID(tx, session.FileObjectID)
+			if err != nil {
+				return err
+			}
+			if err := validateFileObjectMatchesSession(object, session); err != nil {
+				return err
+			}
+		} else {
+			object, reused, err = ensureFileObject(tx, uploadFileObjectInput{
+				StorageDriver: storageDriver,
+				StorageBase:   storageBaseForDriver(storageDriver, session.IsPublic == global.Yes, session.Bucket),
+				Bucket:        session.Bucket,
+				StoragePath:   session.ObjectKey,
+				ObjectKey:     session.ObjectKey,
+				OwnerUID:      uid,
+				IsPublic:      session.IsPublic,
+				Size:          session.Size,
+				Hash:          session.Hash,
+				MimeType:      session.MimeType,
+				ETag:          params.ETag,
+				Status:        model.StorageStatusStored,
+			})
+			if err != nil {
+				return err
+			}
+		}
+		objectKey := object.ObjectKey
+		bucket := object.Bucket
+		size := session.Size
+		hash := session.Hash
+		mimeType := session.MimeType
+		etag := firstNonEmpty(params.ETag, object.ETag)
+		fileUUID := params.UUID
+		if fileUUID == "" {
+			fileUUID = strings.ReplaceAll(uuid.NewString(), "-", "")
+		}
+		fileType, err := resolveUploadFileType(params.FileType, mimeType)
+		if err != nil {
+			return err
+		}
+
+		created, existing, err := s.createUploadFileWithConflict(tx, session.FolderID, session.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+			originName := resolved.FinalName
+			uf := &model.UploadFiles{
+				UID:           uid,
+				FolderID:      session.FolderID,
+				LogicalPath:   logicalPath,
+				DisplayName:   firstNonEmpty(params.DisplayName, originName),
+				OriginName:    originName,
+				Name:          firstNonEmpty(params.Name, filepath.Base(objectKey)),
+				Path:          objectKey,
+				Size:          size,
+				Ext:           firstNonEmpty(params.Ext, filepath.Ext(originName), filepath.Ext(objectKey)),
+				Hash:          hash,
+				UUID:          fileUUID,
+				MimeType:      mimeType,
+				FileType:      fileType,
+				IsPublic:      session.IsPublic,
+				StorageDriver: storageDriver,
+				StorageBase:   bucket,
+				Bucket:        bucket,
+				StoragePath:   objectKey,
+				ObjectKey:     objectKey,
+				ETag:          etag,
+				StorageStatus: model.StorageStatusStored,
+				UploadSource:  model.UploadSourceDirect,
+				UploadScene:   session.UploadScene,
+				UploadStatus:  model.UploadStatusUploaded,
+			}
+			applyObjectToUploadFile(uf, object)
+			return uf
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
-	}
-	objectKey := firstNonEmpty(params.ObjectKey, object.ObjectKey)
-	bucket := firstNonEmpty(params.Bucket, object.Bucket)
-	size := params.Size
-	if size == 0 {
-		size = object.Size
-	}
-	hash := firstNonEmpty(params.Hash, object.Hash)
-	mimeType := firstNonEmpty(params.MimeType, object.MimeType)
-	etag := firstNonEmpty(params.ETag, object.ETag)
-	fileUUID := params.UUID
-	if fileUUID == "" {
-		fileUUID = strings.ReplaceAll(uuid.NewString(), "-", "")
-	}
-	fileType, err := resolveUploadFileType(params.FileType, mimeType)
-	if err != nil {
-		return nil, err
-	}
-
-	uploadFile, existing, err := s.createUploadFileWithConflict(db, params.FolderID, params.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
-		originName := resolved.FinalName
-		uf := &model.UploadFiles{
-			UID:         uid,
-			FolderID:    params.FolderID,
-			LogicalPath: logicalPath,
-			// 保留调用方设置的自定义展示名，仅在未设置时使用冲突解决后的名称
-			DisplayName:   firstNonEmpty(params.DisplayName, originName),
-			OriginName:    originName,
-			Name:          firstNonEmpty(params.Name, filepath.Base(objectKey)),
-			Path:          objectKey,
-			Size:          size,
-			Ext:           firstNonEmpty(params.Ext, filepath.Ext(originName), filepath.Ext(objectKey)),
-			Hash:          hash,
-			UUID:          fileUUID,
-			MimeType:      mimeType,
-			FileType:      fileType,
-			IsPublic:      params.IsPublic,
-			StorageDriver: storageDriver,
-			StorageBase:   bucket,
-			Bucket:        bucket,
-			StoragePath:   objectKey,
-			ObjectKey:     objectKey,
-			ETag:          etag,
-			StorageStatus: model.StorageStatusStored,
-			UploadSource:  model.UploadSourceDirect,
-			UploadScene:   params.UploadScene,
-			UploadStatus:  model.UploadStatusUploaded,
+		if err := markUploadSessionCompleted(tx, session, created.ID, object.ID); err != nil {
+			return err
 		}
-		applyObjectToUploadFile(uf, object)
-		return uf
-	})
-	if err != nil {
-		return nil, err
-	}
-	if existing {
-		// 命中已存在记录，本次新建的物理对象成为孤儿，需清理（复用对象除外）
-		if !reused {
-			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
+		if existing && session.FileObjectID == 0 && !reused {
+			if delErr := tx.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
 				log.Warn("清理孤儿 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(delErr))
 			}
 		}
-		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
-		return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
+		uploadFile = created
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
@@ -660,6 +720,7 @@ func normalizeCompleteItem(parent *form.FileUploadCompleteBatch, item form.FileU
 	}
 	driver := firstNonEmpty(item.Driver, item.StorageDriver, parent.Driver)
 	return &form.FileUploadComplete{
+		CompleteToken: item.CompleteToken,
 		FolderID:      item.FolderID,
 		Reuse:         item.Reuse,
 		FileObjectID:  item.FileObjectID,
@@ -827,6 +888,8 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		Bucket:        bucket,
 		StoragePath:   objectKey,
 		ObjectKey:     objectKey,
+		OwnerUID:      input.UID,
+		IsPublic:      input.IsPublic,
 		Size:          uint(size),
 		Hash:          hash,
 		MimeType:      input.MimeType,
@@ -990,6 +1053,8 @@ func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params 
 		Bucket:        bucket,
 		StoragePath:   relPath,
 		ObjectKey:     relPath,
+		OwnerUID:      uid,
+		IsPublic:      params.IsPublic,
 		Size:          uint(result.Size),
 		Hash:          result.Sha256,
 		MimeType:      result.MimeType,
@@ -1157,7 +1222,8 @@ func buildUploadObjectKey(filename string) string {
 }
 
 // MultipartInit 分片上传初始化。
-func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*resources.MultipartInitResource, error) {
+func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit, uidArg ...uint) (*resources.MultipartInitResource, error) {
+	uid := firstUint(uidArg...)
 	if err := s.validateFileLimit(params.OriginName, params.Size, params.MimeType); err != nil {
 		return nil, err
 	}
@@ -1176,7 +1242,32 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 	if err != nil {
 		return nil, err
 	}
-	if object, err := findReusableFileObject(db, activeDriver, bucket, params.Hash); err == nil {
+	ttl := time.Duration(cfg.SignedURLTTLSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	if object, err := findReusableFileObject(db, activeDriver, bucket, params.Hash, uid, params.IsPublic); err == nil {
+		completeToken, _, err := createUploadSession(db, uploadSessionInput{
+			UploadType:    model.UploadSessionTypeMultipart,
+			StorageDriver: activeDriver,
+			StorageBase:   object.StorageBase,
+			Bucket:        object.Bucket,
+			StoragePath:   object.StoragePath,
+			ObjectKey:     object.ObjectKey,
+			FileObjectID:  object.ID,
+			OwnerUID:      uid,
+			FolderID:      params.FolderID,
+			OriginName:    params.OriginName,
+			Size:          object.Size,
+			Hash:          object.Hash,
+			MimeType:      object.MimeType,
+			ETag:          object.ETag,
+			IsPublic:      params.IsPublic,
+			ExpiresAt:     time.Now().Add(ttl),
+		})
+		if err != nil {
+			return nil, err
+		}
 		return &resources.MultipartInitResource{
 			UploadID:        "",
 			Bucket:          object.Bucket,
@@ -1189,7 +1280,8 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 			MimeType:        object.MimeType,
 			ETag:            object.ETag,
 			ObjectStatus:    object.Status,
-			CompletePayload: buildMultipartCompletePayload(params, activeDriver, object.Bucket, object.ObjectKey, "", true, object),
+			CompleteToken:   completeToken,
+			CompletePayload: buildMultipartCompletePayload(completeToken),
 		}, nil
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -1242,6 +1334,29 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 			Headers:    partResult.Headers,
 		})
 	}
+	completeToken, _, err := createUploadSession(db, uploadSessionInput{
+		UploadType:    model.UploadSessionTypeMultipart,
+		StorageDriver: activeDriver,
+		Bucket:        initResult.Bucket,
+		ObjectKey:     initResult.ObjectKey,
+		UploadID:      initResult.UploadID,
+		OwnerUID:      uid,
+		FolderID:      params.FolderID,
+		OriginName:    params.OriginName,
+		Size:          uint(params.Size),
+		Hash:          params.Hash,
+		MimeType:      params.MimeType,
+		IsPublic:      params.IsPublic,
+		ExpiresAt:     time.Now().Add(ttl),
+	})
+	if err != nil {
+		if abortErr := mp.AbortMultipartUpload(context.Background(), initResult.Bucket, initResult.ObjectKey, initResult.UploadID); abortErr != nil {
+			log.Warn("创建分片上传 session 失败后中止上传失败",
+				zap.String("bucket", initResult.Bucket), zap.String("object_key", initResult.ObjectKey),
+				zap.String("upload_id", initResult.UploadID), zap.Error(abortErr))
+		}
+		return nil, err
+	}
 	return &resources.MultipartInitResource{
 		UploadID:        initResult.UploadID,
 		Bucket:          initResult.Bucket,
@@ -1251,7 +1366,8 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit) (*re
 		Size:            uint(params.Size),
 		Hash:            params.Hash,
 		MimeType:        params.MimeType,
-		CompletePayload: buildMultipartCompletePayload(params, activeDriver, initResult.Bucket, initResult.ObjectKey, initResult.UploadID, false, nil),
+		CompleteToken:   completeToken,
+		CompletePayload: buildMultipartCompletePayload(completeToken),
 	}, nil
 }
 
@@ -1261,129 +1377,136 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 	if err != nil {
 		return nil, err
 	}
-	storageDriver := firstNonEmpty(params.Driver)
-	var object *model.UploadFileObject
-	var reusedObject bool
-	if shouldResolveMultipartReuse(params) {
-		object, err = s.resolveReusableMultipartObject(db, params, storageDriver)
+	var uploadFile *model.UploadFiles
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+		session, err := findPendingUploadSession(tx, params.CompleteToken, model.UploadSessionTypeMultipart, uid)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if storageDriver == "" {
-			storageDriver = object.StorageDriver
+		if err := validateMultipartCompleteSession(session, params, uid); err != nil {
+			return err
 		}
-	} else {
-		if storageDriver == "" {
-			return nil, fmt.Errorf("storage driver is required")
+		if err := requireUploadSessionObject(session); err != nil {
+			return err
 		}
-		if strings.TrimSpace(params.UploadID) == "" {
-			return nil, fmt.Errorf("upload_id is required")
+		storageDriver := session.StorageDriver
+		var object *model.UploadFileObject
+		var reusedObject bool
+		if session.FileObjectID > 0 {
+			object, err = findFileObjectByID(tx, session.FileObjectID)
+			if err != nil {
+				return err
+			}
+			if err := validateFileObjectMatchesSession(object, session); err != nil {
+				return err
+			}
+		} else {
+			if strings.TrimSpace(session.UploadID) == "" {
+				return fmt.Errorf("upload_id is required")
+			}
+			completeParts, err := validateMultipartCompleteParts(params.Parts)
+			if err != nil {
+				return err
+			}
+			driver, _, err := s.storageDriverByName(context.Background(), storageDriver)
+			if err != nil {
+				return err
+			}
+			mp, ok := driver.(filestorage.MultipartCapable)
+			if !ok {
+				return pkgErrors.NewBusinessError(pkgErrors.LocalStorageMultipartUnsupported)
+			}
+			if err := mp.CompleteMultipartUpload(context.Background(), session.Bucket, session.ObjectKey, session.UploadID, completeParts); err != nil {
+				return err
+			}
+			object, reusedObject, err = ensureFileObject(tx, uploadFileObjectInput{
+				StorageDriver: storageDriver,
+				StorageBase:   storageBaseForDriver(storageDriver, session.IsPublic == global.Yes, session.Bucket),
+				Bucket:        session.Bucket,
+				StoragePath:   session.ObjectKey,
+				ObjectKey:     session.ObjectKey,
+				OwnerUID:      uid,
+				IsPublic:      session.IsPublic,
+				Size:          session.Size,
+				Hash:          session.Hash,
+				MimeType:      session.MimeType,
+				ETag:          "",
+				Status:        model.StorageStatusStored,
+			})
+			if err != nil {
+				return err
+			}
 		}
-		if strings.TrimSpace(params.Bucket) == "" {
-			return nil, fmt.Errorf("bucket is required")
-		}
-		if strings.TrimSpace(params.ObjectKey) == "" {
-			return nil, fmt.Errorf("object_key is required")
-		}
-		completeParts, err := validateMultipartCompleteParts(params.Parts)
+		logicalPath, err := folderLogicalPathTx(tx, session.FolderID)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		driver, _, err := s.storageDriverByName(context.Background(), storageDriver)
+		bucket := object.Bucket
+		objectKey := object.ObjectKey
+		size := session.Size
+		hash := session.Hash
+		mimeType := session.MimeType
+		fileUUID := strings.ReplaceAll(uuid.NewString(), "-", "")
+		fileType, err := resolveUploadFileType(params.FileType, mimeType)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		mp, ok := driver.(filestorage.MultipartCapable)
-		if !ok {
-			return nil, pkgErrors.NewBusinessError(pkgErrors.LocalStorageMultipartUnsupported)
-		}
-		if err := mp.CompleteMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID, completeParts); err != nil {
-			return nil, err
-		}
-		object, reusedObject, err = ensureFileObject(db, uploadFileObjectInput{
-			StorageDriver: storageDriver,
-			StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, params.Bucket),
-			Bucket:        params.Bucket,
-			StoragePath:   params.ObjectKey,
-			ObjectKey:     params.ObjectKey,
-			Size:          params.Size,
-			Hash:          params.Hash,
-			MimeType:      params.MimeType,
-			ETag:          "",
-			Status:        model.StorageStatusStored,
+
+		created, existing, err := s.createUploadFileWithConflict(tx, session.FolderID, session.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+			originName := resolved.FinalName
+			uf := &model.UploadFiles{
+				UID:           uid,
+				FolderID:      session.FolderID,
+				LogicalPath:   logicalPath,
+				DisplayName:   originName,
+				OriginName:    originName,
+				Name:          filepath.Base(objectKey),
+				Path:          objectKey,
+				Size:          size,
+				Ext:           filepath.Ext(originName),
+				Hash:          hash,
+				UUID:          fileUUID,
+				MimeType:      mimeType,
+				FileType:      fileType,
+				IsPublic:      session.IsPublic,
+				StorageDriver: storageDriver,
+				StorageBase:   storageBaseForDriver(storageDriver, session.IsPublic == global.Yes, bucket),
+				Bucket:        bucket,
+				StoragePath:   objectKey,
+				ObjectKey:     objectKey,
+				ETag:          "",
+				StorageStatus: model.StorageStatusStored,
+				UploadSource:  model.UploadSourceDirect,
+				UploadScene:   session.UploadScene,
+				UploadStatus:  model.UploadStatusUploaded,
+			}
+			applyObjectToUploadFile(uf, object)
+			return uf
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
-	}
-	logicalPath, err := s.folderLogicalPath(params.FolderID)
-	if err != nil {
-		return nil, err
-	}
-	bucket := firstNonEmpty(params.Bucket, object.Bucket)
-	objectKey := firstNonEmpty(params.ObjectKey, object.ObjectKey)
-	size := params.Size
-	if size == 0 {
-		size = object.Size
-	}
-	hash := firstNonEmpty(params.Hash, object.Hash)
-	mimeType := firstNonEmpty(params.MimeType, object.MimeType)
-	fileUUID := strings.ReplaceAll(uuid.NewString(), "-", "")
-	fileType, err := resolveUploadFileType(params.FileType, mimeType)
-	if err != nil {
-		return nil, err
-	}
-
-	uploadFile, existing, err := s.createUploadFileWithConflict(db, params.FolderID, params.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
-		originName := resolved.FinalName
-		uf := &model.UploadFiles{
-			UID:           uid,
-			FolderID:      params.FolderID,
-			LogicalPath:   logicalPath,
-			DisplayName:   originName,
-			OriginName:    originName,
-			Name:          filepath.Base(objectKey),
-			Path:          objectKey,
-			Size:          size,
-			Ext:           filepath.Ext(originName),
-			Hash:          hash,
-			UUID:          fileUUID,
-			MimeType:      mimeType,
-			FileType:      fileType,
-			IsPublic:      params.IsPublic,
-			StorageDriver: storageDriver,
-			StorageBase:   storageBaseForDriver(storageDriver, params.IsPublic == global.Yes, bucket),
-			Bucket:        bucket,
-			StoragePath:   objectKey,
-			ObjectKey:     objectKey,
-			ETag:          "",
-			StorageStatus: model.StorageStatusStored,
-			UploadSource:  model.UploadSourceDirect,
-			UploadStatus:  model.UploadStatusUploaded,
+		if err := markUploadSessionCompleted(tx, session, created.ID, object.ID); err != nil {
+			return err
 		}
-		applyObjectToUploadFile(uf, object)
-		return uf
-	})
-	if err != nil {
-		return nil, err
-	}
-	if existing {
-		// 命中已存在记录：非 reuse 路径下刚创建了新的云存储对象和 UploadFileObject，需清理
-		if !shouldResolveMultipartReuse(params) && !reusedObject {
-			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
+		if existing && session.FileObjectID == 0 && !reusedObject {
+			if delErr := tx.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
 				log.Warn("multipart orphan cleanup: delete UploadFileObject failed",
 					zap.Uint("object_id", object.ID), zap.Error(delErr))
 			}
 			driver, _, drvErr := s.storageDriverByName(context.Background(), storageDriver)
 			if drvErr == nil {
-				if delErr := driver.Delete(context.Background(), params.Bucket, params.ObjectKey); delErr != nil {
+				if delErr := driver.Delete(context.Background(), session.Bucket, session.ObjectKey); delErr != nil {
 					log.Warn("multipart orphan cleanup: delete object failed",
-						zap.String("bucket", params.Bucket), zap.String("object_key", params.ObjectKey), zap.Error(delErr))
+						zap.String("bucket", session.Bucket), zap.String("object_key", session.ObjectKey), zap.Error(delErr))
 				}
 			}
 		}
-		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
-		return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
+		uploadFile = created
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
@@ -1412,67 +1535,10 @@ func isAllowedUploadFileType(fileType string) bool {
 	}
 }
 
-func buildMultipartCompletePayload(params *form.FileMultipartInit, driver, bucket, objectKey, uploadID string, reuse bool, object *model.UploadFileObject) map[string]any {
-	fileObjectID := uint(0)
-	size := uint(params.Size)
-	hash := params.Hash
-	mimeType := params.MimeType
-	etag := ""
-	if object != nil {
-		fileObjectID = object.ID
-		size = object.Size
-		hash = object.Hash
-		mimeType = object.MimeType
-		etag = object.ETag
-	}
+func buildMultipartCompletePayload(completeToken string) map[string]any {
 	return map[string]any{
-		"upload_id":      uploadID,
-		"reuse":          reuse,
-		"file_object_id": fileObjectID,
-		"bucket":         bucket,
-		"object_key":     objectKey,
-		"origin_name":    params.OriginName,
-		"size":           size,
-		"hash":           hash,
-		"mime_type":      mimeType,
-		"is_public":      params.IsPublic,
-		"driver":         driver,
-		"etag":           etag,
-		"parts":          []any{},
+		"complete_token": completeToken,
 	}
-}
-
-func shouldResolveMultipartReuse(params *form.FileMultipartComplete) bool {
-	if params == nil {
-		return false
-	}
-	if params.Reuse || params.FileObjectID > 0 {
-		return true
-	}
-	// 兼容现有前端 reuse 分支：multipart init 命中已存在对象时，complete 只回传 bucket/object_key/hash/driver，
-	// 不会再显式带 reuse/file_object_id/upload_id/parts。
-	return strings.TrimSpace(params.UploadID) == "" && len(params.Parts) == 0 && strings.TrimSpace(params.Hash) != ""
-}
-
-func (s *FileResourceService) resolveReusableMultipartObject(db *gorm.DB, params *form.FileMultipartComplete, storageDriver string) (*model.UploadFileObject, error) {
-	if params.FileObjectID > 0 {
-		object, err := findFileObjectByID(db, params.FileObjectID)
-		if err != nil {
-			return nil, err
-		}
-		if storageDriver != "" && object.StorageDriver != storageDriver {
-			return nil, fmt.Errorf("file object storage driver mismatch")
-		}
-		return object, nil
-	}
-	if storageDriver == "" {
-		return nil, fmt.Errorf("storage driver is required")
-	}
-	object, err := findReusableFileObject(db, storageDriver, params.Bucket, params.Hash)
-	if err != nil {
-		return nil, err
-	}
-	return object, nil
 }
 
 func validateMultipartCompleteParts(parts []form.MultipartCompletePart) ([]filestorage.CompletePartInfo, error) {

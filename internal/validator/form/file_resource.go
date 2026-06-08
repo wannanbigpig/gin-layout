@@ -65,7 +65,8 @@ func NewFileFolderUpdateForm() *FileFolderUpdate {
 }
 
 type FileFolderDelete struct {
-	ID uint `form:"id" json:"id" binding:"required,gt=0"`
+	ID            uint   `form:"id" json:"id" binding:"required,gt=0"`
+	DeletedReason string `form:"deleted_reason" json:"deleted_reason" binding:"omitempty,max=255"`
 }
 
 func NewFileFolderDeleteForm() *FileFolderDelete {
@@ -113,13 +114,13 @@ func NewFileLocalUploadForm() *FileLocalUpload {
 type FileUploadCredential struct {
 	FolderID    uint   `form:"folder_id" json:"folder_id" binding:"omitempty"`
 	FileName    string `form:"file_name" json:"file_name" binding:"omitempty,max=255"`
-	OriginName  string `form:"origin_name" json:"origin_name" binding:"omitempty,max=255"`
-	MimeType    string `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
-	Size        int64  `form:"size" json:"size" binding:"omitempty,gte=0"`
-	Hash        string `form:"hash" json:"hash" binding:"omitempty,len=64"`
+	OriginName  string `form:"origin_name" json:"origin_name" binding:"required,max=255"`
+	MimeType    string `form:"mime_type" json:"mime_type" binding:"required,max=100"`
+	Size        int64  `form:"size" json:"size" binding:"required,gt=0"`
+	Hash        string `form:"hash" json:"hash" binding:"required,len=64"`
 	IsPublic    uint8  `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
 	UploadScene string `form:"upload_scene" json:"upload_scene" binding:"omitempty,max=60"`
-	Driver      string `form:"driver" json:"driver" binding:"omitempty,oneof=local aliyun_oss"`
+	Driver      string `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss"`
 }
 
 func NewFileUploadCredentialForm() *FileUploadCredential {
@@ -129,7 +130,7 @@ func NewFileUploadCredentialForm() *FileUploadCredential {
 type FileUploadCredentialBatch struct {
 	IsPublic    uint8                           `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
 	UploadScene string                          `form:"upload_scene" json:"upload_scene" binding:"omitempty,max=60"`
-	Driver      string                          `form:"driver" json:"driver" binding:"omitempty,oneof=local aliyun_oss"`
+	Driver      string                          `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss"`
 	Items       []FileUploadCredentialBatchItem `form:"items" json:"items" binding:"required,min=1,dive"`
 }
 
@@ -138,12 +139,12 @@ type FileUploadCredentialBatchItem struct {
 	FolderID    uint   `form:"folder_id" json:"folder_id" binding:"omitempty"`
 	FileName    string `form:"file_name" json:"file_name" binding:"omitempty,max=255"`
 	OriginName  string `form:"origin_name" json:"origin_name" binding:"required,max=255"`
-	MimeType    string `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
-	Size        int64  `form:"size" json:"size" binding:"omitempty,gte=0"`
+	MimeType    string `form:"mime_type" json:"mime_type" binding:"required,max=100"`
+	Size        int64  `form:"size" json:"size" binding:"required,gt=0"`
 	Hash        string `form:"hash" json:"hash" binding:"required,len=64"`
 	IsPublic    *uint8 `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
 	UploadScene string `form:"upload_scene" json:"upload_scene" binding:"omitempty,max=60"`
-	Driver      string `form:"driver" json:"driver" binding:"omitempty,oneof=local aliyun_oss"`
+	Driver      string `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss"`
 }
 
 func NewFileUploadCredentialBatchForm() *FileUploadCredentialBatch {
@@ -151,15 +152,16 @@ func NewFileUploadCredentialBatchForm() *FileUploadCredentialBatch {
 }
 
 type FileUploadComplete struct {
+	CompleteToken string `form:"complete_token" json:"complete_token" binding:"required,max=128"`
 	FolderID      uint   `form:"folder_id" json:"folder_id" binding:"omitempty"`
 	Reuse         bool   `form:"reuse" json:"reuse" binding:"omitempty"`
 	FileObjectID  uint   `form:"file_object_id" json:"file_object_id" binding:"omitempty,gt=0"`
-	OriginName    string `form:"origin_name" json:"origin_name" binding:"required,max=255"`
+	OriginName    string `form:"origin_name" json:"origin_name" binding:"omitempty,max=255"`
 	DisplayName   string `form:"display_name" json:"display_name" binding:"omitempty,max=255"`
 	Name          string `form:"name" json:"name" binding:"omitempty,max=255"`
 	Size          uint   `form:"size" json:"size" binding:"omitempty"`
 	Ext           string `form:"ext" json:"ext" binding:"omitempty,max=20"`
-	Hash          string `form:"hash" json:"hash" binding:"omitempty,max=64"`
+	Hash          string `form:"hash" json:"hash" binding:"omitempty,len=64"`
 	UUID          string `form:"uuid" json:"uuid" binding:"omitempty,len=32"`
 	MimeType      string `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
 	FileType      string `form:"file_type" json:"file_type" binding:"omitempty,oneof=image pdf word excel ppt archive text audio video other"`
@@ -185,15 +187,16 @@ type FileUploadCompleteBatch struct {
 
 type FileUploadCompleteBatchItem struct {
 	ClientID      string `form:"client_id" json:"client_id" binding:"required,max=100"`
+	CompleteToken string `form:"complete_token" json:"complete_token" binding:"required,max=128"`
 	FolderID      uint   `form:"folder_id" json:"folder_id" binding:"omitempty"`
 	Reuse         bool   `form:"reuse" json:"reuse" binding:"omitempty"`
 	FileObjectID  uint   `form:"file_object_id" json:"file_object_id" binding:"omitempty,gt=0"`
-	OriginName    string `form:"origin_name" json:"origin_name" binding:"required,max=255"`
+	OriginName    string `form:"origin_name" json:"origin_name" binding:"omitempty,max=255"`
 	DisplayName   string `form:"display_name" json:"display_name" binding:"omitempty,max=255"`
 	Name          string `form:"name" json:"name" binding:"omitempty,max=255"`
 	Size          uint   `form:"size" json:"size" binding:"omitempty"`
 	Ext           string `form:"ext" json:"ext" binding:"omitempty,max=20"`
-	Hash          string `form:"hash" json:"hash" binding:"omitempty,max=64"`
+	Hash          string `form:"hash" json:"hash" binding:"omitempty,len=64"`
 	UUID          string `form:"uuid" json:"uuid" binding:"omitempty,len=32"`
 	MimeType      string `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
 	FileType      string `form:"file_type" json:"file_type" binding:"omitempty,oneof=image pdf word excel ppt archive text audio video other"`
@@ -243,20 +246,21 @@ func NewFileMultipartInitForm() *FileMultipartInit {
 
 // FileMultipartComplete 分片上传完成参数。
 type FileMultipartComplete struct {
-	UploadID     string                  `form:"upload_id" json:"upload_id" binding:"omitempty"`
-	Reuse        bool                    `form:"reuse" json:"reuse" binding:"omitempty"`
-	FileObjectID uint                    `form:"file_object_id" json:"file_object_id" binding:"omitempty,gt=0"`
-	Bucket       string                  `form:"bucket" json:"bucket" binding:"omitempty"`
-	ObjectKey    string                  `form:"object_key" json:"object_key" binding:"omitempty"`
-	OriginName   string                  `form:"origin_name" json:"origin_name" binding:"required,max=255"`
-	Size         uint                    `form:"size" json:"size" binding:"omitempty"`
-	Hash         string                  `form:"hash" json:"hash" binding:"omitempty,max=64"`
-	MimeType     string                  `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
-	FileType     string                  `form:"file_type" json:"file_type" binding:"omitempty,oneof=image pdf word excel ppt archive text audio video other"`
-	FolderID     uint                    `form:"folder_id" json:"folder_id" binding:"omitempty"`
-	IsPublic     uint8                   `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
-	Driver       string                  `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss"`
-	Parts        []MultipartCompletePart `form:"parts" json:"parts" binding:"omitempty,dive"`
+	CompleteToken string                  `form:"complete_token" json:"complete_token" binding:"required,max=128"`
+	UploadID      string                  `form:"upload_id" json:"upload_id" binding:"omitempty"`
+	Reuse         bool                    `form:"reuse" json:"reuse" binding:"omitempty"`
+	FileObjectID  uint                    `form:"file_object_id" json:"file_object_id" binding:"omitempty,gt=0"`
+	Bucket        string                  `form:"bucket" json:"bucket" binding:"omitempty"`
+	ObjectKey     string                  `form:"object_key" json:"object_key" binding:"omitempty"`
+	OriginName    string                  `form:"origin_name" json:"origin_name" binding:"omitempty,max=255"`
+	Size          uint                    `form:"size" json:"size" binding:"omitempty"`
+	Hash          string                  `form:"hash" json:"hash" binding:"omitempty,len=64"`
+	MimeType      string                  `form:"mime_type" json:"mime_type" binding:"omitempty,max=100"`
+	FileType      string                  `form:"file_type" json:"file_type" binding:"omitempty,oneof=image pdf word excel ppt archive text audio video other"`
+	FolderID      uint                    `form:"folder_id" json:"folder_id" binding:"omitempty"`
+	IsPublic      uint8                   `form:"is_public" json:"is_public" binding:"omitempty,oneof=0 1"`
+	Driver        string                  `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss"`
+	Parts         []MultipartCompletePart `form:"parts" json:"parts" binding:"omitempty,dive"`
 }
 
 // MultipartCompletePart 分片完成信息。

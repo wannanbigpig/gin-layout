@@ -1,8 +1,10 @@
 package cron
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
@@ -51,6 +53,25 @@ func TestSchedulerRegisterReturnsDailyAtError(t *testing.T) {
 		t.Fatal("expected register to return error for invalid daily time")
 	}
 	if !strings.Contains(err.Error(), "调度表达式无效") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWaitForCronStopReturnsWhenDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := waitForCronStop(ctx, time.Second); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestWaitForCronStopTimesOut(t *testing.T) {
+	err := waitForCronStop(context.Background(), time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "did not stop") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

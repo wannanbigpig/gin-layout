@@ -62,18 +62,21 @@ var (
 	loggerOnce sync.Once
 	loggerMu   sync.Mutex
 	initErr    error
+
+	activeWriterCloser io.Closer
 )
 
 // InitLogger 初始化全局日志实例。
 func InitLogger() error {
 	loggerOnce.Do(func() {
-		core, err := buildCore(config.GetConfig())
+		bundle, err := buildCoreBundle(config.GetConfig())
 		if err != nil {
 			initErr = fmt.Errorf("创建zap日志包失败: %w", err)
 			return
 		}
 		loggerMu.Lock()
-		rootCore.store(core)
+		rootCore.store(bundle.core)
+		activeWriterCloser = bundle.closer
 		loggerMu.Unlock()
 	})
 	return initErr
@@ -81,15 +84,11 @@ func InitLogger() error {
 
 // ReloadLogger 根据新配置重建底层日志 core。
 func ReloadLogger(cfg *config.Conf) error {
-	core, err := buildCore(cfg)
+	bundle, err := buildCoreBundle(cfg)
 	if err != nil {
 		return err
 	}
-	loggerMu.Lock()
-	old := rootCore.load()
-	rootCore.store(core)
-	loggerMu.Unlock()
-	_ = old.Sync()
+	reloadLoggerCore(bundle.core, bundle.closer)
 	return nil
 }
 
@@ -130,22 +129,52 @@ func Warn(msg string, fields ...zap.Field) {
 	current().Warn(msg, fields...)
 }
 
-func buildCore(cfg *config.Conf) (zapcore.Core, error) {
-	l, err := buildLogger(cfg)
+type coreBundle struct {
+	core   zapcore.Core
+	closer io.Closer
+}
+
+func buildCoreBundle(cfg *config.Conf) (coreBundle, error) {
+	l, closer, err := buildLogger(cfg)
 	if err != nil {
-		return nil, err
+		return coreBundle{}, err
 	}
-	return l.Core(), nil
+	return coreBundle{core: l.Core(), closer: closer}, nil
+}
+
+func reloadLoggerCore(core zapcore.Core, closer io.Closer) {
+	oldCore, oldCloser := swapLoggerCore(core, closer)
+	_ = oldCore.Sync()
+	closeLoggerWriter(oldCloser)
+}
+
+func swapLoggerCore(core zapcore.Core, closer io.Closer) (zapcore.Core, io.Closer) {
+	loggerMu.Lock()
+	defer loggerMu.Unlock()
+
+	oldCore := rootCore.load()
+	oldCloser := activeWriterCloser
+	rootCore.store(core)
+	activeWriterCloser = closer
+	return oldCore, oldCloser
+}
+
+func closeLoggerWriter(closer io.Closer) {
+	if closer == nil {
+		return
+	}
+	_ = closer.Close()
 }
 
 // buildLogger 初始化 zap 日志
-func buildLogger(cfg *config.Conf) (*zap.Logger, error) {
+func buildLogger(cfg *config.Conf) (*zap.Logger, io.Closer, error) {
 	if cfg == nil {
 		cfg = config.GetConfig()
 	}
 
 	if cfg.Logger.Output == "stderr" {
-		return zap.NewDevelopment()
+		l, err := zap.NewDevelopment()
+		return l, nil, err
 	}
 
 	encoderConfig := zap.NewProductionEncoderConfig()
@@ -157,18 +186,24 @@ func buildLogger(cfg *config.Conf) (*zap.Logger, error) {
 	filename := filepath.Join(cfg.BasePath, "logs", cfg.Logger.Filename)
 
 	var writer zapcore.WriteSyncer
+	var closer io.Closer
 	if cfg.Logger.DefaultDivision == "size" {
-		writer = zapcore.AddSync(getLumberJackWriter(cfg, filename))
+		lumberjackWriter := getLumberJackWriter(cfg, filename)
+		writer = zapcore.AddSync(lumberjackWriter)
+		closer = lumberjackWriter
 	} else {
 		rotateWriter, err := getRotateWriter(cfg, filename)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		writer = zapcore.AddSync(rotateWriter)
+		if rotateCloser, ok := rotateWriter.(io.Closer); ok {
+			closer = rotateCloser
+		}
 	}
 
 	zapCore := zapcore.NewCore(encoder, writer, zap.InfoLevel)
-	return zap.New(zapCore, zap.AddCaller()), nil
+	return zap.New(zapCore, zap.AddCaller()), closer, nil
 }
 
 // getRotateWriter 按日期切割日志
@@ -188,7 +223,7 @@ func getRotateWriter(cfg *config.Conf, filename string) (io.Writer, error) {
 }
 
 // getLumberJackWriter 按文件切割日志
-func getLumberJackWriter(cfg *config.Conf, filename string) io.Writer {
+func getLumberJackWriter(cfg *config.Conf, filename string) *lumberjack.Logger {
 	return &lumberjack.Logger{
 		Filename:   filename,
 		MaxSize:    cfg.Logger.DivisionSize.MaxSize,

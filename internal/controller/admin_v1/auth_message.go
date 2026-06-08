@@ -136,13 +136,14 @@ func (api SysMessageController) GetWsTicket(c *gin.Context) {
 	api.Success(c, map[string]any{"ticket": ticket})
 }
 
-// WS 建立通用实时推送连接。支持 ticket 校验方式，并向下兼容 token/access_token。
+// WS 建立通用实时推送连接，仅支持 ticket 校验方式。
 // 鉴权失败时直接返回 HTTP 401，避免 WebSocket 客户端拿到 200+JSON 后无法判断错误来源。
 func (api SysMessageController) WS(c *gin.Context) {
 	var principal *auth.AuthPrincipal
 	var ok bool
 
 	ticket := strings.TrimSpace(c.Query("ticket"))
+	queryTokenPresent := hasDeprecatedWSTokenQuery(c)
 	if ticket != "" {
 		redisKey := fmt.Sprintf("ws:ticket:%s", ticket)
 		rdb := data.RedisClient()
@@ -167,19 +168,8 @@ func (api SysMessageController) WS(c *gin.Context) {
 		} else if log.Logger != nil {
 			log.Logger.Warn("websocket ws: redis unavailable while consuming ticket",
 				zap.String("remote_addr", c.ClientIP()),
-				zap.String("ticket", ticket),
+				zap.String("ticket", maskWSSecret(ticket)),
 			)
-		}
-	}
-
-	// 兼容旧的 token 传参形式
-	if !ok {
-		accessToken := strings.TrimSpace(c.Query("access_token"))
-		if accessToken == "" {
-			accessToken = strings.TrimSpace(c.Query("token"))
-		}
-		if accessToken != "" {
-			principal, ok = auth.NewLoginService().ResolvePrincipal(accessToken)
 		}
 	}
 
@@ -187,7 +177,8 @@ func (api SysMessageController) WS(c *gin.Context) {
 		if log.Logger != nil {
 			log.Logger.Warn("websocket ws: authentication failed",
 				zap.String("remote_addr", c.ClientIP()),
-				zap.String("ticket", ticket),
+				zap.String("ticket", maskWSSecret(ticket)),
+				zap.Bool("query_token_present", queryTokenPresent),
 			)
 		}
 		api.FailCode(c, e.NotLogin)
@@ -211,4 +202,22 @@ func (api SysMessageController) WS(c *gin.Context) {
 		return
 	}
 	middleware.LogWebSocketConnection(c)
+}
+
+func hasDeprecatedWSTokenQuery(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	return strings.TrimSpace(c.Query("access_token")) != "" || strings.TrimSpace(c.Query("token")) != ""
+}
+
+func maskWSSecret(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 8 {
+		return "***"
+	}
+	return value[:4] + "..." + value[len(value)-4:]
 }

@@ -53,6 +53,9 @@ func (s *RoleService) UpdateWithAuditDiff(params *form.UpdateRole) (string, erro
 	if params == nil {
 		return "", e.NewBusinessError(e.InvalidParameter)
 	}
+	if params.Code != nil {
+		return "", e.NewBusinessError(e.InvalidParameter)
+	}
 	before, err := s.snapshotRoleByID(params.Id)
 	if err != nil {
 		return "", err

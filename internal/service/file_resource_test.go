@@ -218,6 +218,13 @@ func TestFileResourceUploadLocalRecordsLocationFields(t *testing.T) {
 	if stored.UploadSource != model.UploadSourceBackend || stored.UploadScene != "test" || stored.UploadStatus != model.UploadStatusUploaded {
 		t.Fatalf("unexpected upload fields: %#v", stored)
 	}
+	var object model.UploadFileObject
+	if err := db.First(&object, stored.FileObjectID).Error; err != nil {
+		t.Fatalf("query uploaded object failed: %v", err)
+	}
+	if object.OwnerUID != 0 || object.IsPublic != global.Yes {
+		t.Fatalf("expected public local object owner=0/is_public=1, got %#v", object)
+	}
 }
 
 func TestFileResourceUploadLocalReusesPhysicalObject(t *testing.T) {
@@ -230,7 +237,7 @@ func TestFileResourceUploadLocalReusesPhysicalObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first upload failed: %v", err)
 	}
-	second, err := service.UploadLocal([]*multipart.FileHeader{newMultipartFileHeader(t, "second.txt", content)}, &form.FileLocalUpload{IsPublic: global.No}, 2)
+	second, err := service.UploadLocal([]*multipart.FileHeader{newMultipartFileHeader(t, "second.txt", content)}, &form.FileLocalUpload{IsPublic: global.Yes}, 2)
 	if err != nil {
 		t.Fatalf("second upload failed: %v", err)
 	}
@@ -357,6 +364,7 @@ func TestFileResourceUploadCredentialReturnsReuse(t *testing.T) {
 		Bucket:        "assets",
 		StoragePath:   "uploads/existing.txt",
 		ObjectKey:     "uploads/existing.txt",
+		IsPublic:      global.Yes,
 		Size:          12,
 		Hash:          hash,
 		MimeType:      "text/plain",
@@ -375,10 +383,12 @@ func TestFileResourceUploadCredentialReturnsReuse(t *testing.T) {
 		},
 	})
 	result, err := service.UploadCredential(&form.FileUploadCredential{
-		Hash:     hash,
-		MimeType: "text/plain",
-		Size:     12,
-	})
+		OriginName: "existing.txt",
+		Hash:       hash,
+		MimeType:   "text/plain",
+		Size:       12,
+		IsPublic:   global.Yes,
+	}, 1)
 	if err != nil {
 		t.Fatalf("upload credential failed: %v", err)
 	}
@@ -387,6 +397,64 @@ func TestFileResourceUploadCredentialReturnsReuse(t *testing.T) {
 	}
 	if result.UploadURL != "" || result.Method != "" {
 		t.Fatalf("reuse credential should not require direct upload: %#v", result)
+	}
+	if result.CompleteToken == "" || result.CompletePayload["complete_token"] != result.CompleteToken {
+		t.Fatalf("expected credential to return complete_token, got %#v", result)
+	}
+}
+
+func TestFileResourceUploadCredentialDoesNotReusePrivateObjectAcrossUsers(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	hash := strings.Repeat("1", 64)
+	object := model.UploadFileObject{
+		StorageDriver: model.StorageDriverAliyunOSS,
+		Bucket:        "assets",
+		StoragePath:   "uploads/private.txt",
+		ObjectKey:     "uploads/private.txt",
+		OwnerUID:      1,
+		IsPublic:      global.No,
+		Size:          12,
+		Hash:          hash,
+		MimeType:      "text/plain",
+		Status:        model.StorageStatusStored,
+	}
+	if err := db.Create(&object).Error; err != nil {
+		t.Fatalf("create private object failed: %v", err)
+	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, nil
+		},
+	})
+	ownerCredential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "private.txt",
+		Size:       12,
+		Hash:       hash,
+		MimeType:   "text/plain",
+		IsPublic:   global.No,
+	}, 1)
+	if err != nil {
+		t.Fatalf("owner credential failed: %v", err)
+	}
+	if !ownerCredential.Reuse || ownerCredential.FileObjectID != object.ID {
+		t.Fatalf("expected owner to reuse private object, got %#v", ownerCredential)
+	}
+	otherCredential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "private.txt",
+		Size:       12,
+		Hash:       hash,
+		MimeType:   "text/plain",
+		IsPublic:   global.No,
+	}, 2)
+	if err != nil {
+		t.Fatalf("other credential failed: %v", err)
+	}
+	if otherCredential.Reuse || otherCredential.FileObjectID != 0 || otherCredential.ObjectKey == object.ObjectKey {
+		t.Fatalf("expected other user to receive fresh private credential, got %#v", otherCredential)
 	}
 }
 
@@ -398,6 +466,7 @@ func TestFileResourceUploadCredentialBatchReturnsPerItemResults(t *testing.T) {
 		Bucket:        "assets",
 		StoragePath:   "uploads/existing.txt",
 		ObjectKey:     "uploads/existing.txt",
+		IsPublic:      global.Yes,
 		Size:          12,
 		Hash:          hash,
 		MimeType:      "text/plain",
@@ -437,34 +506,45 @@ func TestFileResourceUploadCredentialBatchReturnsPerItemResults(t *testing.T) {
 	if !result.Items[1].Success || result.Items[1].Data == nil || result.Items[1].Data.Reuse || result.Items[1].Data.ObjectKey == "" {
 		t.Fatalf("expected second credential item to return non-reuse credential payload, got %#v", result.Items[1])
 	}
+	if result.Items[0].Data.CompleteToken == "" || result.Items[1].Data.CompleteToken == "" {
+		t.Fatalf("expected credential batch items to include complete_token, got %#v", result.Items)
+	}
 }
 
 func TestFileResourceCompleteDirectUploadRejectsMultiFileType(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
-	object := model.UploadFileObject{
-		Bucket:      "assets",
-		StoragePath: "uploads/reuse.pdf",
-		ObjectKey:   "uploads/reuse.pdf",
-		Size:        12,
-		Hash:        strings.Repeat("f", 64),
-		MimeType:    "application/pdf",
-		Status:      model.StorageStatusStored,
-	}
-	if err := db.Create(&object).Error; err != nil {
-		t.Fatalf("create object failed: %v", err)
-	}
+	hash := strings.Repeat("f", 64)
 	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
 		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
 		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
-			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, nil
 		},
 	})
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "reuse.pdf",
+		Size:       12,
+		Hash:       hash,
+		MimeType:   "application/pdf",
+		IsPublic:   global.Yes,
+	}, 1)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
 
-	_, err := service.CompleteDirectUpload(&form.FileUploadComplete{
-		Reuse:        true,
-		FileObjectID: object.ID,
-		OriginName:   "reuse.pdf",
-		FileType:     "pdf,word",
+	_, err = service.CompleteDirectUpload(&form.FileUploadComplete{
+		CompleteToken: credential.CompleteToken,
+		OriginName:    "reuse.pdf",
+		Size:          12,
+		Hash:          hash,
+		MimeType:      "application/pdf",
+		IsPublic:      global.Yes,
+		Driver:        model.StorageDriverAliyunOSS,
+		Bucket:        credential.Bucket,
+		ObjectKey:     credential.ObjectKey,
+		FileType:      "pdf,word",
 	}, 1)
 	if err == nil {
 		t.Fatal("expected multi file_type direct complete to fail")
@@ -478,6 +558,7 @@ func TestFileResourceCompleteDirectUploadReuseUsesObjectFields(t *testing.T) {
 		Bucket:        "assets",
 		StoragePath:   "uploads/reuse.txt",
 		ObjectKey:     "uploads/reuse.txt",
+		IsPublic:      global.Yes,
 		Size:          12,
 		Hash:          strings.Repeat("9", 64),
 		MimeType:      "text/plain",
@@ -489,22 +570,97 @@ func TestFileResourceCompleteDirectUploadReuseUsesObjectFields(t *testing.T) {
 	}
 	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
 		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
 		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
 			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
 		},
 	})
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "reuse.txt",
+		Size:       12,
+		Hash:       object.Hash,
+		MimeType:   "text/plain",
+		IsPublic:   global.Yes,
+	}, 1)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
 
 	result, err := service.CompleteDirectUpload(&form.FileUploadComplete{
-		Reuse:        true,
-		FileObjectID: object.ID,
-		OriginName:   "reuse.txt",
-		Driver:       model.StorageDriverAliyunOSS,
+		CompleteToken: credential.CompleteToken,
+		Reuse:         true,
+		FileObjectID:  object.ID,
+		OriginName:    "reuse.txt",
+		Size:          object.Size,
+		Hash:          object.Hash,
+		MimeType:      object.MimeType,
+		IsPublic:      global.Yes,
+		Driver:        model.StorageDriverAliyunOSS,
+		Bucket:        object.Bucket,
+		ObjectKey:     object.ObjectKey,
 	}, 1)
 	if err != nil {
 		t.Fatalf("direct complete reuse failed: %v", err)
 	}
 	if result.FileType != "text" || result.ObjectKey != object.ObjectKey || result.Size != object.Size || result.Hash != object.Hash || result.MimeType != object.MimeType {
 		t.Fatalf("expected direct complete to derive fields from object, got %#v", result)
+	}
+}
+
+func TestFileResourceCompleteDirectUploadRequiresValidCompleteToken(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	hash := strings.Repeat("8", 64)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
+		},
+	})
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "secure.txt",
+		Size:       12,
+		Hash:       hash,
+		MimeType:   "text/plain",
+		IsPublic:   global.Yes,
+	}, 7)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
+	base := form.FileUploadComplete{
+		OriginName: "secure.txt",
+		Size:       12,
+		Hash:       hash,
+		MimeType:   "text/plain",
+		IsPublic:   global.Yes,
+		Driver:     model.StorageDriverAliyunOSS,
+		Bucket:     credential.Bucket,
+		ObjectKey:  credential.ObjectKey,
+	}
+	if _, err := service.CompleteDirectUpload(&base, 7); err == nil {
+		t.Fatal("expected missing complete_token to fail")
+	}
+	base.CompleteToken = "wrong-token"
+	if _, err := service.CompleteDirectUpload(&base, 7); err == nil {
+		t.Fatal("expected wrong complete_token to fail")
+	}
+	base.CompleteToken = credential.CompleteToken
+	tampered := base
+	tampered.Hash = strings.Repeat("9", 64)
+	if _, err := service.CompleteDirectUpload(&tampered, 7); err == nil {
+		t.Fatal("expected hash mismatch to fail")
+	}
+	tampered = base
+	tampered.ObjectKey = "uploads/tampered.txt"
+	if _, err := service.CompleteDirectUpload(&tampered, 7); err == nil {
+		t.Fatal("expected object_key mismatch to fail")
+	}
+	if _, err := service.CompleteDirectUpload(&base, 8); err == nil {
+		t.Fatal("expected cross-user complete_token use to fail")
 	}
 }
 
@@ -515,6 +671,7 @@ func TestFileResourceCompleteDirectUploadBatchReturnsPerItemResults(t *testing.T
 		Bucket:        "assets",
 		StoragePath:   "uploads/reuse.txt",
 		ObjectKey:     "uploads/reuse.txt",
+		IsPublic:      global.Yes,
 		Size:          12,
 		Hash:          strings.Repeat("9", 64),
 		MimeType:      "text/plain",
@@ -526,17 +683,40 @@ func TestFileResourceCompleteDirectUploadBatchReturnsPerItemResults(t *testing.T
 	}
 	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
 		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
 		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
 			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
 		},
 	})
+	okCredential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "reuse.txt",
+		Size:       int64(object.Size),
+		Hash:       object.Hash,
+		MimeType:   object.MimeType,
+		IsPublic:   global.Yes,
+	}, 1)
+	if err != nil {
+		t.Fatalf("create ok credential failed: %v", err)
+	}
+	badCredential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "reuse.pdf",
+		Size:       int64(object.Size),
+		Hash:       object.Hash,
+		MimeType:   object.MimeType,
+		IsPublic:   global.Yes,
+	}, 1)
+	if err != nil {
+		t.Fatalf("create bad credential failed: %v", err)
+	}
 
 	result, err := service.CompleteDirectUploadBatch(&form.FileUploadCompleteBatch{
 		IsPublic: global.Yes,
 		Driver:   model.StorageDriverAliyunOSS,
 		Items: []form.FileUploadCompleteBatchItem{
-			{ClientID: "ok", Reuse: true, FileObjectID: object.ID, OriginName: "reuse.txt"},
-			{ClientID: "bad", Reuse: true, FileObjectID: object.ID, OriginName: "reuse.pdf", FileType: "pdf,word"},
+			{ClientID: "ok", CompleteToken: okCredential.CompleteToken, Reuse: true, FileObjectID: object.ID, OriginName: "reuse.txt", Size: object.Size, Hash: object.Hash, MimeType: object.MimeType, Bucket: object.Bucket, ObjectKey: object.ObjectKey},
+			{ClientID: "bad", CompleteToken: badCredential.CompleteToken, Reuse: true, FileObjectID: object.ID, OriginName: "reuse.pdf", Size: object.Size, Hash: object.Hash, MimeType: object.MimeType, Bucket: object.Bucket, ObjectKey: object.ObjectKey, FileType: "pdf,word"},
 		},
 	}, 1)
 	if err != nil {
@@ -598,6 +778,7 @@ func TestFileResourceMultipartInitReuseReturnsCompletablePayload(t *testing.T) {
 		Bucket:        "assets",
 		StoragePath:   "uploads/existing.pdf",
 		ObjectKey:     "uploads/existing.pdf",
+		IsPublic:      global.Yes,
 		Size:          32,
 		Hash:          hash,
 		MimeType:      "application/pdf",
@@ -628,7 +809,7 @@ func TestFileResourceMultipartInitReuseReturnsCompletablePayload(t *testing.T) {
 	if !result.Reuse || result.FileObjectID != object.ID || result.UploadID != "" || len(result.Parts) != 0 {
 		t.Fatalf("unexpected reuse init result: %#v", result)
 	}
-	if result.CompletePayload["reuse"] != true || result.CompletePayload["file_object_id"] != object.ID {
+	if result.CompleteToken == "" || result.CompletePayload["complete_token"] != result.CompleteToken {
 		t.Fatalf("unexpected complete payload: %#v", result.CompletePayload)
 	}
 }
@@ -667,24 +848,52 @@ func TestFileResourceMultipartCompleteReuseCreatesUploadRecord(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	hash := strings.Repeat("d", 64)
 	object := model.UploadFileObject{
-		Bucket:      "assets",
-		StoragePath: "uploads/reuse.txt",
-		ObjectKey:   "uploads/reuse.txt",
-		Size:        12,
-		Hash:        hash,
-		MimeType:    "text/plain",
-		ETag:        "etag-reuse",
-		Status:      model.StorageStatusStored,
+		StorageDriver: model.StorageDriverAliyunOSS,
+		Bucket:        "assets",
+		StoragePath:   "uploads/reuse.txt",
+		ObjectKey:     "uploads/reuse.txt",
+		IsPublic:      global.Yes,
+		Size:          12,
+		Hash:          hash,
+		MimeType:      "text/plain",
+		ETag:          "etag-reuse",
+		Status:        model.StorageStatusStored,
 	}
 	if err := db.Create(&object).Error; err != nil {
 		t.Fatalf("create object failed: %v", err)
 	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, nil
+		},
+	})
+	initResult, err := service.MultipartInit(&form.FileMultipartInit{
+		Hash:       hash,
+		OriginName: "reuse.txt",
+		Size:       12,
+		MimeType:   "text/plain",
+		IsPublic:   global.Yes,
+		PartCount:  2,
+	}, 8)
+	if err != nil {
+		t.Fatalf("multipart init failed: %v", err)
+	}
 
-	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).MultipartComplete(&form.FileMultipartComplete{
-		Reuse:        true,
-		FileObjectID: object.ID,
-		OriginName:   "reuse.txt",
-		IsPublic:     global.Yes,
+	result, err := service.MultipartComplete(&form.FileMultipartComplete{
+		CompleteToken: initResult.CompleteToken,
+		Reuse:         true,
+		FileObjectID:  object.ID,
+		OriginName:    "reuse.txt",
+		Size:          12,
+		Hash:          hash,
+		MimeType:      "text/plain",
+		IsPublic:      global.Yes,
+		Bucket:        object.Bucket,
+		ObjectKey:     object.ObjectKey,
 	}, 8)
 	if err != nil {
 		t.Fatalf("multipart complete reuse failed: %v", err)
@@ -694,62 +903,100 @@ func TestFileResourceMultipartCompleteReuseCreatesUploadRecord(t *testing.T) {
 	}
 }
 
-func TestFileResourceMultipartCompleteImplicitReuseCreatesUploadRecord(t *testing.T) {
+func TestFileResourceMultipartCompleteRequiresValidCompleteToken(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	hash := strings.Repeat("f", 64)
-	object := model.UploadFileObject{
-		StorageDriver: model.StorageDriverAliyunOSS,
-		Bucket:        "assets",
-		StoragePath:   "uploads/implicit-reuse.txt",
-		ObjectKey:     "uploads/implicit-reuse.txt",
-		Size:          21,
-		Hash:          hash,
-		MimeType:      "text/plain",
-		ETag:          "etag-implicit",
-		Status:        model.StorageStatusStored,
-	}
-	if err := db.Create(&object).Error; err != nil {
-		t.Fatalf("create object failed: %v", err)
-	}
-
-	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).MultipartComplete(&form.FileMultipartComplete{
-		Bucket:     object.Bucket,
-		ObjectKey:  object.ObjectKey,
-		OriginName: "implicit-reuse.txt",
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, nil
+		},
+	})
+	initResult, err := service.MultipartInit(&form.FileMultipartInit{
 		Hash:       hash,
-		Driver:     model.StorageDriverAliyunOSS,
+		OriginName: "secure.txt",
+		Size:       21,
 		MimeType:   "text/plain",
 		IsPublic:   global.Yes,
-		Parts:      nil,
+		PartCount:  1,
 	}, 8)
 	if err != nil {
-		t.Fatalf("multipart complete implicit reuse failed: %v", err)
+		t.Fatalf("multipart init failed: %v", err)
 	}
-	if result.FileObjectID != object.ID || result.ObjectKey != object.ObjectKey || result.FileType != "text" {
-		t.Fatalf("unexpected implicit reuse result: %#v", result)
+	base := form.FileMultipartComplete{
+		UploadID:   initResult.UploadID,
+		Bucket:     initResult.Bucket,
+		ObjectKey:  initResult.ObjectKey,
+		OriginName: "secure.txt",
+		Size:       21,
+		Hash:       hash,
+		MimeType:   "text/plain",
+		Driver:     model.StorageDriverAliyunOSS,
+		IsPublic:   global.Yes,
+		Parts:      []form.MultipartCompletePart{{PartNumber: 1, ETag: "etag"}},
+	}
+	if _, err := service.MultipartComplete(&base, 8); err == nil {
+		t.Fatal("expected missing complete_token to fail")
+	}
+	base.CompleteToken = "wrong-token"
+	if _, err := service.MultipartComplete(&base, 8); err == nil {
+		t.Fatal("expected wrong complete_token to fail")
+	}
+	base.CompleteToken = initResult.CompleteToken
+	if _, err := service.MultipartComplete(&base, 9); err == nil {
+		t.Fatal("expected cross-user complete_token use to fail")
 	}
 }
 
 func TestFileResourceMultipartCompleteRejectsMultiFileType(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	object := model.UploadFileObject{
-		Bucket:      "assets",
-		StoragePath: "uploads/reuse.pdf",
-		ObjectKey:   "uploads/reuse.pdf",
-		Size:        12,
-		Hash:        strings.Repeat("7", 64),
-		MimeType:    "application/pdf",
-		Status:      model.StorageStatusStored,
+		StorageDriver: model.StorageDriverAliyunOSS,
+		Bucket:        "assets",
+		StoragePath:   "uploads/reuse.pdf",
+		ObjectKey:     "uploads/reuse.pdf",
+		IsPublic:      global.Yes,
+		Size:          12,
+		Hash:          strings.Repeat("7", 64),
+		MimeType:      "application/pdf",
+		Status:        model.StorageStatusStored,
 	}
 	if err := db.Create(&object).Error; err != nil {
 		t.Fatalf("create object failed: %v", err)
 	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+	})
+	initResult, err := service.MultipartInit(&form.FileMultipartInit{
+		Hash:       object.Hash,
+		OriginName: "reuse.pdf",
+		Size:       12,
+		MimeType:   "application/pdf",
+		IsPublic:   global.Yes,
+		PartCount:  1,
+	}, 8)
+	if err != nil {
+		t.Fatalf("multipart init failed: %v", err)
+	}
 
-	_, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).MultipartComplete(&form.FileMultipartComplete{
-		Reuse:        true,
-		FileObjectID: object.ID,
-		OriginName:   "reuse.pdf",
-		FileType:     "pdf,word",
+	_, err = service.MultipartComplete(&form.FileMultipartComplete{
+		CompleteToken: initResult.CompleteToken,
+		Reuse:         true,
+		FileObjectID:  object.ID,
+		OriginName:    "reuse.pdf",
+		Size:          12,
+		Hash:          object.Hash,
+		MimeType:      "application/pdf",
+		IsPublic:      global.Yes,
+		Bucket:        object.Bucket,
+		ObjectKey:     object.ObjectKey,
+		FileType:      "pdf,word",
 	}, 8)
 	if err == nil {
 		t.Fatal("expected multipart complete multi file_type to fail")
@@ -757,14 +1004,35 @@ func TestFileResourceMultipartCompleteRejectsMultiFileType(t *testing.T) {
 }
 
 func TestFileResourceMultipartCompleteRejectsInvalidParts(t *testing.T) {
-	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: newFileResourceSQLiteDB(t)})
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+	token, _, err := createUploadSession(db, uploadSessionInput{
+		UploadType:    model.UploadSessionTypeMultipart,
+		StorageDriver: model.StorageDriverAliyunOSS,
+		Bucket:        "assets",
+		ObjectKey:     "uploads/a.txt",
+		UploadID:      "upload-1",
+		OwnerUID:      1,
+		OriginName:    "a.txt",
+		Size:          12,
+		Hash:          strings.Repeat("e", 64),
+		MimeType:      "text/plain",
+		IsPublic:      global.Yes,
+		ExpiresAt:     time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("create upload session failed: %v", err)
+	}
 	base := form.FileMultipartComplete{
-		UploadID:   "upload-1",
-		Bucket:     "assets",
-		ObjectKey:  "uploads/a.txt",
-		OriginName: "a.txt",
-		Hash:       strings.Repeat("e", 64),
-		MimeType:   "text/plain",
+		CompleteToken: token,
+		UploadID:      "upload-1",
+		Bucket:        "assets",
+		ObjectKey:     "uploads/a.txt",
+		OriginName:    "a.txt",
+		Size:          12,
+		Hash:          strings.Repeat("e", 64),
+		MimeType:      "text/plain",
+		IsPublic:      global.Yes,
 	}
 	cases := []struct {
 		name  string
@@ -1051,7 +1319,7 @@ func TestDeleteFolderAndRestoreFileRestoresParentFolders(t *testing.T) {
 		t.Fatalf("create upload file failed: %v", err)
 	}
 
-	if err := service.DeleteFolder(parent.ID); err != nil {
+	if err := service.DeleteFolder(parent.ID, 1, "test delete"); err != nil {
 		t.Fatalf("DeleteFolder failed: %v", err)
 	}
 	var deletedParent, deletedChild model.UploadFileFolder
@@ -1071,6 +1339,9 @@ func TestDeleteFolderAndRestoreFileRestoresParentFolders(t *testing.T) {
 	if deletedFile.DeletedAt == 0 {
 		t.Fatal("expected file to be soft deleted")
 	}
+	if deletedFile.DeletedBy != 1 || deletedFile.DeletedReason != "test delete" {
+		t.Fatalf("expected folder delete to write file audit fields, got %#v", deletedFile)
+	}
 
 	if err := service.Restore(file.ID); err != nil {
 		t.Fatalf("Restore failed: %v", err)
@@ -1088,6 +1359,59 @@ func TestDeleteFolderAndRestoreFileRestoresParentFolders(t *testing.T) {
 	}
 	if restoredFile.DeletedAt != 0 || restoredFile.FolderID != child.ID {
 		t.Fatalf("unexpected restored file: %#v", restoredFile)
+	}
+}
+
+func TestDeleteFolderRejectsReferencedDescendantFile(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	parent := model.UploadFileFolder{Name: "parent", LogicalPath: "/parent"}
+	if err := db.Create(&parent).Error; err != nil {
+		t.Fatalf("create parent folder failed: %v", err)
+	}
+	child := model.UploadFileFolder{ParentID: parent.ID, Name: "child", LogicalPath: "/parent/child"}
+	if err := db.Create(&child).Error; err != nil {
+		t.Fatalf("create child folder failed: %v", err)
+	}
+	file := model.UploadFiles{
+		OriginName:    "avatar.png",
+		UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()),
+		FolderID:      child.ID,
+		StorageDriver: model.StorageDriverLocal,
+		StorageStatus: model.StorageStatusStored,
+	}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatalf("create upload file failed: %v", err)
+	}
+	if err := db.Create(&model.UploadFileReference{
+		FileID:     file.ID,
+		UUID:       file.UUID,
+		OwnerType:  "admin_user",
+		OwnerID:    1,
+		OwnerField: "avatar",
+	}).Error; err != nil {
+		t.Fatalf("create file reference failed: %v", err)
+	}
+
+	err := service.DeleteFolder(parent.ID, 9, "folder delete")
+	var referencedErr *FileReferencedDeleteError
+	if !stderrors.As(err, &referencedErr) {
+		t.Fatalf("expected FileReferencedDeleteError, got %v", err)
+	}
+	if len(referencedErr.References) != 1 {
+		t.Fatalf("expected one reference detail, got %#v", referencedErr.References)
+	}
+	var storedFile model.UploadFiles
+	if err := db.First(&storedFile, file.ID).Error; err != nil {
+		t.Fatalf("expected referenced file to remain active: %v", err)
+	}
+	if storedFile.DeletedAt != 0 || storedFile.DeletedBy != 0 || storedFile.DeletedReason != "" {
+		t.Fatalf("expected referenced file untouched, got %#v", storedFile)
+	}
+	var storedParent model.UploadFileFolder
+	if err := db.First(&storedParent, parent.ID).Error; err != nil {
+		t.Fatalf("expected parent folder to remain active: %v", err)
 	}
 }
 
@@ -1164,11 +1488,40 @@ func execFileResourceTestSchema(t *testing.T, db *gorm.DB) {
 			bucket text not null default '',
 			storage_path text not null default '',
 			object_key text not null default '',
+			owner_uid integer not null default 0,
+			is_public integer not null default 0,
 			size integer not null default 0,
 			hash text not null default '',
 			mime_type text not null default '',
 			etag text not null default '',
 			status text not null default 'stored',
+			created_at datetime,
+			updated_at datetime
+		)`,
+		`CREATE TABLE upload_sessions (
+			id integer primary key autoincrement,
+			complete_token_hash text not null default '',
+			upload_type text not null default '',
+			status text not null default 'pending',
+			storage_driver text not null default 'local',
+			storage_base text not null default '',
+			bucket text not null default '',
+			storage_path text not null default '',
+			object_key text not null default '',
+			upload_id text not null default '',
+			file_object_id integer not null default 0,
+			file_id integer not null default 0,
+			owner_uid integer not null default 0,
+			folder_id integer not null default 0,
+			origin_name text not null default '',
+			size integer not null default 0,
+			hash text not null default '',
+			mime_type text not null default '',
+			etag text not null default '',
+			is_public integer not null default 0,
+			upload_scene text not null default '',
+			expires_at datetime,
+			completed_at datetime,
 			created_at datetime,
 			updated_at datetime
 		)`,
@@ -1184,6 +1537,8 @@ func execFileResourceTestSchema(t *testing.T, db *gorm.DB) {
 		)`,
 		// 与生产迁移 uniq_folder_name_deleted 对齐：同目录同名活跃记录唯一。
 		`CREATE UNIQUE INDEX uniq_folder_name_deleted ON upload_files (folder_id, origin_name, deleted_at)`,
+		`CREATE UNIQUE INDEX uniq_upload_session_token_hash ON upload_sessions (complete_token_hash)`,
+		`CREATE UNIQUE INDEX uniq_file_object_scope_hash ON upload_file_objects (storage_driver, bucket, hash, owner_uid, is_public)`,
 	}
 	for _, statement := range statements {
 		if err := db.Exec(statement).Error; err != nil {
@@ -1517,6 +1872,7 @@ func TestFileResourceUploadLimits(t *testing.T) {
 	_, err = servicePass.UploadCredential(&form.FileUploadCredential{
 		OriginName: "test.txt",
 		Size:       100,
+		Hash:       strings.Repeat("c", 64),
 		MimeType:   "text/plain",
 	})
 	if err != nil {

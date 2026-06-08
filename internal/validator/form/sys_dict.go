@@ -8,7 +8,6 @@ type SysDictTypeList struct {
 }
 
 type SysDictTypePayload struct {
-	TypeCode     string            `form:"type_code" json:"type_code" label:"字典类型编码" binding:"required,max=100"`
 	TypeNameI18n map[string]string `form:"type_name_i18n" json:"type_name_i18n" label:"字典类型名称多语言" binding:"required"`
 	Status       *uint8            `form:"status" json:"status" label:"状态" binding:"omitempty,oneof=0 1"`
 	Sort         uint              `form:"sort" json:"sort" label:"排序" binding:"omitempty"`
@@ -16,11 +15,14 @@ type SysDictTypePayload struct {
 }
 
 type CreateSysDictType struct {
+	TypeCode string `form:"type_code" json:"type_code" label:"字典类型编码" binding:"required,max=100"`
 	SysDictTypePayload
 }
 
 type UpdateSysDictType struct {
-	Id uint `form:"id" json:"id" label:"字典类型ID" binding:"required"`
+	Id                  uint    `form:"id" json:"id" label:"字典类型ID" binding:"required"`
+	TypeCode            *string `form:"type_code" json:"type_code" label:"字典类型编码" binding:"excluded_unless=ImmutableFieldGuard __never__"`
+	ImmutableFieldGuard string  `form:"-" json:"-" binding:"-"`
 	SysDictTypePayload
 }
 

@@ -82,6 +82,9 @@ func (s *RoleService) Create(params *form.CreateRole) error {
 
 // Update 更新角色。
 func (s *RoleService) Update(params *form.UpdateRole) error {
+	if params.Code != nil {
+		return e.NewBusinessError(e.InvalidParameter)
+	}
 	return s.applyRoleMutation(&roleMutation{
 		Id:          params.Id,
 		Name:        params.Name,

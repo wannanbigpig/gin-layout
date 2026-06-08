@@ -55,11 +55,16 @@ func (s *AdminUserService) handleMutationError(err error, fallbackCode int) erro
 	return e.NewBusinessError(fallbackCode)
 }
 
-func (s *AdminUserService) revokeUserTokens(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) {
-	loginService := auth.NewLoginService()
-	if err := loginService.RevokeUserTokens(userID, revokedCode, revokedReason, tx); err != nil {
+var revokeUserTokensFunc = func(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) error {
+	return auth.NewLoginService().RevokeUserTokens(userID, revokedCode, revokedReason, tx)
+}
+
+func (s *AdminUserService) revokeUserTokens(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) error {
+	if err := revokeUserTokensFunc(tx, userID, revokedCode, revokedReason); err != nil {
 		log.Logger.Error("撤销用户token失败", zap.Error(err), zap.Uint("user_id", userID))
+		return err
 	}
+	return nil
 }
 
 type userTokenRevocation struct {
@@ -68,10 +73,14 @@ type userTokenRevocation struct {
 	revokedReason string
 }
 
-func (s *AdminUserService) revokeUserTokensAfterCommit(items []userTokenRevocation) {
+func (s *AdminUserService) revokeUserTokensAfterCommit(items []userTokenRevocation) error {
+	var errs []error
 	for _, item := range items {
-		s.revokeUserTokens(nil, item.userID, item.revokedCode, item.revokedReason)
+		if err := s.revokeUserTokens(nil, item.userID, item.revokedCode, item.revokedReason); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	return errors.Join(errs...)
 }
 
 // GetUserInfo 获取用户信息。

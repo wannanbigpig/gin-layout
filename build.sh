@@ -171,8 +171,7 @@ copy_resources() {
             || cp -r data/migrations/* "${dist_dir}/data/migrations/" 2>/dev/null || true
     fi
 
-    # 权限相关文件
-    [ -f "policy.csv" ] && cp "policy.csv" "${dist_dir}/"
+    # 权限模型文件；运行时策略来自数据库 casbin_rule，不打包 policy.csv 样例
     [ -f "rbac_model.conf" ] && cp "rbac_model.conf" "${dist_dir}/"
 }
 

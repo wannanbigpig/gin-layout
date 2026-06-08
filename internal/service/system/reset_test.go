@@ -47,3 +47,13 @@ func TestBuildDatabaseURLUsesInjectedConfig(t *testing.T) {
 		t.Fatalf("expected %s, got %s", want, got)
 	}
 }
+
+func TestIsMissingRollbackMigrationError(t *testing.T) {
+	err := errors.New("no migration found for version 20260425000003: read down for version 20260425000003 .: file does not exist")
+	if !isMissingRollbackMigrationError(err) {
+		t.Fatal("expected missing rollback migration error to be detected")
+	}
+	if isMissingRollbackMigrationError(errors.New("permission denied")) {
+		t.Fatal("unexpectedly detected unrelated error")
+	}
+}

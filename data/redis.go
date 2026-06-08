@@ -14,11 +14,11 @@ import (
 
 var (
 	redisDb        *redis.Client
-	redisOnce      sync.Once
 	redisInitError error
 	redisValue     atomic.Value
 	redisMu        sync.Mutex
 	redisHealth    = newRuntimeHealthCache(defaultRuntimeHealthTTL)
+	openRedisFunc  = openRedis
 )
 
 type redisSlot struct {
@@ -33,15 +33,41 @@ var redisRuntimeProbe = func(client *redis.Client) error {
 	return client.Ping(ctx).Err()
 }
 
-func initRedis() error {
-	return reloadRedis(c.GetConfig())
+func ensureRedisInitialized(cfg *c.Conf) error {
+	if currentRedis() != nil {
+		return nil
+	}
+
+	redisMu.Lock()
+	defer redisMu.Unlock()
+
+	if currentRedis() != nil {
+		return nil
+	}
+
+	next, err := openRedisFunc(cfg)
+	if err != nil {
+		redisInitError = err
+		redisHealth.Reset()
+		return err
+	}
+
+	redisDb = next
+	redisValue.Store(redisSlot{client: next})
+	redisInitError = nil
+	if next != nil {
+		redisHealth.SeedReady()
+	} else {
+		redisHealth.Reset()
+	}
+	return nil
 }
 
 func reloadRedis(cfg *c.Conf) error {
 	redisMu.Lock()
 	defer redisMu.Unlock()
 
-	next, err := openRedis(cfg)
+	next, err := openRedisFunc(cfg)
 	if err != nil {
 		return err
 	}
@@ -94,11 +120,7 @@ func RedisClient() *redis.Client {
 	if client := currentRedis(); client != nil {
 		return client
 	}
-	if redisDb == nil {
-		redisOnce.Do(func() {
-			redisInitError = initRedis()
-		})
-	}
+	_ = ensureRedisInitialized(c.GetConfig())
 	return currentRedis()
 }
 

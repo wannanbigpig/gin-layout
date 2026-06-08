@@ -21,8 +21,7 @@ func NewRoleOptionsQuery() *RoleOptions {
 	return &RoleOptions{}
 }
 
-type rolePayload struct {
-	Code        string `form:"code" json:"code" binding:"omitempty,max=60"`
+type roleMutablePayload struct {
 	Name        string `form:"name" json:"name" binding:"required"`
 	Description string `form:"description" json:"description" binding:"omitempty"`
 	Status      uint8  `form:"status" json:"status"  binding:"omitempty,oneof=0 1"`
@@ -31,7 +30,8 @@ type rolePayload struct {
 }
 
 type CreateRole struct {
-	rolePayload
+	Code string `form:"code" json:"code" binding:"omitempty,max=60"`
+	roleMutablePayload
 }
 
 func NewCreateRoleForm() *CreateRole {
@@ -39,8 +39,10 @@ func NewCreateRoleForm() *CreateRole {
 }
 
 type UpdateRole struct {
-	Id uint `form:"id" json:"id" binding:"required"`
-	rolePayload
+	Id                  uint    `form:"id" json:"id" binding:"required"`
+	Code                *string `form:"code" json:"code" binding:"excluded_unless=ImmutableFieldGuard __never__"`
+	ImmutableFieldGuard string  `form:"-" json:"-" binding:"-"`
+	roleMutablePayload
 }
 
 func NewUpdateRoleForm() *UpdateRole {

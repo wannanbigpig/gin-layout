@@ -8,11 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	dateutils "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
@@ -182,6 +185,27 @@ func TestGetFileAccessPathReturnsThumbnailForLocalImageVariant(t *testing.T) {
 	bounds := thumbImage.Bounds()
 	assert.LessOrEqual(t, bounds.Dx(), thumbnailMaxDimension)
 	assert.LessOrEqual(t, bounds.Dy(), thumbnailMaxDimension)
+}
+
+func TestGetFileAccessPathRejectsExpiredFile(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	record := &model.UploadFiles{
+		UUID:          "abcdef1234567890abcdef1234567890",
+		Path:          "expired.txt",
+		IsPublic:      global.Yes,
+		StorageDriver: model.StorageDriverLocal,
+		StorageBase:   t.TempDir(),
+		StoragePath:   "expired.txt",
+		ObjectKey:     "expired.txt",
+		StorageStatus: model.StorageStatusStored,
+		ExpiresAt:     dateutils.FormatDate{Time: time.Now().Add(-time.Minute)},
+	}
+	assert.NoError(t, db.Create(record).Error)
+
+	_, err := NewCommonService().SetDB(db).GetFileAccessPath(record.UUID, "", false, 0)
+	var businessErr *e.BusinessError
+	assert.ErrorAs(t, err, &businessErr)
+	assert.Equal(t, e.FileAccessDenied, businessErr.GetCode())
 }
 
 func writeLargeJPEG(t *testing.T, path string, width int, height int) {

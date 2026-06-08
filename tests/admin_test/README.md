@@ -35,6 +35,12 @@
 - `task_routes_test.go` — 任务中心组接口
 - `test_helpers_test.go` — 测试辅助函数（环境判断、测试资源命名/查找/清理/兜底数据创建）
 
+## MySQL 集成测试
+
+- `/tests/...` 是接口集成测试，写流程依赖真实 MySQL 和已初始化的系统数据。
+- 本地未启用或无法连接 MySQL 时，`requireMySQL` / `requireWritableDB` 会跳过数据库链路用例。
+- CI 通过 `.github/workflows/go.yml` 启动 MySQL service，生成测试专用 `config.yaml`，执行 `go run main.go -c ./config.yaml command init-system -y` 后运行 `go test ./tests/...`。
+
 ## 接口到文件映射
 
 ### 公开接口

@@ -247,7 +247,17 @@ func (api FileResourceController) FolderDelete(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	if err := service.NewFileResourceService().DeleteFolder(params.ID); err != nil {
+	if err := service.NewFileResourceService().DeleteFolder(params.ID, api.GetCurrentUserID(c), params.DeletedReason); err != nil {
+		var referencedErr *service.FileReferencedDeleteError
+		if stderrors.As(err, &referencedErr) {
+			message := "文件存在引用，不能删除"
+			businessErr := referencedErr.BusinessError()
+			if businessErr != nil {
+				message = businessErr.GetMessage()
+			}
+			api.Fail(c, pkgErrors.FileReferenced, message, gin.H{"references": referencedErr.References})
+			return
+		}
 		api.Err(c, err)
 		return
 	}
@@ -313,7 +323,7 @@ func (api FileResourceController) UploadCredential(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().UploadCredential(params)
+	result, err := service.NewFileResourceService().UploadCredential(params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -326,7 +336,7 @@ func (api FileResourceController) UploadCredentialBatch(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().UploadCredentialBatch(params)
+	result, err := service.NewFileResourceService().UploadCredentialBatch(params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -366,7 +376,7 @@ func (api FileResourceController) MultipartInit(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().MultipartInit(params)
+	result, err := service.NewFileResourceService().MultipartInit(params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return

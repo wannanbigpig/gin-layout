@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"testing"
 
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
 	"github.com/wannanbigpig/gin-layout/internal/model"
 )
 
@@ -59,6 +62,9 @@ func TestDefaultMenuAPIBindingsCoverManagementRoutes(t *testing.T) {
 		http.MethodGet + " /admin/v1/system/config/detail",
 		http.MethodPost + " /admin/v1/system/config/create",
 		http.MethodPost + " /admin/v1/system/config/update",
+		http.MethodGet + " /admin/v1/admin-user/get-full-phone",
+		http.MethodGet + " /admin/v1/admin-user/get-full-email",
+		http.MethodPost + " /admin/v1/menu/update-all-menu-permissions",
 		http.MethodGet + " /admin/v1/system/dict/type/list",
 		http.MethodGet + " /admin/v1/system/dict/options",
 		http.MethodGet + " /admin/v1/task/list",
@@ -125,5 +131,74 @@ func TestBuildDefaultMenuAPIMappingsSkipsMissingTargets(t *testing.T) {
 	want := &model.MenuApiMap{MenuId: 10, ApiId: 20}
 	if mappings[0].MenuId != want.MenuId || mappings[0].ApiId != want.ApiId {
 		t.Fatalf("unexpected mapping: got=%+v want=%+v", mappings[0], want)
+	}
+}
+
+func TestMenuAPIDefaultsSyncReconcilesDefaultRows(t *testing.T) {
+	db := newMenuAPIDefaultsTestDB(t)
+	execMenuAPITestSQL(t, db, "INSERT INTO menu (id, code, deleted_at) VALUES (1, 'old:button', 0), (2, 'new:button', 0), (3, 'manual:button', 0)")
+	execMenuAPITestSQL(t, db, "INSERT INTO api (id, route, method, deleted_at) VALUES (10, '/old', 'GET', 0), (20, '/new', 'GET', 0), (30, '/manual', 'GET', 0)")
+	execMenuAPITestSQL(t, db, "INSERT INTO menu_api_map (id, menu_id, api_id, is_default) VALUES (1, 1, 10, 1), (2, 3, 30, 0)")
+
+	service := NewMenuAPIDefaultsServiceWithDeps(MenuAPIDefaultsServiceDeps{
+		Bindings: []defaultMenuAPIBinding{
+			{MenuCode: "new:button", Route: "/new", Method: http.MethodGet},
+		},
+	})
+
+	if err := service.Sync(db); err != nil {
+		t.Fatalf("sync default menu api mappings: %v", err)
+	}
+
+	type row struct {
+		MenuID    uint `gorm:"column:menu_id"`
+		APIID     uint `gorm:"column:api_id"`
+		IsDefault int  `gorm:"column:is_default"`
+	}
+	var rows []row
+	if err := db.Table("menu_api_map").Select("menu_id", "api_id", "is_default").Order("menu_id, api_id").Find(&rows).Error; err != nil {
+		t.Fatalf("query mappings: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 mappings after reconcile, got %#v", rows)
+	}
+	if rows[0] != (row{MenuID: 2, APIID: 20, IsDefault: 1}) {
+		t.Fatalf("expected new default mapping, got %#v", rows[0])
+	}
+	if rows[1] != (row{MenuID: 3, APIID: 30, IsDefault: 0}) {
+		t.Fatalf("expected manual mapping to remain untouched, got %#v", rows[1])
+	}
+}
+
+func newMenuAPIDefaultsTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	statements := []string{
+		`CREATE TABLE menu (id integer primary key, code text not null default '', deleted_at integer not null default 0)`,
+		`CREATE TABLE api (id integer primary key, route text not null default '', method text not null default '', deleted_at integer not null default 0)`,
+		`CREATE TABLE menu_api_map (
+			id integer primary key autoincrement,
+			menu_id integer not null default 0,
+			api_id integer not null default 0,
+			is_default integer not null default 0,
+			created_at datetime null,
+			updated_at datetime null,
+			unique(menu_id, api_id)
+		)`,
+	}
+	for _, statement := range statements {
+		execMenuAPITestSQL(t, db, statement)
+	}
+	return db
+}
+
+func execMenuAPITestSQL(t *testing.T, db *gorm.DB, statement string) {
+	t.Helper()
+	if err := db.Exec(statement).Error; err != nil {
+		t.Fatalf("exec sql failed: %v\nsql: %s", err, statement)
 	}
 }

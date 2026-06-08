@@ -58,10 +58,12 @@ func (s *SysDictService) CreateTypeWithAuditDiff(params *form.CreateSysDictType)
 	if params == nil {
 		return "", e.NewBusinessError(e.InvalidParameter)
 	}
-	if err := s.applyTypeMutation(0, &params.SysDictTypePayload); err != nil {
+	typeCode := strings.TrimSpace(params.TypeCode)
+	params.TypeCode = typeCode
+	if err := s.applyTypeMutation(0, typeCode, &params.SysDictTypePayload); err != nil {
 		return "", err
 	}
-	after, err := s.snapshotTypeByTypeCode(params.TypeCode)
+	after, err := s.snapshotTypeByTypeCode(typeCode)
 	if err != nil {
 		return "", nil
 	}
@@ -73,11 +75,14 @@ func (s *SysDictService) UpdateTypeWithAuditDiff(params *form.UpdateSysDictType)
 	if params == nil {
 		return "", e.NewBusinessError(e.InvalidParameter)
 	}
+	if params.TypeCode != nil {
+		return "", e.NewBusinessError(e.InvalidParameter)
+	}
 	before, err := s.snapshotTypeByID(params.Id)
 	if err != nil {
 		return "", err
 	}
-	if err := s.applyTypeMutation(params.Id, &params.SysDictTypePayload); err != nil {
+	if err := s.applyTypeMutation(params.Id, "", &params.SysDictTypePayload); err != nil {
 		return "", err
 	}
 	after, err := s.snapshotTypeByID(params.Id)

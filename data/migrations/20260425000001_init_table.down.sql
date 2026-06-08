@@ -54,6 +54,7 @@ DROP TABLE IF EXISTS `casbin_rule`;
 DROP TABLE IF EXISTS `upload_file_references`;
 DROP TABLE IF EXISTS `upload_file_folders`;
 DROP TABLE IF EXISTS `upload_files`;
+DROP TABLE IF EXISTS `upload_sessions`;
 DROP TABLE IF EXISTS `upload_file_objects`;
 
 COMMIT;

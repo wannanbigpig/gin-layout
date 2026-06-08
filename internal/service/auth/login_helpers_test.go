@@ -55,6 +55,54 @@ func TestGetBlacklistKey(t *testing.T) {
 	}
 }
 
+func TestGenerateAccessTokenOmitsPIIClaims(t *testing.T) {
+	secretKey := testkit.SecretKey("auth-minimal-jwt")
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Jwt.SecretKey = secretKey
+		cfg.Jwt.TTL = 3600
+	})
+	defer restoreConfig()
+
+	service := NewLoginService()
+	claims := service.newAdminCustomClaims(&model.AdminUser{
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+			BaseModel: model.BaseModel{ID: 12},
+		},
+		Username:        "tester",
+		Nickname:        "测试用户",
+		Email:           "tester@example.com",
+		FullPhoneNumber: "+8613800138000",
+		PhoneNumber:     "13800138000",
+		CountryCode:     "+86",
+		IsSuperAdmin:    global.Yes,
+	})
+
+	accessToken, err := service.generateAccessToken(claims)
+	if err != nil {
+		t.Fatalf("generate token failed: %v", err)
+	}
+
+	parsedClaims := jwt.MapClaims{}
+	parsed, err := jwt.ParseWithClaims(accessToken, parsedClaims, func(jwtToken *jwt.Token) (interface{}, error) {
+		return []byte(secretKey), nil
+	})
+	if err != nil {
+		t.Fatalf("parse generated token failed: %v", err)
+	}
+	if parsed == nil || !parsed.Valid {
+		t.Fatalf("expected generated token to be valid")
+	}
+
+	for _, key := range []string{"full_phone_number", "phone_number", "country_code", "email", "nickname"} {
+		if _, exists := parsedClaims[key]; exists {
+			t.Fatalf("expected JWT payload to omit %q, got %#v", key, parsedClaims)
+		}
+	}
+	if parsedClaims["user_id"] == nil || parsedClaims["username"] != "tester" || parsedClaims["is_super_admin"] == nil {
+		t.Fatalf("expected minimal identity and permission claims, got %#v", parsedClaims)
+	}
+}
+
 // TestCalculateRemainingTime 验证剩余时间计算逻辑。
 func TestCalculateRemainingTime(t *testing.T) {
 	service := NewLoginService()

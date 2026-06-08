@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
-	"github.com/casbin/casbin/v3/model"
+	casbinmodel "github.com/casbin/casbin/v3/model"
 	"gorm.io/gorm"
 
 	c "github.com/wannanbigpig/gin-layout/config"
@@ -15,11 +17,41 @@ import (
 
 // getModelPath 获取 rbac_model.conf 路径并校验是否存在
 func getModelPath() (string, error) {
-	path := filepath.Join(c.GetConfig().BasePath, "rbac_model.conf")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return "", fmt.Errorf("模型文件不存在: %s", path)
+	const filename = "rbac_model.conf"
+	candidates := []string{}
+	if basePath := strings.TrimSpace(c.GetConfig().BasePath); basePath != "" {
+		candidates = append(candidates, filepath.Join(basePath, filename))
 	}
-	return path, nil
+	if c.V != nil {
+		if configPath := strings.TrimSpace(c.V.ConfigFileUsed()); configPath != "" {
+			candidates = append(candidates, filepath.Join(filepath.Dir(configPath), filename))
+		}
+	}
+	if workDir, err := os.Getwd(); err == nil && strings.TrimSpace(workDir) != "" {
+		candidates = append(candidates, filepath.Join(workDir, filename))
+	}
+	if executablePath, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(executablePath), filename))
+	}
+	if _, currentFile, _, ok := runtime.Caller(0); ok {
+		candidates = append(candidates, filepath.Join(filepath.Dir(currentFile), "..", "..", "..", filename))
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		absPath, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[absPath]; ok {
+			continue
+		}
+		seen[absPath] = struct{}{}
+		if info, err := os.Stat(absPath); err == nil && !info.IsDir() {
+			return absPath, nil
+		}
+	}
+	return "", fmt.Errorf("模型文件不存在: %s", strings.Join(candidates, ", "))
 }
 
 // isInTransaction 判断是否在事务中
@@ -41,7 +73,7 @@ func initEnforcerLocked() error {
 		return err
 	}
 
-	m, err := model.NewModelFromFile(modelPath)
+	m, err := casbinmodel.NewModelFromFile(modelPath)
 	if err != nil {
 		casbinManager.errInit = fmt.Errorf("加载模型失败: %w", err)
 		return casbinManager.errInit

@@ -6,14 +6,14 @@ import (
 
 func TestText(t *testing.T) {
 	var errorText = NewErrorText("zh_CN")
-	if "OK" != errorText.Text(0) {
+	if errorText.Text(0) != "OK" {
 		t.Error("text 返回 msg 不是预期的")
 	}
-	if "文件存在引用，不能删除" != errorText.Text(FileReferenced) {
+	if errorText.Text(FileReferenced) != "文件存在引用，不能删除" {
 		t.Error("文件引用错误码文案不是预期的")
 	}
 
-	if "unknown error" != errorText.Text(1202389) {
+	if errorText.Text(1202389) != "unknown error" {
 		t.Error("text 返回 msg 不是预期的")
 	}
 }

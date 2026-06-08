@@ -57,11 +57,10 @@ func InitApiRoutes() error {
 	if err := saveApiData(apiData); err != nil {
 		return fmt.Errorf("保存API数据失败: %w", err)
 	}
-	if err := access.NewMenuAPIDefaultsService().Sync(); err != nil {
-		return fmt.Errorf("同步默认菜单接口关系失败: %w", err)
+	if err := access.NewPermissionSyncCoordinator().SyncAll(); err != nil {
+		return fmt.Errorf("同步权限策略闭环失败: %w", err)
 	}
-
-	return access.NewSystemDefaultsService().Ensure()
+	return nil
 }
 
 // RebuildUserPermissions 按数据库关系全量重建用户最终 API 权限。
@@ -72,13 +71,7 @@ func RebuildUserPermissions() error {
 	}
 
 	// 在方案A中，菜单-API 关系以数据库关系表为准，这里改为全量重建用户最终 API 权限
-	if err := access.NewMenuAPIDefaultsService().Sync(); err != nil {
-		return err
-	}
-	if err := access.NewSystemDefaultsService().Ensure(); err != nil {
-		return err
-	}
-	return access.NewUserPermissionSyncService().SyncAllUsers()
+	return access.NewPermissionSyncCoordinator().SyncAll()
 }
 
 // buildApiData 构建API数据

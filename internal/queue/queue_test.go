@@ -148,6 +148,41 @@ func TestInitPublisherStoresLastError(t *testing.T) {
 	}
 }
 
+func TestPublishRetriesPublisherInitAfterFailure(t *testing.T) {
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue = autoload.QueueConfig{Enable: true}
+	})
+	defer restoreConfig()
+
+	previousFactory := activePublisherF
+	previousPublisher := activePublisher
+	previousInitErr := activePublisherE
+	t.Cleanup(func() {
+		activePublisherF = previousFactory
+		activePublisher = previousPublisher
+		activePublisherE = previousInitErr
+	})
+
+	publisher := &stubPublisher{}
+	activePublisher = nil
+	activePublisherE = errTestPublisherInit
+	activePublisherF = func(cfg *config.Conf) (Publisher, error) {
+		_ = cfg
+		return publisher, nil
+	}
+
+	info, err := PublishJSON(context.Background(), "demo:send", "default", testPayload{Name: "codex"})
+	if err != nil {
+		t.Fatalf("PublishJSON returned error: %v", err)
+	}
+	if info.ID != "job-1" || publisher.lastJob == nil {
+		t.Fatalf("expected retry to publish job, info=%#v publisher=%#v", info, publisher)
+	}
+	if PublisherInitError() != nil {
+		t.Fatalf("expected init error to be cleared, got %v", PublisherInitError())
+	}
+}
+
 func TestDeleteTaskUsesGlobalInspector(t *testing.T) {
 	inspector := &stubInspector{}
 	restore := SetInspectorForTesting(inspector)
@@ -181,6 +216,40 @@ func TestDeleteTaskReturnsUnavailableWithoutInspector(t *testing.T) {
 	err := DeleteTask(context.Background(), "default", "task-1")
 	if !errors.Is(err, ErrInspectorUnavailable) {
 		t.Fatalf("expected ErrInspectorUnavailable, got %v", err)
+	}
+}
+
+func TestDeleteTaskRetriesInspectorInitAfterFailure(t *testing.T) {
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue = autoload.QueueConfig{Enable: true}
+	})
+	defer restoreConfig()
+
+	previousFactory := activeInspectorF
+	previousInspector := activeInspector
+	previousInitErr := activeInspectorE
+	t.Cleanup(func() {
+		activeInspectorF = previousFactory
+		activeInspector = previousInspector
+		activeInspectorE = previousInitErr
+	})
+
+	inspector := &stubInspector{}
+	activeInspector = nil
+	activeInspectorE = errTestPublisherInit
+	activeInspectorF = func(cfg *config.Conf) (Inspector, error) {
+		_ = cfg
+		return inspector, nil
+	}
+
+	if err := DeleteTask(context.Background(), "default", "task-1"); err != nil {
+		t.Fatalf("DeleteTask returned error: %v", err)
+	}
+	if !inspector.deleteCalled {
+		t.Fatal("expected retry to initialize inspector and delete task")
+	}
+	if InspectorInitError() != nil {
+		t.Fatalf("expected init error to be cleared, got %v", InspectorInitError())
 	}
 }
 

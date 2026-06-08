@@ -347,9 +347,26 @@ func TestSystemDictWriteFlow(t *testing.T) {
 	assert.Equal(t, typeNameZh, typeNameI18n["zh-CN"])
 	assert.Equal(t, typeNameEn, typeNameI18n["en-US"])
 
-	updateTypeBody := map[string]any{
+	rejectTypeCodeUpdateBody := map[string]any{
 		"id":        dictType.ID,
-		"type_code": typeCode,
+		"type_code": typeCode + "_new",
+		"type_name_i18n": map[string]string{
+			"en-US": typeNameEn + "-rejected",
+		},
+		"status": 1,
+		"sort":   20,
+	}
+	rejectTypeCodeUpdateBytes, _ := json.Marshal(rejectTypeCodeUpdateBody)
+	rejectTypeCodeUpdatePayload := string(rejectTypeCodeUpdateBytes)
+	rejectTypeCodeUpdateResp := postRequest("/admin/v1/system/dict/type/update", &rejectTypeCodeUpdatePayload)
+	rejectTypeCodeUpdateResult := decodeResult(t, rejectTypeCodeUpdateResp)
+	assert.Equal(t, e.InvalidParameter, rejectTypeCodeUpdateResult.Code, rejectTypeCodeUpdateResult.Msg)
+
+	dictType = findSysDictTypeByCode(t, typeCode)
+	assert.Equal(t, typeCode, dictType.TypeCode)
+
+	updateTypeBody := map[string]any{
+		"id": dictType.ID,
 		"type_name_i18n": map[string]string{
 			"en-US": typeNameEn + "-u",
 		},
@@ -472,8 +489,7 @@ func TestSystemDictUpdateOmittedLocaleKeepsExistingTranslations(t *testing.T) {
 	dictType := findSysDictTypeByCode(t, typeCode)
 
 	updateTypeBody := map[string]any{
-		"id":        dictType.ID,
-		"type_code": typeCode,
+		"id": dictType.ID,
 		"type_name_i18n": map[string]string{
 			"en-US": typeNameEn + "-patched",
 		},

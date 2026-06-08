@@ -309,6 +309,15 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func firstUint(values ...uint) uint {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
 func (s *StorageConfigService) GetSensitiveValue(driverName, field string) (string, error) {
 	settings, err := s.Get(false)
 	if err != nil {

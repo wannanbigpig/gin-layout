@@ -186,9 +186,25 @@ func (s *ResetService) rollbackMigrations() error {
 			}
 			return nil
 		}
+		if isMissingRollbackMigrationError(err) {
+			log.Logger.Warn("检测到已应用迁移文件缺失，改为清空数据库后重建系统数据", zap.Error(err))
+			if dropErr := m.Drop(); dropErr != nil {
+				return fmt.Errorf("缺失回滚迁移文件后清空数据库失败: %w", dropErr)
+			}
+			return nil
+		}
 		return err
 	}
 	return nil
+}
+
+func isMissingRollbackMigrationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "no migration found for version") ||
+		(strings.Contains(message, "read down for version") && strings.Contains(message, "file does not exist"))
 }
 
 func (s *ResetService) runMigrations() error {

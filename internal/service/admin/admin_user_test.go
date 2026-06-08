@@ -92,6 +92,31 @@ func TestAdminUserHandleMutationErrorWrapsPlainError(t *testing.T) {
 	assertBusinessErrorMessage(t, err, e.CreateUserFailed, "创建用户失败，请重试")
 }
 
+func TestRevokeUserTokensAfterCommitReturnsError(t *testing.T) {
+	service := NewAdminUserService()
+	wantErr := errors.New("revoke failed")
+	previous := revokeUserTokensFunc
+	revokeUserTokensFunc = func(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) error {
+		_ = tx
+		if userID != 12 || revokedCode != model.RevokedCodePasswordChangeAdmin || revokedReason == "" {
+			t.Fatalf("unexpected revocation input: userID=%d code=%d reason=%q", userID, revokedCode, revokedReason)
+		}
+		return wantErr
+	}
+	defer func() {
+		revokeUserTokensFunc = previous
+	}()
+
+	err := service.revokeUserTokensAfterCommit([]userTokenRevocation{{
+		userID:        12,
+		revokedCode:   model.RevokedCodePasswordChangeAdmin,
+		revokedReason: "管理员修改密码",
+	}})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected revoke error %v, got %v", wantErr, err)
+	}
+}
+
 func TestAdminUserListOptionsDepartmentSelectFields(t *testing.T) {
 	service := NewAdminUserService()
 	options := service.adminUserListOptions()

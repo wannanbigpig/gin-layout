@@ -24,7 +24,7 @@ func TestFileResourceListAllowsMultiFileTypeAndOther(t *testing.T) {
 }
 
 func TestFileUploadCompleteRejectsMultiFileType(t *testing.T) {
-	err := bindJSONBody(t, `{"origin_name":"a.txt","storage_driver":"aliyun_oss","bucket":"assets","object_key":"a.txt","file_type":"pdf,word"}`, NewFileUploadCompleteForm())
+	err := bindJSONBody(t, `{"complete_token":"token","origin_name":"a.txt","size":12,"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime_type":"text/plain","is_public":1,"storage_driver":"aliyun_oss","bucket":"assets","object_key":"a.txt","file_type":"pdf,word"}`, NewFileUploadCompleteForm())
 	if err == nil {
 		t.Fatal("expected upload complete multi file_type to fail validation")
 	}
@@ -37,6 +37,13 @@ func TestFileUploadCredentialBatchAllowsSharedDriverAndItems(t *testing.T) {
 	}
 }
 
+func TestFileUploadCredentialRequiresHash(t *testing.T) {
+	err := bindJSONBody(t, `{"origin_name":"a.txt","size":12,"mime_type":"text/plain","driver":"aliyun_oss"}`, NewFileUploadCredentialForm())
+	if err == nil {
+		t.Fatal("expected credential without hash to fail validation")
+	}
+}
+
 func TestFileUploadCredentialBatchRequiresClientIDAndHash(t *testing.T) {
 	err := bindJSONBody(t, `{"items":[{"origin_name":"a.txt","size":12,"hash":"short"}]}`, NewFileUploadCredentialBatchForm())
 	if err == nil {
@@ -45,28 +52,28 @@ func TestFileUploadCredentialBatchRequiresClientIDAndHash(t *testing.T) {
 }
 
 func TestFileUploadCompleteBatchRejectsLocalDriver(t *testing.T) {
-	err := bindJSONBody(t, `{"driver":"local","items":[{"client_id":"c1","origin_name":"a.txt"}]}`, NewFileUploadCompleteBatchForm())
+	err := bindJSONBody(t, `{"driver":"local","items":[{"client_id":"c1","complete_token":"token","origin_name":"a.txt","size":12,"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime_type":"text/plain"}]}`, NewFileUploadCompleteBatchForm())
 	if err == nil {
 		t.Fatal("expected local complete batch driver to fail validation")
 	}
 }
 
 func TestFileUploadCompleteBatchAllowsReuseItem(t *testing.T) {
-	err := bindJSONBody(t, `{"driver":"aliyun_oss","items":[{"client_id":"c1","reuse":true,"file_object_id":1,"origin_name":"a.txt"}]}`, NewFileUploadCompleteBatchForm())
+	err := bindJSONBody(t, `{"driver":"aliyun_oss","items":[{"client_id":"c1","complete_token":"token","reuse":true,"file_object_id":1,"origin_name":"a.txt","size":12,"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime_type":"text/plain"}]}`, NewFileUploadCompleteBatchForm())
 	if err != nil {
 		t.Fatalf("expected complete batch reuse item to pass validation, got %v", err)
 	}
 }
 
 func TestFileMultipartCompleteRejectsMultiFileType(t *testing.T) {
-	err := bindJSONBody(t, `{"origin_name":"a.txt","driver":"aliyun_oss","bucket":"assets","object_key":"a.txt","file_type":"pdf,word","parts":[{"part_number":1,"etag":"etag"}]}`, NewFileMultipartCompleteForm())
+	err := bindJSONBody(t, `{"complete_token":"token","origin_name":"a.txt","size":12,"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime_type":"text/plain","driver":"aliyun_oss","bucket":"assets","object_key":"a.txt","file_type":"pdf,word","parts":[{"part_number":1,"etag":"etag"}]}`, NewFileMultipartCompleteForm())
 	if err == nil {
 		t.Fatal("expected multipart complete multi file_type to fail validation")
 	}
 }
 
-func TestFileMultipartCompleteAllowsReuseWithoutUploadIDAndParts(t *testing.T) {
-	err := bindJSONBody(t, `{"reuse":true,"file_object_id":1,"origin_name":"a.txt","file_type":"pdf"}`, NewFileMultipartCompleteForm())
+func TestFileMultipartCompleteAllowsReuseTokenWithoutUploadIDAndParts(t *testing.T) {
+	err := bindJSONBody(t, `{"complete_token":"token","reuse":true,"file_object_id":1,"origin_name":"a.txt","size":12,"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime_type":"application/pdf","file_type":"pdf"}`, NewFileMultipartCompleteForm())
 	if err != nil {
 		t.Fatalf("expected reuse multipart complete without upload_id, bucket, object_key and parts to pass validation, got %v", err)
 	}

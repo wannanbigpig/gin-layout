@@ -134,6 +134,10 @@ func NewJSONJob(taskType, queueName string, payload any, opts ...JobOption) Job 
 func Publish(ctx context.Context, job Job) (JobInfo, error) {
 	publisher := PublisherOrNil()
 	if publisher == nil {
+		retryPublisherInitIfNeeded()
+		publisher = PublisherOrNil()
+	}
+	if publisher == nil {
 		return JobInfo{}, ErrPublisherUnavailable
 	}
 	return publisher.Enqueue(ctx, job)
@@ -314,9 +318,41 @@ func InspectorInitError() error {
 	return activeInspectorE
 }
 
+func retryPublisherInitIfNeeded() {
+	cfg := config.GetConfig()
+	if cfg == nil || !cfg.Queue.Enable {
+		return
+	}
+
+	publisherMu.RLock()
+	shouldRetry := activePublisher == nil && activePublisherE != nil
+	publisherMu.RUnlock()
+	if shouldRetry {
+		_ = InitPublisher(cfg)
+	}
+}
+
+func retryInspectorInitIfNeeded() {
+	cfg := config.GetConfig()
+	if cfg == nil || !cfg.Queue.Enable {
+		return
+	}
+
+	inspectorMu.RLock()
+	shouldRetry := activeInspector == nil && activeInspectorE != nil
+	inspectorMu.RUnlock()
+	if shouldRetry {
+		_ = InitInspector(cfg)
+	}
+}
+
 // DeleteTask 删除队列中的任务（pending/scheduled/retry/archived）。
 func DeleteTask(ctx context.Context, queueName, taskID string) error {
 	inspector := InspectorOrNil()
+	if inspector == nil {
+		retryInspectorInitIfNeeded()
+		inspector = InspectorOrNil()
+	}
 	if inspector == nil {
 		return ErrInspectorUnavailable
 	}
@@ -326,6 +362,10 @@ func DeleteTask(ctx context.Context, queueName, taskID string) error {
 // CancelProcessing 发送取消正在执行任务的信号（best-effort）。
 func CancelProcessing(ctx context.Context, taskID string) error {
 	inspector := InspectorOrNil()
+	if inspector == nil {
+		retryInspectorInitIfNeeded()
+		inspector = InspectorOrNil()
+	}
 	if inspector == nil {
 		return ErrInspectorUnavailable
 	}

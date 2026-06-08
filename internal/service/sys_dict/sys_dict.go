@@ -108,10 +108,16 @@ func (s *SysDictService) Options(typeCode string, locale string) ([]resources.Sy
 	return resources.ToSysDictOptions(items), nil
 }
 
-func (s *SysDictService) applyTypeMutation(id uint, params *form.SysDictTypePayload) error {
-	params.TypeCode = strings.TrimSpace(params.TypeCode)
+func (s *SysDictService) applyTypeMutation(id uint, typeCode string, params *form.SysDictTypePayload) error {
+	if params == nil {
+		return e.NewBusinessError(e.InvalidParameter)
+	}
+	typeCode = strings.TrimSpace(typeCode)
 	params.TypeNameI18n = service.NormalizeLocaleTextMap(params.TypeNameI18n)
 	params.Remark = strings.TrimSpace(params.Remark)
+	if id == 0 && typeCode == "" {
+		return e.NewBusinessError(e.InvalidParameter)
+	}
 	if len(params.TypeNameI18n) == 0 {
 		return e.NewBusinessError(e.InvalidParameter)
 	}
@@ -121,17 +127,19 @@ func (s *SysDictService) applyTypeMutation(id uint, params *form.SysDictTypePayl
 		if err := dictType.GetById(id); err != nil || dictType.ID == 0 {
 			return e.NewBusinessError(e.NotFound)
 		}
-		if dictType.IsProtected() && dictType.TypeCode != params.TypeCode {
+		typeCode = dictType.TypeCode
+	}
+	if id == 0 {
+		if exists, err := model.NewSysDictType().ExistsByTypeCodeExcludeID(typeCode, 0); err != nil {
+			return err
+		} else if exists {
 			return e.NewBusinessError(e.InvalidParameter)
 		}
 	}
-	if exists, err := model.NewSysDictType().ExistsByTypeCodeExcludeID(params.TypeCode, id); err != nil {
-		return err
-	} else if exists {
-		return e.NewBusinessError(e.InvalidParameter)
-	}
 
-	dictType.TypeCode = params.TypeCode
+	if id == 0 {
+		dictType.TypeCode = typeCode
+	}
 	dictType.Status = valueOrDefault(params.Status, defaultStatus(dictType.Status, id))
 	dictType.Sort = params.Sort
 	dictType.Remark = params.Remark

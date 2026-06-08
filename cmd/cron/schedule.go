@@ -18,6 +18,7 @@ import (
 // Scheduler 提供链式的任务注册方式。
 type Scheduler struct {
 	logger *cronLogger
+	ctx    context.Context
 	tasks  []*scheduledTask
 }
 
@@ -25,7 +26,7 @@ type scheduledTask struct {
 	name      string
 	spec      string
 	specErr   error
-	run       func() error
+	run       func(context.Context) error
 	skipIfRun bool
 }
 
@@ -44,17 +45,26 @@ var cronSpecParser = cron.NewParser(
 		cron.Descriptor,
 )
 
-func registerTasks(crontab *cron.Cron) error {
+func registerTasks(crontab *cron.Cron, ctx context.Context) error {
 	logger := &cronLogger{}
-	schedule := NewSchedule(logger)
+	schedule := NewScheduleWithContext(ctx, logger)
 	defineSchedule(schedule)
 	return schedule.Register(crontab)
 }
 
 // NewSchedule 创建任务声明器。
 func NewSchedule(logger *cronLogger) *Scheduler {
+	return NewScheduleWithContext(context.Background(), logger)
+}
+
+// NewScheduleWithContext 创建带运行上下文的任务声明器。
+func NewScheduleWithContext(ctx context.Context, logger *cronLogger) *Scheduler {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &Scheduler{
 		logger: logger,
+		ctx:    ctx,
 		tasks:  make([]*scheduledTask, 0, 4),
 	}
 }
@@ -63,7 +73,7 @@ func NewSchedule(logger *cronLogger) *Scheduler {
 func (s *Scheduler) Call(name string, fn func()) *TaskBuilder {
 	task := &scheduledTask{
 		name:      name,
-		run:       func() error { fn(); return nil },
+		run:       func(context.Context) error { fn(); return nil },
 		skipIfRun: true,
 	}
 	s.tasks = append(s.tasks, task)
@@ -72,6 +82,17 @@ func (s *Scheduler) Call(name string, fn func()) *TaskBuilder {
 
 // CallE 注册一个返回 error 的函数任务。
 func (s *Scheduler) CallE(name string, fn func() error) *TaskBuilder {
+	task := &scheduledTask{
+		name:      name,
+		run:       func(context.Context) error { return fn() },
+		skipIfRun: true,
+	}
+	s.tasks = append(s.tasks, task)
+	return &TaskBuilder{task: task}
+}
+
+// CallContextE 注册一个接收运行上下文并返回 error 的函数任务。
+func (s *Scheduler) CallContextE(name string, fn func(context.Context) error) *TaskBuilder {
 	task := &scheduledTask{
 		name:      name,
 		run:       fn,
@@ -159,7 +180,7 @@ func (s *Scheduler) recordedJob(task *scheduledTask) cron.Job {
 			return
 		}
 
-		ctx := context.Background()
+		ctx := s.taskContext()
 		taskCode := "cron:" + task.name
 		run, recordErr := taskcenter.NewRunRecorder().Start(ctx, taskcenter.RunStart{
 			TaskCode: taskCode,
@@ -174,7 +195,7 @@ func (s *Scheduler) recordedJob(task *scheduledTask) cron.Job {
 				zap.Error(recordErr))
 		}
 
-		err := task.run()
+		err := task.run(ctx)
 		if err != nil {
 			log.Logger.Error("定时任务执行失败",
 				zap.String("name", task.name),
@@ -199,6 +220,13 @@ func (s *Scheduler) recordedJob(task *scheduledTask) cron.Job {
 				zap.Error(recordErr))
 		}
 	})
+}
+
+func (s *Scheduler) taskContext() context.Context {
+	if s == nil || s.ctx == nil {
+		return context.Background()
+	}
+	return s.ctx
 }
 
 func calculateNextRunAt(spec string, base time.Time) (*time.Time, error) {

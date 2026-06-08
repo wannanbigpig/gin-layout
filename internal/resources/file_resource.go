@@ -178,6 +178,7 @@ type FileUploadCredentialResources struct {
 	MimeType        string            `json:"mime_type"`
 	ETag            string            `json:"etag"`
 	ObjectStatus    string            `json:"object_status"`
+	CompleteToken   string            `json:"complete_token"`
 	CompletePayload map[string]any    `json:"complete_payload"`
 }
 
@@ -316,5 +317,6 @@ type MultipartInitResource struct {
 	MimeType        string                   `json:"mime_type"`
 	ETag            string                   `json:"etag"`
 	ObjectStatus    string                   `json:"object_status"`
+	CompleteToken   string                   `json:"complete_token"`
 	CompletePayload map[string]any           `json:"complete_payload,omitempty"`
 }

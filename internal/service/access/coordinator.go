@@ -1,6 +1,8 @@
 package access
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -46,18 +48,30 @@ func NewPermissionSyncCoordinatorWithDeps(deps PermissionSyncCoordinatorDeps) *P
 
 // SyncAll 重建全部用户最终 API 权限。
 func (c *PermissionSyncCoordinator) SyncAll() error {
-	if err := NewSystemDefaultsService().Ensure(); err != nil {
-		return err
+	if err := NewMenuAPIDefaultsService().Sync(); err != nil {
+		return fmt.Errorf("sync default menu api mappings: %w", err)
 	}
-	return c.syncer.SyncAllUsers()
+	if err := NewSystemDefaultsService().Ensure(); err != nil {
+		return fmt.Errorf("ensure system defaults: %w", err)
+	}
+	if err := c.syncer.SyncAllUsers(); err != nil {
+		return fmt.Errorf("sync all user permissions: %w", err)
+	}
+	return nil
 }
 
 // SyncAllInTx 在事务内重建全部用户最终 API 权限。
 func (c *PermissionSyncCoordinator) SyncAllInTx(tx *gorm.DB) error {
-	if err := NewSystemDefaultsService().Ensure(tx); err != nil {
-		return err
+	if err := NewMenuAPIDefaultsService().Sync(tx); err != nil {
+		return fmt.Errorf("sync default menu api mappings: %w", err)
 	}
-	return c.syncer.SyncAllUsers(tx)
+	if err := NewSystemDefaultsService().Ensure(tx); err != nil {
+		return fmt.Errorf("ensure system defaults: %w", err)
+	}
+	if err := c.syncer.SyncAllUsers(tx); err != nil {
+		return fmt.Errorf("sync all user permissions: %w", err)
+	}
+	return nil
 }
 
 // SyncUser 重建单个用户最终 API 权限。

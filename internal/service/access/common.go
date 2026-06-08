@@ -1,8 +1,9 @@
 package access
 
 import (
+	"fmt"
+
 	casbinx "github.com/wannanbigpig/gin-layout/internal/access/casbin"
-	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"gorm.io/gorm"
 )
 
@@ -14,7 +15,7 @@ func defaultReloadPolicy() error {
 func getPolicyEnforcer() (*casbinx.CasbinEnforcer, error) {
 	enforcer, err := casbinx.GetEnforcer()
 	if err != nil {
-		return nil, e.NewBusinessError(e.CasbinInitFailed)
+		return nil, fmt.Errorf("casbin enforcer init failed: %w", err)
 	}
 	return enforcer, nil
 }
