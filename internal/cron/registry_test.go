@@ -87,7 +87,7 @@ func TestSyncBuiltinDefinitionsPreservesOperationalConfigAndUpdatesDefinitionFie
 		t.Fatalf("query synced task definition failed: %v", err)
 	}
 	if definition.Name != "自动清理过期临时文件" ||
-		definition.CronSpec != "0 0 3 * * *" ||
+		definition.CronSpec != "0 * * * * *" ||
 		definition.Handler != HandlerCronCleanExpiredFiles ||
 		definition.Remark == "旧备注" {
 		t.Fatalf("definition fields were not updated: %#v", definition)

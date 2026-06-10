@@ -252,7 +252,7 @@ Notes:
 go run main.go -c ./config.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
 ```
 
-- After adding built-in async or cron tasks in a deployed environment, do not run `init-system`. Run `command task sync-definitions` to sync task definitions, then use `scan-async` / `scan-cron` to verify that tasks exist in the table. The sync only updates code-owned definition fields and preserves operational settings such as `status`, manual trigger, retry, and record policies.
+- After adding built-in async or cron tasks in a deployed environment, do not run `init-system`. Run `command task sync-definitions` to sync task definitions, then use `scan-async` / `scan-cron` to verify that tasks exist in the table. The sync only updates code-owned definition fields and preserves operational settings such as `status`, `cron_spec`, manual trigger, retry, and record policies.
 
 ## Configuration
 

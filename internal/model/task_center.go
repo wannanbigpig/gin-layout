@@ -53,6 +53,7 @@ const (
 	TaskDetailRecordNone    = "none"
 
 	TaskRunStatsWindowHour = "hour"
+	TaskRunStatsWindowDay  = "day"
 )
 
 // TaskDefinition 描述一个可被后台管理识别的任务。
@@ -87,27 +88,30 @@ func (m *TaskDefinition) TableName() string {
 // TaskRun 表示一次任务执行记录。
 type TaskRun struct {
 	BaseModel
-	TaskCode         string            `json:"task_code"`          // 任务唯一编码
-	Kind             string            `json:"kind"`               // async/cron
-	Source           string            `json:"source"`             // queue/cron/manual
-	SourceID         string            `json:"source_id"`          // 来源任务ID
-	Queue            string            `json:"queue"`              // 队列名称
-	TriggerUserID    uint              `json:"trigger_user_id"`    // 触发人ID
-	TriggerAccount   string            `json:"trigger_account"`    // 触发人账号
-	Status           string            `json:"status"`             // 执行状态
-	Attempt          int               `json:"attempt"`            // 当前尝试次数
-	MaxRetry         int               `json:"max_retry"`          // 最大重试次数
-	RetryOfRunID     uint              `json:"retry_of_run_id"`    // 直接重试来源执行记录ID
-	RetryRootRunID   uint              `json:"retry_root_run_id"`  // 重试链路根执行记录ID
-	RetrySeq         int               `json:"retry_seq"`          // 重试链路内人工重试序号
-	Payload          string            `json:"payload"`            // 任务 payload
-	ErrorMessage     string            `json:"error_message"`      // 失败原因
-	StartedAt        *utils.FormatDate `json:"started_at"`         // 开始时间
-	FinishedAt       *utils.FormatDate `json:"finished_at"`        // 结束时间
-	DurationMS       float64           `json:"duration_ms"`        // 执行耗时毫秒
-	DetailRecordMode string            `json:"detail_record_mode"` // 明细记录模式
-	CanRetry         bool              `gorm:"-" json:"can_retry"` // 当前执行记录是否允许手动重试
-	RetryBlockReason string            `gorm:"-" json:"retry_block_reason"`
+	TaskCode          string            `json:"task_code"`          // 任务唯一编码
+	Kind              string            `json:"kind"`               // async/cron
+	Source            string            `json:"source"`             // queue/cron/manual
+	SourceID          string            `json:"source_id"`          // 来源任务ID
+	Queue             string            `json:"queue"`              // 队列名称
+	TriggerUserID     uint              `json:"trigger_user_id"`    // 触发人ID
+	TriggerAccount    string            `json:"trigger_account"`    // 触发人账号
+	Status            string            `json:"status"`             // 执行状态
+	Attempt           int               `json:"attempt"`            // 当前尝试次数
+	MaxRetry          int               `json:"max_retry"`          // 最大重试次数
+	RetryOfRunID      uint              `json:"retry_of_run_id"`    // 直接重试来源执行记录ID
+	RetryRootRunID    uint              `json:"retry_root_run_id"`  // 重试链路根执行记录ID
+	RetrySeq          int               `json:"retry_seq"`          // 重试链路内人工重试序号
+	Payload           string            `json:"payload"`            // 任务 payload
+	ErrorMessage      string            `json:"error_message"`      // 失败原因
+	StartedAt         *utils.FormatDate `json:"started_at"`         // 开始时间
+	FinishedAt        *utils.FormatDate `json:"finished_at"`        // 结束时间
+	DurationMS        float64           `json:"duration_ms"`        // 执行耗时毫秒
+	DetailRecordMode  string            `json:"detail_record_mode"` // 明细记录模式
+	CanRetry          bool              `gorm:"-" json:"can_retry"` // 当前执行记录是否允许手动重试
+	RetryBlockReason  string            `gorm:"-" json:"retry_block_reason"`
+	RetryCount        int               `gorm:"-" json:"retry_count"`         // 重试链路内已人工重试次数
+	LatestRetryRunID  uint              `gorm:"-" json:"latest_retry_run_id"` // 最近一次人工重试执行记录ID
+	LatestRetryStatus string            `gorm:"-" json:"latest_retry_status"` // 最近一次人工重试状态
 }
 
 func NewTaskRun() *TaskRun {

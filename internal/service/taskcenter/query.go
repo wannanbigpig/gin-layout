@@ -130,11 +130,39 @@ func (s *TaskCenterService) ListTaskRuns(params *form.TaskRunList) *resources.Co
 	}
 
 	transformer := resources.NewTaskRunTransformer()
+	if s.db != nil {
+		var total int64
+		db := s.db.Model(&model.TaskRun{})
+		if condition != "" {
+			db = db.Where(condition, args...)
+		}
+		if err := db.Count(&total).Error; err != nil {
+			log.Logger.Error("查询任务执行记录列表失败", zap.Error(err))
+			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		}
+		if total == 0 {
+			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		}
+		collection := make([]*model.TaskRun, 0, params.PerPage)
+		queryDB := s.db.Model(&model.TaskRun{}).Select(listOptionalParams.SelectFields).Order(listOptionalParams.OrderBy)
+		if condition != "" {
+			queryDB = queryDB.Where(condition, args...)
+		}
+		if err := queryDB.Scopes(runModel.Paginate(params.Page, params.PerPage)).Find(&collection).Error; err != nil {
+			log.Logger.Error("查询任务执行记录列表失败", zap.Error(err))
+			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		}
+		s.fillTaskRunTriggerAccounts(context.Background(), collection)
+		s.decorateTaskRunRetryState(context.Background(), collection)
+		return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	}
+
 	total, collection, err := model.ListPageE(runModel, params.Page, params.PerPage, condition, args, listOptionalParams)
 	if err != nil {
 		log.Logger.Error("查询任务执行记录列表失败", zap.Error(err))
 		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
 	}
+	s.fillTaskRunTriggerAccounts(context.Background(), collection)
 	s.decorateTaskRunRetryState(context.Background(), collection)
 	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
 }
@@ -148,6 +176,7 @@ func (s *TaskCenterService) TaskRunDetail(id uint) (any, error) {
 	if err := taskRun.GetById(id); err != nil || taskRun.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
+	s.fillTaskRunTriggerAccounts(context.Background(), []*model.TaskRun{taskRun})
 	s.decorateTaskRunRetryState(context.Background(), []*model.TaskRun{taskRun})
 	return resources.NewTaskRunTransformer().ToStruct(taskRun), nil
 }
@@ -191,6 +220,61 @@ func buildTaskRunEventResources(events []*model.TaskRunEvent) []*resources.TaskR
 		response = append(response, transformer.ToStruct(item))
 	}
 	return response
+}
+
+func (s *TaskCenterService) fillTaskRunTriggerAccounts(ctx context.Context, runs []*model.TaskRun) {
+	if len(runs) == 0 {
+		return
+	}
+	userIDs := make([]uint, 0, len(runs))
+	seen := make(map[uint]struct{}, len(runs))
+	for _, run := range runs {
+		if run == nil || run.TriggerUserID == 0 || strings.TrimSpace(run.TriggerAccount) != "" {
+			continue
+		}
+		if _, ok := seen[run.TriggerUserID]; ok {
+			continue
+		}
+		seen[run.TriggerUserID] = struct{}{}
+		userIDs = append(userIDs, run.TriggerUserID)
+	}
+	if len(userIDs) == 0 {
+		return
+	}
+
+	db, err := s.dbOrDefault()
+	if err != nil {
+		log.Logger.Warn("补全任务执行记录操作人账号失败", zap.Error(err))
+		return
+	}
+	type adminUserRow struct {
+		ID       uint
+		Username string
+	}
+	rows := make([]adminUserRow, 0, len(userIDs))
+	if err := db.WithContext(ctx).
+		Table(model.NewAdminUsers().TableName()).
+		Select("id", "username").
+		Where("id IN ? AND deleted_at = 0", userIDs).
+		Scan(&rows).Error; err != nil {
+		log.Logger.Warn("查询任务执行记录操作人账号失败", zap.Error(err))
+		return
+	}
+	accountByID := make(map[uint]string, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.Username) == "" {
+			continue
+		}
+		accountByID[row.ID] = row.Username
+	}
+	for _, run := range runs {
+		if run == nil || run.TriggerUserID == 0 || strings.TrimSpace(run.TriggerAccount) != "" {
+			continue
+		}
+		if account, ok := accountByID[run.TriggerUserID]; ok {
+			run.TriggerAccount = account
+		}
+	}
 }
 
 // TaskRunAuditSnapshot 查询任务执行记录的审计快照（用于构建 change_diff）。
@@ -321,20 +405,8 @@ func (s *TaskCenterService) TaskRunStatsTrend(params *form.TaskRunStatsQuery) ([
 	if err != nil {
 		return nil, err
 	}
-	type row struct {
-		WindowStart         utils.FormatDate
-		WindowSize          string
-		TotalCount          uint64
-		SuccessCount        uint64
-		FailedCount         uint64
-		CanceledCount       uint64
-		TimeoutCount        uint64
-		InterruptedCount    uint64
-		SampledSuccessCount uint64
-		DurationTotalMS     float64
-		DurationMaxMS       float64
-	}
-	var rows []row
+	windowSize := statsFilter.trendWindowSize()
+	var rows []taskRunTrendRow
 	err = statsFilter.Apply(db.Model(&model.TaskRunStat{})).
 		Select([]string{
 			"window_start",
@@ -355,11 +427,14 @@ func (s *TaskCenterService) TaskRunStatsTrend(params *form.TaskRunStatsQuery) ([
 	if err != nil {
 		return nil, err
 	}
+	if windowSize == model.TaskRunStatsWindowDay {
+		rows = aggregateTaskRunTrendRowsByDay(rows)
+	}
 	result := make([]*resources.TaskRunTrendPointResources, 0, len(rows))
 	for _, item := range rows {
 		result = append(result, &resources.TaskRunTrendPointResources{
 			WindowStart:         item.WindowStart,
-			WindowSize:          item.WindowSize,
+			WindowSize:          windowSize,
 			TotalCount:          item.TotalCount,
 			SuccessCount:        item.SuccessCount,
 			FailedCount:         item.FailedCount,
@@ -372,6 +447,53 @@ func (s *TaskCenterService) TaskRunStatsTrend(params *form.TaskRunStatsQuery) ([
 		})
 	}
 	return result, nil
+}
+
+type taskRunTrendRow struct {
+	WindowStart         utils.FormatDate
+	WindowSize          string
+	TotalCount          uint64
+	SuccessCount        uint64
+	FailedCount         uint64
+	CanceledCount       uint64
+	TimeoutCount        uint64
+	InterruptedCount    uint64
+	SampledSuccessCount uint64
+	DurationTotalMS     float64
+	DurationMaxMS       float64
+}
+
+func aggregateTaskRunTrendRowsByDay(rows []taskRunTrendRow) []taskRunTrendRow {
+	if len(rows) == 0 {
+		return rows
+	}
+	result := make([]taskRunTrendRow, 0, len(rows))
+	indexByDay := make(map[string]int, len(rows))
+	for _, row := range rows {
+		item := row
+		start := item.WindowStart.Time
+		dayStart := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+		item.WindowStart = utils.FormatDate{Time: dayStart}
+		item.WindowSize = model.TaskRunStatsWindowDay
+		dayKey := dayStart.Format("2006-01-02")
+		if index, ok := indexByDay[dayKey]; ok {
+			result[index].TotalCount += item.TotalCount
+			result[index].SuccessCount += item.SuccessCount
+			result[index].FailedCount += item.FailedCount
+			result[index].CanceledCount += item.CanceledCount
+			result[index].TimeoutCount += item.TimeoutCount
+			result[index].InterruptedCount += item.InterruptedCount
+			result[index].SampledSuccessCount += item.SampledSuccessCount
+			result[index].DurationTotalMS += item.DurationTotalMS
+			if item.DurationMaxMS > result[index].DurationMaxMS {
+				result[index].DurationMaxMS = item.DurationMaxMS
+			}
+			continue
+		}
+		indexByDay[dayKey] = len(result)
+		result = append(result, item)
+	}
+	return result
 }
 
 func (s *TaskCenterService) dbOrDefault() (*gorm.DB, error) {
@@ -447,7 +569,11 @@ func (s *TaskCenterService) decorateTaskRunRetryState(ctx context.Context, runs 
 			continue
 		}
 		rootID := retryRootRunID(run)
-		canRetry, reason := evaluateTaskRunRetryState(run, definitions[run.TaskCode], summaries[rootID])
+		summary := summaries[rootID]
+		run.RetryCount = summary.MaxSeq
+		run.LatestRetryRunID = summary.LatestRetryRunID
+		run.LatestRetryStatus = summary.LatestRetryStatus
+		canRetry, reason := evaluateTaskRunRetryState(run, definitions[run.TaskCode], summary)
 		run.CanRetry = canRetry
 		run.RetryBlockReason = reason
 	}
@@ -479,6 +605,13 @@ func (f *statsFilter) Apply(db *gorm.DB) *gorm.DB {
 		return db.Where(condition, args...)
 	}
 	return db
+}
+
+func (f *statsFilter) trendWindowSize() string {
+	if f == nil || f.end.Sub(f.start) > 24*time.Hour {
+		return model.TaskRunStatsWindowDay
+	}
+	return model.TaskRunStatsWindowHour
 }
 
 func (f *statsFilter) taskCode() string {

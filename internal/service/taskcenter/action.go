@@ -13,6 +13,7 @@ import (
 
 	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/cronexpr"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
@@ -44,6 +45,7 @@ var executeCronHandler = func(ctx context.Context, handler string, payload map[s
 
 type exportTaskService interface {
 	CreateRecordForTask(ctx context.Context, input baseservice.ExportTaskBootstrapInput) (*model.SysExportRecord, bool, error)
+	HasRecordForTaskRun(ctx context.Context, taskRunID uint) (bool, error)
 	ReassignTaskRun(ctx context.Context, oldTaskRunID, newTaskRunID uint, queueName string) (bool, error)
 	MarkFailed(ctx context.Context, taskRunID uint, taskErr error) error
 	MarkCanceledIfExists(ctx context.Context, taskRunID uint, cancelReason string) error
@@ -129,7 +131,7 @@ func (s *TaskCenterService) UpdateTaskRecordPolicy(ctx context.Context, params *
 	return resources.NewTaskDefinitionTransformer().ToStruct(definition), nil
 }
 
-// UpdateTaskOperationConfig 更新任务启停和手动触发/重试开关。
+// UpdateTaskOperationConfig 更新任务启停、手动触发/重试开关和 cron 调度表达式。
 func (s *TaskCenterService) UpdateTaskOperationConfig(ctx context.Context, params *form.TaskOperationConfigForm) (any, error) {
 	taskCode := strings.TrimSpace(params.TaskCode)
 	if taskCode == "" {
@@ -153,6 +155,19 @@ func (s *TaskCenterService) UpdateTaskOperationConfig(ctx context.Context, param
 		"allow_manual": params.AllowManual,
 		"allow_retry":  params.AllowRetry,
 	}
+	cronSpec := strings.TrimSpace(params.CronSpec)
+	if definition.Kind == model.TaskKindCron {
+		if cronSpec == "" {
+			cronSpec = strings.TrimSpace(definition.CronSpec)
+		}
+		if cronSpec == "" {
+			return nil, e.NewBusinessError(e.InvalidParameter, "cron_spec 不能为空")
+		}
+		if err := cronexpr.Validate(cronSpec); err != nil {
+			return nil, e.NewBusinessError(e.InvalidParameter, "cron_spec 不是合法 Cron 表达式")
+		}
+		updates["cron_spec"] = cronSpec
+	}
 	if err := db.WithContext(ctx).Model(&model.TaskDefinition{}).
 		Where("code = ? AND deleted_at = 0", taskCode).
 		Updates(updates).Error; err != nil {
@@ -161,6 +176,9 @@ func (s *TaskCenterService) UpdateTaskOperationConfig(ctx context.Context, param
 	definition.Status = params.Status
 	definition.AllowManual = params.AllowManual
 	definition.AllowRetry = params.AllowRetry
+	if definition.Kind == model.TaskKindCron {
+		definition.CronSpec = cronSpec
+	}
 	return resources.NewTaskDefinitionTransformer().ToStruct(definition), nil
 }
 
@@ -329,13 +347,26 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 	}
 	rawPayload, _ := json.Marshal(payloadAny)
 
+	exportService := newExportTaskService()
+	shouldUpdateExportRecord := isExportTaskCode(runModel.TaskCode)
+	if shouldUpdateExportRecord {
+		exists, err := exportService.HasRecordForTaskRun(ctx, runModel.ID)
+		if err != nil {
+			if errors.Is(err, baseservice.ErrExportRecordTableMissing) {
+				return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "导出记录表未初始化")
+			}
+			return nil, err
+		}
+		if !exists {
+			return nil, e.NewBusinessError(e.NotFound, "导出记录不存在，无法重试")
+		}
+	}
+
 	retryRun, retrySeq, taskID, err := s.enqueueRetryRunWithChainGuard(ctx, runModel, definition, rootRunID, queueName, rawPayload, triggerUserID, triggerAccount)
 	if err != nil {
 		return nil, err
 	}
 
-	exportService := newExportTaskService()
-	shouldUpdateExportRecord := isExportTaskCode(runModel.TaskCode)
 	if shouldUpdateExportRecord {
 		reassigned, err := exportService.ReassignTaskRun(ctx, runModel.ID, retryRun.ID, queueName)
 		if err != nil {

@@ -154,7 +154,7 @@ go run main.go -c ./config.yaml command migrate up
 - `task sync-definitions`
   - 非破坏性同步 `BuiltinTaskDefinitions(cfg)` 到 `task_definitions`
   - 新增任务上线后使用这个命令补齐表数据，不执行 `init-system`
-  - 已存在任务只更新 `name/kind/queue/cron_spec/handler/is_high_risk/remark` 等代码定义字段，保留 `status/allow_manual/allow_retry/record_success_*` 等运营配置
+  - 已存在任务只更新 `name/kind/queue/handler/is_high_risk/remark` 等代码定义字段，保留 `status/cron_spec/allow_manual/allow_retry/record_success_*` 等运营配置
 
 ### 6. 查看版本
 

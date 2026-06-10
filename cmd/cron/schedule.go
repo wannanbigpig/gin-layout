@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/cronexpr"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service/taskcenter"
 )
@@ -35,16 +36,6 @@ type scheduledTask struct {
 type TaskBuilder struct {
 	task *scheduledTask
 }
-
-var cronSpecParser = cron.NewParser(
-	cron.Second |
-		cron.Minute |
-		cron.Hour |
-		cron.Dom |
-		cron.Month |
-		cron.Dow |
-		cron.Descriptor,
-)
 
 func registerTasks(crontab *cron.Cron, ctx context.Context) error {
 	logger := &cronLogger{}
@@ -146,31 +137,36 @@ func (b *TaskBuilder) AllowOverlap() *TaskBuilder {
 // Register 把声明过的任务统一注册到 cron 实例中。
 func (s *Scheduler) Register(crontab *cron.Cron) error {
 	for _, task := range s.tasks {
-		if err := s.registerTask(crontab, task); err != nil {
+		if _, err := s.registerTask(crontab, task); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Scheduler) registerTask(crontab *cron.Cron, task *scheduledTask) error {
+func (s *Scheduler) registerTask(crontab *cron.Cron, task *scheduledTask) (cron.EntryID, error) {
+	return registerScheduledTask(crontab, s.logger, s.taskContext(), task)
+}
+
+func registerScheduledTask(crontab *cron.Cron, logger *cronLogger, ctx context.Context, task *scheduledTask) (cron.EntryID, error) {
 	if task.specErr != nil {
-		return fmt.Errorf("定时任务 %s 调度表达式无效: %w", task.name, task.specErr)
+		return 0, fmt.Errorf("定时任务 %s 调度表达式无效: %w", task.name, task.specErr)
 	}
 	if task.spec == "" {
-		return fmt.Errorf("定时任务 %s 缺少调度表达式", task.name)
+		return 0, fmt.Errorf("定时任务 %s 缺少调度表达式", task.name)
 	}
 
-	chain := cron.NewChain(cron.Recover(s.logger))
+	chain := cron.NewChain(cron.Recover(logger))
 	if task.skipIfRun {
 		chain = cron.NewChain(
-			cron.SkipIfStillRunning(s.logger),
-			cron.Recover(s.logger),
+			cron.SkipIfStillRunning(logger),
+			cron.Recover(logger),
 		)
 	}
 
-	if _, err := crontab.AddJob(task.spec, chain.Then(s.recordedJob(task))); err != nil {
-		return fmt.Errorf("添加定时任务失败 [%s] (schedule: %s): %w", task.name, task.spec, err)
+	entryID, err := crontab.AddJob(task.spec, chain.Then(recordedJob(ctx, task)))
+	if err != nil {
+		return 0, fmt.Errorf("添加定时任务失败 [%s] (schedule: %s): %w", task.name, task.spec, err)
 	}
 
 	log.Logger.Info("定时任务添加成功",
@@ -178,16 +174,22 @@ func (s *Scheduler) registerTask(crontab *cron.Cron, task *scheduledTask) error 
 		zap.String("schedule", task.spec),
 		zap.Bool("skip_if_still_running", task.skipIfRun),
 	)
-	return nil
+	return entryID, nil
 }
 
 func (s *Scheduler) recordedJob(task *scheduledTask) cron.Job {
+	return recordedJob(s.taskContext(), task)
+}
+
+func recordedJob(ctx context.Context, task *scheduledTask) cron.Job {
 	return cron.FuncJob(func() {
 		if task == nil || task.run == nil {
 			return
 		}
 
-		ctx := s.taskContext()
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		taskCode := "cron:" + task.name
 		if task.enabledWhen != nil && !task.enabledWhen(ctx) {
 			log.Logger.Info("定时任务已停用，跳过执行", zap.String("name", task.name))
@@ -246,7 +248,7 @@ func calculateNextRunAt(spec string, base time.Time) (*time.Time, error) {
 		return nil, nil
 	}
 
-	schedule, err := cronSpecParser.Parse(spec)
+	schedule, err := cronexpr.Parse(spec)
 	if err != nil {
 		return nil, err
 	}

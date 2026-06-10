@@ -6,6 +6,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/cronexpr"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -64,6 +65,8 @@ var taskOperationConfigDiffRules = []auditdiff.FieldRule{
 	{Field: "status", Label: "任务状态", ValueLabels: taskDefinitionStatusLabels},
 	{Field: "allow_manual", Label: "允许手动触发", ValueLabels: yesNoLabels},
 	{Field: "allow_retry", Label: "允许重试", ValueLabels: yesNoLabels},
+	{Field: "cron_spec", Label: "Cron 表达式"},
+	{Field: "cron_spec_description", Label: "Cron 表达式说明"},
 }
 
 // TaskRunAuditSnapshot 描述任务执行记录审计快照。
@@ -176,6 +179,11 @@ func BuildOperationConfigAuditDiff(params *form.TaskOperationConfigForm) string 
 		"status":       params.Status,
 		"allow_manual": params.AllowManual,
 		"allow_retry":  params.AllowRetry,
+	}
+	cronSpec := strings.TrimSpace(params.CronSpec)
+	if cronSpec != "" {
+		after["cron_spec"] = cronSpec
+		after["cron_spec_description"] = cronexpr.Describe(cronSpec)
 	}
 	items := auditdiff.BuildFieldDiff(nil, after, taskOperationConfigDiffRules)
 	return auditdiff.Marshal(items)

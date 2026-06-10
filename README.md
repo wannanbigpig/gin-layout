@@ -272,7 +272,7 @@ go run main.go -c /path/to/config.yaml command init-system
 go run main.go -c ./config.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
 ```
 
-- 新增内置异步任务或定时任务上线后，不要执行 `init-system`；使用 `command task sync-definitions` 同步任务定义，再用 `scan-async` / `scan-cron` 检查任务是否已在表中。同步只更新代码定义字段，会保留线上 `status`、是否允许手动触发、是否允许重试和记录策略等运营配置。
+- 新增内置异步任务或定时任务上线后，不要执行 `init-system`；使用 `command task sync-definitions` 同步任务定义，再用 `scan-async` / `scan-cron` 检查任务是否已在表中。同步只更新代码定义字段，会保留线上 `status`、`cron_spec`、是否允许手动触发、是否允许重试和记录策略等运营配置。
 
 ## 配置说明
 

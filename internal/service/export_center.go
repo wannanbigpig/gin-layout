@@ -25,6 +25,8 @@ const (
 
 	exportProgressPending uint8 = 0
 	exportProgressDone    uint8 = 100
+
+	exportManualRetryLimit = 3
 )
 
 var ErrExportRecordTableMissing = errors.New("sys_export_records table is missing")
@@ -221,6 +223,25 @@ func (s *ExportCenterService) MarkCanceledIfExists(ctx context.Context, taskRunI
 		updates["error_message"] = strings.TrimSpace(cancelReason)
 	}
 	return db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", taskRunID).Updates(updates).Error
+}
+
+// HasRecordForTaskRun 判断指定 task_run_id 是否仍关联导出记录。
+func (s *ExportCenterService) HasRecordForTaskRun(ctx context.Context, taskRunID uint) (bool, error) {
+	if taskRunID == 0 {
+		return false, nil
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return false, err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return false, err
+	}
+	var count int64
+	if err := db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", taskRunID).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // ReassignTaskRun 将已有导出记录改绑到新的 retry run，并重置为待执行状态。
@@ -522,9 +543,8 @@ func evaluateExportRetryState(run *model.TaskRun, definition *model.TaskDefiniti
 	if summary.SuccessCount > 0 {
 		return false, "该任务重试链路已成功，不允许继续重试"
 	}
-	limit := 3
-	if summary.MaxSeq >= limit {
-		return false, fmt.Sprintf("已达到最大手动重试次数 %d", limit)
+	if summary.MaxSeq >= exportManualRetryLimit {
+		return false, fmt.Sprintf("已达到最大手动重试次数 %d", exportManualRetryLimit)
 	}
 	return true, ""
 }

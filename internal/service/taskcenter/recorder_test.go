@@ -473,6 +473,14 @@ func newTaskCenterTestDB(t *testing.T) *gorm.DB {
 			duration_max_ms real default 0,
 			unique(task_code, kind, source, window_start, window_size)
 		)`,
+		`CREATE TABLE admin_user (
+			id integer primary key autoincrement,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at integer default 0,
+			username text,
+			nickname text
+		)`,
 	}
 	for _, statement := range statements {
 		if err := db.Exec(statement).Error; err != nil {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/robfig/cron/v3"
+
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 )
@@ -90,6 +92,63 @@ func TestDefineScheduleUsesDBStatusToDisableTaskWithoutRestart(t *testing.T) {
 	}
 }
 
+func TestRuntimeCronRegistryReconcilesDefinitionChanges(t *testing.T) {
+	crontab := cron.New(cron.WithSeconds())
+	registry := newRuntimeCronRegistry(context.Background(), crontab, &cronLogger{})
+
+	restoreDefinitions := setCronTaskDefinitionsForTest([]cronTaskDefinition{
+		{
+			TaskCode: "cron:demo",
+			TaskName: "demo",
+			CronSpec: "0 0 4 * * *",
+			Handler:  "cron.demo",
+			Status:   model.TaskStatusEnabled,
+		},
+	})
+	registry.reconcileOnce(context.Background())
+	restoreDefinitions()
+
+	if len(registry.tasks) != 1 || len(crontab.Entries()) != 1 {
+		t.Fatalf("expected one runtime task, got tasks=%d entries=%d", len(registry.tasks), len(crontab.Entries()))
+	}
+	firstEntry := registry.tasks["cron:demo"].entryID
+
+	restoreDefinitions = setCronTaskDefinitionsForTest([]cronTaskDefinition{
+		{
+			TaskCode: "cron:demo",
+			TaskName: "demo",
+			CronSpec: "0 0 5 * * *",
+			Handler:  "cron.demo",
+			Status:   model.TaskStatusEnabled,
+		},
+	})
+	registry.reconcileOnce(context.Background())
+	restoreDefinitions()
+
+	if len(registry.tasks) != 1 || registry.tasks["cron:demo"].definition.CronSpec != "0 0 5 * * *" {
+		t.Fatalf("expected runtime task spec to be replaced, got %#v", registry.tasks["cron:demo"])
+	}
+	if registry.tasks["cron:demo"].entryID == firstEntry {
+		t.Fatal("expected cron entry to be replaced when cron spec changes")
+	}
+
+	restoreDefinitions = setCronTaskDefinitionsForTest([]cronTaskDefinition{
+		{
+			TaskCode: "cron:demo",
+			TaskName: "demo",
+			CronSpec: "0 0 5 * * *",
+			Handler:  "cron.demo",
+			Status:   model.TaskStatusDisabled,
+		},
+	})
+	registry.reconcileOnce(context.Background())
+	restoreDefinitions()
+
+	if len(registry.tasks) != 0 || len(crontab.Entries()) != 0 {
+		t.Fatalf("expected disabled task to be removed, got tasks=%d entries=%d", len(registry.tasks), len(crontab.Entries()))
+	}
+}
+
 func hasScheduledTask(schedule *Scheduler, name string) bool {
 	for _, task := range schedule.tasks {
 		if task.name == name {
@@ -122,5 +181,15 @@ func setCronTaskStatusForTest(statuses map[string]uint8) func() {
 	}
 	return func() {
 		loadCronTaskStatus = previous
+	}
+}
+
+func setCronTaskDefinitionsForTest(definitions []cronTaskDefinition) func() {
+	previous := loadCronTaskDefinitions
+	loadCronTaskDefinitions = func(context.Context) ([]cronTaskDefinition, error) {
+		return definitions, nil
+	}
+	return func() {
+		loadCronTaskDefinitions = previous
 	}
 }

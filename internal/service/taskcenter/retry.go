@@ -10,9 +10,11 @@ import (
 )
 
 type retryChainSummary struct {
-	MaxSeq       int
-	SuccessCount int64
-	ActiveCount  int64
+	MaxSeq            int
+	SuccessCount      int64
+	ActiveCount       int64
+	LatestRetryRunID  uint
+	LatestRetryStatus string
 }
 
 var loadTaskRetryChainSummary = loadTaskRetryChainSummaryFromDB
@@ -126,10 +128,12 @@ func loadTaskRetryChainSummaries(ctx context.Context, db *gorm.DB, rootRunIDs []
 	}
 
 	type row struct {
-		RetryRootRunID uint
-		MaxSeq         int
-		SuccessCount   int64
-		ActiveCount    int64
+		RetryRootRunID    uint
+		MaxSeq            int
+		SuccessCount      int64
+		ActiveCount       int64
+		LatestRetryRunID  uint
+		LatestRetryStatus string
 	}
 	rows := make([]row, 0, len(rootRunIDs))
 	err := db.WithContext(ctx).
@@ -150,11 +154,31 @@ func loadTaskRetryChainSummaries(ctx context.Context, db *gorm.DB, rootRunIDs []
 	if err != nil {
 		return result, err
 	}
+	for i := range rows {
+		if rows[i].MaxSeq <= 0 {
+			continue
+		}
+		var latest model.TaskRun
+		if err := db.WithContext(ctx).
+			Select("id", "status").
+			Where("retry_root_run_id = ? AND retry_seq = ?", rows[i].RetryRootRunID, rows[i].MaxSeq).
+			Order("id DESC").
+			First(&latest).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				continue
+			}
+			return result, err
+		}
+		rows[i].LatestRetryRunID = latest.ID
+		rows[i].LatestRetryStatus = latest.Status
+	}
 	for _, item := range rows {
 		result[item.RetryRootRunID] = retryChainSummary{
-			MaxSeq:       item.MaxSeq,
-			SuccessCount: item.SuccessCount,
-			ActiveCount:  item.ActiveCount,
+			MaxSeq:            item.MaxSeq,
+			SuccessCount:      item.SuccessCount,
+			ActiveCount:       item.ActiveCount,
+			LatestRetryRunID:  item.LatestRetryRunID,
+			LatestRetryStatus: item.LatestRetryStatus,
 		}
 	}
 	return result, nil

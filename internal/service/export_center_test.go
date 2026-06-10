@@ -248,7 +248,7 @@ func TestExportCenterServiceListExposesQueuedStageAndTaskCode(t *testing.T) {
 	}
 }
 
-func TestExportCenterServiceCreateRecordForRetryKeepsOldFailure(t *testing.T) {
+func TestExportCenterServiceReassignTaskRunKeepsSameRecord(t *testing.T) {
 	db := newExportCenterTestDB(t)
 	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
 
@@ -267,17 +267,12 @@ func TestExportCenterServiceCreateRecordForRetryKeepsOldFailure(t *testing.T) {
 		t.Fatalf("mark failed: %v", err)
 	}
 
-	retryRecord, matched, err := svc.CreateRecordForTask(context.Background(), ExportTaskBootstrapInput{
-		TaskCode:      "export:request-log",
-		TaskRunID:     202,
-		TriggerUserID: 9,
-		Queue:         "export-retry",
-	})
+	reassigned, err := svc.ReassignTaskRun(context.Background(), 101, 202, "export-retry")
 	if err != nil {
-		t.Fatalf("create retry record failed: %v", err)
+		t.Fatalf("reassign retry record failed: %v", err)
 	}
-	if !matched || retryRecord == nil {
-		t.Fatal("expected retry export task to create a new export record")
+	if !reassigned {
+		t.Fatal("expected retry export task to reassign existing export record")
 	}
 
 	oldID := uint(101)
@@ -285,15 +280,8 @@ func TestExportCenterServiceCreateRecordForRetryKeepsOldFailure(t *testing.T) {
 		Paginate:  form.Paginate{Page: 1, PerPage: 10},
 		TaskRunID: &oldID,
 	})
-	if listOld.Total != 1 || len(listOld.Data) != 1 {
-		t.Fatalf("expected old failed record to stay on task_run_id 101, got %#v", listOld)
-	}
-	oldItem, ok := listOld.Data[0].(*resources.ExportRecordListResources)
-	if !ok {
-		t.Fatalf("unexpected old list item type: %T", listOld.Data[0])
-	}
-	if oldItem.ID != record.ID || oldItem.Status != model.TaskRunStatusFailed || oldItem.ErrorMessage != "boom" {
-		t.Fatalf("unexpected old failed record: %#v", oldItem)
+	if listOld.Total != 0 || len(listOld.Data) != 0 {
+		t.Fatalf("expected old task_run_id 101 to have no export record after reassign, got %#v", listOld)
 	}
 
 	newID := uint(202)
@@ -308,8 +296,8 @@ func TestExportCenterServiceCreateRecordForRetryKeepsOldFailure(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected list item type: %T", listNew.Data[0])
 	}
-	if item.ID == record.ID {
-		t.Fatalf("expected retry to use a new record id, got same id %d", item.ID)
+	if item.ID != record.ID {
+		t.Fatalf("expected retry to keep same record id %d, got %d", record.ID, item.ID)
 	}
 	if item.TaskRunID != 202 {
 		t.Fatalf("expected task_run_id=202, got %d", item.TaskRunID)

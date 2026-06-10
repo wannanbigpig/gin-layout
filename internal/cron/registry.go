@@ -327,7 +327,6 @@ func syncOneBuiltinDefinition(db *gorm.DB, definition model.TaskDefinition) (tas
 		"name":         definition.Name,
 		"kind":         definition.Kind,
 		"queue":        definition.Queue,
-		"cron_spec":    definition.CronSpec,
 		"handler":      definition.Handler,
 		"is_high_risk": definition.IsHighRisk,
 		"remark":       definition.Remark,
@@ -342,7 +341,6 @@ func taskDefinitionManagedFieldsEqual(current, next model.TaskDefinition) bool {
 	return current.Name == next.Name &&
 		current.Kind == next.Kind &&
 		current.Queue == next.Queue &&
-		current.CronSpec == next.CronSpec &&
 		current.Handler == next.Handler &&
 		current.IsHighRisk == next.IsHighRisk &&
 		current.Remark == next.Remark

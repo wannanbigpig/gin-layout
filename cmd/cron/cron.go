@@ -38,10 +38,7 @@ func Start() error {
 	}
 	cronCtx, cancelCron := context.WithCancel(context.Background())
 	defer cancelCron()
-	if err := registerTasks(crontab, cronCtx); err != nil {
-		log.Logger.Error("定时任务启动失败", zap.Error(err))
-		return fmt.Errorf("定时任务启动失败: %w", err)
-	}
+	startRuntimeDefinitionSync(cronCtx, crontab)
 
 	// 启动定时器
 	crontab.Start()

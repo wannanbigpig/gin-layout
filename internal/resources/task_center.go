@@ -2,6 +2,7 @@ package resources
 
 import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/cronexpr"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
 
@@ -13,6 +14,7 @@ type TaskDefinitionResources struct {
 	Kind                         string           `json:"kind"`
 	Queue                        string           `json:"queue"`
 	CronSpec                     string           `json:"cron_spec"`
+	CronSpecDescription          string           `json:"cron_spec_description"`
 	Handler                      string           `json:"handler"`
 	Status                       uint8            `json:"status"`
 	AllowManual                  uint8            `json:"allow_manual"`
@@ -26,6 +28,13 @@ type TaskDefinitionResources struct {
 	Remark                       string           `json:"remark"`
 	CreatedAt                    utils.FormatDate `json:"created_at"`
 	UpdatedAt                    utils.FormatDate `json:"updated_at"`
+}
+
+func (r *TaskDefinitionResources) SetCustomFields(data *model.TaskDefinition) {
+	if data == nil {
+		return
+	}
+	r.CronSpecDescription = cronexpr.Describe(data.CronSpec)
 }
 
 // TaskDefinitionTransformer 任务定义资源转换器。
@@ -45,28 +54,31 @@ func NewTaskDefinitionTransformer() TaskDefinitionTransformer {
 
 // TaskRunBaseResources 任务执行记录公共字段。
 type TaskRunBaseResources struct {
-	ID               uint              `json:"id"`
-	TaskCode         string            `json:"task_code"`
-	Kind             string            `json:"kind"`
-	Source           string            `json:"source"`
-	SourceID         string            `json:"source_id"`
-	Queue            string            `json:"queue"`
-	Status           string            `json:"status"`
-	Attempt          int               `json:"attempt"`
-	MaxRetry         int               `json:"max_retry"`
-	RetryOfRunID     uint              `json:"retry_of_run_id"`
-	RetryRootRunID   uint              `json:"retry_root_run_id"`
-	RetrySeq         int               `json:"retry_seq"`
-	ErrorMessage     string            `json:"error_message"`
-	DurationMS       float64           `json:"duration_ms"`
-	StartedAt        *utils.FormatDate `json:"started_at"`
-	FinishedAt       *utils.FormatDate `json:"finished_at"`
-	CreatedAt        utils.FormatDate  `json:"created_at"`
-	TriggerUserID    uint              `json:"trigger_user_id"`
-	TriggerAccount   string            `json:"trigger_account"`
-	DetailRecordMode string            `json:"detail_record_mode"`
-	CanRetry         bool              `json:"can_retry"`
-	RetryBlockReason string            `json:"retry_block_reason"`
+	ID                uint              `json:"id"`
+	TaskCode          string            `json:"task_code"`
+	Kind              string            `json:"kind"`
+	Source            string            `json:"source"`
+	SourceID          string            `json:"source_id"`
+	Queue             string            `json:"queue"`
+	Status            string            `json:"status"`
+	Attempt           int               `json:"attempt"`
+	MaxRetry          int               `json:"max_retry"`
+	RetryOfRunID      uint              `json:"retry_of_run_id"`
+	RetryRootRunID    uint              `json:"retry_root_run_id"`
+	RetrySeq          int               `json:"retry_seq"`
+	ErrorMessage      string            `json:"error_message"`
+	DurationMS        float64           `json:"duration_ms"`
+	StartedAt         *utils.FormatDate `json:"started_at"`
+	FinishedAt        *utils.FormatDate `json:"finished_at"`
+	CreatedAt         utils.FormatDate  `json:"created_at"`
+	TriggerUserID     uint              `json:"trigger_user_id"`
+	TriggerAccount    string            `json:"trigger_account"`
+	DetailRecordMode  string            `json:"detail_record_mode"`
+	CanRetry          bool              `json:"can_retry"`
+	RetryBlockReason  string            `json:"retry_block_reason"`
+	RetryCount        int               `json:"retry_count"`
+	LatestRetryRunID  uint              `json:"latest_retry_run_id"`
+	LatestRetryStatus string            `json:"latest_retry_status"`
 }
 
 // TaskRunListResources 任务执行记录列表响应。
@@ -108,28 +120,31 @@ func NewTaskRunTransformer() TaskRunTransformer {
 
 func buildTaskRunBaseResources(data *model.TaskRun) TaskRunBaseResources {
 	return TaskRunBaseResources{
-		ID:               data.ID,
-		TaskCode:         data.TaskCode,
-		Kind:             data.Kind,
-		Source:           data.Source,
-		SourceID:         data.SourceID,
-		Queue:            data.Queue,
-		Status:           data.Status,
-		Attempt:          data.Attempt,
-		MaxRetry:         data.MaxRetry,
-		RetryOfRunID:     data.RetryOfRunID,
-		RetryRootRunID:   data.RetryRootRunID,
-		RetrySeq:         data.RetrySeq,
-		ErrorMessage:     data.ErrorMessage,
-		DurationMS:       data.DurationMS,
-		StartedAt:        data.StartedAt,
-		FinishedAt:       data.FinishedAt,
-		CreatedAt:        data.CreatedAt,
-		TriggerUserID:    data.TriggerUserID,
-		TriggerAccount:   data.TriggerAccount,
-		DetailRecordMode: data.DetailRecordMode,
-		CanRetry:         data.CanRetry,
-		RetryBlockReason: data.RetryBlockReason,
+		ID:                data.ID,
+		TaskCode:          data.TaskCode,
+		Kind:              data.Kind,
+		Source:            data.Source,
+		SourceID:          data.SourceID,
+		Queue:             data.Queue,
+		Status:            data.Status,
+		Attempt:           data.Attempt,
+		MaxRetry:          data.MaxRetry,
+		RetryOfRunID:      data.RetryOfRunID,
+		RetryRootRunID:    data.RetryRootRunID,
+		RetrySeq:          data.RetrySeq,
+		ErrorMessage:      data.ErrorMessage,
+		DurationMS:        data.DurationMS,
+		StartedAt:         data.StartedAt,
+		FinishedAt:        data.FinishedAt,
+		CreatedAt:         data.CreatedAt,
+		TriggerUserID:     data.TriggerUserID,
+		TriggerAccount:    data.TriggerAccount,
+		DetailRecordMode:  data.DetailRecordMode,
+		CanRetry:          data.CanRetry,
+		RetryBlockReason:  data.RetryBlockReason,
+		RetryCount:        data.RetryCount,
+		LatestRetryRunID:  data.LatestRetryRunID,
+		LatestRetryStatus: data.LatestRetryStatus,
 	}
 }
 
@@ -173,6 +188,7 @@ type CronTaskStateResources struct {
 	ID                   uint              `json:"id"`
 	TaskCode             string            `json:"task_code"`
 	CronSpec             string            `json:"cron_spec"`
+	CronSpecDescription  string            `json:"cron_spec_description"`
 	LastRunID            uint              `json:"last_run_id"`
 	LastStatus           string            `json:"last_status"`
 	LastStartedAt        *utils.FormatDate `json:"last_started_at"`
@@ -183,6 +199,13 @@ type CronTaskStateResources struct {
 	LastStatsWindowStart *utils.FormatDate `json:"last_stats_window_start"`
 	LastError            string            `json:"last_error"`
 	UpdatedAt            utils.FormatDate  `json:"updated_at"`
+}
+
+func (r *CronTaskStateResources) SetCustomFields(data *model.CronTaskState) {
+	if data == nil {
+		return
+	}
+	r.CronSpecDescription = cronexpr.Describe(data.CronSpec)
 }
 
 // CronTaskStateTransformer 定时任务状态资源转换器。

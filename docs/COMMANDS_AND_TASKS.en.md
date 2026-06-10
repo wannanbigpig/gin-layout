@@ -154,7 +154,7 @@ Supported subcommands:
 - `task sync-definitions`
   - non-destructively syncs `BuiltinTaskDefinitions(cfg)` into `task_definitions`
   - use this after deploying new tasks; do not run `init-system`
-  - existing tasks only update code-owned fields such as `name/kind/queue/cron_spec/handler/is_high_risk/remark`; operational settings such as `status/allow_manual/allow_retry/record_success_*` are preserved
+  - existing tasks only update code-owned fields such as `name/kind/queue/handler/is_high_risk/remark`; operational settings such as `status/cron_spec/allow_manual/allow_retry/record_success_*` are preserved
 
 ### 6. Show Version
 

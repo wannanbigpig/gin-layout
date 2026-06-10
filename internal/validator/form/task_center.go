@@ -106,6 +106,7 @@ type TaskOperationConfigForm struct {
 	Status      uint8  `form:"status" json:"status" binding:"oneof=0 1"`
 	AllowManual uint8  `form:"allow_manual" json:"allow_manual" binding:"oneof=0 1"`
 	AllowRetry  uint8  `form:"allow_retry" json:"allow_retry" binding:"oneof=0 1"`
+	CronSpec    string `form:"cron_spec" json:"cron_spec" binding:"omitempty,max=120"`
 }
 
 func NewTaskOperationConfigForm() *TaskOperationConfigForm {
