@@ -40,3 +40,15 @@ func (api DashboardController) Statistics(c *gin.Context) {
 
 	api.Success(c, statistics)
 }
+
+func (api DashboardController) Monitor(c *gin.Context) {
+	service := dashboard.NewMonitorService()
+
+	snapshot, err := service.GetSnapshot()
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+
+	api.Success(c, snapshot)
+}

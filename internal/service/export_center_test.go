@@ -248,8 +248,7 @@ func TestExportCenterServiceListExposesQueuedStageAndTaskCode(t *testing.T) {
 	}
 }
 
-// TestExportCenterServiceReassignTaskRun 验证重试时复用同一条导出记录、重置状态、改挂新的 task_run_id。
-func TestExportCenterServiceReassignTaskRun(t *testing.T) {
+func TestExportCenterServiceCreateRecordForRetryKeepsOldFailure(t *testing.T) {
 	db := newExportCenterTestDB(t)
 	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
 
@@ -268,22 +267,33 @@ func TestExportCenterServiceReassignTaskRun(t *testing.T) {
 		t.Fatalf("mark failed: %v", err)
 	}
 
-	reassigned, err := svc.ReassignTaskRun(context.Background(), 101, 202, "export-retry")
+	retryRecord, matched, err := svc.CreateRecordForTask(context.Background(), ExportTaskBootstrapInput{
+		TaskCode:      "export:request-log",
+		TaskRunID:     202,
+		TriggerUserID: 9,
+		Queue:         "export-retry",
+	})
 	if err != nil {
-		t.Fatalf("reassign failed: %v", err)
+		t.Fatalf("create retry record failed: %v", err)
 	}
-	if !reassigned {
-		t.Fatalf("expected reassigned=true for existing record")
+	if !matched || retryRecord == nil {
+		t.Fatal("expected retry export task to create a new export record")
 	}
 
-	// 旧 task_run_id 应该已经查不到
 	oldID := uint(101)
 	listOld := svc.List(&form.ExportRecordList{
 		Paginate:  form.Paginate{Page: 1, PerPage: 10},
 		TaskRunID: &oldID,
 	})
-	if listOld.Total != 0 {
-		t.Fatalf("expected old task_run_id 101 detached, got total=%d", listOld.Total)
+	if listOld.Total != 1 || len(listOld.Data) != 1 {
+		t.Fatalf("expected old failed record to stay on task_run_id 101, got %#v", listOld)
+	}
+	oldItem, ok := listOld.Data[0].(*resources.ExportRecordListResources)
+	if !ok {
+		t.Fatalf("unexpected old list item type: %T", listOld.Data[0])
+	}
+	if oldItem.ID != record.ID || oldItem.Status != model.TaskRunStatusFailed || oldItem.ErrorMessage != "boom" {
+		t.Fatalf("unexpected old failed record: %#v", oldItem)
 	}
 
 	newID := uint(202)
@@ -298,8 +308,8 @@ func TestExportCenterServiceReassignTaskRun(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected list item type: %T", listNew.Data[0])
 	}
-	if item.ID != record.ID {
-		t.Fatalf("expected same record id (no new row), got %d want %d", item.ID, record.ID)
+	if item.ID == record.ID {
+		t.Fatalf("expected retry to use a new record id, got same id %d", item.ID)
 	}
 	if item.TaskRunID != 202 {
 		t.Fatalf("expected task_run_id=202, got %d", item.TaskRunID)
@@ -312,21 +322,6 @@ func TestExportCenterServiceReassignTaskRun(t *testing.T) {
 	}
 	if item.Queue != "export-retry" {
 		t.Fatalf("expected queue updated to export-retry, got %s", item.Queue)
-	}
-	if item.FileID != 0 || item.FileUUID != "" || item.FileName != "" || item.FileSize != 0 {
-		t.Fatalf("expected file fields cleared, got %#v", item)
-	}
-	if item.ErrorMessage != "" {
-		t.Fatalf("expected error_message cleared, got %q", item.ErrorMessage)
-	}
-
-	// 不存在原 task_run_id 时返回 false 而非报错
-	missing, err := svc.ReassignTaskRun(context.Background(), 9999, 8888, "export")
-	if err != nil {
-		t.Fatalf("expected nil error when no existing record, got %v", err)
-	}
-	if missing {
-		t.Fatalf("expected reassigned=false when no existing record")
 	}
 }
 

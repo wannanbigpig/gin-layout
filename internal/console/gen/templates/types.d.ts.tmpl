@@ -1,0 +1,70 @@
+/** {{.MenuTitle}}实体 */
+export interface {{.ModelName}} {
+  id: number
+{{- range .Fields}}
+{{- if ne .ColumnName "id"}}
+{{- if ne .ColumnName "created_at"}}
+{{- if ne .ColumnName "updated_at"}}
+{{- if ne .ColumnName "deleted_at"}}
+  {{.JsonTag}}: {{tsType .GoType}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- if .HasStatus}}
+  status_name: string
+{{- end}}
+  created_at: string
+  updated_at: string
+}
+
+/** {{.MenuTitle}}列表查询参数 */
+export interface {{.ModelName}}ListParams {
+  page?: number
+  per_page?: number
+{{- range .ListFields}}
+{{- if eq .GoType "string"}}
+  {{.JsonTag}}?: string
+{{- else if eq .ColumnName "status"}}
+  {{.JsonTag}}?: number
+{{- end}}
+{{- end}}
+}
+
+/** {{.MenuTitle}}列表响应 */
+export interface {{.ModelName}}ListResult {
+  total: number
+  per_page: number
+  current_page: number
+  last_page: number
+  data: {{.ModelName}}[]
+}
+
+/** {{.MenuTitle}}详情 */
+export type {{.ModelName}}Detail = {{.ModelName}}
+
+/** {{.MenuTitle}}新增参数 */
+export interface {{.ModelName}}CreateParams {
+{{- range .FormFields}}
+{{- if .IsForm}}
+  {{.JsonTag}}{{- if not (eq .BindingTag "required") }}?{{- end}}: {{tsType .GoType}}
+{{- end}}
+{{- end}}
+}
+
+/** {{.MenuTitle}}更新参数 */
+export interface {{.ModelName}}UpdateParams {
+  id: number
+{{- range .FormFields}}
+{{- if .IsForm}}
+  {{.JsonTag}}?: {{tsType .GoType}}
+{{- end}}
+{{- end}}
+}
+
+/** {{.MenuTitle}}选项 */
+export interface {{.ModelName}}OptionItem {
+  id: number
+  name: string
+}

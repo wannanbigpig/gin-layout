@@ -19,13 +19,14 @@ func NewTaskDefinitionListQuery() *TaskDefinitionList {
 // TaskRunList 任务执行记录列表查询参数。
 type TaskRunList struct {
 	Paginate
-	TaskCode  string `form:"task_code" json:"task_code" binding:"omitempty"`
-	Kind      string `form:"kind" json:"kind" binding:"omitempty,oneof=async cron"`
-	Source    string `form:"source" json:"source" binding:"omitempty,oneof=queue cron manual"`
-	SourceID  string `form:"source_id" json:"source_id" binding:"omitempty"`
-	Status    string `form:"status" json:"status" binding:"omitempty,oneof=pending running success failed canceled retrying"`
-	StartTime string `form:"start_time" json:"start_time" binding:"omitempty"`
-	EndTime   string `form:"end_time" json:"end_time" binding:"omitempty"`
+	TaskCode         string `form:"task_code" json:"task_code" binding:"omitempty"`
+	Kind             string `form:"kind" json:"kind" binding:"omitempty,oneof=async cron"`
+	Source           string `form:"source" json:"source" binding:"omitempty,oneof=queue cron manual"`
+	SourceID         string `form:"source_id" json:"source_id" binding:"omitempty"`
+	Status           string `form:"status" json:"status" binding:"omitempty,oneof=pending running success failed canceled retrying timeout interrupted"`
+	DetailRecordMode string `form:"detail_record_mode" json:"detail_record_mode" binding:"omitempty,oneof=all sampled forced none"`
+	StartTime        string `form:"start_time" json:"start_time" binding:"omitempty"`
+	EndTime          string `form:"end_time" json:"end_time" binding:"omitempty"`
 }
 
 func NewTaskRunListQuery() *TaskRunList {
@@ -45,7 +46,7 @@ func NewTaskRunEventsQuery() *TaskRunEvents {
 type CronTaskStateList struct {
 	Paginate
 	TaskCode   string `form:"task_code" json:"task_code" binding:"omitempty"`
-	LastStatus string `form:"last_status" json:"last_status" binding:"omitempty,oneof=pending running success failed canceled retrying"`
+	LastStatus string `form:"last_status" json:"last_status" binding:"omitempty,oneof=pending running success failed canceled retrying timeout interrupted"`
 }
 
 func NewCronTaskStateListQuery() *CronTaskStateList {
@@ -83,4 +84,43 @@ type TaskCancelForm struct {
 
 func NewTaskCancelForm() *TaskCancelForm {
 	return &TaskCancelForm{}
+}
+
+// TaskRecordPolicyForm 修改任务执行明细记录策略。
+type TaskRecordPolicyForm struct {
+	TaskCode                     string `form:"task_code" json:"task_code" binding:"required"`
+	RecordSuccessMode            string `form:"record_success_mode" json:"record_success_mode" binding:"required,oneof=all sample interval none"`
+	RecordSuccessRate            uint8  `form:"record_success_rate" json:"record_success_rate" binding:"omitempty,min=0,max=100"`
+	RecordSuccessIntervalSeconds int    `form:"record_success_interval_seconds" json:"record_success_interval_seconds" binding:"omitempty,min=0"`
+	RecordDetailOnManual         uint8  `form:"record_detail_on_manual" json:"record_detail_on_manual" binding:"omitempty,oneof=0 1"`
+	RecordDetailOnFailure        uint8  `form:"record_detail_on_failure" json:"record_detail_on_failure" binding:"omitempty,oneof=0 1"`
+}
+
+func NewTaskRecordPolicyForm() *TaskRecordPolicyForm {
+	return &TaskRecordPolicyForm{}
+}
+
+// TaskOperationConfigForm 修改任务运营配置。
+type TaskOperationConfigForm struct {
+	TaskCode    string `form:"task_code" json:"task_code" binding:"required"`
+	Status      uint8  `form:"status" json:"status" binding:"oneof=0 1"`
+	AllowManual uint8  `form:"allow_manual" json:"allow_manual" binding:"oneof=0 1"`
+	AllowRetry  uint8  `form:"allow_retry" json:"allow_retry" binding:"oneof=0 1"`
+}
+
+func NewTaskOperationConfigForm() *TaskOperationConfigForm {
+	return &TaskOperationConfigForm{}
+}
+
+// TaskRunStatsQuery 查询任务执行统计。
+type TaskRunStatsQuery struct {
+	TaskCode  string `form:"task_code" json:"task_code" binding:"omitempty"`
+	Kind      string `form:"kind" json:"kind" binding:"omitempty,oneof=async cron"`
+	Source    string `form:"source" json:"source" binding:"omitempty,oneof=queue cron manual"`
+	StartTime string `form:"start_time" json:"start_time" binding:"omitempty"`
+	EndTime   string `form:"end_time" json:"end_time" binding:"omitempty"`
+}
+
+func NewTaskRunStatsQuery() *TaskRunStatsQuery {
+	return &TaskRunStatsQuery{}
 }

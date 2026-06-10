@@ -194,18 +194,21 @@ func countDistinct(db *gorm.DB, field string) (int64, error) {
 }
 
 func taskCompletionRate(db *gorm.DB, start time.Time, end time.Time) (float64, error) {
-	total, err := countRows(db.Table("task_runs").Where("created_at >= ? AND created_at < ?", start, end))
-	if err != nil {
+	type taskStat struct {
+		TotalCount   uint64
+		SuccessCount uint64
+	}
+	var stat taskStat
+	if err := db.Table("task_run_stats").
+		Select("COALESCE(SUM(total_count), 0) AS total_count, COALESCE(SUM(success_count), 0) AS success_count").
+		Where("window_start >= ? AND window_start < ?", start, end).
+		Scan(&stat).Error; err != nil {
 		return 0, err
 	}
-	if total == 0 {
+	if stat.TotalCount == 0 {
 		return 0, nil
 	}
-	success, err := countRows(db.Table("task_runs").Where("created_at >= ? AND created_at < ? AND status = ?", start, end, model.TaskRunStatusSuccess))
-	if err != nil {
-		return 0, err
-	}
-	return math.Round(float64(success)*1000/float64(total)) / 10, nil
+	return math.Round(float64(stat.SuccessCount)*1000/float64(stat.TotalCount)) / 10, nil
 }
 
 func buildActivities(db *gorm.DB, operatorID uint) []ActivityItem {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
@@ -113,6 +114,69 @@ func (i *inspector) CancelProcessing(ctx context.Context, taskID string) error {
 	return normalizeInspectorError(i.raw.CancelProcessing(taskID))
 }
 
+func (i *inspector) GetQueueStats(ctx context.Context, queueName string) (*queue.QueueStats, error) {
+	_ = ctx
+	if i == nil || i.raw == nil {
+		return nil, queue.ErrInspectorUnavailable
+	}
+	info, err := i.raw.GetQueueInfo(prefixedQueueName(i.namespace, queueName))
+	if err != nil {
+		return nil, normalizeInspectorError(err)
+	}
+	return convertQueueInfo(info, i.namespace), nil
+}
+
+func (i *inspector) GetAllQueueStats(ctx context.Context) ([]*queue.QueueStats, error) {
+	_ = ctx
+	if i == nil || i.raw == nil {
+		return nil, queue.ErrInspectorUnavailable
+	}
+	queueNames, err := i.raw.Queues()
+	if err != nil {
+		return nil, err
+	}
+
+	statsByIndex := make([]*queue.QueueStats, len(queueNames))
+	var wg sync.WaitGroup
+	wg.Add(len(queueNames))
+	for idx, name := range queueNames {
+		idx, name := idx, name
+		go func() {
+			defer wg.Done()
+			info, err := i.raw.GetQueueInfo(name)
+			if err != nil {
+				return
+			}
+			statsByIndex[idx] = convertQueueInfo(info, i.namespace)
+		}()
+	}
+	wg.Wait()
+
+	stats := make([]*queue.QueueStats, 0, len(queueNames))
+	for _, item := range statsByIndex {
+		if item != nil {
+			stats = append(stats, item)
+		}
+	}
+	return stats, nil
+}
+
+func convertQueueInfo(info *asynq.QueueInfo, namespace string) *queue.QueueStats {
+	return &queue.QueueStats{
+		Queue:     unprefixQueueName(namespace, info.Queue),
+		Size:      info.Size,
+		Pending:   info.Pending,
+		Active:    info.Active,
+		Scheduled: info.Scheduled,
+		Retry:     info.Retry,
+		Archived:  info.Archived,
+		Completed: info.Completed,
+		Processed: info.Processed,
+		Failed:    info.Failed,
+		Paused:    info.Paused,
+	}
+}
+
 // NewServer 创建 Asynq worker server 和 mux。
 func NewServer(cfg *config.Conf, registry queue.Registry) (*asynq.Server, *asynq.ServeMux, error) {
 	if cfg == nil {
@@ -195,12 +259,25 @@ func recordAsynqTaskFinish(ctx context.Context, run *model.TaskRun, taskErr erro
 	if run == nil {
 		return
 	}
-	if err := taskcenter.NewRunRecorder().Finish(ctx, run, taskcenter.RunFinish{Error: taskErr}); err != nil {
+	if err := taskcenter.NewRunRecorder().Finish(ctx, run, resolveAsynqRunFinish(ctx, taskErr)); err != nil {
 		log.Warn("Record async task finish failed",
 			zap.String("task_type", run.TaskCode),
 			zap.String("task_id", run.SourceID),
 			zap.Error(err))
 	}
+}
+
+func resolveAsynqRunFinish(ctx context.Context, taskErr error) taskcenter.RunFinish {
+	finish := taskcenter.RunFinish{Error: taskErr}
+	if taskErr == nil || errors.Is(taskErr, queue.ErrSkipRetry) {
+		return finish
+	}
+	retryCount, retryOK := asynq.GetRetryCount(ctx)
+	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
+	if retryOK && maxRetryOK && retryCount < maxRetry {
+		finish.Status = model.TaskRunStatusRetrying
+	}
+	return finish
 }
 
 func currentQueueNamespace() string {

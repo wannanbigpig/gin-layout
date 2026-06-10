@@ -1,0 +1,63 @@
+package form
+
+// {{.ModelName}}List {{.MenuTitle}}列表查询参数。
+type {{.ModelName}}List struct {
+	Paginate
+{{- range .ListFields}}
+{{- if eq .GoType "string"}}
+	{{.Name}} string `form:"{{.JsonTag}}" json:"{{.JsonTag}}" binding:"omitempty{{if gt .MaxLength 0}},max={{.MaxLength}}{{end}}"`
+{{- else if eq .ColumnName "status"}}
+	{{.Name}} *int8 `form:"{{.JsonTag}}" json:"{{.JsonTag}}" binding:"omitempty,oneof=0 1"`
+{{- end}}
+{{- end}}
+}
+
+// New{{.ModelName}}ListQuery 初始化查询参数。
+func New{{.ModelName}}ListQuery() *{{.ModelName}}List {
+	return &{{.ModelName}}List{}
+}
+
+// {{.ModelName}}Options {{.MenuTitle}}选择器查询参数。
+type {{.ModelName}}Options struct {
+	Keyword string `form:"keyword" json:"keyword" binding:"omitempty,max=64"`
+}
+
+// New{{.ModelName}}OptionsQuery 初始化选择器查询参数。
+func New{{.ModelName}}OptionsQuery() *{{.ModelName}}Options {
+	return &{{.ModelName}}Options{}
+}
+
+// {{.VarName}}MutablePayload 可变字段。
+type {{.VarName}}MutablePayload struct {
+{{- range .FormFields}}
+{{- if .IsForm}}
+	{{.Name}} {{.GoType}} `form:"{{.JsonTag}}" json:"{{.JsonTag}}"{{- if .BindingTag}} binding:"{{.BindingTag}}"{{- end}}`
+{{- end}}
+{{- end}}
+}
+
+// Create{{.ModelName}} 新增参数。
+type Create{{.ModelName}} struct {
+	{{.VarName}}MutablePayload
+}
+
+// NewCreate{{.ModelName}}Form 初始化新增参数。
+func NewCreate{{.ModelName}}Form() *Create{{.ModelName}} {
+	return &Create{{.ModelName}}{}
+}
+
+// Update{{.ModelName}} 更新参数。
+type Update{{.ModelName}} struct {
+	Id uint `form:"id" json:"id" binding:"required"`
+	{{.VarName}}MutablePayload
+}
+
+// NewUpdate{{.ModelName}}Form 初始化更新参数。
+func NewUpdate{{.ModelName}}Form() *Update{{.ModelName}} {
+	return &Update{{.ModelName}}{}
+}
+
+// GetIDPointer 返回 ID 指针。
+func (f *Update{{.ModelName}}) GetIDPointer() *uint {
+	return &f.Id
+}

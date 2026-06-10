@@ -1,0 +1,74 @@
+package resources
+
+import (
+	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+)
+
+// {{.ResourceName}} {{.MenuTitle}}响应结构。
+type {{.ResourceName}} struct {
+	ID uint `json:"id"`
+{{- range .Fields}}
+{{- if ne .ColumnName "id"}}
+{{- if ne .ColumnName "created_at"}}
+{{- if ne .ColumnName "updated_at"}}
+{{- if ne .ColumnName "deleted_at"}}
+	{{.Name}} {{.GoType}} `json:"{{.JsonTag}}"`
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- if .HasStatus}}
+	StatusName string `json:"status_name"`
+{{- end}}
+	CreatedAt utils.FormatDate `json:"created_at"`
+	UpdatedAt utils.FormatDate `json:"updated_at"`
+}
+
+// SetCustomFields 填充扩展字段。
+func (r *{{.ResourceName}}) SetCustomFields(data *model.{{.ModelName}}) {
+	if data == nil {
+		return
+	}
+{{- if .HasStatus}}
+	r.StatusName = model.{{.ModelName}}StatusDict.Map(data.Status)
+{{- end}}
+}
+
+// {{.ModelName}}Transformer 负责资源转换。
+type {{.ModelName}}Transformer struct {
+	BaseResources[*model.{{.ModelName}}, *{{.ResourceName}}]
+}
+
+// New{{.ModelName}}Transformer 创建资源转换器。
+func New{{.ModelName}}Transformer() {{.ModelName}}Transformer {
+	return {{.ModelName}}Transformer{
+		BaseResources: BaseResources[*model.{{.ModelName}}, *{{.ResourceName}}]{
+			NewResource: func() *{{.ResourceName}} {
+				return &{{.ResourceName}}{}
+			},
+		},
+	}
+}
+
+// {{.ModelName}}OptionResources 选择器选项，仅暴露下拉所需的最小字段。
+type {{.ModelName}}OptionResources struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+}
+
+// To{{.ModelName}}Options 将模型集合转换为选择器选项列表。
+func To{{.ModelName}}Options(items []*model.{{.ModelName}}) []{{.ModelName}}OptionResources {
+	options := make([]{{.ModelName}}OptionResources, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		options = append(options, {{.ModelName}}OptionResources{
+			ID:   item.ID,
+			Name: item.Name,
+		})
+	}
+	return options
+}

@@ -25,7 +25,8 @@ type AdminUserResources struct {
 	StatusName       string           `json:"status_name"`         // 状态名称
 	LastIp           string           `json:"last_ip"`             // 上次登录 IP
 	LastLogin        utils.FormatDate `json:"last_login"`          // 上次登录时间
-	Departments      []department     `json:"departments"`         // 部门信息D
+	DeptId           uint             `json:"dept_id"`             // 默认部门ID（第一个部门）
+	Departments      []department     `json:"departments"`         // 部门信息
 	RoleList         []uint           `json:"role_list"`           // 角色信息
 }
 
@@ -54,7 +55,7 @@ func (r *AdminUserResources) SetCustomFields(data *model.AdminUser) {
 			return m.RoleId
 		})
 	}
-	// 如果 Department 有数据，则转换为 department 结构
+	// 如果 Department 有数据，则转换为 department 结构，并设置默认部门 ID
 	if len(data.Department) > 0 {
 		r.Departments = lo.Map(data.Department, func(d model.Department, _ int) department {
 			return department{
@@ -63,6 +64,8 @@ func (r *AdminUserResources) SetCustomFields(data *model.AdminUser) {
 				Pid:  d.Pid,
 			}
 		})
+		// 默认部门取第一个部门
+		r.DeptId = data.Department[0].ID
 	}
 }
 

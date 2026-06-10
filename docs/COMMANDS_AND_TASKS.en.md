@@ -114,9 +114,9 @@ Used for:
 
 Task definition boundary:
 
-- `task_definitions` is currently a read-only mirror of built-in task definitions for the task center UI, manual trigger checks, and retry checks.
-- The `cron` scheduler still uses `BuiltinTaskDefinitions(cfg)` as its source of truth and does not read manually edited `task_definitions` rows from DB.
-- If the admin UI should become the scheduler configuration source, update the scheduler to read DB first and change built-in sync from overwrite to missing-record initialization.
+- `BuiltinTaskDefinitions(cfg)` defines the built-in task set, default cron expressions, and handler safety boundary.
+- `task_definitions` is the operational table synced from built-ins; existing tasks preserve operational settings such as `status/allow_manual/allow_retry/record_success_*`.
+- The `cron` process registers all built-in cron tasks on startup. Before each trigger, it reads `task_definitions.status`, so admin enable/disable changes take effect on the next scheduled trigger without restarting the cron process.
 
 ### 5. Run One-Off Commands
 
@@ -124,6 +124,7 @@ Task definition boundary:
 go run main.go command api-route
 go run main.go command rebuild-user-permissions
 go run main.go command init-system
+go run main.go -c ./config.yaml command task sync-definitions
 go run main.go -c ./config.yaml command migrate up
 ```
 
@@ -138,7 +139,9 @@ Supported subcommands:
 - `rebuild-user-permissions`
   - rebuilds final user API permissions from database relationships
 - `init-system`
-  - rolls back migrations, reruns migrations, initializes API routes, and rebuilds user permissions
+  - destructive reset command: drops objects in the configured database, reruns migrations, initializes API routes, and rebuilds user permissions
+  - before execution it prints a red warning with the current environment and MySQL target, then requires backup confirmation and the current database name
+  - `-y` only skips the ordinary prompt; automation must also pass `--backup-confirmed --confirm-database <mysql.database>`
 - `demo`
   - example command
 - `migrate`
@@ -148,6 +151,10 @@ Supported subcommands:
   - scans async queue tasks registered in code and compares them with the `task_definitions` mirror
 - `task scan-cron`
   - scans built-in cron task definitions and compares them with the `task_definitions` mirror
+- `task sync-definitions`
+  - non-destructively syncs `BuiltinTaskDefinitions(cfg)` into `task_definitions`
+  - use this after deploying new tasks; do not run `init-system`
+  - existing tasks only update code-owned fields such as `name/kind/queue/cron_spec/handler/is_high_risk/remark`; operational settings such as `status/allow_manual/allow_retry/record_success_*` are preserved
 
 ### 6. Show Version
 

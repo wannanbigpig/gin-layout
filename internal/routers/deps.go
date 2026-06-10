@@ -19,6 +19,7 @@ type ControllerDeps struct {
 	Menu       *admin_v1.MenuController
 	Role       *admin_v1.RoleController
 	Dept       *admin_v1.DeptController
+	Product    *admin_v1.ProductController
 	SysConfig  *admin_v1.SysConfigController
 	SysDict    *admin_v1.SysDictController
 	Storage    *admin_v1.StorageConfigController
@@ -48,6 +49,7 @@ func DefaultControllerDeps() *ControllerDeps {
 			Menu:       admin_v1.NewMenuController(),
 			Role:       admin_v1.NewRoleController(),
 			Dept:       admin_v1.NewDeptController(),
+			Product:    admin_v1.NewProductController(),
 			SysConfig:  admin_v1.NewSysConfigController(),
 			SysDict:    admin_v1.NewSysDictController(),
 			Storage:    admin_v1.NewStorageConfigController(),
@@ -94,6 +96,9 @@ func normalizeControllerDeps(deps *ControllerDeps) *ControllerDeps {
 	}
 	if deps.Dept == nil {
 		deps.Dept = defaultDeps.Dept
+	}
+	if deps.Product == nil {
+		deps.Product = defaultDeps.Product
 	}
 	if deps.SysConfig == nil {
 		deps.SysConfig = defaultDeps.SysConfig

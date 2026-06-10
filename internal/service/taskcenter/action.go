@@ -6,16 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
+	"github.com/wannanbigpig/gin-layout/internal/resources"
 	baseservice "github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	"go.uber.org/zap"
@@ -84,6 +85,83 @@ func (s *TaskCenterService) TriggerTask(ctx context.Context, params *form.TaskTr
 	default:
 		return nil, e.NewBusinessError(e.InvalidParameter, "当前任务类型不支持手动触发")
 	}
+}
+
+// UpdateTaskRecordPolicy 更新任务成功明细记录策略。
+func (s *TaskCenterService) UpdateTaskRecordPolicy(ctx context.Context, params *form.TaskRecordPolicyForm) (any, error) {
+	taskCode := strings.TrimSpace(params.TaskCode)
+	if taskCode == "" {
+		return nil, e.NewBusinessError(e.InvalidParameter, "task_code 不能为空")
+	}
+	if params.RecordDetailOnFailure == 0 {
+		return nil, e.NewBusinessError(e.InvalidParameter, "失败类结果必须记录明细")
+	}
+
+	definition, err := loadTaskDefinitionByCode(taskCode)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, e.NewBusinessError(e.ServerErr, "读取任务定义失败")
+	}
+
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	updates := map[string]any{
+		"record_success_mode":             strings.TrimSpace(params.RecordSuccessMode),
+		"record_success_rate":             params.RecordSuccessRate,
+		"record_success_interval_seconds": params.RecordSuccessIntervalSeconds,
+		"record_detail_on_manual":         params.RecordDetailOnManual,
+		"record_detail_on_failure":        params.RecordDetailOnFailure,
+	}
+	if err := db.WithContext(ctx).Model(&model.TaskDefinition{}).
+		Where("code = ? AND deleted_at = 0", taskCode).
+		Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	definition.RecordSuccessMode = strings.TrimSpace(params.RecordSuccessMode)
+	definition.RecordSuccessRate = params.RecordSuccessRate
+	definition.RecordSuccessIntervalSeconds = params.RecordSuccessIntervalSeconds
+	definition.RecordDetailOnManual = params.RecordDetailOnManual
+	definition.RecordDetailOnFailure = params.RecordDetailOnFailure
+	return resources.NewTaskDefinitionTransformer().ToStruct(definition), nil
+}
+
+// UpdateTaskOperationConfig 更新任务启停和手动触发/重试开关。
+func (s *TaskCenterService) UpdateTaskOperationConfig(ctx context.Context, params *form.TaskOperationConfigForm) (any, error) {
+	taskCode := strings.TrimSpace(params.TaskCode)
+	if taskCode == "" {
+		return nil, e.NewBusinessError(e.InvalidParameter, "task_code 不能为空")
+	}
+
+	definition, err := loadTaskDefinitionByCode(taskCode)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, e.NewBusinessError(e.ServerErr, "读取任务定义失败")
+	}
+
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	updates := map[string]any{
+		"status":       params.Status,
+		"allow_manual": params.AllowManual,
+		"allow_retry":  params.AllowRetry,
+	}
+	if err := db.WithContext(ctx).Model(&model.TaskDefinition{}).
+		Where("code = ? AND deleted_at = 0", taskCode).
+		Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	definition.Status = params.Status
+	definition.AllowManual = params.AllowManual
+	definition.AllowRetry = params.AllowRetry
+	return resources.NewTaskDefinitionTransformer().ToStruct(definition), nil
 }
 
 func (s *TaskCenterService) triggerAsyncTask(ctx context.Context, definition *model.TaskDefinition, params *form.TaskTriggerForm, triggerUserID uint, triggerAccount string) (map[string]any, error) {
@@ -206,14 +284,14 @@ func (s *TaskCenterService) triggerCronTask(ctx context.Context, definition *mod
 	}, nil
 }
 
-// RetryTask 重试失败任务，重试时会创建一条新的执行记录。
+// RetryTask 重试失败类任务，重试时会创建一条新的执行记录并挂到同一重试链路下。
 func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUserID uint, triggerAccount string) (map[string]any, error) {
 	runModel, err := loadTaskRunByID(runID)
 	if err != nil || runModel == nil || runModel.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
-	if runModel.Status != model.TaskRunStatusFailed {
-		return nil, e.NewBusinessError(e.InvalidParameter, "仅失败任务允许重试")
+	if !isTaskRunRetryableStatus(runModel.Status) {
+		return nil, e.NewBusinessError(e.InvalidParameter, "仅失败、超时或中断任务允许重试")
 	}
 	if strings.TrimSpace(runModel.TaskCode) == "" {
 		return nil, e.NewBusinessError(e.InvalidParameter, "任务编码为空，无法重试")
@@ -236,6 +314,7 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 	if definition.Kind != runModel.Kind {
 		return nil, e.NewBusinessError(e.InvalidParameter, "任务类型与当前定义不一致，无法重试")
 	}
+	rootRunID := retryRootRunID(runModel)
 
 	payloadAny := map[string]any{}
 	if strings.TrimSpace(runModel.Payload) != "" {
@@ -244,53 +323,23 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 		}
 	}
 
-	taskID := fmt.Sprintf("retry:%d:%d:%s", runModel.ID, time.Now().UnixMilli(), uuid.NewString())
 	queueName := strings.TrimSpace(runModel.Queue)
 	if queueName == "" {
 		queueName = queue.DefaultQueue
 	}
 	rawPayload, _ := json.Marshal(payloadAny)
 
-	recorder := NewRunRecorder()
-	retryRun, err := recorder.Enqueue(ctx, RunStart{
-		TaskCode:       runModel.TaskCode,
-		Kind:           runModel.Kind,
-		Source:         model.TaskSourceManual,
-		SourceID:       taskID,
-		Queue:          queueName,
-		Attempt:        1,
-		MaxRetry:       runModel.MaxRetry,
-		Payload:        rawPayload,
-		TriggerUserID:  triggerUserID,
-		TriggerAccount: triggerAccount,
-	})
+	retryRun, retrySeq, taskID, err := s.enqueueRetryRunWithChainGuard(ctx, runModel, definition, rootRunID, queueName, rawPayload, triggerUserID, triggerAccount)
 	if err != nil {
 		return nil, err
 	}
 
 	exportService := newExportTaskService()
-	reassigned, err := exportService.ReassignTaskRun(ctx, runModel.ID, retryRun.ID, queueName)
-	if err != nil {
-		_ = recorder.Finish(ctx, retryRun, RunFinish{
-			Status: model.TaskRunStatusFailed,
-			Error:  err,
-		})
-		if errors.Is(err, baseservice.ErrExportRecordTableMissing) {
-			return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "导出记录表未初始化")
-		}
-		return nil, err
-	}
-	shouldCreateExportRecord := reassigned
-	if !reassigned {
-		// 兼容历史：原 run 尚未生成导出记录时，按场景判断是否需要新建。
-		_, shouldCreate, err := exportService.CreateRecordForTask(ctx, baseservice.ExportTaskBootstrapInput{
-			TaskCode:      runModel.TaskCode,
-			TaskRunID:     retryRun.ID,
-			TriggerUserID: triggerUserID,
-			Queue:         queueName,
-		})
+	shouldUpdateExportRecord := isExportTaskCode(runModel.TaskCode)
+	if shouldUpdateExportRecord {
+		reassigned, err := exportService.ReassignTaskRun(ctx, runModel.ID, retryRun.ID, queueName)
 		if err != nil {
-			_ = recorder.Finish(ctx, retryRun, RunFinish{
+			_ = NewRunRecorder().Finish(ctx, retryRun, RunFinish{
 				Status: model.TaskRunStatusFailed,
 				Error:  err,
 			})
@@ -299,9 +348,14 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 			}
 			return nil, err
 		}
-		shouldCreateExportRecord = shouldCreate
-	}
-	if shouldCreateExportRecord {
+		if !reassigned {
+			reassignErr := e.NewBusinessError(e.NotFound, "导出记录不存在，无法重试")
+			_ = NewRunRecorder().Finish(ctx, retryRun, RunFinish{
+				Status: model.TaskRunStatusFailed,
+				Error:  reassignErr,
+			})
+			return nil, reassignErr
+		}
 		payloadAny["task_run_id"] = retryRun.ID
 	}
 
@@ -311,7 +365,7 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 	}
 	jobInfo, publishErr := queue.PublishJSON(ctx, runModel.TaskCode, queueName, payloadAny, options...)
 	if publishErr != nil {
-		finishErr := recorder.Finish(ctx, retryRun, RunFinish{
+		finishErr := NewRunRecorder().Finish(ctx, retryRun, RunFinish{
 			Status: model.TaskRunStatusFailed,
 			Error:  publishErr,
 		})
@@ -320,7 +374,7 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 				zap.Uint("run_id", retryRun.ID),
 				zap.Error(finishErr))
 		}
-		if shouldCreateExportRecord {
+		if shouldUpdateExportRecord {
 			_ = exportService.MarkFailed(ctx, retryRun.ID, publishErr)
 		}
 		if errors.Is(publishErr, queue.ErrPublisherUnavailable) {
@@ -335,7 +389,79 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 		"queue":          jobInfo.Queue,
 		"type":           jobInfo.Type,
 		"retry_from_run": runModel.ID,
+		"retry_root_run": rootRunID,
+		"retry_seq":      retrySeq,
 	}, nil
+}
+
+func (s *TaskCenterService) enqueueRetryRunWithChainGuard(ctx context.Context, runModel *model.TaskRun, definition *model.TaskDefinition, rootRunID uint, queueName string, rawPayload []byte, triggerUserID uint, triggerAccount string) (*model.TaskRun, int, string, error) {
+	db, dbErr := s.dbOrDefault()
+	if dbErr != nil {
+		return enqueueRetryRunAfterChainCheck(ctx, nil, NewRunRecorder(), runModel, definition, rootRunID, queueName, rawPayload, triggerUserID, triggerAccount)
+	}
+
+	var retryRun *model.TaskRun
+	var retrySeq int
+	var taskID string
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked model.TaskRun
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").
+			Where("id = ?", rootRunID).
+			First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.NotFound, "重试根记录不存在")
+			}
+			log.Logger.Warn("锁定任务重试链路失败",
+				zap.Uint("run_id", runModel.ID),
+				zap.Uint("retry_root_run_id", rootRunID),
+				zap.Error(err))
+			return e.NewBusinessError(e.ServerErr, "锁定任务重试链路失败")
+		}
+
+		var err error
+		retryRun, retrySeq, taskID, err = enqueueRetryRunAfterChainCheck(ctx, tx, NewRecorderWithDB(tx), runModel, definition, rootRunID, queueName, rawPayload, triggerUserID, triggerAccount)
+		return err
+	})
+	if err != nil {
+		return nil, 0, "", err
+	}
+	return retryRun, retrySeq, taskID, nil
+}
+
+func enqueueRetryRunAfterChainCheck(ctx context.Context, db *gorm.DB, recorder Recorder, runModel *model.TaskRun, definition *model.TaskDefinition, rootRunID uint, queueName string, rawPayload []byte, triggerUserID uint, triggerAccount string) (*model.TaskRun, int, string, error) {
+	summary, err := loadTaskRetryChainSummary(ctx, db, rootRunID)
+	if err != nil {
+		log.Logger.Warn("读取任务重试链路失败",
+			zap.Uint("run_id", runModel.ID),
+			zap.Uint("retry_root_run_id", rootRunID),
+			zap.Error(err))
+		return nil, 0, "", e.NewBusinessError(e.ServerErr, "读取任务重试链路失败")
+	}
+	if canRetry, reason := evaluateTaskRunRetryState(runModel, definition, summary); !canRetry {
+		return nil, 0, "", e.NewBusinessError(e.InvalidParameter, reason)
+	}
+	retrySeq := summary.MaxSeq + 1
+	taskID := fmt.Sprintf("retry:%d:%d:%s", rootRunID, retrySeq, uuid.NewString())
+	retryRun, err := recorder.Enqueue(ctx, RunStart{
+		TaskCode:       runModel.TaskCode,
+		Kind:           runModel.Kind,
+		Source:         model.TaskSourceManual,
+		SourceID:       taskID,
+		Queue:          queueName,
+		Attempt:        1,
+		MaxRetry:       runModel.MaxRetry,
+		RetryOfRunID:   runModel.ID,
+		RetryRootRunID: rootRunID,
+		RetrySeq:       retrySeq,
+		Payload:        rawPayload,
+		TriggerUserID:  triggerUserID,
+		TriggerAccount: triggerAccount,
+	})
+	if err != nil {
+		return nil, 0, "", err
+	}
+	return retryRun, retrySeq, taskID, nil
 }
 
 // CancelTask 取消待执行或执行中的异步任务。

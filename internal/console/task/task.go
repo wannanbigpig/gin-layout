@@ -44,11 +44,36 @@ var (
 			return runScanCron()
 		},
 	}
+
+	syncDefinitionsCmd = &cobra.Command{
+		Use:   "sync-definitions",
+		Short: "Sync built-in task definitions to database without resetting data",
+		Long:  "Sync built-in task definitions to task_definitions. Existing operational settings such as status, allow_manual, allow_retry, and record policies are preserved.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSyncDefinitions()
+		},
+	}
 )
 
 func init() {
 	Cmd.AddCommand(scanAsyncCmd)
 	Cmd.AddCommand(scanCronCmd)
+	Cmd.AddCommand(syncDefinitionsCmd)
+}
+
+func runSyncDefinitions() error {
+	report, err := taskcron.SyncBuiltinDefinitionsWithReportIfAvailable(config.GetConfig())
+	if err != nil {
+		return err
+	}
+	if !report.TableAvailable {
+		return fmt.Errorf("task_definitions table is not available; run migrations first")
+	}
+
+	fmt.Printf("任务定义同步完成：total=%d inserted=%d updated=%d unchanged=%d\n",
+		report.Total, report.Inserted, report.Updated, report.Unchanged)
+	fmt.Println("已保留线上运营配置：status、allow_manual、allow_retry、record_success_*、record_detail_*。")
+	return nil
 }
 
 func runScanAsync() error {

@@ -1,0 +1,15 @@
+// {{.ModuleSnake}}Group {{.MenuTitle}}路由组
+func {{.ModuleSnake}}Group(deps *ControllerDeps) RouteGroupDef {
+	return RouteGroupDef{
+		Prefix:    "{{.TableName}}",
+		GroupCode: "{{.ModuleSnake}}",
+		Routes: []RouteDef{
+			GET("list", "{{.MenuTitle}}列表", AuthModeAuth, deps.{{.ControllerName}}.List),
+			GET("options", "{{.MenuTitle}}选项", AuthModeAuth, deps.{{.ControllerName}}.Options).WithDesc("按关键词搜索，供下拉选择器使用"),
+			GET("detail", "{{.MenuTitle}}详情", AuthModeAuth, deps.{{.ControllerName}}.Detail),
+			POST("create", "新增{{.MenuTitle}}", AuthModeAuth, deps.{{.ControllerName}}.Create),
+			POST("update", "更新{{.MenuTitle}}", AuthModeAuth, deps.{{.ControllerName}}.Update),
+			POST("delete", "删除{{.MenuTitle}}", AuthModeAuth, deps.{{.ControllerName}}.Delete),
+		},
+	}
+}

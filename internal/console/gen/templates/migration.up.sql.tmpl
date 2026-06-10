@@ -1,0 +1,27 @@
+BEGIN;
+
+-- 创建{{.Comment}}表
+CREATE TABLE IF NOT EXISTS `{{.TableName}}`
+(
+    `id`          int unsigned    NOT NULL AUTO_INCREMENT,
+{{- range .Fields}}
+{{- if ne .ColumnName "id"}}
+    `{{.ColumnName}}` {{.ColumnType}}{{if not .IsNullable}} NOT NULL{{end}}{{if .DefaultVal}} DEFAULT '{{.DefaultVal}}'{{end}}{{if .Comment}} COMMENT '{{.Comment}}'{{end}},
+{{- end}}
+{{- end}}
+    `created_at`  datetime                 DEFAULT NULL,
+    `updated_at`  datetime                 DEFAULT NULL,
+    `deleted_at`  int             NOT NULL DEFAULT '0' COMMENT '删除时间',
+    PRIMARY KEY (`id`),
+{{- range .Fields}}
+{{- if .IsIndex}}
+    KEY `idx_{{.ColumnName}}` (`{{.ColumnName}}`),
+{{- end}}
+{{- end}}
+    KEY `idx_deleted_at` (`deleted_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_bin
+  ROW_FORMAT = DYNAMIC COMMENT ='{{.Comment}}';
+
+COMMIT;

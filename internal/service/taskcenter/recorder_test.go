@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -54,6 +55,54 @@ func TestRecorderStartAndFinishSuccess(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("expected 2 events, got %d", count)
+	}
+	var stat model.TaskRunStat
+	if err := db.Where("task_code = ?", "demo:send").First(&stat).Error; err != nil {
+		t.Fatalf("query task run stat failed: %v", err)
+	}
+	if stat.TotalCount != 1 || stat.SuccessCount != 1 || stat.SampledSuccessCount != 1 {
+		t.Fatalf("unexpected task run stat: %#v", stat)
+	}
+}
+
+func TestRecorderSuccessWithoutDetailStillUpdatesStats(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	insertTaskDefinition(t, db, "audit:request_log.write", model.TaskRecordSuccessNone)
+	recorder := NewRecorderWithDB(db)
+
+	run, err := recorder.Start(context.Background(), RunStart{
+		TaskCode: "audit:request_log.write",
+		Kind:     model.TaskKindAsync,
+		Source:   model.TaskSourceQueue,
+		SourceID: "task-1",
+		Queue:    "audit",
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if err := recorder.Finish(context.Background(), run, RunFinish{}); err != nil {
+		t.Fatalf("Finish returned error: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.TaskRun{}).Where("id = ?", run.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count task runs failed: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected success detail to be deleted, got %d", count)
+	}
+	if err := db.Model(&model.TaskRunEvent{}).Where("run_id = ?", run.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count task events failed: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected success events to be deleted, got %d", count)
+	}
+	var stat model.TaskRunStat
+	if err := db.Where("task_code = ?", "audit:request_log.write").First(&stat).Error; err != nil {
+		t.Fatalf("query task run stat failed: %v", err)
+	}
+	if stat.TotalCount != 1 || stat.SuccessCount != 1 || stat.SampledSuccessCount != 0 {
+		t.Fatalf("unexpected task run stat: %#v", stat)
 	}
 }
 
@@ -112,6 +161,41 @@ func TestRecorderFinishFailureUpdatesCronState(t *testing.T) {
 	}
 }
 
+func TestRecorderFailureAlwaysKeepsDetail(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	insertTaskDefinition(t, db, "audit:request_log.write", model.TaskRecordSuccessNone)
+	recorder := NewRecorderWithDB(db)
+
+	run, err := recorder.Start(context.Background(), RunStart{
+		TaskCode: "audit:request_log.write",
+		Kind:     model.TaskKindAsync,
+		Source:   model.TaskSourceQueue,
+		SourceID: "task-1",
+		Queue:    "audit",
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if err := recorder.Finish(context.Background(), run, RunFinish{Error: errors.New("boom")}); err != nil {
+		t.Fatalf("Finish returned error: %v", err)
+	}
+
+	var stored model.TaskRun
+	if err := db.First(&stored, run.ID).Error; err != nil {
+		t.Fatalf("query task run failed: %v", err)
+	}
+	if stored.Status != model.TaskRunStatusFailed || stored.DetailRecordMode != model.TaskDetailRecordForced {
+		t.Fatalf("unexpected failed run: %#v", stored)
+	}
+	var stat model.TaskRunStat
+	if err := db.Where("task_code = ?", "audit:request_log.write").First(&stat).Error; err != nil {
+		t.Fatalf("query task run stat failed: %v", err)
+	}
+	if stat.TotalCount != 1 || stat.FailedCount != 1 {
+		t.Fatalf("unexpected task run stat: %#v", stat)
+	}
+}
+
 func TestRecorderFinishCancelWritesOperatorMeta(t *testing.T) {
 	db := newTaskCenterTestDB(t)
 	recorder := NewRecorderWithDB(db)
@@ -164,6 +248,108 @@ func TestRecorderFinishCancelWritesOperatorMeta(t *testing.T) {
 	}
 }
 
+func TestRecorderEnqueuePersistsRetryChain(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	recorder := NewRecorderWithDB(db)
+
+	run, err := recorder.Enqueue(context.Background(), RunStart{
+		TaskCode:       "demo:send",
+		Kind:           model.TaskKindAsync,
+		Source:         model.TaskSourceManual,
+		SourceID:       "retry:101:1",
+		MaxRetry:       3,
+		RetryOfRunID:   101,
+		RetryRootRunID: 88,
+		RetrySeq:       2,
+	})
+	if err != nil {
+		t.Fatalf("Enqueue returned error: %v", err)
+	}
+
+	var stored model.TaskRun
+	if err := db.First(&stored, run.ID).Error; err != nil {
+		t.Fatalf("query task run failed: %v", err)
+	}
+	if stored.RetryOfRunID != 101 || stored.RetryRootRunID != 88 || stored.RetrySeq != 2 {
+		t.Fatalf("unexpected retry chain fields: %#v", stored)
+	}
+
+	var event model.TaskRunEvent
+	if err := db.Where("run_id = ? AND event_type = ?", run.ID, model.TaskEventEnqueue).First(&event).Error; err != nil {
+		t.Fatalf("query enqueue event failed: %v", err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(event.Meta), &meta); err != nil {
+		t.Fatalf("unmarshal enqueue meta failed: %v", err)
+	}
+	if meta["retry_of_run_id"] != float64(101) || meta["retry_root_run_id"] != float64(88) || meta["retry_seq"] != float64(2) {
+		t.Fatalf("unexpected retry meta: %#v", meta)
+	}
+}
+
+func TestRecorderStartPreservesRetryChainWhenReusingPendingRun(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	recorder := NewRecorderWithDB(db)
+
+	queued, err := recorder.Enqueue(context.Background(), RunStart{
+		TaskCode:       "demo:send",
+		Kind:           model.TaskKindAsync,
+		Source:         model.TaskSourceManual,
+		SourceID:       "retry:88:2",
+		Queue:          "default",
+		MaxRetry:       3,
+		RetryOfRunID:   101,
+		RetryRootRunID: 88,
+		RetrySeq:       2,
+	})
+	if err != nil {
+		t.Fatalf("Enqueue returned error: %v", err)
+	}
+
+	started, err := recorder.Start(context.Background(), RunStart{
+		TaskCode: "demo:send",
+		Kind:     model.TaskKindAsync,
+		Source:   model.TaskSourceQueue,
+		SourceID: "retry:88:2",
+		Queue:    "default",
+		Attempt:  1,
+		MaxRetry: 3,
+		Payload:  []byte(`{"retry":true}`),
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if started.ID != queued.ID {
+		t.Fatalf("expected start to reuse queued run %d, got %d", queued.ID, started.ID)
+	}
+
+	var stored model.TaskRun
+	if err := db.First(&stored, queued.ID).Error; err != nil {
+		t.Fatalf("query task run failed: %v", err)
+	}
+	if stored.Status != model.TaskRunStatusRunning {
+		t.Fatalf("unexpected status: %s", stored.Status)
+	}
+	if stored.Source != model.TaskSourceManual {
+		t.Fatalf("expected source to stay manual, got %s", stored.Source)
+	}
+	if stored.RetryOfRunID != 101 || stored.RetryRootRunID != 88 || stored.RetrySeq != 2 {
+		t.Fatalf("retry chain fields were not preserved: %#v", stored)
+	}
+
+	var event model.TaskRunEvent
+	if err := db.Where("run_id = ? AND event_type = ?", queued.ID, model.TaskEventStart).First(&event).Error; err != nil {
+		t.Fatalf("query start event failed: %v", err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(event.Meta), &meta); err != nil {
+		t.Fatalf("unmarshal start meta failed: %v", err)
+	}
+	if meta["retry_of_run_id"] != float64(101) || meta["retry_root_run_id"] != float64(88) || meta["retry_seq"] != float64(2) {
+		t.Fatalf("unexpected start retry meta: %#v", meta)
+	}
+}
+
 func TestTaskRunEventsReturnsCreatedAtAscending(t *testing.T) {
 	db := newTaskCenterTestDB(t)
 	events := []model.TaskRunEvent{
@@ -210,11 +396,15 @@ func newTaskCenterTestDB(t *testing.T) *gorm.DB {
 			status text,
 			attempt integer,
 			max_retry integer,
+			retry_of_run_id integer,
+			retry_root_run_id integer,
+			retry_seq integer,
 			payload text,
 			error_message text,
 			started_at datetime,
 			finished_at datetime,
-			duration_ms real
+			duration_ms real,
+			detail_record_mode text
 		)`,
 		`CREATE TABLE task_run_events (
 			id integer primary key autoincrement,
@@ -236,7 +426,52 @@ func newTaskCenterTestDB(t *testing.T) *gorm.DB {
 			last_started_at datetime,
 			last_finished_at datetime,
 			next_run_at datetime,
+			last_success_at datetime,
+			last_failed_at datetime,
+			last_stats_window_start datetime,
 			last_error text
+		)`,
+		`CREATE TABLE task_definitions (
+			id integer primary key autoincrement,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at integer default 0,
+			code text,
+			name text,
+			kind text,
+			queue text,
+			cron_spec text,
+			handler text,
+			status integer,
+			allow_manual integer,
+			allow_retry integer,
+			is_high_risk integer,
+			record_success_mode text,
+			record_success_rate integer,
+			record_success_interval_seconds integer,
+			record_detail_on_manual integer,
+			record_detail_on_failure integer,
+			remark text
+		)`,
+		`CREATE TABLE task_run_stats (
+			id integer primary key autoincrement,
+			created_at datetime,
+			updated_at datetime,
+			task_code text,
+			kind text,
+			source text,
+			window_start datetime,
+			window_size text,
+			total_count integer default 0,
+			success_count integer default 0,
+			failed_count integer default 0,
+			canceled_count integer default 0,
+			timeout_count integer default 0,
+			interrupted_count integer default 0,
+			sampled_success_count integer default 0,
+			duration_total_ms real default 0,
+			duration_max_ms real default 0,
+			unique(task_code, kind, source, window_start, window_size)
 		)`,
 	}
 	for _, statement := range statements {
@@ -245,4 +480,13 @@ func newTaskCenterTestDB(t *testing.T) *gorm.DB {
 		}
 	}
 	return db
+}
+
+func insertTaskDefinition(t *testing.T, db *gorm.DB, code string, successMode string) {
+	t.Helper()
+	now := time.Now()
+	if err := db.Exec(`INSERT INTO task_definitions (created_at, updated_at, deleted_at, code, name, kind, queue, status, allow_manual, allow_retry, is_high_risk, record_success_mode, record_success_rate, record_success_interval_seconds, record_detail_on_manual, record_detail_on_failure) VALUES (?, ?, 0, ?, ?, ?, ?, 1, 0, 1, 0, ?, 0, 0, 1, 1)`,
+		now, now, code, code, model.TaskKindAsync, "default", successMode).Error; err != nil {
+		t.Fatalf("insert task definition failed: %v", err)
+	}
 }

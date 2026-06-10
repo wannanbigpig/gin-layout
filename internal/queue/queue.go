@@ -41,10 +41,27 @@ type Publisher interface {
 	Enqueue(ctx context.Context, job Job) (JobInfo, error)
 }
 
-// Inspector 负责对已入队任务执行控制操作。
+// QueueStats 表示单个队列的统计信息。
+type QueueStats struct {
+	Queue     string `json:"queue"`
+	Size      int    `json:"size"`
+	Pending   int    `json:"pending"`
+	Active    int    `json:"active"`
+	Scheduled int    `json:"scheduled"`
+	Retry     int    `json:"retry"`
+	Archived  int    `json:"archived"`
+	Completed int    `json:"completed"`
+	Processed int    `json:"processed"`
+	Failed    int    `json:"failed"`
+	Paused    bool   `json:"paused"`
+}
+
+// Inspector 负责对已入队任务执行控制操作和查询统计。
 type Inspector interface {
 	DeleteTask(ctx context.Context, queueName, taskID string) error
 	CancelProcessing(ctx context.Context, taskID string) error
+	GetQueueStats(ctx context.Context, queueName string) (*QueueStats, error)
+	GetAllQueueStats(ctx context.Context) ([]*QueueStats, error)
 }
 
 // Handler 负责消费任务 payload。
@@ -346,13 +363,18 @@ func retryInspectorInitIfNeeded() {
 	}
 }
 
+func inspectorOrRetry() Inspector {
+	inspector := InspectorOrNil()
+	if inspector != nil {
+		return inspector
+	}
+	retryInspectorInitIfNeeded()
+	return InspectorOrNil()
+}
+
 // DeleteTask 删除队列中的任务（pending/scheduled/retry/archived）。
 func DeleteTask(ctx context.Context, queueName, taskID string) error {
-	inspector := InspectorOrNil()
-	if inspector == nil {
-		retryInspectorInitIfNeeded()
-		inspector = InspectorOrNil()
-	}
+	inspector := inspectorOrRetry()
 	if inspector == nil {
 		return ErrInspectorUnavailable
 	}
@@ -361,15 +383,29 @@ func DeleteTask(ctx context.Context, queueName, taskID string) error {
 
 // CancelProcessing 发送取消正在执行任务的信号（best-effort）。
 func CancelProcessing(ctx context.Context, taskID string) error {
-	inspector := InspectorOrNil()
-	if inspector == nil {
-		retryInspectorInitIfNeeded()
-		inspector = InspectorOrNil()
-	}
+	inspector := inspectorOrRetry()
 	if inspector == nil {
 		return ErrInspectorUnavailable
 	}
 	return inspector.CancelProcessing(ctx, taskID)
+}
+
+// GetQueueStats 获取单个队列的统计信息。
+func GetQueueStats(ctx context.Context, queueName string) (*QueueStats, error) {
+	inspector := inspectorOrRetry()
+	if inspector == nil {
+		return nil, ErrInspectorUnavailable
+	}
+	return inspector.GetQueueStats(ctx, queueName)
+}
+
+// GetAllQueueStats 获取所有队列的统计信息。
+func GetAllQueueStats(ctx context.Context) ([]*QueueStats, error) {
+	inspector := inspectorOrRetry()
+	if inspector == nil {
+		return nil, ErrInspectorUnavailable
+	}
+	return inspector.GetAllQueueStats(ctx)
 }
 
 // SetPublisherForTesting 仅用于测试时替换全局 publisher。

@@ -223,6 +223,41 @@ func (s *ExportCenterService) MarkCanceledIfExists(ctx context.Context, taskRunI
 	return db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", taskRunID).Updates(updates).Error
 }
 
+// ReassignTaskRun 将已有导出记录改绑到新的 retry run，并重置为待执行状态。
+func (s *ExportCenterService) ReassignTaskRun(ctx context.Context, oldTaskRunID, newTaskRunID uint, queueName string) (bool, error) {
+	if oldTaskRunID == 0 || newTaskRunID == 0 {
+		return false, nil
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return false, err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return false, err
+	}
+
+	updates := map[string]any{
+		"task_run_id":     newTaskRunID,
+		"status":          model.TaskRunStatusPending,
+		"queue":           strings.TrimSpace(queueName),
+		"progress":        exportProgressPending,
+		"total_count":     uint64(0),
+		"processed_count": uint64(0),
+		"file_id":         uint(0),
+		"file_uuid":       "",
+		"file_name":       "",
+		"file_size":       uint64(0),
+		"error_message":   "",
+		"started_at":      nil,
+		"finished_at":     nil,
+	}
+	result := db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", oldTaskRunID).Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 func (s *ExportCenterService) List(params *form.ExportRecordList) *resources.Collection {
 	query := query_builder.New().
 		AddEq("scene", strings.TrimSpace(params.Scene)).
@@ -280,30 +315,36 @@ func (s *ExportCenterService) List(params *form.ExportRecordList) *resources.Col
 		if err := queryDB.Scopes(recordModel.Paginate(params.Page, params.PerPage)).Find(&rows).Error; err != nil {
 			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
 		}
+		s.decorateExportRetryState(context.Background(), s.db, rows)
 		return transformer.ToCollection(params.Page, params.PerPage, total, rows)
 	}
 
-	if db, err := model.GetDB(); err != nil || !exportRecordsTableReady(db) {
+	db, err := model.GetDB()
+	if err != nil || !exportRecordsTableReady(db) {
 		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
 	}
 
-	recordModel.SetDB(s.db)
+	recordModel.SetDB(db)
 	total, collection, err := model.ListPageE(recordModel, params.Page, params.PerPage, condition, args, listOptionalParams)
 	if err != nil {
 		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
 	}
+	s.decorateExportRetryState(context.Background(), db, collection)
 	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
 }
 
 func (s *ExportCenterService) Detail(id uint) (any, error) {
 	record := model.NewSysExportRecord()
+	var db *gorm.DB
 	if s.db != nil {
 		if err := ensureExportRecordTable(s.db); err != nil {
 			return nil, e.NewBusinessError(e.NotFound)
 		}
+		db = s.db
 		record.SetDB(s.db)
 	} else {
-		db, err := model.GetDB()
+		var err error
+		db, err = model.GetDB()
 		if err != nil {
 			return nil, err
 		}
@@ -314,51 +355,178 @@ func (s *ExportCenterService) Detail(id uint) (any, error) {
 	if err := record.GetById(id); err != nil || record.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
+	s.decorateExportRetryState(context.Background(), db, []*model.SysExportRecord{record})
 	return resources.NewExportRecordTransformer().ToStruct(record), nil
 }
 
-// ReassignTaskRun 将 oldTaskRunID 对应的导出记录改挂到 newTaskRunID 并重置为 pending 待执行态。
-// 返回 reassigned=true 表示已复用旧记录；返回 reassigned=false 表示原 task_run 没有对应导出记录，
-// 调用方应回退到 CreateRecordForTask（兼容历史无 export_record 的老 run）。
-func (s *ExportCenterService) ReassignTaskRun(ctx context.Context, oldTaskRunID, newTaskRunID uint, queueName string) (bool, error) {
-	if oldTaskRunID == 0 || newTaskRunID == 0 {
-		return false, nil
+func (s *ExportCenterService) decorateExportRetryState(ctx context.Context, db *gorm.DB, records []*model.SysExportRecord) {
+	if len(records) == 0 || db == nil {
+		return
 	}
-	db, err := s.dbOrDefault(ctx)
-	if err != nil {
-		return false, err
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if err := ensureExportRecordTable(db); err != nil {
-		return false, err
-	}
-	var record model.SysExportRecord
-	if err := db.Where("task_run_id = ?", oldTaskRunID).First(&record).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
+
+	taskRunIDs := make([]uint, 0, len(records))
+	taskRunSeen := make(map[uint]struct{}, len(records))
+	for _, record := range records {
+		if record == nil {
+			continue
 		}
-		return false, err
+		record.CanRetry = false
+		if record.TaskRunID == 0 {
+			record.RetryBlockReason = "导出记录未关联执行记录"
+			continue
+		}
+		if record.Status != model.TaskRunStatusFailed {
+			record.RetryBlockReason = "仅失败导出任务允许重试"
+			continue
+		}
+		if _, ok := taskRunSeen[record.TaskRunID]; ok {
+			continue
+		}
+		taskRunSeen[record.TaskRunID] = struct{}{}
+		taskRunIDs = append(taskRunIDs, record.TaskRunID)
 	}
-	updates := map[string]any{
-		"task_run_id":     newTaskRunID,
-		"status":          model.TaskRunStatusPending,
-		"progress":        exportProgressPending,
-		"total_count":     uint64(0),
-		"processed_count": uint64(0),
-		"started_at":      nil,
-		"finished_at":     nil,
-		"file_id":         0,
-		"file_uuid":       "",
-		"file_name":       "",
-		"file_size":       uint64(0),
-		"error_message":   "",
+	if len(taskRunIDs) == 0 {
+		return
 	}
-	if trimmed := strings.TrimSpace(queueName); trimmed != "" {
-		updates["queue"] = trimmed
+
+	var runs []*model.TaskRun
+	if err := db.WithContext(ctx).
+		Select("id", "task_code", "status", "max_retry", "retry_root_run_id").
+		Where("id IN ?", taskRunIDs).
+		Find(&runs).Error; err != nil {
+		for _, record := range records {
+			if record != nil && record.Status == model.TaskRunStatusFailed {
+				record.RetryBlockReason = "读取执行记录失败"
+			}
+		}
+		return
 	}
-	if err := db.Model(&model.SysExportRecord{}).Where("id = ?", record.ID).Updates(updates).Error; err != nil {
-		return false, err
+	runMap := make(map[uint]*model.TaskRun, len(runs))
+	taskCodes := make([]string, 0, len(runs))
+	taskCodeSeen := make(map[string]struct{}, len(runs))
+	rootIDs := make([]uint, 0, len(runs))
+	rootSeen := make(map[uint]struct{}, len(runs))
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		runMap[run.ID] = run
+		if strings.TrimSpace(run.TaskCode) != "" {
+			if _, ok := taskCodeSeen[run.TaskCode]; !ok {
+				taskCodeSeen[run.TaskCode] = struct{}{}
+				taskCodes = append(taskCodes, run.TaskCode)
+			}
+		}
+		rootID := run.RetryRootRunID
+		if rootID == 0 {
+			rootID = run.ID
+		}
+		if _, ok := rootSeen[rootID]; !ok {
+			rootSeen[rootID] = struct{}{}
+			rootIDs = append(rootIDs, rootID)
+		}
 	}
-	return true, nil
+
+	definitions := make(map[string]*model.TaskDefinition, len(taskCodes))
+	if len(taskCodes) > 0 {
+		var rows []*model.TaskDefinition
+		if err := db.WithContext(ctx).Where("code IN ? AND deleted_at = 0", taskCodes).Find(&rows).Error; err == nil {
+			for _, item := range rows {
+				definitions[item.Code] = item
+			}
+		}
+	}
+	summaries := make(map[uint]exportRetryChainSummary, len(rootIDs))
+	if len(rootIDs) > 0 {
+		type row struct {
+			RetryRootRunID uint
+			MaxSeq         int
+			SuccessCount   int64
+			ActiveCount    int64
+		}
+		rows := make([]row, 0, len(rootIDs))
+		if err := db.WithContext(ctx).
+			Model(&model.TaskRun{}).
+			Select(
+				`retry_root_run_id,
+				COALESCE(MAX(retry_seq), 0) AS max_seq,
+				COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS success_count,
+				COALESCE(SUM(CASE WHEN status IN (?, ?, ?) THEN 1 ELSE 0 END), 0) AS active_count`,
+				model.TaskRunStatusSuccess,
+				model.TaskRunStatusPending,
+				model.TaskRunStatusRunning,
+				model.TaskRunStatusRetrying,
+			).
+			Where("retry_root_run_id IN ?", rootIDs).
+			Group("retry_root_run_id").
+			Scan(&rows).Error; err == nil {
+			for _, item := range rows {
+				summaries[item.RetryRootRunID] = exportRetryChainSummary{
+					MaxSeq:       item.MaxSeq,
+					SuccessCount: item.SuccessCount,
+					ActiveCount:  item.ActiveCount,
+				}
+			}
+		}
+	}
+
+	for _, record := range records {
+		if record == nil || record.Status != model.TaskRunStatusFailed || record.TaskRunID == 0 {
+			continue
+		}
+		run := runMap[record.TaskRunID]
+		if run == nil {
+			record.RetryBlockReason = "执行记录不存在"
+			continue
+		}
+		rootID := run.RetryRootRunID
+		if rootID == 0 {
+			rootID = run.ID
+		}
+		canRetry, reason := evaluateExportRetryState(run, definitions[run.TaskCode], summaries[rootID])
+		record.CanRetry = canRetry
+		record.RetryBlockReason = reason
+	}
+}
+
+type exportRetryChainSummary struct {
+	MaxSeq       int
+	SuccessCount int64
+	ActiveCount  int64
+}
+
+func evaluateExportRetryState(run *model.TaskRun, definition *model.TaskDefinition, summary exportRetryChainSummary) (bool, string) {
+	if run == nil || run.ID == 0 {
+		return false, "执行记录不存在"
+	}
+	switch run.Status {
+	case model.TaskRunStatusFailed, model.TaskRunStatusTimeout, model.TaskRunStatusInterrupted:
+	default:
+		return false, "仅失败、超时或中断任务允许重试"
+	}
+	if definition == nil {
+		return false, "任务定义不存在"
+	}
+	if definition.Status != model.TaskStatusEnabled {
+		return false, "任务已停用，无法重试"
+	}
+	if definition.AllowRetry != model.TaskRetryAllowed {
+		return false, "任务不允许重试"
+	}
+	if summary.ActiveCount > 0 {
+		return false, "该任务已有重试记录正在执行或排队"
+	}
+	if summary.SuccessCount > 0 {
+		return false, "该任务重试链路已成功，不允许继续重试"
+	}
+	limit := 3
+	if summary.MaxSeq >= limit {
+		return false, fmt.Sprintf("已达到最大手动重试次数 %d", limit)
+	}
+	return true, ""
 }
 
 func (s *ExportCenterService) updateByTaskRunID(ctx context.Context, taskRunID uint, updates map[string]any) error {
@@ -396,7 +564,7 @@ func normalizeExportProgressCounts(processedCount, totalCount uint64) (uint64, u
 // sys_export_records 表存在性探测使用 sync.Once + atomic.Bool 缓存。
 //
 // 背景：原实现中 ensureExportRecordTable 在每次 CreateRecord / UpdateProgress /
-// MarkSuccess / MarkFailed / List / Detail / Reassign / updateByTaskRunID 等
+// MarkSuccess / MarkFailed / List / Detail / updateByTaskRunID 等
 // 路径都会调用 db.Migrator().HasTable(&model.SysExportRecord{})。在 MySQL 下，
 // 该调用会真实下发一次 INFORMATION_SCHEMA 查询，纯属重复劳动，因为应用启动后
 // 该表是否存在不会再发生变化（不会被在线 drop）。

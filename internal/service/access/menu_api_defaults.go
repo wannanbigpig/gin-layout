@@ -106,7 +106,7 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "file:create", Route: "/admin/v1/system/file/upload/multipart/abort", Method: "POST"},
 	{MenuCode: "file:update", Route: "/admin/v1/system/file/folder/create", Method: "POST"},
 	{MenuCode: "file:update", Route: "/admin/v1/system/file/folder/update", Method: "POST"},
-	{MenuCode: "file:update", Route: "/admin/v1/system/file/folder/delete", Method: "POST"},
+	{MenuCode: "file:delete", Route: "/admin/v1/system/file/folder/delete", Method: "POST"},
 	{MenuCode: "file:update", Route: "/admin/v1/system/file/folder/move", Method: "POST"},
 	{MenuCode: "file:update", Route: "/admin/v1/system/file/move", Method: "POST"},
 	{MenuCode: "file:delete", Route: "/admin/v1/system/file/delete", Method: "POST"},
@@ -122,7 +122,11 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "session:list", Route: "/admin/v1/auth/session/list", Method: "GET"},
 	{MenuCode: "session:revoke", Route: "/admin/v1/auth/session/revoke", Method: "POST"},
 	{MenuCode: "task:list", Route: "/admin/v1/task/list", Method: "GET"},
+	{MenuCode: "task:update", Route: "/admin/v1/task/record-policy", Method: "PATCH"},
+	{MenuCode: "task:update", Route: "/admin/v1/task/operation-config", Method: "PATCH"},
 	{MenuCode: "task:list", Route: "/admin/v1/task/run/list", Method: "GET"},
+	{MenuCode: "task:stats", Route: "/admin/v1/task/run/stats", Method: "GET"},
+	{MenuCode: "task:stats", Route: "/admin/v1/task/run/stats/trend", Method: "GET"},
 	{MenuCode: "task:detail", Route: "/admin/v1/task/run/detail", Method: "GET"},
 	{MenuCode: "task:detail", Route: "/admin/v1/task/run/events", Method: "GET"},
 	{MenuCode: "task:list", Route: "/admin/v1/task/cron/state", Method: "GET"},
@@ -136,18 +140,35 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "notification:send", Route: "/admin/v1/system/notification/send", Method: "POST"},
 	{MenuCode: "dashboard:overview", Route: "/admin/v1/dashboard/overview", Method: "GET"},
 	{MenuCode: "dashboard:statistics", Route: "/admin/v1/dashboard/statistics", Method: "GET"},
+	{MenuCode: "dashboard:monitor", Route: "/admin/v1/dashboard/monitor", Method: "GET"},
+	{MenuCode: "product:list", Route: "/admin/v1/product/list", Method: "GET"},
+	{MenuCode: "product:list", Route: "/admin/v1/product/detail", Method: "GET"},
+	{MenuCode: "product:create", Route: "/admin/v1/product/create", Method: "POST"},
+	{MenuCode: "product:update", Route: "/admin/v1/product/detail", Method: "GET"},
+	{MenuCode: "product:update", Route: "/admin/v1/product/update", Method: "POST"},
+	{MenuCode: "product:delete", Route: "/admin/v1/product/delete", Method: "POST"},
 }
 
 // MenuAPIDefaultsService 负责初始化默认菜单与接口映射关系。
 type MenuAPIDefaultsService struct {
-	// bindings 默认菜单与接口绑定配置。
+	// bindings 默认菜单与接口绑定配置（合并后）。
 	bindings []defaultMenuAPIBinding
+	// builtinBindings 内置默认绑定。
+	builtinBindings []defaultMenuAPIBinding
+	// externalBindings 外部配置绑定。
+	externalBindings []ExternalMenuAPIBinding
+	// includeExternal 是否包含外部绑定。
+	includeExternal bool
 }
 
 // MenuAPIDefaultsServiceDeps 描述 MenuAPIDefaultsService 可注入依赖。
 type MenuAPIDefaultsServiceDeps struct {
-	// Bindings 自定义默认菜单接口绑定。
+	// Bindings 自定义默认菜单接口绑定（覆盖内置）。
 	Bindings []defaultMenuAPIBinding
+	// ExternalBindings 外部配置绑定。
+	ExternalBindings []ExternalMenuAPIBinding
+	// IncludeExternal 是否包含外部绑定，默认 true。
+	IncludeExternal *bool
 }
 
 // NewMenuAPIDefaultsService 创建默认菜单接口映射服务实例。
@@ -157,13 +178,78 @@ func NewMenuAPIDefaultsService() *MenuAPIDefaultsService {
 
 // NewMenuAPIDefaultsServiceWithDeps 创建带依赖注入的默认菜单接口映射服务实例。
 func NewMenuAPIDefaultsServiceWithDeps(deps MenuAPIDefaultsServiceDeps) *MenuAPIDefaultsService {
-	s := &MenuAPIDefaultsService{}
-	if deps.Bindings != nil {
-		s.bindings = cloneMenuAPIBindings(deps.Bindings)
-	} else {
-		s.bindings = defaultMenuAPIBindings()
+	s := &MenuAPIDefaultsService{
+		includeExternal: true,
 	}
+
+	if deps.IncludeExternal != nil {
+		s.includeExternal = *deps.IncludeExternal
+	}
+
+	if deps.Bindings != nil {
+		s.builtinBindings = cloneMenuAPIBindings(deps.Bindings)
+	} else {
+		s.builtinBindings = defaultMenuAPIBindings()
+	}
+
+	if deps.ExternalBindings != nil {
+		s.externalBindings = cloneExternalMenuAPIBindings(deps.ExternalBindings)
+	} else if s.includeExternal {
+		s.externalBindings = LoadExternalBindings()
+	}
+
+	s.bindings = MergeBindings(s.builtinBindings, s.externalBindings)
 	return s
+}
+
+// cloneExternalMenuAPIBindings 克隆外部绑定切片。
+func cloneExternalMenuAPIBindings(source []ExternalMenuAPIBinding) []ExternalMenuAPIBinding {
+	if len(source) == 0 {
+		return nil
+	}
+	cloned := make([]ExternalMenuAPIBinding, len(source))
+	copy(cloned, source)
+	return cloned
+}
+
+// BuiltinBindings 返回内置绑定列表。
+func (s *MenuAPIDefaultsService) BuiltinBindings() []defaultMenuAPIBinding {
+	return cloneMenuAPIBindings(s.builtinBindings)
+}
+
+// ExternalBindings 返回外部绑定列表。
+func (s *MenuAPIDefaultsService) ExternalBindings() []ExternalMenuAPIBinding {
+	return cloneExternalMenuAPIBindings(s.externalBindings)
+}
+
+// Bindings 返回合并后的绑定列表。
+func (s *MenuAPIDefaultsService) Bindings() []defaultMenuAPIBinding {
+	return cloneMenuAPIBindings(s.bindings)
+}
+
+// BindingStats 返回绑定统计信息。
+func (s *MenuAPIDefaultsService) BindingStats() map[string]int {
+	return GetBindingStats(s.builtinBindings, s.externalBindings)
+}
+
+// AddExternalBinding 添加单个外部绑定并重新合并。
+func (s *MenuAPIDefaultsService) AddExternalBinding(binding ExternalMenuAPIBinding) {
+	if binding.Source == "" {
+		binding.Source = BindingSourceExternal
+	}
+	s.externalBindings = append(s.externalBindings, binding)
+	s.bindings = MergeBindings(s.builtinBindings, s.externalBindings)
+}
+
+// AddExternalBindings 批量添加外部绑定并重新合并。
+func (s *MenuAPIDefaultsService) AddExternalBindings(bindings []ExternalMenuAPIBinding) {
+	for i := range bindings {
+		if bindings[i].Source == "" {
+			bindings[i].Source = BindingSourceExternal
+		}
+	}
+	s.externalBindings = append(s.externalBindings, bindings...)
+	s.bindings = MergeBindings(s.builtinBindings, s.externalBindings)
 }
 
 func defaultMenuAPIBindings() []defaultMenuAPIBinding {
@@ -390,7 +476,17 @@ func defaultMenuAPIBindingRouteSet(bindings []defaultMenuAPIBinding) map[string]
 	return result
 }
 
-// DefaultMenuAPIBindingRouteSet 返回内置默认菜单/API 绑定的 method+route 集合。
+// DefaultMenuAPIBindingRouteSet 返回所有默认菜单/API 绑定（含外部）的 method+route 集合。
 func DefaultMenuAPIBindingRouteSet() map[string]struct{} {
+	external := LoadExternalBindings()
+	if len(external) == 0 {
+		return defaultMenuAPIBindingRouteSet(defaultMenuAPIBindings())
+	}
+	merged := MergeBindings(defaultMenuAPIBindings(), external)
+	return defaultMenuAPIBindingRouteSet(merged)
+}
+
+// BuiltinDefaultMenuAPIBindingRouteSet 返回仅内置默认菜单/API 绑定的 method+route 集合。
+func BuiltinDefaultMenuAPIBindingRouteSet() map[string]struct{} {
 	return defaultMenuAPIBindingRouteSet(defaultMenuAPIBindings())
 }

@@ -41,6 +41,36 @@ func (api TaskCenterController) RunList(c *gin.Context) {
 	api.Success(c, result)
 }
 
+// RunStats 查询任务执行全量统计汇总。
+func (api TaskCenterController) RunStats(c *gin.Context) {
+	params := form.NewTaskRunStatsQuery()
+	if err := validator.CheckQueryParams(c, &params); err != nil {
+		return
+	}
+
+	result, err := taskcenter.NewTaskCenterService().TaskRunStats(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+// RunStatsTrend 查询任务执行统计趋势。
+func (api TaskCenterController) RunStatsTrend(c *gin.Context) {
+	params := form.NewTaskRunStatsQuery()
+	if err := validator.CheckQueryParams(c, &params); err != nil {
+		return
+	}
+
+	result, err := taskcenter.NewTaskCenterService().TaskRunStatsTrend(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
 // RunDetail 查询任务执行记录详情。
 func (api TaskCenterController) RunDetail(c *gin.Context) {
 	query := form.NewIdForm()
@@ -79,6 +109,38 @@ func (api TaskCenterController) CronStateList(c *gin.Context) {
 	}
 
 	result := taskcenter.NewTaskCenterService().ListCronTaskStates(params)
+	api.Success(c, result)
+}
+
+// RecordPolicy 更新任务执行明细记录策略。
+func (api TaskCenterController) RecordPolicy(c *gin.Context) {
+	params := form.NewTaskRecordPolicyForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+
+	result, err := taskcenter.NewTaskCenterService().UpdateTaskRecordPolicy(c.Request.Context(), params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	middleware.SetAuditChangeDiffRaw(c, taskcenter.BuildRecordPolicyAuditDiff(params))
+	api.Success(c, result)
+}
+
+// OperationConfig 更新任务运营配置。
+func (api TaskCenterController) OperationConfig(c *gin.Context) {
+	params := form.NewTaskOperationConfigForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+
+	result, err := taskcenter.NewTaskCenterService().UpdateTaskOperationConfig(c.Request.Context(), params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	middleware.SetAuditChangeDiffRaw(c, taskcenter.BuildOperationConfigAuditDiff(params))
 	api.Success(c, result)
 }
 

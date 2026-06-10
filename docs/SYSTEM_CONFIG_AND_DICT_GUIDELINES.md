@@ -46,7 +46,7 @@
 - 路由定义。
 - 数据库结构含义。
 - 核心状态机流转规则。
-- 任务调度器的真实 source-of-truth，除非已专门改造 scheduler 从 DB 读取。
+- 任务调度器的 handler/spec 安全边界；定时任务启停这类运营状态应使用 `task_definitions`。
 - 会导致“后台一改，系统核心行为立即改变且难以审计”的规则。
 
 这类规则应继续由代码常量、validator、service 状态机、数据库约束和 migration 负责。
@@ -140,6 +140,6 @@
 | 页面下拉、tag、颜色、多语言 label | 放 `sys_dict` |
 | 登录锁定次数、审计脱敏字段、可运营阈值 | 放 `sys_config` |
 | validator 枚举、权限模式、状态机流转 | 放代码常量与校验 |
-| 定时任务是否真实启停 | 先明确 scheduler source-of-truth，再决定是否进 DB 配置 |
+| 定时任务是否真实启停 | 放 `task_definitions.status`，`cron` 每次触发前读取；handler/spec 仍以代码内置定义为准 |
 | 后端需要运行时读取策略 | 通过领域化 helper 读取 `sys_config`，并保留默认值 |
 | 展示层需要减少硬编码枚举 | 后端提供 `dict/options`；调用方 fallback 由调用方项目维护 |

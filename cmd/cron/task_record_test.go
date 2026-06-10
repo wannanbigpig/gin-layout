@@ -73,6 +73,29 @@ func TestRecordedJobPassesSchedulerContext(t *testing.T) {
 	}
 }
 
+func TestRecordedJobSkipsWhenRuntimeDisabled(t *testing.T) {
+	fake := &fakeCronRunRecorder{}
+	restore := taskcenter.SetRecorderForTesting(fake)
+	defer restore()
+
+	called := false
+	schedule := NewSchedule(&cronLogger{})
+	builder := schedule.Call("demo", func() {
+		called = true
+	}).EnabledWhen(func(context.Context) bool {
+		return false
+	}).EveryFiveSeconds()
+
+	schedule.recordedJob(builder.task).Run()
+
+	if called {
+		t.Fatal("expected disabled task not to run")
+	}
+	if len(fake.starts) != 0 || len(fake.finishes) != 0 {
+		t.Fatalf("expected disabled task not to be recorded, got starts=%d finishes=%d", len(fake.starts), len(fake.finishes))
+	}
+}
+
 func TestCalculateNextRunAtInvalidSpec(t *testing.T) {
 	nextRunAt, err := calculateNextRunAt("bad spec", time.Now())
 	if err == nil {

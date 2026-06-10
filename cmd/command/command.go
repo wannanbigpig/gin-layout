@@ -5,6 +5,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/cmd/bootstrapx"
 	"github.com/wannanbigpig/gin-layout/internal/console/demo"
+	genconsole "github.com/wannanbigpig/gin-layout/internal/console/gen"
 	initconsole "github.com/wannanbigpig/gin-layout/internal/console/init"
 	migrateconsole "github.com/wannanbigpig/gin-layout/internal/console/migrate"
 	"github.com/wannanbigpig/gin-layout/internal/console/system_init"
@@ -32,4 +33,5 @@ func registerSubCommands() {
 	Cmd.AddCommand(bootstrapx.WrapCommand(system_init.InitSystemCmd, bootstrapx.Requirements{Data: true}))             // 初始化系统: go-layout command init-system
 	Cmd.AddCommand(migrateconsole.Cmd)                                                                                 // 迁移管理: go-layout command migrate up / down / create / check
 	Cmd.AddCommand(bootstrapx.WrapCommand(taskconsole.Cmd, bootstrapx.Requirements{Data: true}))                       // 任务扫描: go-layout command task scan-async
+	Cmd.AddCommand(genconsole.Cmd)                                                                                     // 代码生成: go-layout command gen --from=gen/specs/product.yaml
 }

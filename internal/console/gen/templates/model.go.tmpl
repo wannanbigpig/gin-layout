@@ -1,0 +1,50 @@
+package model
+
+import (
+	"github.com/wannanbigpig/gin-layout/internal/model/modelDict"
+)
+
+{{if .HasStatus}}// {{.ModelName}}StatusDict 状态字典
+var {{.ModelName}}StatusDict modelDict.Dict = map[uint8]string{
+	1: "启用",
+	0: "禁用",
+}
+{{end}}
+// {{.ModelName}} {{.TableName}} 表
+type {{.ModelName}} struct {
+	ContainsDeleteBaseModel
+{{- range .Fields}}
+{{- if ne .ColumnName "id"}}
+{{- if ne .ColumnName "created_at"}}
+{{- if ne .ColumnName "updated_at"}}
+{{- if ne .ColumnName "deleted_at"}}
+	{{.Name}} {{.GoType}} `json:"{{.JsonTag}}" gorm:"{{.GormTag}}"`
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+{{- end}}
+}
+
+// New{{.ModelName}} 创建 {{.ModelName}} 模型实例。
+func New{{.ModelName}}() *{{.ModelName}} {
+	return BindModel(&{{.ModelName}}{})
+}
+
+// TableName 获取表名。
+func (m *{{.ModelName}}) TableName() string {
+	return "{{.TableName}}"
+}
+{{if .HasStatus}}// StatusMap 返回状态名称。
+func (m *{{.ModelName}}) StatusMap() string {
+	return {{.ModelName}}StatusDict.Map(m.Status)
+}
+{{end}}
+// Create 创建记录。
+func (m *{{.ModelName}}) Create() error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Create(m).Error
+}

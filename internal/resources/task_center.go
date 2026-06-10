@@ -7,20 +7,25 @@ import (
 
 // TaskDefinitionResources 任务定义响应结构。
 type TaskDefinitionResources struct {
-	ID          uint             `json:"id"`
-	Code        string           `json:"code"`
-	Name        string           `json:"name"`
-	Kind        string           `json:"kind"`
-	Queue       string           `json:"queue"`
-	CronSpec    string           `json:"cron_spec"`
-	Handler     string           `json:"handler"`
-	Status      uint8            `json:"status"`
-	AllowManual uint8            `json:"allow_manual"`
-	AllowRetry  uint8            `json:"allow_retry"`
-	IsHighRisk  uint8            `json:"is_high_risk"`
-	Remark      string           `json:"remark"`
-	CreatedAt   utils.FormatDate `json:"created_at"`
-	UpdatedAt   utils.FormatDate `json:"updated_at"`
+	ID                           uint             `json:"id"`
+	Code                         string           `json:"code"`
+	Name                         string           `json:"name"`
+	Kind                         string           `json:"kind"`
+	Queue                        string           `json:"queue"`
+	CronSpec                     string           `json:"cron_spec"`
+	Handler                      string           `json:"handler"`
+	Status                       uint8            `json:"status"`
+	AllowManual                  uint8            `json:"allow_manual"`
+	AllowRetry                   uint8            `json:"allow_retry"`
+	IsHighRisk                   uint8            `json:"is_high_risk"`
+	RecordSuccessMode            string           `json:"record_success_mode"`
+	RecordSuccessRate            uint8            `json:"record_success_rate"`
+	RecordSuccessIntervalSeconds int              `json:"record_success_interval_seconds"`
+	RecordDetailOnManual         uint8            `json:"record_detail_on_manual"`
+	RecordDetailOnFailure        uint8            `json:"record_detail_on_failure"`
+	Remark                       string           `json:"remark"`
+	CreatedAt                    utils.FormatDate `json:"created_at"`
+	UpdatedAt                    utils.FormatDate `json:"updated_at"`
 }
 
 // TaskDefinitionTransformer 任务定义资源转换器。
@@ -40,22 +45,28 @@ func NewTaskDefinitionTransformer() TaskDefinitionTransformer {
 
 // TaskRunBaseResources 任务执行记录公共字段。
 type TaskRunBaseResources struct {
-	ID             uint              `json:"id"`
-	TaskCode       string            `json:"task_code"`
-	Kind           string            `json:"kind"`
-	Source         string            `json:"source"`
-	SourceID       string            `json:"source_id"`
-	Queue          string            `json:"queue"`
-	Status         string            `json:"status"`
-	Attempt        int               `json:"attempt"`
-	MaxRetry       int               `json:"max_retry"`
-	ErrorMessage   string            `json:"error_message"`
-	DurationMS     float64           `json:"duration_ms"`
-	StartedAt      *utils.FormatDate `json:"started_at"`
-	FinishedAt     *utils.FormatDate `json:"finished_at"`
-	CreatedAt      utils.FormatDate  `json:"created_at"`
-	TriggerUserID  uint              `json:"trigger_user_id"`
-	TriggerAccount string            `json:"trigger_account"`
+	ID               uint              `json:"id"`
+	TaskCode         string            `json:"task_code"`
+	Kind             string            `json:"kind"`
+	Source           string            `json:"source"`
+	SourceID         string            `json:"source_id"`
+	Queue            string            `json:"queue"`
+	Status           string            `json:"status"`
+	Attempt          int               `json:"attempt"`
+	MaxRetry         int               `json:"max_retry"`
+	RetryOfRunID     uint              `json:"retry_of_run_id"`
+	RetryRootRunID   uint              `json:"retry_root_run_id"`
+	RetrySeq         int               `json:"retry_seq"`
+	ErrorMessage     string            `json:"error_message"`
+	DurationMS       float64           `json:"duration_ms"`
+	StartedAt        *utils.FormatDate `json:"started_at"`
+	FinishedAt       *utils.FormatDate `json:"finished_at"`
+	CreatedAt        utils.FormatDate  `json:"created_at"`
+	TriggerUserID    uint              `json:"trigger_user_id"`
+	TriggerAccount   string            `json:"trigger_account"`
+	DetailRecordMode string            `json:"detail_record_mode"`
+	CanRetry         bool              `json:"can_retry"`
+	RetryBlockReason string            `json:"retry_block_reason"`
 }
 
 // TaskRunListResources 任务执行记录列表响应。
@@ -97,22 +108,28 @@ func NewTaskRunTransformer() TaskRunTransformer {
 
 func buildTaskRunBaseResources(data *model.TaskRun) TaskRunBaseResources {
 	return TaskRunBaseResources{
-		ID:             data.ID,
-		TaskCode:       data.TaskCode,
-		Kind:           data.Kind,
-		Source:         data.Source,
-		SourceID:       data.SourceID,
-		Queue:          data.Queue,
-		Status:         data.Status,
-		Attempt:        data.Attempt,
-		MaxRetry:       data.MaxRetry,
-		ErrorMessage:   data.ErrorMessage,
-		DurationMS:     data.DurationMS,
-		StartedAt:      data.StartedAt,
-		FinishedAt:     data.FinishedAt,
-		CreatedAt:      data.CreatedAt,
-		TriggerUserID:  data.TriggerUserID,
-		TriggerAccount: data.TriggerAccount,
+		ID:               data.ID,
+		TaskCode:         data.TaskCode,
+		Kind:             data.Kind,
+		Source:           data.Source,
+		SourceID:         data.SourceID,
+		Queue:            data.Queue,
+		Status:           data.Status,
+		Attempt:          data.Attempt,
+		MaxRetry:         data.MaxRetry,
+		RetryOfRunID:     data.RetryOfRunID,
+		RetryRootRunID:   data.RetryRootRunID,
+		RetrySeq:         data.RetrySeq,
+		ErrorMessage:     data.ErrorMessage,
+		DurationMS:       data.DurationMS,
+		StartedAt:        data.StartedAt,
+		FinishedAt:       data.FinishedAt,
+		CreatedAt:        data.CreatedAt,
+		TriggerUserID:    data.TriggerUserID,
+		TriggerAccount:   data.TriggerAccount,
+		DetailRecordMode: data.DetailRecordMode,
+		CanRetry:         data.CanRetry,
+		RetryBlockReason: data.RetryBlockReason,
 	}
 }
 
@@ -153,16 +170,19 @@ func NewTaskRunEventTransformer() TaskRunEventTransformer {
 
 // CronTaskStateResources 定时任务最近状态响应结构。
 type CronTaskStateResources struct {
-	ID             uint              `json:"id"`
-	TaskCode       string            `json:"task_code"`
-	CronSpec       string            `json:"cron_spec"`
-	LastRunID      uint              `json:"last_run_id"`
-	LastStatus     string            `json:"last_status"`
-	LastStartedAt  *utils.FormatDate `json:"last_started_at"`
-	LastFinishedAt *utils.FormatDate `json:"last_finished_at"`
-	NextRunAt      *utils.FormatDate `json:"next_run_at"`
-	LastError      string            `json:"last_error"`
-	UpdatedAt      utils.FormatDate  `json:"updated_at"`
+	ID                   uint              `json:"id"`
+	TaskCode             string            `json:"task_code"`
+	CronSpec             string            `json:"cron_spec"`
+	LastRunID            uint              `json:"last_run_id"`
+	LastStatus           string            `json:"last_status"`
+	LastStartedAt        *utils.FormatDate `json:"last_started_at"`
+	LastFinishedAt       *utils.FormatDate `json:"last_finished_at"`
+	NextRunAt            *utils.FormatDate `json:"next_run_at"`
+	LastSuccessAt        *utils.FormatDate `json:"last_success_at"`
+	LastFailedAt         *utils.FormatDate `json:"last_failed_at"`
+	LastStatsWindowStart *utils.FormatDate `json:"last_stats_window_start"`
+	LastError            string            `json:"last_error"`
+	UpdatedAt            utils.FormatDate  `json:"updated_at"`
 }
 
 // CronTaskStateTransformer 定时任务状态资源转换器。
@@ -178,4 +198,37 @@ func NewCronTaskStateTransformer() CronTaskStateTransformer {
 			},
 		},
 	}
+}
+
+// TaskRunStatsResources 任务执行全量统计响应结构。
+type TaskRunStatsResources struct {
+	TaskCode            string  `json:"task_code"`
+	Kind                string  `json:"kind"`
+	Source              string  `json:"source"`
+	TotalCount          uint64  `json:"total_count"`
+	SuccessCount        uint64  `json:"success_count"`
+	FailedCount         uint64  `json:"failed_count"`
+	CanceledCount       uint64  `json:"canceled_count"`
+	TimeoutCount        uint64  `json:"timeout_count"`
+	InterruptedCount    uint64  `json:"interrupted_count"`
+	SampledSuccessCount uint64  `json:"sampled_success_count"`
+	DurationTotalMS     float64 `json:"duration_total_ms"`
+	DurationMaxMS       float64 `json:"duration_max_ms"`
+	DurationAvgMS       float64 `json:"duration_avg_ms"`
+	SuccessRate         float64 `json:"success_rate"`
+}
+
+// TaskRunTrendPointResources 任务执行统计趋势单点。
+type TaskRunTrendPointResources struct {
+	WindowStart         utils.FormatDate `json:"window_start"`
+	WindowSize          string           `json:"window_size"`
+	TotalCount          uint64           `json:"total_count"`
+	SuccessCount        uint64           `json:"success_count"`
+	FailedCount         uint64           `json:"failed_count"`
+	CanceledCount       uint64           `json:"canceled_count"`
+	TimeoutCount        uint64           `json:"timeout_count"`
+	InterruptedCount    uint64           `json:"interrupted_count"`
+	SampledSuccessCount uint64           `json:"sampled_success_count"`
+	DurationTotalMS     float64          `json:"duration_total_ms"`
+	DurationMaxMS       float64          `json:"duration_max_ms"`
 }

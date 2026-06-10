@@ -30,6 +30,10 @@ type stubInspector struct {
 	lastQueue    string
 	lastTaskID   string
 	lastCancelID string
+	stats        *QueueStats
+	statsErr     error
+	allStats     []*QueueStats
+	allStatsErr  error
 }
 
 func (s *stubPublisher) Enqueue(ctx context.Context, job Job) (JobInfo, error) {
@@ -51,6 +55,23 @@ func (s *stubInspector) CancelProcessing(ctx context.Context, taskID string) err
 	s.cancelCalled = true
 	s.lastCancelID = taskID
 	return nil
+}
+
+func (s *stubInspector) GetQueueStats(ctx context.Context, queueName string) (*QueueStats, error) {
+	_ = ctx
+	_ = queueName
+	if s.statsErr != nil {
+		return nil, s.statsErr
+	}
+	return s.stats, nil
+}
+
+func (s *stubInspector) GetAllQueueStats(ctx context.Context) ([]*QueueStats, error) {
+	_ = ctx
+	if s.allStatsErr != nil {
+		return nil, s.allStatsErr
+	}
+	return s.allStats, nil
 }
 
 func TestPublishJSONUsesGlobalPublisher(t *testing.T) {
@@ -250,6 +271,75 @@ func TestDeleteTaskRetriesInspectorInitAfterFailure(t *testing.T) {
 	}
 	if InspectorInitError() != nil {
 		t.Fatalf("expected init error to be cleared, got %v", InspectorInitError())
+	}
+}
+
+func TestGetQueueStatsUsesGlobalInspector(t *testing.T) {
+	want := &QueueStats{Queue: "default", Pending: 5, Active: 2, Retry: 1}
+	inspector := &stubInspector{stats: want}
+	restore := SetInspectorForTesting(inspector)
+	defer restore()
+
+	got, err := GetQueueStats(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("GetQueueStats returned error: %v", err)
+	}
+	if got.Queue != want.Queue || got.Pending != want.Pending || got.Active != want.Active || got.Retry != want.Retry {
+		t.Fatalf("unexpected stats: got=%#v want=%#v", got, want)
+	}
+}
+
+func TestGetQueueStatsReturnsUnavailableWithoutInspector(t *testing.T) {
+	restore := SetInspectorForTesting(nil)
+	defer restore()
+
+	_, err := GetQueueStats(context.Background(), "default")
+	if !errors.Is(err, ErrInspectorUnavailable) {
+		t.Fatalf("expected ErrInspectorUnavailable, got %v", err)
+	}
+}
+
+func TestGetAllQueueStatsUsesGlobalInspector(t *testing.T) {
+	want := []*QueueStats{
+		{Queue: "default", Pending: 3, Active: 1},
+		{Queue: "critical", Pending: 10, Active: 5},
+	}
+	inspector := &stubInspector{allStats: want}
+	restore := SetInspectorForTesting(inspector)
+	defer restore()
+
+	got, err := GetAllQueueStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetAllQueueStats returned error: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d stats, got %d", len(want), len(got))
+	}
+	for i, s := range got {
+		if s.Queue != want[i].Queue {
+			t.Fatalf("stats[%d] queue mismatch: got=%s want=%s", i, s.Queue, want[i].Queue)
+		}
+	}
+}
+
+func TestGetAllQueueStatsReturnsUnavailableWithoutInspector(t *testing.T) {
+	restore := SetInspectorForTesting(nil)
+	defer restore()
+
+	_, err := GetAllQueueStats(context.Background())
+	if !errors.Is(err, ErrInspectorUnavailable) {
+		t.Fatalf("expected ErrInspectorUnavailable, got %v", err)
+	}
+}
+
+func TestGetQueueStatsPropagatesError(t *testing.T) {
+	inspector := &stubInspector{statsErr: errors.New("redis down")}
+	restore := SetInspectorForTesting(inspector)
+	defer restore()
+
+	_, err := GetQueueStats(context.Background(), "default")
+	if err == nil || err.Error() != "redis down" {
+		t.Fatalf("expected 'redis down' error, got %v", err)
 	}
 }
 

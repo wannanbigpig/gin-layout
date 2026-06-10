@@ -58,11 +58,33 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 			status text,
 			attempt integer,
 			max_retry integer,
+			retry_of_run_id integer,
+			retry_root_run_id integer,
+			retry_seq integer,
 			payload text,
 			error_message text,
 			started_at datetime,
 			finished_at datetime,
 			duration_ms real
+		)`,
+		`CREATE TABLE task_run_stats (
+			id integer primary key autoincrement,
+			created_at datetime,
+			updated_at datetime,
+			task_code text,
+			kind text,
+			source text,
+			window_start datetime,
+			window_size text,
+			total_count integer default 0,
+			success_count integer default 0,
+			failed_count integer default 0,
+			canceled_count integer default 0,
+			timeout_count integer default 0,
+			interrupted_count integer default 0,
+			sampled_success_count integer default 0,
+			duration_total_ms real default 0,
+			duration_max_ms real default 0
 		)`,
 	}
 	for _, statement := range statements {
@@ -363,9 +385,16 @@ func TestBuildStatisticsAggregatesSummaryAndTrend(t *testing.T) {
 
 func insertTaskRun(t *testing.T, db *gorm.DB, createdAt time.Time, status string) {
 	t.Helper()
-	if err := db.Exec(`INSERT INTO task_runs (created_at, updated_at, task_code, status) VALUES (?, ?, ?, ?)`,
-		createdAt, createdAt, "test_task", status).Error; err != nil {
-		t.Fatalf("insert task_run failed: %v", err)
+	successCount := 0
+	failedCount := 0
+	if status == model.TaskRunStatusSuccess {
+		successCount = 1
+	} else {
+		failedCount = 1
+	}
+	if err := db.Exec(`INSERT INTO task_run_stats (created_at, updated_at, task_code, kind, source, window_start, window_size, total_count, success_count, failed_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		createdAt, createdAt, "test_task", model.TaskKindAsync, model.TaskSourceQueue, createdAt, model.TaskRunStatsWindowHour, 1, successCount, failedCount).Error; err != nil {
+		t.Fatalf("insert task_run_stat failed: %v", err)
 	}
 }
 

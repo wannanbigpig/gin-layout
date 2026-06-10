@@ -21,7 +21,7 @@ type FileResourceController struct {
 
 // FolderStats 查询目录统计信息（文件数和子目录数）。
 func (api FileResourceController) FolderStats(c *gin.Context) {
-	query := form.NewFileFolderDeleteForm()
+	query := form.NewFileFolderStatsForm()
 	if err := validator.CheckQueryParams(c, &query); err != nil {
 		return
 	}
@@ -102,7 +102,7 @@ func (api FileResourceController) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := service.NewFileResourceService().Delete(params.ID, api.GetCurrentUserID(c), params.DeletedReason, params.Force == 1); err != nil {
+	if err := service.NewFileResourceService().Delete(params.ID, api.GetCurrentUserID(c), params.DeletedReason); err != nil {
 		var referencedErr *service.FileReferencedDeleteError
 		if stderrors.As(err, &referencedErr) {
 			message := "文件存在引用，不能删除"

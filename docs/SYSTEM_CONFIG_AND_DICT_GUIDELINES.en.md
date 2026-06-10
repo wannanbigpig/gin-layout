@@ -46,7 +46,7 @@ Do not put these into `sys_config`:
 - Route definitions.
 - Database schema meaning.
 - Core state transitions.
-- The scheduler source of truth, unless scheduler has explicitly been redesigned to read DB definitions.
+- Scheduler handler/spec safety boundaries. Operational cron enable/disable state belongs in `task_definitions`.
 - Rules where an admin-side edit would silently change core system behavior and make troubleshooting harder.
 
 These should remain enforced by code constants, validators, service state machines, database constraints, and migrations.
@@ -140,6 +140,6 @@ Interface tests and caller-side acceptance should cover these facts at minimum:
 | Select options, table tags, colors, localized labels | Use `sys_dict` |
 | Login lock limits, request-log masking fields, operational thresholds | Use `sys_config` |
 | Validator enums, permission modes, state transitions | Use code constants and validators |
-| Real cron enable/disable from admin UI | Decide scheduler source of truth first |
+| Real cron enable/disable from admin UI | Use `task_definitions.status`; `cron` reads it before each trigger, while handler/spec still come from built-in code definitions |
 | Backend needs runtime policy reads | Read `sys_config` through domain helpers and keep defaults |
 | Display layer wants less enum hardcoding | Backend provides `dict/options`; caller fallbacks are maintained by the caller project |

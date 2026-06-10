@@ -68,6 +68,10 @@ func TestDefaultMenuAPIBindingsCoverManagementRoutes(t *testing.T) {
 		http.MethodGet + " /admin/v1/system/dict/type/list",
 		http.MethodGet + " /admin/v1/system/dict/options",
 		http.MethodGet + " /admin/v1/task/list",
+		http.MethodPatch + " /admin/v1/task/record-policy",
+		http.MethodPatch + " /admin/v1/task/operation-config",
+		http.MethodGet + " /admin/v1/task/run/stats",
+		http.MethodGet + " /admin/v1/task/run/stats/trend",
 		http.MethodPost + " /admin/v1/task/trigger",
 		http.MethodPost + " /admin/v1/task/run/retry",
 		http.MethodPost + " /admin/v1/task/run/cancel",
@@ -84,6 +88,40 @@ func TestDefaultMenuAPIBindingsCoverManagementRoutes(t *testing.T) {
 	for _, route := range required {
 		if _, ok := bindingSet[route]; !ok {
 			t.Fatalf("missing default menu API binding for %s", route)
+		}
+	}
+}
+
+func TestDefaultMenuAPIBindingsPutFolderDeleteUnderDeletePermission(t *testing.T) {
+	service := NewMenuAPIDefaultsService()
+	var menuCodes []string
+	for _, binding := range service.bindings {
+		if binding.Route == "/admin/v1/system/file/folder/delete" && binding.Method == http.MethodPost {
+			menuCodes = append(menuCodes, binding.MenuCode)
+		}
+	}
+
+	if len(menuCodes) != 1 || menuCodes[0] != "file:delete" {
+		t.Fatalf("expected folder/delete to bind only file:delete, got %#v", menuCodes)
+	}
+}
+
+func TestDefaultMenuAPIBindingsPutTaskStatsUnderStatsPermission(t *testing.T) {
+	service := NewMenuAPIDefaultsService()
+	want := map[string]string{
+		http.MethodGet + " /admin/v1/task/run/stats":       "task:stats",
+		http.MethodGet + " /admin/v1/task/run/stats/trend": "task:stats",
+	}
+
+	for route, menuCode := range want {
+		var menuCodes []string
+		for _, binding := range service.bindings {
+			if binding.Method+" "+binding.Route == route {
+				menuCodes = append(menuCodes, binding.MenuCode)
+			}
+		}
+		if len(menuCodes) != 1 || menuCodes[0] != menuCode {
+			t.Fatalf("expected %s to bind only %s, got %#v", route, menuCode, menuCodes)
 		}
 	}
 }

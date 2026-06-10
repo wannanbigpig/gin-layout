@@ -245,7 +245,8 @@ go run main.go service --help
 | `go run main.go command demo` | 运行示例命令 |
 | `go run main.go command api-route -y` | 扫描声明式路由树并重建 `api` 路由表 |
 | `go run main.go command rebuild-user-permissions -y` | 按数据库关系重建用户最终 API 权限 |
-| `go run main.go command init-system -y` | 回滚并重新执行迁移、重建 API 路由、重建用户权限 |
+| `go run main.go command init-system` | 清空当前配置数据库对象并重建系统数据 |
+| `go run main.go -c ./config.yaml command task sync-definitions` | 非破坏性同步内置任务定义到 `task_definitions` |
 | `go run main.go -c ./config.yaml command task scan-async` | 扫描异步任务注册与任务定义镜像 |
 | `go run main.go -c ./config.yaml command task scan-cron` | 扫描定时任务定义与任务定义镜像 |
 | `go run main.go -c ./config.yaml command migrate check` | 校验迁移文件命名与 up/down 配对 |
@@ -263,8 +264,15 @@ go run main.go -c /path/to/config.yaml command init-system
 
 补充说明：
 
-- `api-route`、`rebuild-user-permissions`、`init-system` 默认会二次确认；自动化场景建议显式加 `-y`
-- `init-system` 会清空并重建系统数据，只适合本地初始化或明确允许重置的环境
+- `api-route`、`rebuild-user-permissions` 默认会二次确认；自动化场景可以显式加 `-y`
+- `init-system` 是高危重置命令，会清空当前配置数据库对象并重建系统数据；执行前会用红色提示当前环境、MySQL host、port、database、username、table_prefix，并要求确认已备份和输入当前库名
+- `init-system -y` 只跳过普通确认，不能单独跳过高危确认；自动化场景必须同时传入 `--backup-confirmed --confirm-database <mysql.database>`，例如：
+
+```bash
+go run main.go -c ./config.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
+```
+
+- 新增内置异步任务或定时任务上线后，不要执行 `init-system`；使用 `command task sync-definitions` 同步任务定义，再用 `scan-async` / `scan-cron` 检查任务是否已在表中。同步只更新代码定义字段，会保留线上 `status`、是否允许手动触发、是否允许重试和记录策略等运营配置。
 
 ## 配置说明
 
@@ -301,11 +309,11 @@ go run main.go -c /path/to/config.yaml command init-system
 - `service` 负责提供 HTTP API。
 - `worker` 负责消费 Asynq 异步任务。当前首版只接入请求审计日志异步落库。
 - `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会在当前请求链路同步落库。
-- `cron` 负责定时任务调度；演示定时任务由系统配置 `task.cron_demo_enabled` 控制，初始化默认关闭。
-- `reset-system-data` 需要显式配置 `app.enable_reset_system_cron=true` 才会注册，并在启动时输出高风险告警。
+- `cron` 负责定时任务调度；代码内置任务会同步到 `task_definitions`，后台运营配置中的 `status` 会覆盖代码默认启停，下一次调度触发时生效。
+- 演示定时任务初始化默认关闭；`reset-system-data` 默认关闭，启用执行时会输出高风险告警。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
 
-注意：`reset-system-data` 当前调用的是 `system.ReinitializeSystemData()`，会回滚迁移并重建系统数据。生产环境建议保持 `app.enable_reset_system_cron=false`，只有在明确需要重建系统数据时才临时开启。
+注意：`reset-system-data` 当前调用的是 `system.ReinitializeSystemData()`，会清空数据库对象并按当前迁移重建系统数据。生产环境必须保持该任务在 `task_definitions.status=0`，只有在明确需要重建系统数据时才临时启用并及时关闭。
 
 ### 热更新
 

@@ -19,6 +19,7 @@ import (
 	_ "github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
+	"github.com/wannanbigpig/gin-layout/internal/service/dashboard"
 	"github.com/wannanbigpig/gin-layout/internal/service/notification"
 )
 
@@ -59,6 +60,7 @@ func run() error {
 	auth.SessionControlPublisher = notification.PublishSessionControl
 
 	notification.EnsureRealtimeDispatcherStarted()
+	dashboard.EnsureMonitorPushStarted()
 
 	engine, err := routers.SetRouters()
 	if err != nil {
@@ -104,6 +106,7 @@ func waitForShutdown(server *http.Server, errChan <-chan error) error {
 		return fmt.Errorf("shutdown http server failed: %w", err)
 	}
 	middleware.StopAuditLogQueueDrain(auditDrainTimeout)
+	dashboard.StopMonitorPush(gracefulShutdownTimout)
 	if err := data.Shutdown(); err != nil {
 		return fmt.Errorf("shutdown data resources failed: %w", err)
 	}

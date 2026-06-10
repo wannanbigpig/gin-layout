@@ -83,7 +83,7 @@ jobs:
           YAML
 
       - name: Initialize MySQL schema and seed data
-        run: go run main.go -c ./config.yaml command init-system -y
+        run: go run main.go -c ./config.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
         env:
           GO_LAYOUT_MIGRATIONS_PATH: ${{ github.workspace }}/data/migrations
 

@@ -225,7 +225,8 @@ Common commands:
 | `go run main.go command demo` | Run the demo command |
 | `go run main.go command api-route` | Scan the declarative route tree and rebuild the `api` route table |
 | `go run main.go command rebuild-user-permissions` | Rebuild final user API permissions from database relationships |
-| `go run main.go command init-system` | Roll back and rerun migrations, rebuild API routes, and rebuild user permissions |
+| `go run main.go command init-system` | Drop objects in the configured database and rebuild system data |
+| `go run main.go -c ./config.yaml command task sync-definitions` | Non-destructively sync built-in task definitions into `task_definitions` |
 | `go run main.go -c ./config.yaml command task scan-async` | Scan async task registration against the task-definition mirror |
 | `go run main.go -c ./config.yaml command task scan-cron` | Scan cron task definitions against the task-definition mirror |
 | `go run main.go -c ./config.yaml command migrate check` | Validate migration naming and up/down pairing |
@@ -240,6 +241,18 @@ go run main.go -c /path/to/config.yaml command init-system
 ```
 
 See [docs/MIGRATE_COMMANDS.en.md](./docs/MIGRATE_COMMANDS.en.md) for full migration command details.
+
+Notes:
+
+- `api-route` and `rebuild-user-permissions` prompt for confirmation by default; automation can pass `-y`.
+- `init-system` is destructive. It drops objects in the configured database and rebuilds system data. Before running, it prints a red warning with app environment and MySQL host, port, database, username, and table prefix, then requires a backup confirmation and the current database name.
+- `init-system -y` only skips the ordinary prompt. Automation must also pass `--backup-confirmed --confirm-database <mysql.database>`, for example:
+
+```bash
+go run main.go -c ./config.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
+```
+
+- After adding built-in async or cron tasks in a deployed environment, do not run `init-system`. Run `command task sync-definitions` to sync task definitions, then use `scan-async` / `scan-cron` to verify that tasks exist in the table. The sync only updates code-owned definition fields and preserves operational settings such as `status`, manual trigger, retry, and record policies.
 
 ## Configuration
 
@@ -276,11 +289,11 @@ If requests pass through Nginx, Ingress, or a load balancer, keep `app.trusted_p
 - `service` serves the HTTP API.
 - `worker` consumes Asynq jobs. The current first phase only moves request audit-log persistence to Asynq.
 - When `queue.enable=false`, you do not need to start `worker`; request audit logs are persisted synchronously in the current request flow.
-- `cron` owns scheduled jobs. The demo cron task is controlled by the system config `task.cron_demo_enabled` and is disabled by default after initialization.
-- `reset-system-data` is only registered when `app.enable_reset_system_cron=true` is explicitly configured, and startup logs a high-risk warning.
+- `cron` owns scheduled jobs. Built-in task definitions are synced into `task_definitions`, and the admin operation `status` overrides code defaults on the next scheduled trigger.
+- The demo cron task is disabled by default after initialization. `reset-system-data` is also disabled by default and logs a high-risk warning when it is enabled for execution.
 - Do not register the same recurring business task in both `cron` and the async worker flow, or it will run twice.
 
-Note: `reset-system-data` currently calls `system.ReinitializeSystemData()`, which rolls back migrations and rebuilds system data. Keep `app.enable_reset_system_cron=false` in production, and only enable it temporarily when you explicitly need to rebuild system data.
+Note: `reset-system-data` currently calls `system.ReinitializeSystemData()`, which drops database objects and rebuilds system data from the current migrations. Keep `task_definitions.status=0` for this task in production, and only enable it temporarily when you explicitly need to rebuild system data.
 
 ### Hot Reload
 

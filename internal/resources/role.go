@@ -17,6 +17,8 @@ type RoleResources struct {
 	Sort        uint16           `json:"sort"`
 	Status      uint8            `json:"status"`
 	StatusName  string           `json:"status_name"` // 状态名称
+	DataScope   uint8            `json:"data_scope"`  // 数据权限范围:1全部,2本部门及子级,3本部门,4仅本人,5自定义部门
+	DeptIds     []uint           `json:"dept_ids"`    // 自定义部门 ID 列表
 	MenuList    []uint           `json:"menu_list"`
 	CreatedAt   utils.FormatDate `json:"created_at"`
 	UpdatedAt   utils.FormatDate `json:"updated_at"`
@@ -30,15 +32,20 @@ func (r *RoleResources) GetID() uint {
 // SetCustomFields 填充角色资源的扩展字段。
 func (r *RoleResources) SetCustomFields(data *model.Role) {
 	r.MenuList = []uint{}
+	r.DeptIds = []uint{}
 	if data == nil {
 		return
 	}
 	r.Code = data.Code
 	r.IsSystem = data.IsSystem
+	r.DataScope = data.DataScope
 	// 设置映射字段
 	r.StatusName = data.StatusMap()
 	r.MenuList = lo.Map(data.MenuList, func(m model.RoleMenuMap, _ int) uint {
 		return m.MenuId
+	})
+	r.DeptIds = lo.Map(data.DeptList, func(d model.RoleDataScopeDept, _ int) uint {
+		return d.DeptId
 	})
 }
 

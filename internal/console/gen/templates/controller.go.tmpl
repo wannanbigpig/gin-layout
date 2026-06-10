@@ -1,0 +1,105 @@
+package admin_v1
+
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/service/{{.ModuleSnake}}"
+	"github.com/wannanbigpig/gin-layout/internal/validator"
+	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+)
+
+// {{.ControllerName}} {{.MenuTitle}}控制器。
+type {{.ControllerName}} struct {
+	controller.Api
+}
+
+// New{{.ControllerName}} 创建 {{.ControllerName}} 实例。
+func New{{.ControllerName}}() *{{.ControllerName}} {
+	return &{{.ControllerName}}{}
+}
+
+func (api {{.ControllerName}}) new{{.ModelName}}Service(ctx *gin.Context) *{{.ModuleSnake}}.{{.ServiceName}} {
+	svc := {{.ModuleSnake}}.New{{.ServiceName}}()
+	svc.SetCtx(ctx)
+	svc.SetAdminUserId(api.GetCurrentUserID(ctx))
+	return svc
+}
+
+// List 列表。
+func (api {{.ControllerName}}) List(ctx *gin.Context) {
+	params := form.New{{.ModelName}}ListQuery()
+	if err := validator.CheckQueryParams(ctx, &params); err != nil {
+		return
+	}
+
+	data := api.new{{.ModelName}}Service(ctx).List(params)
+	api.Success(ctx, data)
+}
+
+// Options 选择器。
+func (api {{.ControllerName}}) Options(ctx *gin.Context) {
+	params := form.New{{.ModelName}}OptionsQuery()
+	if err := validator.CheckQueryParams(ctx, &params); err != nil {
+		return
+	}
+
+	data := api.new{{.ModelName}}Service(ctx).Options(params.Keyword)
+	api.Success(ctx, data)
+}
+
+// Create 新增。
+func (api {{.ControllerName}}) Create(ctx *gin.Context) {
+	params := form.NewCreate{{.ModelName}}Form()
+	if err := validator.CheckPostParams(ctx, &params); err != nil {
+		return
+	}
+
+	if err := api.new{{.ModelName}}Service(ctx).Create(params); err != nil {
+		api.Err(ctx, err)
+		return
+	}
+	api.Success(ctx, nil)
+}
+
+// Update 更新。
+func (api {{.ControllerName}}) Update(ctx *gin.Context) {
+	params := form.NewUpdate{{.ModelName}}Form()
+	if err := validator.CheckPostParams(ctx, &params); err != nil {
+		return
+	}
+
+	if err := api.new{{.ModelName}}Service(ctx).Update(params); err != nil {
+		api.Err(ctx, err)
+		return
+	}
+	api.Success(ctx, nil)
+}
+
+// Delete 删除。
+func (api {{.ControllerName}}) Delete(ctx *gin.Context) {
+	query := form.NewIdForm()
+	if err := validator.CheckPostParams(ctx, &query); err != nil {
+		return
+	}
+
+	if err := api.new{{.ModelName}}Service(ctx).Delete(query.ID); err != nil {
+		api.Err(ctx, err)
+		return
+	}
+	api.Success(ctx, nil)
+}
+
+// Detail 详情。
+func (api {{.ControllerName}}) Detail(ctx *gin.Context) {
+	query := form.NewIdForm()
+	if err := validator.CheckQueryParams(ctx, &query); err != nil {
+		return
+	}
+
+	data, err := api.new{{.ModelName}}Service(ctx).Detail(query.ID)
+	if err != nil {
+		api.Err(ctx, err)
+		return
+	}
+	api.Success(ctx, data)
+}

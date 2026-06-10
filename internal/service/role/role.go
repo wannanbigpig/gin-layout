@@ -77,6 +77,8 @@ func (s *RoleService) Create(params *form.CreateRole) error {
 		Status:      params.Status,
 		Sort:        params.Sort,
 		MenuList:    params.MenuList,
+		DataScope:   params.DataScope,
+		DeptIds:     params.DeptIds,
 	})
 }
 
@@ -92,6 +94,8 @@ func (s *RoleService) Update(params *form.UpdateRole) error {
 		Status:      params.Status,
 		Sort:        params.Sort,
 		MenuList:    params.MenuList,
+		DataScope:   params.DataScope,
+		DeptIds:     params.DeptIds,
 	})
 }
 

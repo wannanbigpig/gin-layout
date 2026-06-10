@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS `role`
     `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '描述',
     `sort`        mediumint                                              NOT NULL DEFAULT '0' COMMENT '排序',
     `status`      tinyint                                                NOT NULL DEFAULT '0' COMMENT '是否启用状态,1是，0否',
+    `data_scope`  tinyint unsigned                                       NOT NULL DEFAULT '3' COMMENT '数据权限范围:1全部,2本部门及子级,3本部门,4仅本人,5自定义部门',
     `created_at`  datetime                                                        DEFAULT NULL,
     `updated_at`  datetime                                                        DEFAULT NULL,
     `deleted_at`  int                                                    NOT NULL DEFAULT '0' COMMENT '删除时间戳',
@@ -185,6 +186,22 @@ CREATE TABLE IF NOT EXISTS `role`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
   ROW_FORMAT = DYNAMIC COMMENT ='角色表';
+
+-- 新建角色自定义数据权限部门关联表
+CREATE TABLE IF NOT EXISTS `role_data_scope_dept`
+(
+    `id`         int unsigned NOT NULL AUTO_INCREMENT,
+    `role_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '角色ID',
+    `dept_id`    int unsigned NOT NULL DEFAULT '0' COMMENT '部门ID',
+    `created_at` datetime              DEFAULT NULL,
+    `updated_at` datetime              DEFAULT NULL,
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `uniq_role_dept` (`role_id`, `dept_id`),
+    KEY `idx_dept_id` (`dept_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_bin
+  ROW_FORMAT = DYNAMIC COMMENT ='角色数据权限部门关联表';
 
 -- 创建用户部门映射表
 CREATE TABLE IF NOT EXISTS `admin_user_department_map`
@@ -288,6 +305,28 @@ CREATE TABLE IF NOT EXISTS `admin_user_role_map`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
   ROW_FORMAT = DYNAMIC COMMENT ='用户角色映射表';
+
+-- 创建产品表（示例：演示数据权限接入）
+CREATE TABLE IF NOT EXISTS `product`
+(
+    `id`          int unsigned     NOT NULL AUTO_INCREMENT,
+    `name`        varchar(200)     NOT NULL DEFAULT '' COMMENT '产品名称',
+    `description` text COMMENT '产品描述',
+    `price`       bigint           NOT NULL DEFAULT '0' COMMENT '价格(分)',
+    `status`      tinyint unsigned NOT NULL DEFAULT '1' COMMENT '状态:1启用,0禁用',
+    `dept_id`     int unsigned     NOT NULL DEFAULT '0' COMMENT '归属部门ID',
+    `created_by`  int unsigned     NOT NULL DEFAULT '0' COMMENT '创建者UID',
+    `created_at`  datetime                 DEFAULT NULL,
+    `updated_at`  datetime                 DEFAULT NULL,
+    `deleted_at`  int              NOT NULL DEFAULT '0' COMMENT '删除时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_dept_id` (`dept_id`),
+    KEY `idx_created_by` (`created_by`),
+    KEY `idx_status_deleted_at` (`status`, `deleted_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_bin
+  ROW_FORMAT = DYNAMIC COMMENT ='产品表（数据权限示例）';
 
 -- 创建管理员登录日志表
 CREATE TABLE IF NOT EXISTS `admin_login_logs`
@@ -618,6 +657,11 @@ CREATE TABLE IF NOT EXISTS `task_definitions`
     `allow_manual`   tinyint(1)   NOT NULL DEFAULT '0' COMMENT '是否允许手动触发 1是 0否',
     `allow_retry`    tinyint(1)   NOT NULL DEFAULT '1' COMMENT '是否允许手动重试 1是 0否',
     `is_high_risk`   tinyint(1)   NOT NULL DEFAULT '0' COMMENT '是否高危任务 1是 0否',
+    `record_success_mode` varchar(20) NOT NULL DEFAULT 'all' COMMENT '成功明细记录策略 all/sample/interval/none',
+    `record_success_rate` tinyint unsigned NOT NULL DEFAULT '100' COMMENT '成功采样比例 0-100',
+    `record_success_interval_seconds` int unsigned NOT NULL DEFAULT '0' COMMENT '成功明细最小记录间隔秒',
+    `record_detail_on_manual` tinyint(1) NOT NULL DEFAULT '1' COMMENT '手动触发是否强制记录明细 1是 0否',
+    `record_detail_on_failure` tinyint(1) NOT NULL DEFAULT '1' COMMENT '失败类结果是否强制记录明细 1是 0否',
     `remark`         varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
     `created_at`     datetime             DEFAULT NULL,
     `updated_at`     datetime             DEFAULT NULL,
@@ -642,16 +686,22 @@ CREATE TABLE IF NOT EXISTS `task_runs`
     `status`          varchar(20)     NOT NULL DEFAULT '' COMMENT '执行状态 pending/running/success/failed/canceled/retrying',
     `attempt`         int             NOT NULL DEFAULT '0' COMMENT '当前尝试次数',
     `max_retry`       int             NOT NULL DEFAULT '0' COMMENT '最大重试次数',
+    `retry_of_run_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '直接重试来源执行记录ID',
+    `retry_root_run_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '重试链路根执行记录ID',
+    `retry_seq`       int unsigned    NOT NULL DEFAULT '0' COMMENT '重试链路内人工重试序号',
     `payload`         mediumtext               DEFAULT NULL COMMENT '任务 payload',
     `error_message`   text                     DEFAULT NULL COMMENT '失败原因',
     `started_at`      datetime                 DEFAULT NULL COMMENT '开始时间',
     `finished_at`     datetime                 DEFAULT NULL COMMENT '结束时间',
     `duration_ms`     decimal(10, 4)  NOT NULL DEFAULT '0.0000' COMMENT '执行耗时毫秒',
+    `detail_record_mode` varchar(20) NOT NULL DEFAULT 'all' COMMENT '明细记录模式 all/sampled/forced/none',
     `created_at`      datetime                 DEFAULT NULL,
     `updated_at`      datetime                 DEFAULT NULL,
     PRIMARY KEY (`id`),
     KEY `tr_task_code_created_at` (`task_code`, `created_at`),
-    KEY `tr_status_created_at` (`status`, `created_at`)
+    KEY `tr_status_created_at` (`status`, `created_at`),
+    KEY `tr_retry_of_run_id` (`retry_of_run_id`),
+    KEY `tr_retry_root_seq` (`retry_root_run_id`, `retry_seq`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='任务执行记录表';
@@ -681,6 +731,9 @@ CREATE TABLE IF NOT EXISTS `cron_task_states`
     `last_started_at`  datetime                 DEFAULT NULL COMMENT '最近开始时间',
     `last_finished_at` datetime                 DEFAULT NULL COMMENT '最近结束时间',
     `next_run_at`      datetime                 DEFAULT NULL COMMENT '下次执行时间',
+    `last_success_at`  datetime                 DEFAULT NULL COMMENT '最近成功时间',
+    `last_failed_at`   datetime                 DEFAULT NULL COMMENT '最近失败时间',
+    `last_stats_window_start` datetime          DEFAULT NULL COMMENT '最近统计窗口开始时间',
     `last_error`       text                     DEFAULT NULL COMMENT '最近失败原因',
     `created_at`       datetime                 DEFAULT NULL,
     `updated_at`       datetime                 DEFAULT NULL,
@@ -689,6 +742,33 @@ CREATE TABLE IF NOT EXISTS `cron_task_states`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='定时任务最近状态表';
+
+CREATE TABLE IF NOT EXISTS `task_run_stats`
+(
+    `id`                    bigint unsigned NOT NULL AUTO_INCREMENT,
+    `task_code`             varchar(120)    NOT NULL DEFAULT '' COMMENT '任务唯一编码',
+    `kind`                  varchar(20)     NOT NULL DEFAULT '' COMMENT '任务类型 async/cron',
+    `source`                varchar(20)     NOT NULL DEFAULT '' COMMENT '来源 queue/cron/manual',
+    `window_start`          datetime        NOT NULL COMMENT '统计窗口开始时间',
+    `window_size`           varchar(20)     NOT NULL DEFAULT 'hour' COMMENT '统计窗口粒度',
+    `total_count`           bigint unsigned NOT NULL DEFAULT '0' COMMENT '总执行次数',
+    `success_count`         bigint unsigned NOT NULL DEFAULT '0' COMMENT '成功次数',
+    `failed_count`          bigint unsigned NOT NULL DEFAULT '0' COMMENT '失败次数',
+    `canceled_count`        bigint unsigned NOT NULL DEFAULT '0' COMMENT '取消次数',
+    `timeout_count`         bigint unsigned NOT NULL DEFAULT '0' COMMENT '超时次数',
+    `interrupted_count`     bigint unsigned NOT NULL DEFAULT '0' COMMENT '中断次数',
+    `sampled_success_count` bigint unsigned NOT NULL DEFAULT '0' COMMENT '成功明细记录次数',
+    `duration_total_ms`     decimal(18, 4)  NOT NULL DEFAULT '0.0000' COMMENT '总耗时毫秒',
+    `duration_max_ms`       decimal(18, 4)  NOT NULL DEFAULT '0.0000' COMMENT '最大耗时毫秒',
+    `created_at`            datetime                 DEFAULT NULL,
+    `updated_at`            datetime                 DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `trs_task_window` (`task_code`, `kind`, `source`, `window_start`, `window_size`),
+    KEY `trs_window_start` (`window_start`),
+    KEY `trs_task_code_window_start` (`task_code`, `window_start`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='任务执行全量统计表';
 
 CREATE TABLE IF NOT EXISTS `upload_file_objects`
 (

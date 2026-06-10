@@ -6,10 +6,13 @@ import (
 	stderrors "errors"
 	"testing"
 
+	"gorm.io/gorm"
+
 	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
+	"github.com/wannanbigpig/gin-layout/internal/resources"
 	baseservice "github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
@@ -33,14 +36,7 @@ type stubExportTaskService struct {
 	createRecordMatched bool
 	createRecordErr     error
 	createRecordInputs  []baseservice.ExportTaskBootstrapInput
-	reassignReturn      bool
-	reassignErr         error
-	reassignInputs      []struct {
-		oldTaskRunID uint
-		newTaskRunID uint
-		queueName    string
-	}
-	markFailedInputs []struct {
+	markFailedInputs    []struct {
 		taskRunID uint
 		taskErr   error
 	}
@@ -57,19 +53,6 @@ func (s *stubExportTaskService) CreateRecordForTask(ctx context.Context, input b
 		return nil, false, s.createRecordErr
 	}
 	return &model.SysExportRecord{}, s.createRecordMatched, nil
-}
-
-func (s *stubExportTaskService) ReassignTaskRun(ctx context.Context, oldTaskRunID, newTaskRunID uint, queueName string) (bool, error) {
-	_ = ctx
-	s.reassignInputs = append(s.reassignInputs, struct {
-		oldTaskRunID uint
-		newTaskRunID uint
-		queueName    string
-	}{oldTaskRunID: oldTaskRunID, newTaskRunID: newTaskRunID, queueName: queueName})
-	if s.reassignErr != nil {
-		return false, s.reassignErr
-	}
-	return s.reassignReturn, nil
 }
 
 func (s *stubExportTaskService) MarkFailed(ctx context.Context, taskRunID uint, taskErr error) error {
@@ -117,13 +100,25 @@ type stubInspector struct {
 func (f *fakeActionRecorder) Enqueue(ctx context.Context, input RunStart) (*model.TaskRun, error) {
 	_ = ctx
 	f.enqueueInputs = append(f.enqueueInputs, input)
-	return &model.TaskRun{BaseModel: model.BaseModel{ID: uint(len(f.enqueueInputs))}, TaskCode: input.TaskCode}, nil
+	return &model.TaskRun{
+		BaseModel:      model.BaseModel{ID: uint(len(f.enqueueInputs))},
+		TaskCode:       input.TaskCode,
+		RetryOfRunID:   input.RetryOfRunID,
+		RetryRootRunID: input.RetryRootRunID,
+		RetrySeq:       input.RetrySeq,
+	}, nil
 }
 
 func (f *fakeActionRecorder) Start(ctx context.Context, input RunStart) (*model.TaskRun, error) {
 	_ = ctx
 	f.startInputs = append(f.startInputs, input)
-	return &model.TaskRun{BaseModel: model.BaseModel{ID: uint(len(f.startInputs))}, TaskCode: input.TaskCode}, nil
+	return &model.TaskRun{
+		BaseModel:      model.BaseModel{ID: uint(len(f.startInputs))},
+		TaskCode:       input.TaskCode,
+		RetryOfRunID:   input.RetryOfRunID,
+		RetryRootRunID: input.RetryRootRunID,
+		RetrySeq:       input.RetrySeq,
+	}, nil
 }
 
 func (f *fakeActionRecorder) Finish(ctx context.Context, run *model.TaskRun, input RunFinish) error {
@@ -146,6 +141,57 @@ func (s *stubInspector) CancelProcessing(ctx context.Context, taskID string) err
 	_ = ctx
 	s.canceled = append(s.canceled, taskID)
 	return s.cancelErr
+}
+
+func (s *stubInspector) GetQueueStats(ctx context.Context, queueName string) (*queue.QueueStats, error) {
+	_ = ctx
+	_ = queueName
+	return &queue.QueueStats{}, nil
+}
+
+func (s *stubInspector) GetAllQueueStats(ctx context.Context) ([]*queue.QueueStats, error) {
+	_ = ctx
+	return []*queue.QueueStats{}, nil
+}
+
+func TestUpdateTaskOperationConfigUpdatesDefinition(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	insertTaskDefinition(t, db, "task:config", model.TaskRecordSuccessAll)
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:        taskCode,
+			Status:      model.TaskStatusEnabled,
+			AllowManual: model.TaskManualNotAllowed,
+			AllowRetry:  model.TaskRetryAllowed,
+		}, nil
+	})
+	defer restoreDefinition()
+
+	result, err := NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db}).UpdateTaskOperationConfig(context.Background(), &form.TaskOperationConfigForm{
+		TaskCode:    "task:config",
+		Status:      model.TaskStatusDisabled,
+		AllowManual: model.TaskManualAllowed,
+		AllowRetry:  model.TaskRetryNotAllowed,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTaskOperationConfig returned error: %v", err)
+	}
+
+	resource, ok := result.(*resources.TaskDefinitionResources)
+	if !ok {
+		t.Fatalf("unexpected result type: %T", result)
+	}
+	if resource.Status != model.TaskStatusDisabled || resource.AllowManual != model.TaskManualAllowed || resource.AllowRetry != model.TaskRetryNotAllowed {
+		t.Fatalf("unexpected resource: %#v", resource)
+	}
+
+	var stored model.TaskDefinition
+	if err := db.Where("code = ?", "task:config").First(&stored).Error; err != nil {
+		t.Fatalf("query stored definition failed: %v", err)
+	}
+	if stored.Status != model.TaskStatusDisabled || stored.AllowManual != model.TaskManualAllowed || stored.AllowRetry != model.TaskRetryNotAllowed {
+		t.Fatalf("unexpected stored definition: status=%d allow_manual=%d allow_retry=%d", stored.Status, stored.AllowManual, stored.AllowRetry)
+	}
 }
 
 func TestTriggerTaskSuccess(t *testing.T) {
@@ -397,6 +443,13 @@ func TestRetryTaskRespectsCurrentDefinition(t *testing.T) {
 		}, nil
 	})
 	defer restoreDefinition()
+	restoreRetrySummary := setTaskRetryChainSummaryLoaderForTest(func(ctx context.Context, db *gorm.DB, rootRunID uint) (retryChainSummary, error) {
+		_ = ctx
+		_ = db
+		_ = rootRunID
+		return retryChainSummary{}, nil
+	})
+	defer restoreRetrySummary()
 
 	svc := NewTaskCenterService()
 	_, err := svc.RetryTask(context.Background(), 101, 1, "tester")
@@ -410,6 +463,254 @@ func TestRetryTaskRespectsCurrentDefinition(t *testing.T) {
 	}
 	if be.GetCode() != e.InvalidParameter {
 		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+}
+
+func TestRetryTaskRejectsSuccessfulRun(t *testing.T) {
+	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		return &model.TaskRun{
+			BaseModel: model.BaseModel{ID: runID},
+			TaskCode:  "demo:send",
+			Kind:      model.TaskKindAsync,
+			Status:    model.TaskRunStatusSuccess,
+		}, nil
+	})
+	defer restoreRun()
+
+	svc := NewTaskCenterService()
+	_, err := svc.RetryTask(context.Background(), 101, 1, "tester")
+	if err == nil {
+		t.Fatal("expected error when retrying successful run")
+	}
+	var be *e.BusinessError
+	if !stderrors.As(err, &be) {
+		t.Fatalf("expected business error, got %T", err)
+	}
+	if be.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+}
+
+func TestRetryTaskRejectsResolvedOrExceededChain(t *testing.T) {
+	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		return &model.TaskRun{
+			BaseModel: model.BaseModel{ID: runID},
+			TaskCode:  "demo:send",
+			Kind:      model.TaskKindAsync,
+			Status:    model.TaskRunStatusFailed,
+			MaxRetry:  2,
+		}, nil
+	})
+	defer restoreRun()
+
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:       taskCode,
+			Kind:       model.TaskKindAsync,
+			Status:     model.TaskStatusEnabled,
+			AllowRetry: model.TaskRetryAllowed,
+		}, nil
+	})
+	defer restoreDefinition()
+
+	restoreRetrySummary := setTaskRetryChainSummaryLoaderForTest(func(ctx context.Context, db *gorm.DB, rootRunID uint) (retryChainSummary, error) {
+		_ = ctx
+		_ = db
+		_ = rootRunID
+		return retryChainSummary{MaxSeq: 2}, nil
+	})
+	defer restoreRetrySummary()
+
+	svc := NewTaskCenterService()
+	_, err := svc.RetryTask(context.Background(), 101, 1, "tester")
+	if err == nil {
+		t.Fatal("expected error when manual retry limit is reached")
+	}
+	var be *e.BusinessError
+	if !stderrors.As(err, &be) {
+		t.Fatalf("expected business error, got %T", err)
+	}
+	if be.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+}
+
+func TestRetryTaskRejectsSuccessfulRetryChain(t *testing.T) {
+	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		return &model.TaskRun{
+			BaseModel: model.BaseModel{ID: runID},
+			TaskCode:  "demo:send",
+			Kind:      model.TaskKindAsync,
+			Status:    model.TaskRunStatusFailed,
+			MaxRetry:  3,
+		}, nil
+	})
+	defer restoreRun()
+
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:       taskCode,
+			Kind:       model.TaskKindAsync,
+			Status:     model.TaskStatusEnabled,
+			AllowRetry: model.TaskRetryAllowed,
+		}, nil
+	})
+	defer restoreDefinition()
+
+	restoreRetrySummary := setTaskRetryChainSummaryLoaderForTest(func(ctx context.Context, db *gorm.DB, rootRunID uint) (retryChainSummary, error) {
+		_ = ctx
+		_ = db
+		_ = rootRunID
+		return retryChainSummary{MaxSeq: 1, SuccessCount: 1}, nil
+	})
+	defer restoreRetrySummary()
+
+	_, err := NewTaskCenterService().RetryTask(context.Background(), 101, 1, "tester")
+	if err == nil {
+		t.Fatal("expected error when retry chain has already succeeded")
+	}
+	var be *e.BusinessError
+	if !stderrors.As(err, &be) {
+		t.Fatalf("expected business error, got %T", err)
+	}
+	if be.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+}
+
+func TestRetryTaskCarriesRetryChain(t *testing.T) {
+	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		return &model.TaskRun{
+			BaseModel:      model.BaseModel{ID: runID},
+			TaskCode:       "demo:send",
+			Kind:           model.TaskKindAsync,
+			Queue:          "default",
+			Status:         model.TaskRunStatusFailed,
+			MaxRetry:       3,
+			RetryRootRunID: 88,
+			RetrySeq:       1,
+			Payload:        `{"name":"codex"}`,
+		}, nil
+	})
+	defer restoreRun()
+
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:       taskCode,
+			Kind:       model.TaskKindAsync,
+			Status:     model.TaskStatusEnabled,
+			AllowRetry: model.TaskRetryAllowed,
+		}, nil
+	})
+	defer restoreDefinition()
+
+	restoreRetrySummary := setTaskRetryChainSummaryLoaderForTest(func(ctx context.Context, db *gorm.DB, rootRunID uint) (retryChainSummary, error) {
+		_ = ctx
+		_ = db
+		if rootRunID != 88 {
+			t.Fatalf("expected retry root 88, got %d", rootRunID)
+		}
+		return retryChainSummary{MaxSeq: 1}, nil
+	})
+	defer restoreRetrySummary()
+
+	restorePublisher := queue.SetPublisherForTesting(&stubPublisher{
+		info: queue.JobInfo{ID: "task-retry-1", Queue: "default", Type: "demo:send"},
+	})
+	defer restorePublisher()
+	fakeRecorder := &fakeActionRecorder{}
+	restoreRecorder := SetRecorderForTesting(fakeRecorder)
+	defer restoreRecorder()
+	exportSvc := &stubExportTaskService{}
+	restoreExportSvc := setExportTaskServiceForTesting(exportSvc)
+	defer restoreExportSvc()
+
+	result, err := NewTaskCenterService().RetryTask(context.Background(), 101, 9, "tester")
+	if err != nil {
+		t.Fatalf("RetryTask returned error: %v", err)
+	}
+	if result["retry_from_run"] != uint(101) || result["retry_root_run"] != uint(88) || result["retry_seq"] != 2 {
+		t.Fatalf("unexpected retry result: %#v", result)
+	}
+	if len(fakeRecorder.enqueueInputs) != 1 {
+		t.Fatalf("expected enqueue once, got %d", len(fakeRecorder.enqueueInputs))
+	}
+	input := fakeRecorder.enqueueInputs[0]
+	if input.RetryOfRunID != 101 || input.RetryRootRunID != 88 || input.RetrySeq != 2 {
+		t.Fatalf("unexpected retry chain input: %#v", input)
+	}
+}
+
+func TestRetryTaskDBPathRejectsSecondPendingRetry(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	insertTaskDefinition(t, db, "demo:send", model.TaskRecordSuccessAll)
+	if err := db.Exec(`INSERT INTO task_runs (id, task_code, kind, source, source_id, queue, status, max_retry, payload) VALUES (101, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"demo:send",
+		model.TaskKindAsync,
+		model.TaskSourceQueue,
+		"origin-task",
+		"default",
+		model.TaskRunStatusFailed,
+		3,
+		`{"name":"codex"}`,
+	).Error; err != nil {
+		t.Fatalf("insert task run failed: %v", err)
+	}
+
+	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		var run model.TaskRun
+		if err := db.First(&run, runID).Error; err != nil {
+			return nil, err
+		}
+		return &run, nil
+	})
+	defer restoreRun()
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		var definition model.TaskDefinition
+		if err := db.Where("code = ? AND deleted_at = 0", taskCode).First(&definition).Error; err != nil {
+			return nil, err
+		}
+		return &definition, nil
+	})
+	defer restoreDefinition()
+
+	restorePublisher := queue.SetPublisherForTesting(&stubPublisher{
+		info: queue.JobInfo{ID: "task-retry-1", Queue: "default", Type: "demo:send"},
+	})
+	defer restorePublisher()
+	exportSvc := &stubExportTaskService{}
+	restoreExportSvc := setExportTaskServiceForTesting(exportSvc)
+	defer restoreExportSvc()
+
+	svc := NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db})
+	result, err := svc.RetryTask(context.Background(), 101, 9, "tester")
+	if err != nil {
+		t.Fatalf("first RetryTask returned error: %v", err)
+	}
+	if result["retry_seq"] != 1 {
+		t.Fatalf("unexpected retry seq: %#v", result)
+	}
+
+	_, err = svc.RetryTask(context.Background(), 101, 9, "tester")
+	if err == nil {
+		t.Fatal("expected second retry to be rejected while first retry is pending")
+	}
+	var be *e.BusinessError
+	if !stderrors.As(err, &be) {
+		t.Fatalf("expected business error, got %T", err)
+	}
+	if be.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+
+	var pendingCount int64
+	if err := db.Model(&model.TaskRun{}).
+		Where("retry_root_run_id = ? AND status = ?", 101, model.TaskRunStatusPending).
+		Count(&pendingCount).Error; err != nil {
+		t.Fatalf("count pending retry runs failed: %v", err)
+	}
+	if pendingCount != 1 {
+		t.Fatalf("expected exactly one pending retry run, got %d", pendingCount)
 	}
 }
 
@@ -435,6 +736,13 @@ func TestRetryTaskInjectsNewTaskRunIDForExportTasks(t *testing.T) {
 		}, nil
 	})
 	defer restoreDefinition()
+	restoreRetrySummary := setTaskRetryChainSummaryLoaderForTest(func(ctx context.Context, db *gorm.DB, rootRunID uint) (retryChainSummary, error) {
+		_ = ctx
+		_ = db
+		_ = rootRunID
+		return retryChainSummary{}, nil
+	})
+	defer restoreRetrySummary()
 
 	publisher := &stubPublisher{
 		info: queue.JobInfo{ID: "task-export-1", Queue: "export", Type: "export:request-log"},
@@ -446,7 +754,7 @@ func TestRetryTaskInjectsNewTaskRunIDForExportTasks(t *testing.T) {
 	restoreRecorder := SetRecorderForTesting(fakeRecorder)
 	defer restoreRecorder()
 
-	exportSvc := &stubExportTaskService{reassignReturn: true}
+	exportSvc := &stubExportTaskService{createRecordMatched: true}
 	restoreExportSvc := setExportTaskServiceForTesting(exportSvc)
 	defer restoreExportSvc()
 
@@ -461,14 +769,11 @@ func TestRetryTaskInjectsNewTaskRunIDForExportTasks(t *testing.T) {
 	if publisher.job == nil {
 		t.Fatal("expected job to be published")
 	}
-	if len(exportSvc.reassignInputs) != 1 {
-		t.Fatalf("expected ReassignTaskRun called once, got %d", len(exportSvc.reassignInputs))
+	if len(exportSvc.createRecordInputs) != 1 {
+		t.Fatalf("expected CreateRecordForTask called once, got %d", len(exportSvc.createRecordInputs))
 	}
-	if exportSvc.reassignInputs[0].oldTaskRunID != 101 || exportSvc.reassignInputs[0].newTaskRunID != 1 {
-		t.Fatalf("unexpected reassign args: %#v", exportSvc.reassignInputs[0])
-	}
-	if len(exportSvc.createRecordInputs) != 0 {
-		t.Fatalf("expected CreateRecordForTask NOT called when reassign succeeded, got %d", len(exportSvc.createRecordInputs))
+	if exportSvc.createRecordInputs[0].TaskRunID != 1 || exportSvc.createRecordInputs[0].TaskCode != "export:request-log" {
+		t.Fatalf("unexpected create record args: %#v", exportSvc.createRecordInputs[0])
 	}
 
 	rawPayload, err := publisher.job.Payload()
@@ -487,15 +792,13 @@ func TestRetryTaskInjectsNewTaskRunIDForExportTasks(t *testing.T) {
 	}
 }
 
-// TestRetryTaskFallsBackToCreateWhenNoExistingExportRecord 验证兼容历史无 export_record 的旧 run：
-// ReassignTaskRun 返回 false 时回退到 CreateRecordForTask，且仍注入新的 task_run_id。
-func TestRetryTaskFallsBackToCreateWhenNoExistingExportRecord(t *testing.T) {
+func TestRetryTaskDoesNotInjectTaskRunIDForNonExportTasks(t *testing.T) {
 	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
 		return &model.TaskRun{
 			BaseModel: model.BaseModel{ID: runID},
-			TaskCode:  "export:request-log",
+			TaskCode:  "demo:send",
 			Kind:      model.TaskKindAsync,
-			Queue:     "export",
+			Queue:     "default",
 			Status:    model.TaskRunStatusFailed,
 			Payload:   `{"limit":50}`,
 		}, nil
@@ -511,9 +814,16 @@ func TestRetryTaskFallsBackToCreateWhenNoExistingExportRecord(t *testing.T) {
 		}, nil
 	})
 	defer restoreDefinition()
+	restoreRetrySummary := setTaskRetryChainSummaryLoaderForTest(func(ctx context.Context, db *gorm.DB, rootRunID uint) (retryChainSummary, error) {
+		_ = ctx
+		_ = db
+		_ = rootRunID
+		return retryChainSummary{}, nil
+	})
+	defer restoreRetrySummary()
 
 	publisher := &stubPublisher{
-		info: queue.JobInfo{ID: "task-export-1", Queue: "export", Type: "export:request-log"},
+		info: queue.JobInfo{ID: "task-demo-1", Queue: "default", Type: "demo:send"},
 	}
 	restorePublisher := queue.SetPublisherForTesting(publisher)
 	defer restorePublisher()
@@ -522,7 +832,7 @@ func TestRetryTaskFallsBackToCreateWhenNoExistingExportRecord(t *testing.T) {
 	restoreRecorder := SetRecorderForTesting(fakeRecorder)
 	defer restoreRecorder()
 
-	exportSvc := &stubExportTaskService{reassignReturn: false, createRecordMatched: true}
+	exportSvc := &stubExportTaskService{createRecordMatched: false}
 	restoreExportSvc := setExportTaskServiceForTesting(exportSvc)
 	defer restoreExportSvc()
 
@@ -535,7 +845,7 @@ func TestRetryTaskFallsBackToCreateWhenNoExistingExportRecord(t *testing.T) {
 		t.Fatalf("unexpected retry run id: %#v", result["run_id"])
 	}
 	if len(exportSvc.createRecordInputs) != 1 {
-		t.Fatalf("expected CreateRecordForTask called once as fallback, got %d", len(exportSvc.createRecordInputs))
+		t.Fatalf("expected CreateRecordForTask called once, got %d", len(exportSvc.createRecordInputs))
 	}
 	if publisher.job == nil {
 		t.Fatal("expected job to be published")
@@ -548,8 +858,8 @@ func TestRetryTaskFallsBackToCreateWhenNoExistingExportRecord(t *testing.T) {
 	if err := json.Unmarshal(rawPayload, &payload); err != nil {
 		t.Fatalf("decode published payload failed: %v", err)
 	}
-	if payload["task_run_id"] != float64(1) {
-		t.Fatalf("expected fallback payload task_run_id=1, got %#v", payload["task_run_id"])
+	if _, ok := payload["task_run_id"]; ok {
+		t.Fatalf("did not expect non-export retry payload to include task_run_id: %#v", payload)
 	}
 }
 
@@ -637,6 +947,14 @@ func setTaskDefinitionLoaderForTest(loader func(taskCode string) (*model.TaskDef
 	loadTaskDefinitionByCode = loader
 	return func() {
 		loadTaskDefinitionByCode = previous
+	}
+}
+
+func setTaskRetryChainSummaryLoaderForTest(loader func(ctx context.Context, db *gorm.DB, rootRunID uint) (retryChainSummary, error)) func() {
+	previous := loadTaskRetryChainSummary
+	loadTaskRetryChainSummary = loader
+	return func() {
+		loadTaskRetryChainSummary = previous
 	}
 }
 

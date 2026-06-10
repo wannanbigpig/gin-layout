@@ -86,6 +86,27 @@ func TestFileResourceIDRejectsZero(t *testing.T) {
 	}
 }
 
+func TestFileFolderDeleteRequiresConfirm(t *testing.T) {
+	err := bindJSONBody(t, `{"id":1}`, NewFileFolderDeleteForm())
+	if err == nil {
+		t.Fatal("expected folder delete without confirm to fail validation")
+	}
+}
+
+func TestFileFolderDeleteAllowsExplicitConfirm(t *testing.T) {
+	err := bindJSONBody(t, `{"id":1,"confirm":1}`, NewFileFolderDeleteForm())
+	if err != nil {
+		t.Fatalf("expected folder delete with confirm to pass validation, got %v", err)
+	}
+}
+
+func TestFileFolderStatsDoesNotRequireDeleteConfirm(t *testing.T) {
+	err := bindJSONBody(t, `{"id":1}`, NewFileFolderStatsForm())
+	if err != nil {
+		t.Fatalf("expected folder stats to pass without delete confirm, got %v", err)
+	}
+}
+
 func TestFileResourceListRejectsInvalidStorageDriver(t *testing.T) {
 	err := bindJSONBody(t, `{"storage_driver":"ftp"}`, NewFileResourceListQuery())
 	if err == nil {

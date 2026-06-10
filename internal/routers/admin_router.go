@@ -17,6 +17,10 @@ func POST(path, title string, auth AuthMode, handlers ...gin.HandlerFunc) RouteD
 	return RouteDef{Method: http.MethodPost, Path: path, Title: title, Auth: auth, Handlers: handlers}
 }
 
+func PATCH(path, title string, auth AuthMode, handlers ...gin.HandlerFunc) RouteDef {
+	return RouteDef{Method: http.MethodPatch, Path: path, Title: title, Auth: auth, Handlers: handlers}
+}
+
 // AdminRouteTree 返回管理员后台路由声明树。
 // deps: 控制器依赖容器，传入 nil 则使用默认实现
 func AdminRouteTree(deps *ControllerDeps) RouteGroupDef {
@@ -76,6 +80,7 @@ func adminAuthGroup(deps *ControllerDeps) RouteGroupDef {
 			menuGroup(deps),
 			roleGroup(deps),
 			deptGroup(deps),
+			productGroup(deps),
 			systemGroup(deps),
 			logGroup(deps),
 			taskGroup(deps),
@@ -90,6 +95,7 @@ func dashboardGroup(deps *ControllerDeps) RouteGroupDef {
 		Routes: []RouteDef{
 			GET("overview", "仪表盘概览", AuthModeAuth, deps.Dashboard.Overview),
 			GET("statistics", "仪表盘统计", AuthModeAuth, deps.Dashboard.Statistics),
+			GET("monitor", "服务器监控", AuthModeAuth, deps.Dashboard.Monitor),
 		},
 	}
 }
@@ -215,6 +221,21 @@ func deptGroup(deps *ControllerDeps) RouteGroupDef {
 	}
 }
 
+// productGroup 产品管理组（示例：演示数据权限接入）
+func productGroup(deps *ControllerDeps) RouteGroupDef {
+	return RouteGroupDef{
+		Prefix:    "product",
+		GroupCode: "product",
+		Routes: []RouteDef{
+			GET("list", "产品列表", AuthModeAuth, deps.Product.List),
+			POST("create", "新增产品", AuthModeAuth, deps.Product.Create),
+			POST("update", "更新产品", AuthModeAuth, deps.Product.Update),
+			GET("detail", "产品详情", AuthModeAuth, deps.Product.Detail),
+			POST("delete", "删除产品", AuthModeAuth, deps.Product.Delete),
+		},
+	}
+}
+
 // systemGroup 系统管理组
 func systemGroup(deps *ControllerDeps) RouteGroupDef {
 	return RouteGroupDef{
@@ -257,7 +278,7 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					GET("list", "文件资源列表", AuthModeAuth, deps.File.List),
 					GET("detail", "文件资源详情", AuthModeAuth, deps.File.Detail),
 					GET("folder/tree", "文件目录树", AuthModeAuth, deps.File.FolderTree),
-						GET("folder/stats", "目录统计信息", AuthModeAuth, deps.File.FolderStats),
+					GET("folder/stats", "目录统计信息", AuthModeAuth, deps.File.FolderStats),
 					POST("folder/create", "创建文件目录", AuthModeAuth, deps.File.FolderCreate),
 					POST("folder/update", "更新文件目录", AuthModeAuth, deps.File.FolderUpdate),
 					POST("folder/delete", "删除文件目录", AuthModeAuth, deps.File.FolderDelete),
@@ -351,12 +372,16 @@ func taskGroup(deps *ControllerDeps) RouteGroupDef {
 		Routes: []RouteDef{
 			GET("list", "任务定义列表", AuthModeAuth, deps.TaskCenter.TaskList),
 			POST("trigger", "手动触发任务", AuthModeAuth, deps.TaskCenter.Trigger),
+			PATCH("record-policy", "更新任务记录策略", AuthModeAuth, deps.TaskCenter.RecordPolicy),
+			PATCH("operation-config", "更新任务运营配置", AuthModeAuth, deps.TaskCenter.OperationConfig),
 		},
 		Children: []RouteGroupDef{
 			{
 				Prefix: "run",
 				Routes: []RouteDef{
 					GET("list", "任务执行记录列表", AuthModeAuth, deps.TaskCenter.RunList),
+					GET("stats", "任务执行统计", AuthModeAuth, deps.TaskCenter.RunStats),
+					GET("stats/trend", "任务执行统计趋势", AuthModeAuth, deps.TaskCenter.RunStatsTrend),
 					GET("detail", "任务执行记录详情", AuthModeAuth, deps.TaskCenter.RunDetail),
 					GET("events", "任务执行事件列表", AuthModeAuth, deps.TaskCenter.RunEvents),
 					POST("retry", "重试失败任务", AuthModeAuth, deps.TaskCenter.Retry),

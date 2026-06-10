@@ -114,9 +114,9 @@ go run main.go cron
 
 任务定义边界：
 
-- `task_definitions` 当前是代码内置任务定义的只读镜像，用于任务中心展示、手动触发与重试校验。
-- `cron` 调度器的真实来源仍是 `BuiltinTaskDefinitions(cfg)`，不会读取 DB 中被人工修改的 `task_definitions`。
-- 如需让后台成为调度配置入口，必须先调整 scheduler 读取 DB，并把内置同步策略从覆盖改为初始化缺失记录。
+- `BuiltinTaskDefinitions(cfg)` 定义内置任务集合、默认调度表达式和 handler 安全边界。
+- `task_definitions` 是内置任务定义同步后的运营配置表；已有任务会保留 `status/allow_manual/allow_retry/record_success_*` 等运营配置。
+- `cron` 进程启动时注册所有内置 cron 任务；每次触发前读取 `task_definitions.status`，后台启停无需重启 cron 进程，下一次调度触发即生效。
 
 ### 5. 运行一次性命令
 
@@ -124,6 +124,7 @@ go run main.go cron
 go run main.go command api-route
 go run main.go command rebuild-user-permissions
 go run main.go command init-system
+go run main.go -c ./config.yaml command task sync-definitions
 go run main.go -c ./config.yaml command migrate up
 ```
 
@@ -138,7 +139,9 @@ go run main.go -c ./config.yaml command migrate up
 - `rebuild-user-permissions`
   - 按数据库关系重建用户最终 API 权限
 - `init-system`
-  - 回滚迁移、重新执行迁移、初始化 API 路由、重建用户权限
+  - 高危重置命令：清空当前配置数据库对象、重新执行迁移、初始化 API 路由、重建用户权限
+  - 执行前会红色提示当前环境和 MySQL 连接信息，并要求确认已备份、输入当前库名
+  - `-y` 只跳过普通确认，自动化执行必须额外传 `--backup-confirmed --confirm-database <mysql.database>`
 - `demo`
   - 示例命令
 - `migrate`
@@ -148,6 +151,10 @@ go run main.go -c ./config.yaml command migrate up
   - 扫描代码注册的异步队列任务，并与 `task_definitions` 镜像做对比
 - `task scan-cron`
   - 扫描代码内置的 cron 任务定义，并与 `task_definitions` 镜像做对比
+- `task sync-definitions`
+  - 非破坏性同步 `BuiltinTaskDefinitions(cfg)` 到 `task_definitions`
+  - 新增任务上线后使用这个命令补齐表数据，不执行 `init-system`
+  - 已存在任务只更新 `name/kind/queue/cron_spec/handler/is_high_risk/remark` 等代码定义字段，保留 `status/allow_manual/allow_retry/record_success_*` 等运营配置
 
 ### 6. 查看版本
 

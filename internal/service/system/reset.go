@@ -1,7 +1,6 @@
 package system
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
+	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 )
@@ -139,17 +139,23 @@ func (s *ResetService) cleanupExpiredSystemData() error {
 func (s *ResetService) reinitializeSystemData() error {
 	log.Logger.Info("开始重新初始化系统数据")
 
-	if err := s.rollbackMigrations(); err != nil {
-		log.Logger.Error("回滚迁移失败", zap.Error(err))
-		return fmt.Errorf("回滚迁移失败: %w", err)
+	if err := s.dropDatabaseObjects(); err != nil {
+		log.Logger.Error("清空数据库对象失败", zap.Error(err))
+		return fmt.Errorf("清空数据库对象失败: %w", err)
 	}
-	log.Logger.Info("回滚迁移完成")
+	log.Logger.Info("清空数据库对象完成")
 
 	if err := s.runMigrations(); err != nil {
 		log.Logger.Error("执行迁移失败", zap.Error(err))
 		return fmt.Errorf("执行迁移失败: %w", err)
 	}
 	log.Logger.Info("执行迁移完成")
+
+	if err := taskcron.SyncBuiltinDefinitionsIfAvailable(s.currentConfig()); err != nil {
+		log.Logger.Error("同步内置任务定义失败", zap.Error(err))
+		return fmt.Errorf("同步内置任务定义失败: %w", err)
+	}
+	log.Logger.Info("同步内置任务定义完成")
 
 	if err := initAPIRoutes(); err != nil {
 		log.Logger.Error("初始化API路由失败", zap.Error(err))
@@ -167,44 +173,17 @@ func (s *ResetService) reinitializeSystemData() error {
 	return nil
 }
 
-func (s *ResetService) rollbackMigrations() error {
+func (s *ResetService) dropDatabaseObjects() error {
 	m, err := s.createMigrateInstance()
 	if err != nil {
 		return err
 	}
 	defer m.Close()
 
-	if err := m.Down(); err != nil && err != migrate.ErrNoChange {
-		var dirtyErr migrate.ErrDirty
-		if errors.As(err, &dirtyErr) {
-			log.Logger.Warn("检测到 dirty 迁移状态，尝试自动修复并重试回滚", zap.Uint("version", uint(dirtyErr.Version)))
-			if forceErr := m.Force(int(dirtyErr.Version)); forceErr != nil {
-				return fmt.Errorf("自动修复 dirty 状态失败: %w", forceErr)
-			}
-			if retryErr := m.Down(); retryErr != nil && retryErr != migrate.ErrNoChange {
-				return retryErr
-			}
-			return nil
-		}
-		if isMissingRollbackMigrationError(err) {
-			log.Logger.Warn("检测到已应用迁移文件缺失，改为清空数据库后重建系统数据", zap.Error(err))
-			if dropErr := m.Drop(); dropErr != nil {
-				return fmt.Errorf("缺失回滚迁移文件后清空数据库失败: %w", dropErr)
-			}
-			return nil
-		}
+	if err := m.Drop(); err != nil && err != migrate.ErrNoChange {
 		return err
 	}
 	return nil
-}
-
-func isMissingRollbackMigrationError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := err.Error()
-	return strings.Contains(message, "no migration found for version") ||
-		(strings.Contains(message, "read down for version") && strings.Contains(message, "file does not exist"))
 }
 
 func (s *ResetService) runMigrations() error {

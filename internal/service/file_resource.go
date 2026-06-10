@@ -194,21 +194,18 @@ func (s *FileResourceService) Detail(id uint) (any, error) {
 	return result, nil
 }
 
-// Delete 软删除文件记录。force=true 时跳过引用检查。
-func (s *FileResourceService) Delete(id uint, deletedBy uint, reason string, force ...bool) error {
+// Delete 软删除文件记录。存在业务引用时拒绝删除，避免留下悬空引用。
+func (s *FileResourceService) Delete(id uint, deletedBy uint, reason string) error {
 	uploadFile, err := s.findByID(id)
 	if err != nil {
 		return err
 	}
-	isForced := len(force) > 0 && force[0]
-	if !isForced {
-		refs, err := NewFileReferenceService(s.db).ReferencesByFileID(id)
-		if err != nil {
-			return err
-		}
-		if len(refs) > 0 {
-			return NewFileReferencedDeleteError(buildFileReferenceResources(refs))
-		}
+	refs, err := NewFileReferenceService(s.db).ReferencesByFileID(id)
+	if err != nil {
+		return err
+	}
+	if len(refs) > 0 {
+		return NewFileReferencedDeleteError(buildFileReferenceResources(refs))
 	}
 
 	if s.db != nil {
@@ -333,18 +330,20 @@ func (s *FileResourceService) BatchRestore(ids []uint) error {
 		if len(files) == 0 {
 			return e.NewBusinessError(e.NotFound)
 		}
-		restoredFolders := make(map[uint]struct{})
+		folderIDs := make([]uint, 0, len(files))
+		seenFolderIDs := make(map[uint]struct{})
 		for _, file := range files {
 			if file.FolderID == 0 {
 				continue
 			}
-			if _, ok := restoredFolders[file.FolderID]; ok {
+			if _, ok := seenFolderIDs[file.FolderID]; ok {
 				continue
 			}
-			if err := restoreFolderAncestors(tx, file.FolderID); err != nil {
-				return err
-			}
-			restoredFolders[file.FolderID] = struct{}{}
+			seenFolderIDs[file.FolderID] = struct{}{}
+			folderIDs = append(folderIDs, file.FolderID)
+		}
+		if err := restoreFolderAncestorsForFolders(tx, folderIDs); err != nil {
+			return err
 		}
 		result := tx.Unscoped().Model(&model.UploadFiles{}).Where("id IN ? AND deleted_at <> 0", ids).Updates(map[string]any{
 			"deleted_at":     0,
@@ -435,10 +434,40 @@ func buildFileBatchDestroyFailure(id uint, err error) *FileBatchDestroyFailure {
 }
 
 func restoreFolderAncestors(tx *gorm.DB, folderID uint) error {
+	return restoreFolderAncestorsForFolders(tx, []uint{folderID})
+}
+
+func restoreFolderAncestorsForFolders(tx *gorm.DB, folderIDs []uint) error {
+	if len(folderIDs) == 0 {
+		return nil
+	}
+	folderCache := make(map[uint]model.UploadFileFolder)
+	restoreSet := make(map[uint]struct{})
+	for _, folderID := range folderIDs {
+		if folderID == 0 {
+			continue
+		}
+		if err := collectRestorableFolderAncestors(tx, folderID, folderCache, restoreSet); err != nil {
+			return err
+		}
+	}
+	if len(restoreSet) == 0 {
+		return nil
+	}
+	restoreIDs := make([]uint, 0, len(restoreSet))
+	for id := range restoreSet {
+		restoreIDs = append(restoreIDs, id)
+	}
+	return tx.Unscoped().
+		Model(&model.UploadFileFolder{}).
+		Where("id IN ? AND deleted_at <> 0", restoreIDs).
+		Update("deleted_at", 0).Error
+}
+
+func collectRestorableFolderAncestors(tx *gorm.DB, folderID uint, folderCache map[uint]model.UploadFileFolder, restoreSet map[uint]struct{}) error {
 	if folderID == 0 {
 		return nil
 	}
-	chain := make([]model.UploadFileFolder, 0)
 	seen := make(map[uint]struct{})
 	for currentID := folderID; currentID > 0; {
 		if _, ok := seen[currentID]; ok {
@@ -446,20 +475,17 @@ func restoreFolderAncestors(tx *gorm.DB, folderID uint) error {
 		}
 		seen[currentID] = struct{}{}
 
-		var folder model.UploadFileFolder
-		if err := tx.Unscoped().First(&folder, currentID).Error; err != nil {
-			return e.NewBusinessError(e.NotFound)
+		folder, ok := folderCache[currentID]
+		if !ok {
+			if err := tx.Unscoped().First(&folder, currentID).Error; err != nil {
+				return e.NewBusinessError(e.NotFound)
+			}
+			folderCache[currentID] = folder
 		}
-		chain = append(chain, folder)
+		if folder.DeletedAt != 0 {
+			restoreSet[folder.ID] = struct{}{}
+		}
 		currentID = folder.ParentID
-	}
-	for i := len(chain) - 1; i >= 0; i-- {
-		if chain[i].DeletedAt == 0 {
-			continue
-		}
-		if err := tx.Unscoped().Model(&model.UploadFileFolder{}).Where("id = ? AND deleted_at <> 0", chain[i].ID).Update("deleted_at", 0).Error; err != nil {
-			return err
-		}
 	}
 	return nil
 }

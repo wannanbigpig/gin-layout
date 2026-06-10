@@ -1,0 +1,193 @@
+<template>
+  <div class="{{.ModuleSnake}}-page">
+    <el-card shadow="never">
+      <el-form :model="queryParams" inline>
+{{- range .ListFields}}
+{{- if eq .GoType "string"}}
+        <el-form-item label="{{.Comment}}">
+          <el-input v-model="queryParams.{{.JsonTag}}" placeholder="请输入{{.Comment}}" clearable />
+        </el-form-item>
+{{- else if eq .ColumnName "status"}}
+        <el-form-item label="{{.Comment}}">
+          <el-select v-model="queryParams.{{.JsonTag}}" placeholder="请选择{{.Comment}}" clearable>
+            <el-option label="启用" :value="1" />
+            <el-option label="禁用" :value="0" />
+          </el-select>
+        </el-form-item>
+{{- end}}
+{{- end}}
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">搜索</el-button>
+          <el-button @click="handleReset">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never" style="margin-top: 16px">
+      <template #header>
+        <el-button type="primary" v-permission="'{{.ModuleSnake}}:create'" @click="handleAdd">新增</el-button>
+      </template>
+
+      <el-table :data="tableData" v-loading="loading" border>
+{{- range .FormFields}}
+{{- if .IsForm}}
+        <el-table-column prop="{{.JsonTag}}" label="{{.Comment}}" />
+{{- end}}
+{{- end}}
+{{- if .HasStatus}}
+        <el-table-column prop="status_name" label="状态" />
+{{- end}}
+        <el-table-column label="操作" width="200" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" v-permission="'{{.ModuleSnake}}:update'" @click="handleEdit(row)">编辑</el-button>
+            <el-button link type="danger" v-permission="'{{.ModuleSnake}}:delete'" @click="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-pagination
+        style="margin-top: 16px; justify-content: flex-end"
+        v-model:current-page="queryParams.page"
+        v-model:page-size="queryParams.per_page"
+        :total="total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="handleSearch"
+        @current-change="handleSearch"
+      />
+    </el-card>
+
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="500px" destroy-on-close>
+      <el-form ref="formRef" :model="formData" :rules="rules" label-width="100px">
+{{- range .FormFields}}
+{{- if .IsForm}}
+        <el-form-item label="{{.Comment}}" prop="{{.JsonTag}}">
+{{- if eq .FormType "el-input"}}
+          <el-input v-model="formData.{{.JsonTag}}" placeholder="请输入{{.Comment}}" />
+{{- else if eq .FormType "el-input type=textarea"}}
+          <el-input v-model="formData.{{.JsonTag}}" type="textarea" placeholder="请输入{{.Comment}}" />
+{{- else if eq .FormType "el-input-number"}}
+          <el-input-number v-model="formData.{{.JsonTag}}" :min="0" />
+{{- else if eq .FormType "el-select"}}
+          <el-select v-model="formData.{{.JsonTag}}" placeholder="请选择{{.Comment}}">
+            <el-option label="启用" :value="1" />
+            <el-option label="禁用" :value="0" />
+          </el-select>
+{{- else if eq .FormType "el-date-picker"}}
+          <el-date-picker v-model="formData.{{.JsonTag}}" type="datetime" placeholder="请选择{{.Comment}}" />
+{{- end}}
+        </el-form-item>
+{{- end}}
+{{- end}}
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSubmit">确定</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
+import {
+  get{{.ModelName}}List,
+  create{{.ModelName}},
+  update{{.ModelName}},
+  delete{{.ModelName}}
+} from '@/api/{{.ModuleSnake}}'
+import type { {{.ModelName}}, {{.ModelName}}ListParams, {{.ModelName}}CreateParams } from '@/types/{{.ModuleSnake}}'
+
+const loading = ref(false)
+const tableData = ref<{{.ModelName}}[]>([])
+const total = ref(0)
+const queryParams = reactive<{{.ModelName}}ListParams>({
+  page: 1,
+  per_page: 10,
+})
+
+const dialogVisible = ref(false)
+const dialogTitle = ref('')
+const formRef = ref<FormInstance>()
+const formData = reactive<{{.ModelName}}CreateParams>({
+{{- range .FormFields}}
+{{- if .IsForm}}
+{{- if eq .GoType "string"}}
+  {{.JsonTag}}: '',
+{{- else if or (eq .GoType "uint8") (eq .GoType "uint") (eq .GoType "int") (eq .GoType "int64") (eq .GoType "uint64")}}
+  {{.JsonTag}}: 0,
+{{- end}}
+{{- end}}
+{{- end}}
+})
+
+const rules: FormRules = {
+{{- range .FormFields}}
+{{- if and .IsForm (eq .BindingTag "required")}}
+  {{.JsonTag}}: [{ required: true, message: '请输入{{.Comment}}', trigger: 'blur' }],
+{{- end}}
+{{- end}}
+}
+
+const fetchData = async () => {
+  loading.value = true
+  try {
+    const res = await get{{.ModelName}}List(queryParams)
+    tableData.value = res.data.data
+    total.value = res.data.total
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleSearch = () => {
+  queryParams.page = 1
+  fetchData()
+}
+
+const handleReset = () => {
+  queryParams.page = 1
+  queryParams.per_page = 10
+{{- range .ListFields}}
+  queryParams.{{.JsonTag}} = undefined
+{{- end}}
+  fetchData()
+}
+
+const handleAdd = () => {
+  dialogTitle.value = '新增{{.MenuTitle}}'
+  dialogVisible.value = true
+}
+
+const handleEdit = (row: {{.ModelName}}) => {
+  dialogTitle.value = '编辑{{.MenuTitle}}'
+  Object.assign(formData, row)
+  dialogVisible.value = true
+}
+
+const handleDelete = async (row: {{.ModelName}}) => {
+  await ElMessageBox.confirm('确认删除该记录？', '提示', { type: 'warning' })
+  await delete{{.ModelName}}(row.id)
+  ElMessage.success('删除成功')
+  fetchData()
+}
+
+const handleSubmit = async () => {
+  await formRef.value?.validate()
+  if ((formData as any).id) {
+    await update{{.ModelName}}(formData as any)
+    ElMessage.success('更新成功')
+  } else {
+    await create{{.ModelName}}(formData)
+    ElMessage.success('新增成功')
+  }
+  dialogVisible.value = false
+  fetchData()
+}
+
+onMounted(() => {
+  fetchData()
+})
+</script>

@@ -27,6 +27,8 @@ type roleMutablePayload struct {
 	Status      uint8  `form:"status" json:"status"  binding:"omitempty,oneof=0 1"`
 	Sort        uint   `form:"sort" json:"sort" binding:"omitempty"`
 	MenuList    []uint `form:"menu_list" json:"menu_list" binding:"omitempty,dive,gt=0"`
+	DataScope   uint8  `form:"data_scope" json:"data_scope" binding:"omitempty,oneof=1 2 3 4 5"`
+	DeptIds     []uint `form:"dept_ids" json:"dept_ids" binding:"omitempty,dive,gt=0"`
 }
 
 type CreateRole struct {

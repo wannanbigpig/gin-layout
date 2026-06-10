@@ -1626,14 +1626,38 @@ func TestFileResourceService_BatchRestore(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
 
+	deletedAt := soft_delete.DeletedAt(time.Now().Unix())
+	parent := model.UploadFileFolder{
+		Name:        "restore-parent",
+		LogicalPath: "/restore-parent",
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+			DeletedAt: deletedAt,
+		},
+	}
+	if err := db.Create(&parent).Error; err != nil {
+		t.Fatalf("create parent folder failed: %v", err)
+	}
+	child := model.UploadFileFolder{
+		ParentID:    parent.ID,
+		Name:        "restore-child",
+		LogicalPath: "/restore-parent/restore-child",
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+			DeletedAt: deletedAt,
+		},
+	}
+	if err := db.Create(&child).Error; err != nil {
+		t.Fatalf("create child folder failed: %v", err)
+	}
+
 	// 创建已软删除的文件
 	file1 := model.UploadFiles{
 		OriginName:    "restore1.jpg",
 		UUID:          "restore1-uuid-00000000000000000000",
+		FolderID:      child.ID,
 		StorageDriver: model.StorageDriverLocal,
 		StorageStatus: model.StorageStatusStored,
 		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
-			DeletedAt: soft_delete.DeletedAt(time.Now().Unix()),
+			DeletedAt: deletedAt,
 		},
 		DeletedBy:     1,
 		DeletedReason: "soft delete",
@@ -1641,10 +1665,11 @@ func TestFileResourceService_BatchRestore(t *testing.T) {
 	file2 := model.UploadFiles{
 		OriginName:    "restore2.jpg",
 		UUID:          "restore2-uuid-00000000000000000000",
+		FolderID:      child.ID,
 		StorageDriver: model.StorageDriverLocal,
 		StorageStatus: model.StorageStatusStored,
 		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
-			DeletedAt: soft_delete.DeletedAt(time.Now().Unix()),
+			DeletedAt: deletedAt,
 		},
 		DeletedBy:     1,
 		DeletedReason: "soft delete",
@@ -1676,6 +1701,13 @@ func TestFileResourceService_BatchRestore(t *testing.T) {
 	}
 	if res2.DeletedAt != 0 || res2.DeletedBy != 0 || res2.DeletedReason != "" {
 		t.Fatalf("file2 not restored correctly: %+v", res2)
+	}
+	var restoredParent, restoredChild model.UploadFileFolder
+	if err := db.First(&restoredParent, parent.ID).Error; err != nil {
+		t.Fatalf("expected parent folder restored: %v", err)
+	}
+	if err := db.First(&restoredChild, child.ID).Error; err != nil {
+		t.Fatalf("expected child folder restored: %v", err)
 	}
 }
 

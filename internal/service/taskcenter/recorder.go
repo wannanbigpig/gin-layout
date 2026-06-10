@@ -30,6 +30,9 @@ type RunStart struct {
 	CronSpec       string
 	Attempt        int
 	MaxRetry       int
+	RetryOfRunID   uint
+	RetryRootRunID uint
+	RetrySeq       int
 	Payload        []byte
 	TriggerUserID  uint
 	TriggerAccount string
@@ -126,6 +129,9 @@ func (r *recorder) Start(ctx context.Context, input RunStart) (*model.TaskRun, e
 	run.Status = model.TaskRunStatusRunning
 	run.Attempt = input.Attempt
 	run.MaxRetry = input.MaxRetry
+	run.RetryOfRunID = input.RetryOfRunID
+	run.RetryRootRunID = input.RetryRootRunID
+	run.RetrySeq = input.RetrySeq
 	run.Payload = truncateBytes(input.Payload, maxPayloadBytes)
 	run.StartedAt = &now
 
@@ -138,31 +144,65 @@ func (r *recorder) Start(ctx context.Context, input RunStart) (*model.TaskRun, e
 				Order("id DESC").First(&existing).Error
 			if findErr == nil {
 				run = &existing
+				retryOfRunID := input.RetryOfRunID
+				if retryOfRunID == 0 {
+					retryOfRunID = existing.RetryOfRunID
+				}
+				retryRootRunID := input.RetryRootRunID
+				if retryRootRunID == 0 {
+					retryRootRunID = existing.RetryRootRunID
+				}
+				retrySeq := input.RetrySeq
+				if retrySeq == 0 {
+					retrySeq = existing.RetrySeq
+				}
+				source := input.Source
+				if strings.TrimSpace(existing.Source) != "" {
+					source = existing.Source
+				}
+				eventInput := input
+				eventInput.Source = source
+				eventInput.RetryOfRunID = retryOfRunID
+				eventInput.RetryRootRunID = retryRootRunID
+				eventInput.RetrySeq = retrySeq
+
 				run.Kind = input.Kind
-				run.Source = input.Source
+				run.Source = source
 				run.Queue = input.Queue
 				run.Status = model.TaskRunStatusRunning
 				run.Attempt = input.Attempt
 				run.MaxRetry = input.MaxRetry
+				run.RetryOfRunID = retryOfRunID
+				run.RetryRootRunID = retryRootRunID
+				run.RetrySeq = retrySeq
+				run.ErrorMessage = ""
 				run.Payload = truncateBytes(input.Payload, maxPayloadBytes)
 				run.StartedAt = &now
+				run.FinishedAt = nil
+				run.DurationMS = 0
 				if err := tx.Model(&model.TaskRun{}).Where("id = ?", run.ID).Updates(map[string]any{
-					"kind":       run.Kind,
-					"source":     run.Source,
-					"queue":      run.Queue,
-					"status":     run.Status,
-					"attempt":    run.Attempt,
-					"max_retry":  run.MaxRetry,
-					"payload":    run.Payload,
-					"started_at": run.StartedAt,
+					"kind":              run.Kind,
+					"source":            run.Source,
+					"queue":             run.Queue,
+					"status":            run.Status,
+					"attempt":           run.Attempt,
+					"max_retry":         run.MaxRetry,
+					"retry_of_run_id":   run.RetryOfRunID,
+					"retry_root_run_id": run.RetryRootRunID,
+					"retry_seq":         run.RetrySeq,
+					"error_message":     run.ErrorMessage,
+					"payload":           run.Payload,
+					"started_at":        run.StartedAt,
+					"finished_at":       run.FinishedAt,
+					"duration_ms":       run.DurationMS,
 				}).Error; err != nil {
 					return err
 				}
-				if err := tx.Create(newEvent(run.ID, model.TaskEventStart, "task started", inputMeta(input))).Error; err != nil {
+				if err := tx.Create(newEvent(run.ID, model.TaskEventStart, "task started", inputMeta(eventInput))).Error; err != nil {
 					return err
 				}
 				if input.Source == model.TaskSourceCron {
-					return upsertCronState(tx, run, input.CronSpec, "", nil)
+					return upsertCronState(tx, run, input.CronSpec, "", nil, true, time.Time{})
 				}
 				return nil
 			}
@@ -178,7 +218,7 @@ func (r *recorder) Start(ctx context.Context, input RunStart) (*model.TaskRun, e
 			return err
 		}
 		if input.Source == model.TaskSourceCron {
-			return upsertCronState(tx, run, input.CronSpec, "", nil)
+			return upsertCronState(tx, run, input.CronSpec, "", nil, true, time.Time{})
 		}
 		return nil
 	})
@@ -215,6 +255,9 @@ func (r *recorder) Enqueue(ctx context.Context, input RunStart) (*model.TaskRun,
 	run.Status = model.TaskRunStatusPending
 	run.Attempt = input.Attempt
 	run.MaxRetry = input.MaxRetry
+	run.RetryOfRunID = input.RetryOfRunID
+	run.RetryRootRunID = input.RetryRootRunID
+	run.RetrySeq = input.RetrySeq
 	run.Payload = truncateBytes(input.Payload, maxPayloadBytes)
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
@@ -250,8 +293,10 @@ func (r *recorder) Finish(ctx context.Context, run *model.TaskRun, input RunFini
 	eventType, eventMessage := resolveFinishEvent(status)
 	if input.Error != nil {
 		errorMessage = truncateString(input.Error.Error(), maxErrorBytes)
-		eventType = model.TaskEventFail
 		eventMessage = errorMessage
+		if status != model.TaskRunStatusRetrying {
+			eventType = model.TaskEventFail
+		}
 	}
 	input.Status = status
 
@@ -268,19 +313,34 @@ func (r *recorder) Finish(ctx context.Context, run *model.TaskRun, input RunFini
 	run.DurationMS = durationMS
 
 	return db.Transaction(func(tx *gorm.DB) error {
+		detail := resolveDetailDecision(tx, run, status)
+		run.DetailRecordMode = detail.Mode
 		if err := tx.Model(&model.TaskRun{}).Where("id = ?", run.ID).Updates(map[string]any{
-			"status":        run.Status,
-			"error_message": run.ErrorMessage,
-			"finished_at":   run.FinishedAt,
-			"duration_ms":   run.DurationMS,
+			"status":             run.Status,
+			"error_message":      run.ErrorMessage,
+			"finished_at":        run.FinishedAt,
+			"duration_ms":        run.DurationMS,
+			"detail_record_mode": run.DetailRecordMode,
 		}).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(newEvent(run.ID, eventType, eventMessage, finishMeta(input))).Error; err != nil {
 			return err
 		}
+		if status == model.TaskRunStatusRetrying {
+			return nil
+		}
+		statsWindowStart, err := recordTaskRunStat(tx, run, detail.Keep && status == model.TaskRunStatusSuccess)
+		if err != nil {
+			return err
+		}
 		if run.Source == model.TaskSourceCron {
-			return upsertCronState(tx, run, "", errorMessage, input.NextRunAt)
+			if err := upsertCronState(tx, run, "", errorMessage, input.NextRunAt, detail.Keep, statsWindowStart); err != nil {
+				return err
+			}
+		}
+		if !detail.Keep {
+			return deleteRunDetail(tx, run.ID)
 		}
 		return nil
 	})
@@ -292,6 +352,10 @@ func resolveFinishEvent(status string) (eventType string, message string) {
 		return model.TaskEventFail, "task failed"
 	case model.TaskRunStatusCanceled:
 		return model.TaskEventCancel, "task canceled"
+	case model.TaskRunStatusTimeout:
+		return model.TaskEventTimeout, "task timeout"
+	case model.TaskRunStatusInterrupted:
+		return model.TaskEventInterrupted, "task interrupted"
 	case model.TaskRunStatusRetrying:
 		return model.TaskEventRetry, "task retrying"
 	default:
@@ -342,6 +406,15 @@ func inputMeta(input RunStart) map[string]any {
 	if strings.TrimSpace(input.TriggerReason) != "" {
 		meta["trigger_reason"] = strings.TrimSpace(input.TriggerReason)
 	}
+	if input.RetryOfRunID > 0 {
+		meta["retry_of_run_id"] = input.RetryOfRunID
+	}
+	if input.RetryRootRunID > 0 {
+		meta["retry_root_run_id"] = input.RetryRootRunID
+	}
+	if input.RetrySeq > 0 {
+		meta["retry_seq"] = input.RetrySeq
+	}
 	return meta
 }
 
@@ -375,7 +448,7 @@ func marshalMeta(meta map[string]any) string {
 	return string(raw)
 }
 
-func upsertCronState(tx *gorm.DB, run *model.TaskRun, cronSpec string, lastError string, nextRunAt *time.Time) error {
+func upsertCronState(tx *gorm.DB, run *model.TaskRun, cronSpec string, lastError string, nextRunAt *time.Time, keepDetail bool, statsWindowStart time.Time) error {
 	if run == nil || run.TaskCode == "" {
 		return nil
 	}
@@ -383,7 +456,9 @@ func upsertCronState(tx *gorm.DB, run *model.TaskRun, cronSpec string, lastError
 	state := model.NewCronTaskState()
 	state.TaskCode = run.TaskCode
 	state.CronSpec = cronSpec
-	state.LastRunID = run.ID
+	if keepDetail {
+		state.LastRunID = run.ID
+	}
 	state.LastStatus = run.Status
 	state.LastStartedAt = run.StartedAt
 	state.LastFinishedAt = run.FinishedAt
@@ -391,15 +466,28 @@ func upsertCronState(tx *gorm.DB, run *model.TaskRun, cronSpec string, lastError
 	if nextRunAt != nil {
 		state.NextRunAt = &utils.FormatDate{Time: *nextRunAt}
 	}
+	if run.Status == model.TaskRunStatusSuccess {
+		state.LastSuccessAt = run.FinishedAt
+	} else if run.Status == model.TaskRunStatusFailed || run.Status == model.TaskRunStatusTimeout || run.Status == model.TaskRunStatusInterrupted {
+		state.LastFailedAt = run.FinishedAt
+	}
+	if !statsWindowStart.IsZero() {
+		state.LastStatsWindowStart = &utils.FormatDate{Time: statsWindowStart}
+	}
 
 	assignments := []string{
-		"last_run_id",
 		"last_status",
 		"last_started_at",
 		"last_finished_at",
 		"next_run_at",
+		"last_success_at",
+		"last_failed_at",
+		"last_stats_window_start",
 		"last_error",
 		"updated_at",
+	}
+	if keepDetail {
+		assignments = append(assignments, "last_run_id")
 	}
 	if cronSpec != "" {
 		assignments = append(assignments, "cron_spec")

@@ -1,6 +1,7 @@
 package role
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -24,6 +25,8 @@ type roleMutation struct {
 	Status      uint8  // 角色状态
 	Sort        uint   // 排序权重
 	MenuList    []uint // 关联的菜单 ID 列表
+	DataScope   uint8  // 数据权限范围:1全部,2本部门及子级,3本部门,4仅本人,5自定义部门
+	DeptIds     []uint // 自定义部门 ID 列表（仅 DataScope=5 时有效）
 }
 
 // applyRoleMutation 执行角色变更操作（新增/更新）。
@@ -67,6 +70,7 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	role.Description = params.Description
 	role.Status = params.Status
 	role.Sort = params.Sort
+	role.DataScope = normalizeDataScope(params.DataScope)
 
 	// 验证所有菜单 ID 是否存在，再按真实授权节点规则过滤。
 	menuList, err := model.VerifyExistingIDs(model.NewMenu(), params.MenuList)
@@ -84,7 +88,9 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	}
 	// 事务执行：保存角色、级联更新、菜单同步、受影响用户权限同步；
 	// 提交后的共享策略缓存刷新失败仅告警，不再向调用方回传“失败但数据已落库”的假象。
-	return access.NewPermissionSyncCoordinator().RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
+	coordinator := access.NewPermissionSyncCoordinator()
+	var affectedUserIDs []uint
+	if err := coordinator.RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
 		role.SetDB(tx)
 
 		if err := role.Save(); err != nil {
@@ -97,9 +103,29 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 		if err := s.updateRoleMenu(role.ID, menuList, tx); err != nil {
 			return err
 		}
+		// 更新角色自定义数据权限部门关联
+		if err := s.updateRoleDataScopeDept(role.ID, params.DataScope, params.DeptIds, tx); err != nil {
+			return err
+		}
 		// 同步受影响角色的用户权限（纳入事务，与提交一致）
-		return access.NewPermissionSyncCoordinator().SyncUsersAffectedByRoles([]uint{role.ID}, tx)
-	})
+		affected, err := access.NewAffectedUsersResolver().Resolve(access.PermissionChangeScope{RoleIDs: []uint{role.ID}}, tx)
+		if err != nil {
+			return err
+		}
+		affectedUserIDs = affected
+		return coordinator.SyncUsers(affectedUserIDs, tx)
+	}); err != nil {
+		return err
+	}
+	access.NewDataScopeFilter().InvalidateCache(context.Background(), affectedUserIDs...)
+	return nil
+}
+
+func normalizeDataScope(dataScope uint8) uint8 {
+	if dataScope == 0 {
+		return access.DataScopeDept
+	}
+	return dataScope
 }
 
 func isRoleCodeDuplicateErr(err error) bool {
@@ -132,9 +158,13 @@ func (s *RoleService) updateRoleMenu(roleId uint, menuList []uint, tx ...*gorm.D
 		roleMenuMap.SetDB(tx[0])
 	}
 
-	// 查询角色当前已关联的菜单 ID 列表
-	existingIds, err := model.ExtractColumnsByCondition[model.RoleMenuMap, *model.RoleMenuMap, uint](roleMenuMap, "menu_id", "role_id = ?", roleId)
+	db, err := roleMenuMap.GetDB(roleMenuMap)
 	if err != nil {
+		return err
+	}
+	// 查询角色当前已关联的菜单 ID 列表
+	var existingIds []uint
+	if err := db.Where("role_id = ?", roleId).Pluck("menu_id", &existingIds).Error; err != nil {
 		return err
 	}
 
@@ -193,6 +223,12 @@ func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error 
 		if err := deptRoleMap.DeleteWhere("role_id = ?", id); err != nil {
 			return err
 		}
+		// 删除角色自定义数据权限部门关联
+		roleDataScopeDept := model.NewRoleDataScopeDept()
+		roleDataScopeDept.SetDB(tx)
+		if err := roleDataScopeDept.DeleteByRoleId(id); err != nil {
+			return err
+		}
 
 		// 删除角色记录
 		if _, err := role.DeleteByID(id); err != nil {
@@ -204,5 +240,77 @@ func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error 
 		return e.NewBusinessError(e.RoleCannotDelete)
 	}
 	// 同步受影响用户的权限缓存
-	return coordinator.ReloadPolicyCacheWithCode(e.RoleCannotDelete)
+	if err := coordinator.ReloadPolicyCacheWithCode(e.RoleCannotDelete); err != nil {
+		return err
+	}
+	access.NewDataScopeFilter().InvalidateCache(context.Background(), affectedUserIDs...)
+	return nil
+}
+
+// updateRoleDataScopeDept 更新角色的自定义数据权限部门关联。
+// 使用差分算法：计算需要删除和新增的部门 ID，只变更差异部分。
+// 仅当 dataScope=DataScopeCustom（自定义部门）时才保存关联。
+func (s *RoleService) updateRoleDataScopeDept(roleId uint, dataScope uint8, deptIds []uint, tx ...*gorm.DB) error {
+	roleDataScopeDept := model.NewRoleDataScopeDept()
+	if len(tx) > 0 {
+		roleDataScopeDept.SetDB(tx[0])
+	}
+
+	db, err := roleDataScopeDept.GetDB(roleDataScopeDept)
+	if err != nil {
+		return err
+	}
+	// 查询角色当前已关联的部门 ID 列表
+	var existingIds []uint
+	if err := db.Where("role_id = ?", roleId).Pluck("dept_id", &existingIds).Error; err != nil {
+		return err
+	}
+
+	// 非自定义部门模式时，清空关联
+	if dataScope != access.DataScopeCustom {
+		deptIds = nil
+	} else {
+		deptIds, err = existingDepartmentIDs(db, deptIds)
+		if err != nil {
+			return err
+		}
+	}
+
+	// 计算差异：toDelete 需删除，toAdd 需新增
+	toDelete, toAdd, _ := utils.CalculateChanges(existingIds, deptIds)
+	// 批量删除差异部门关联
+	if len(toDelete) > 0 {
+		if err := roleDataScopeDept.DeleteWhere("role_id = ? AND dept_id IN (?)", []any{roleId, toDelete}...); err != nil {
+			return err
+		}
+	}
+
+	// 批量新增部门关联
+	if len(toAdd) > 0 {
+		newMappings := lo.Map(toAdd, func(deptId uint, _ int) *model.RoleDataScopeDept {
+			return &model.RoleDataScopeDept{RoleId: roleId, DeptId: deptId}
+		})
+		if err := roleDataScopeDept.CreateBatch(newMappings); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func existingDepartmentIDs(db *gorm.DB, deptIds []uint) ([]uint, error) {
+	if len(deptIds) == 0 {
+		return deptIds, nil
+	}
+	if db == nil {
+		var err error
+		db, err = model.GetDB(model.NewDepartment())
+		if err != nil {
+			return nil, err
+		}
+	}
+	var existingIds []uint
+	if err := db.Session(&gorm.Session{NewDB: true}).Model(&model.Department{}).Where("id IN ?", deptIds).Pluck("id", &existingIds).Error; err != nil {
+		return nil, err
+	}
+	return existingIds, nil
 }

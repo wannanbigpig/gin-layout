@@ -2,13 +2,13 @@ package taskcron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
@@ -36,6 +36,15 @@ const (
 const cronLogTimeFormat = "2006-01-02 15:04:05"
 
 type HandlerFunc func(ctx context.Context, payload map[string]any) error
+
+// TaskDefinitionSyncReport 描述一次内置任务定义同步结果。
+type TaskDefinitionSyncReport struct {
+	TableAvailable bool
+	Total          int
+	Inserted       int
+	Updated        int
+	Unchanged      int
+}
 
 var (
 	handlersMu sync.RWMutex
@@ -97,56 +106,76 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 
 	return []model.TaskDefinition{
 		{
-			Code:        jobs.AuditLogTaskType,
-			Name:        "请求日志异步落库",
-			Kind:        model.TaskKindAsync,
-			Queue:       jobs.AuditQueueName,
-			CronSpec:    "",
-			Handler:     "jobs.audit_log.write",
-			Status:      model.TaskStatusEnabled,
-			AllowManual: model.TaskManualNotAllowed,
-			AllowRetry:  model.TaskRetryAllowed,
-			IsHighRisk:  model.TaskNotHighRisk,
-			Remark:      "写入 request_logs 审计日志",
+			Code:                         jobs.AuditLogTaskType,
+			Name:                         "请求日志异步落库",
+			Kind:                         model.TaskKindAsync,
+			Queue:                        jobs.AuditQueueName,
+			CronSpec:                     "",
+			Handler:                      "jobs.audit_log.write",
+			Status:                       model.TaskStatusEnabled,
+			AllowManual:                  model.TaskManualNotAllowed,
+			AllowRetry:                   model.TaskRetryAllowed,
+			IsHighRisk:                   model.TaskNotHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessNone,
+			RecordSuccessRate:            0,
+			RecordSuccessIntervalSeconds: 0,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "写入 request_logs 审计日志",
 		},
 		{
-			Code:        jobs.TypeExportRequestLog,
-			Name:        "请求日志导出",
-			Kind:        model.TaskKindAsync,
-			Queue:       jobs.ExportRequestLogQueue,
-			CronSpec:    "",
-			Handler:     "jobs.export_request_log",
-			Status:      model.TaskStatusEnabled,
-			AllowManual: model.TaskManualNotAllowed,
-			AllowRetry:  model.TaskRetryAllowed,
-			IsHighRisk:  model.TaskNotHighRisk,
-			Remark:      "异步导出请求日志为 CSV 文件",
+			Code:                         jobs.TypeExportRequestLog,
+			Name:                         "请求日志导出",
+			Kind:                         model.TaskKindAsync,
+			Queue:                        jobs.ExportRequestLogQueue,
+			CronSpec:                     "",
+			Handler:                      "jobs.export_request_log",
+			Status:                       model.TaskStatusEnabled,
+			AllowManual:                  model.TaskManualNotAllowed,
+			AllowRetry:                   model.TaskRetryAllowed,
+			IsHighRisk:                   model.TaskNotHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessAll,
+			RecordSuccessRate:            100,
+			RecordSuccessIntervalSeconds: 0,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "异步导出请求日志为 CSV 文件",
 		},
 		{
-			Code:        jobs.TypeExportFileList,
-			Name:        "文件资源导出",
-			Kind:        model.TaskKindAsync,
-			Queue:       jobs.ExportFileListQueue,
-			CronSpec:    "",
-			Handler:     "jobs.export_file_list",
-			Status:      model.TaskStatusEnabled,
-			AllowManual: model.TaskManualNotAllowed,
-			AllowRetry:  model.TaskRetryAllowed,
-			IsHighRisk:  model.TaskNotHighRisk,
-			Remark:      "异步导出文件资源为 CSV 文件",
+			Code:                         jobs.TypeExportFileList,
+			Name:                         "文件资源导出",
+			Kind:                         model.TaskKindAsync,
+			Queue:                        jobs.ExportFileListQueue,
+			CronSpec:                     "",
+			Handler:                      "jobs.export_file_list",
+			Status:                       model.TaskStatusEnabled,
+			AllowManual:                  model.TaskManualNotAllowed,
+			AllowRetry:                   model.TaskRetryAllowed,
+			IsHighRisk:                   model.TaskNotHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessAll,
+			RecordSuccessRate:            100,
+			RecordSuccessIntervalSeconds: 0,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "异步导出文件资源为 CSV 文件",
 		},
 		{
-			Code:        TaskCodeCronDemo,
-			Name:        "演示定时任务",
-			Kind:        model.TaskKindCron,
-			Queue:       "",
-			CronSpec:    "0/5 * * * * *",
-			Handler:     HandlerCronDemo,
-			Status:      demoStatus,
-			AllowManual: model.TaskManualAllowed,
-			AllowRetry:  model.TaskRetryNotAllowed,
-			IsHighRisk:  model.TaskNotHighRisk,
-			Remark:      "开发演示任务",
+			Code:                         TaskCodeCronDemo,
+			Name:                         "演示定时任务",
+			Kind:                         model.TaskKindCron,
+			Queue:                        "",
+			CronSpec:                     "0/5 * * * * *",
+			Handler:                      HandlerCronDemo,
+			Status:                       demoStatus,
+			AllowManual:                  model.TaskManualAllowed,
+			AllowRetry:                   model.TaskRetryNotAllowed,
+			IsHighRisk:                   model.TaskNotHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessInterval,
+			RecordSuccessRate:            100,
+			RecordSuccessIntervalSeconds: 300,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "开发演示任务",
 		},
 		{
 			Code:     TaskCodeCronResetSystemData,
@@ -156,97 +185,165 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 			CronSpec: "0 0 2 * * *",
 			Handler:  HandlerCronResetSystemData,
 			// 任务定义保留在任务中心可见；是否参与 cron 调度由 status 决定。
-			Status:      resetStatus,
-			AllowManual: model.TaskManualAllowed,
-			AllowRetry:  model.TaskRetryNotAllowed,
-			IsHighRisk:  model.TaskHighRisk,
-			Remark:      "高风险任务，默认关闭",
+			Status:                       resetStatus,
+			AllowManual:                  model.TaskManualAllowed,
+			AllowRetry:                   model.TaskRetryNotAllowed,
+			IsHighRisk:                   model.TaskHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessAll,
+			RecordSuccessRate:            100,
+			RecordSuccessIntervalSeconds: 0,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "高风险任务，默认关闭",
 		},
 		{
-			Code:        TaskCodeCronFileAccessFlush,
-			Name:        "文件访问时间聚合落库",
-			Kind:        model.TaskKindCron,
-			Queue:       "",
-			CronSpec:    "0 * * * * *",
-			Handler:     HandlerCronFileAccessFlush,
-			Status:      model.TaskStatusEnabled,
-			AllowManual: model.TaskManualAllowed,
-			AllowRetry:  model.TaskRetryNotAllowed,
-			IsHighRisk:  model.TaskNotHighRisk,
-			Remark:      "每分钟将 upload_files.last_accessed_at 从 Redis ZSet 批量落库",
+			Code:                         TaskCodeCronFileAccessFlush,
+			Name:                         "文件访问时间聚合落库",
+			Kind:                         model.TaskKindCron,
+			Queue:                        "",
+			CronSpec:                     "0 * * * * *",
+			Handler:                      HandlerCronFileAccessFlush,
+			Status:                       model.TaskStatusEnabled,
+			AllowManual:                  model.TaskManualAllowed,
+			AllowRetry:                   model.TaskRetryNotAllowed,
+			IsHighRisk:                   model.TaskNotHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessInterval,
+			RecordSuccessRate:            100,
+			RecordSuccessIntervalSeconds: 900,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "每分钟将 upload_files.last_accessed_at 从 Redis ZSet 批量落库",
 		},
 		{
-			Code:        TaskCodeCronCleanExpiredFiles,
-			Name:        "自动清理过期临时文件",
-			Kind:        model.TaskKindCron,
-			Queue:       "",
-			CronSpec:    "0 0 3 * * *",
-			Handler:     HandlerCronCleanExpiredFiles,
-			Status:      model.TaskStatusEnabled,
-			AllowManual: model.TaskManualAllowed,
-			AllowRetry:  model.TaskRetryNotAllowed,
-			IsHighRisk:  model.TaskNotHighRisk,
-			Remark:      "自动物理清理系统内所有已过期的临时导出/上传文件及物理介质",
+			Code:                         TaskCodeCronCleanExpiredFiles,
+			Name:                         "自动清理过期临时文件",
+			Kind:                         model.TaskKindCron,
+			Queue:                        "",
+			CronSpec:                     "0 0 3 * * *",
+			Handler:                      HandlerCronCleanExpiredFiles,
+			Status:                       model.TaskStatusEnabled,
+			AllowManual:                  model.TaskManualAllowed,
+			AllowRetry:                   model.TaskRetryNotAllowed,
+			IsHighRisk:                   model.TaskNotHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessAll,
+			RecordSuccessRate:            100,
+			RecordSuccessIntervalSeconds: 0,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "自动物理清理系统内所有已过期的临时导出/上传文件及物理介质",
 		},
 		{
-			Code:        TaskCodeCronCleanAuditLogs,
-			Name:        "自动清理过期审计日志",
-			Kind:        model.TaskKindCron,
-			Queue:       "",
-			CronSpec:    "0 0 4 * * *",
-			Handler:     HandlerCronCleanAuditLogs,
-			Status:      model.TaskStatusEnabled,
-			AllowManual: model.TaskManualAllowed,
-			AllowRetry:  model.TaskRetryNotAllowed,
-			IsHighRisk:  model.TaskNotHighRisk,
-			Remark:      "每天凌晨 4 点自动清理超过保留天数的请求日志和登录日志",
+			Code:                         TaskCodeCronCleanAuditLogs,
+			Name:                         "自动清理过期审计日志",
+			Kind:                         model.TaskKindCron,
+			Queue:                        "",
+			CronSpec:                     "0 0 4 * * *",
+			Handler:                      HandlerCronCleanAuditLogs,
+			Status:                       model.TaskStatusEnabled,
+			AllowManual:                  model.TaskManualAllowed,
+			AllowRetry:                   model.TaskRetryNotAllowed,
+			IsHighRisk:                   model.TaskNotHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessAll,
+			RecordSuccessRate:            100,
+			RecordSuccessIntervalSeconds: 0,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "每天凌晨 4 点自动清理超过保留天数的请求日志和登录日志",
 		},
 	}
 }
 
 // SyncBuiltinDefinitionsIfAvailable 在任务定义表存在时同步内置任务定义。
 func SyncBuiltinDefinitionsIfAvailable(cfg *config.Conf) error {
+	_, err := SyncBuiltinDefinitionsWithReportIfAvailable(cfg)
+	return err
+}
+
+// SyncBuiltinDefinitionsWithReportIfAvailable 在任务定义表存在时同步内置任务定义并返回结果摘要。
+func SyncBuiltinDefinitionsWithReportIfAvailable(cfg *config.Conf) (TaskDefinitionSyncReport, error) {
 	db, err := model.GetDB()
 	if err != nil {
-		return err
+		return TaskDefinitionSyncReport{}, err
 	}
 	if !db.Migrator().HasTable(model.NewTaskDefinition().TableName()) {
-		return nil
+		return TaskDefinitionSyncReport{}, nil
 	}
-	return syncBuiltinDefinitions(db, cfg)
+	report, err := syncBuiltinDefinitionsWithReport(db, cfg)
+	report.TableAvailable = true
+	return report, err
 }
 
 func syncBuiltinDefinitions(db *gorm.DB, cfg *config.Conf) error {
-	if db == nil {
-		return nil
-	}
-
-	for _, definition := range BuiltinTaskDefinitions(cfg) {
-		if err := upsertTaskDefinition(db, definition); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := syncBuiltinDefinitionsWithReport(db, cfg)
+	return err
 }
 
-func upsertTaskDefinition(db *gorm.DB, definition model.TaskDefinition) error {
-	return db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "code"},
-			{Name: "deleted_at"},
-		},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"name",
-			"kind",
-			"queue",
-			"cron_spec",
-			"handler",
-			"status",
-			"allow_manual",
-			"allow_retry",
-			"is_high_risk",
-			"remark",
-			"updated_at",
-		}),
-	}).Create(&definition).Error
+func syncBuiltinDefinitionsWithReport(db *gorm.DB, cfg *config.Conf) (TaskDefinitionSyncReport, error) {
+	definitions := BuiltinTaskDefinitions(cfg)
+	report := TaskDefinitionSyncReport{Total: len(definitions)}
+	if db == nil {
+		return report, nil
+	}
+
+	for _, definition := range definitions {
+		result, err := syncOneBuiltinDefinition(db, definition)
+		if err != nil {
+			return report, err
+		}
+		switch result {
+		case taskDefinitionSyncInserted:
+			report.Inserted++
+		case taskDefinitionSyncUpdated:
+			report.Updated++
+		case taskDefinitionSyncUnchanged:
+			report.Unchanged++
+		}
+	}
+	return report, nil
+}
+
+type taskDefinitionSyncResult string
+
+const (
+	taskDefinitionSyncInserted  taskDefinitionSyncResult = "inserted"
+	taskDefinitionSyncUpdated   taskDefinitionSyncResult = "updated"
+	taskDefinitionSyncUnchanged taskDefinitionSyncResult = "unchanged"
+)
+
+func syncOneBuiltinDefinition(db *gorm.DB, definition model.TaskDefinition) (taskDefinitionSyncResult, error) {
+	var current model.TaskDefinition
+	err := db.Where("code = ? AND deleted_at = 0", definition.Code).First(&current).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return taskDefinitionSyncInserted, db.Create(&definition).Error
+	}
+	if err != nil {
+		return "", err
+	}
+	if taskDefinitionManagedFieldsEqual(current, definition) {
+		return taskDefinitionSyncUnchanged, nil
+	}
+
+	updates := map[string]any{
+		"name":         definition.Name,
+		"kind":         definition.Kind,
+		"queue":        definition.Queue,
+		"cron_spec":    definition.CronSpec,
+		"handler":      definition.Handler,
+		"is_high_risk": definition.IsHighRisk,
+		"remark":       definition.Remark,
+	}
+	if err := db.Model(&current).Updates(updates).Error; err != nil {
+		return "", err
+	}
+	return taskDefinitionSyncUpdated, nil
+}
+
+func taskDefinitionManagedFieldsEqual(current, next model.TaskDefinition) bool {
+	return current.Name == next.Name &&
+		current.Kind == next.Kind &&
+		current.Queue == next.Queue &&
+		current.CronSpec == next.CronSpec &&
+		current.Handler == next.Handler &&
+		current.IsHighRisk == next.IsHighRisk &&
+		current.Remark == next.Remark
 }

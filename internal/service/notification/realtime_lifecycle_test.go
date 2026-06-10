@@ -59,6 +59,23 @@ func TestShutdownRealtimeDispatcherSendsCloseFrame(t *testing.T) {
 	}
 }
 
+func TestHubChannelSubscriberCountOnlyCountsMatchingSubscriptions(t *testing.T) {
+	h := &hub{clients: make(map[uint]map[*wsClient]struct{})}
+	monitorClient := &wsClient{userID: 1}
+	otherClient := &wsClient{userID: 2}
+	monitorClient.SubscribeChannel("monitor")
+	otherClient.SubscribeChannel("other")
+	h.register(monitorClient)
+	h.register(otherClient)
+
+	if got := h.channelSubscriberCount("monitor"); got != 1 {
+		t.Fatalf("expected one monitor subscriber, got %d", got)
+	}
+	if got := h.channelSubscriberCount("missing"); got != 0 {
+		t.Fatalf("expected zero missing-channel subscribers, got %d", got)
+	}
+}
+
 func TestStopRealtimeSubscriberCancelsRunner(t *testing.T) {
 	started := make(chan struct{}, 1)
 	stopped := make(chan struct{}, 1)

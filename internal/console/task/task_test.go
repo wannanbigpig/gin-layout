@@ -67,3 +67,13 @@ func TestSortedDefinitionCodes(t *testing.T) {
 		t.Fatalf("unexpected sorted codes: %#v", codes)
 	}
 }
+
+func TestTaskCommandRegistersSyncDefinitions(t *testing.T) {
+	cmd, _, err := Cmd.Find([]string{"sync-definitions"})
+	if err != nil {
+		t.Fatalf("find sync-definitions command failed: %v", err)
+	}
+	if cmd == nil || cmd.Use != "sync-definitions" {
+		t.Fatalf("expected sync-definitions command, got %#v", cmd)
+	}
+}

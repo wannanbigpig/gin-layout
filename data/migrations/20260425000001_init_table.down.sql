@@ -12,10 +12,13 @@ DROP TABLE IF EXISTS `daily_request_stats`;
 DROP TABLE IF EXISTS `sys_messages`;
 DROP TABLE IF EXISTS `sys_export_records`;
 -- 删除任务中心相关表
+DROP TABLE IF EXISTS `task_run_stats`;
 DROP TABLE IF EXISTS `cron_task_states`;
 DROP TABLE IF EXISTS `task_run_events`;
 DROP TABLE IF EXISTS `task_runs`;
 DROP TABLE IF EXISTS `task_definitions`;
+-- 删除产品示例表
+DROP TABLE IF EXISTS `product`;
 -- 删除管理员表
 DROP TABLE IF EXISTS `admin_user`;
 -- 删除路由表
@@ -28,6 +31,8 @@ DROP TABLE IF EXISTS `menu_i18n`;
 DROP TABLE IF EXISTS `menu`;
 -- 删除部门表
 DROP TABLE IF EXISTS `department`;
+-- 删除角色自定义数据权限部门关联表
+DROP TABLE IF EXISTS `role_data_scope_dept`;
 -- 删除角色表
 DROP TABLE IF EXISTS `role`;
 -- 删除用户部门映射表

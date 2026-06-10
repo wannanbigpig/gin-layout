@@ -9,35 +9,37 @@ import (
 
 // ExportRecordBaseResources 导出记录公共字段。
 type ExportRecordBaseResources struct {
-	ID             uint              `json:"id"`
-	ExportName     string            `json:"export_name"`
-	Scene          string            `json:"scene"`
-	SceneName      string            `json:"scene_name"`
-	TaskCode       string            `json:"task_code"`
-	TaskRunID      uint              `json:"task_run_id"`
-	TriggerUserID  uint              `json:"trigger_user_id"`
-	Status         string            `json:"status"`
-	StatusName     string            `json:"status_name"`
-	Stage          string            `json:"stage"`
-	StageName      string            `json:"stage_name"`
-	Queue          string            `json:"queue"`
-	Progress       uint8             `json:"progress"`
-	TotalCount     uint64            `json:"total_count"`
-	ProcessedCount uint64            `json:"processed_count"`
-	FileID         uint              `json:"file_id"`
-	FileUUID       string            `json:"file_uuid"`
-	FileName       string            `json:"file_name"`
-	FileSize       uint64            `json:"file_size"`
-	FileURL        string            `json:"file_url"`
-	DownloadURL    string            `json:"download_url"`
-	HasFile        bool              `json:"has_file"`
-	DownloadReady  bool              `json:"download_ready"`
-	Format         string            `json:"format"`
-	ErrorMessage   string            `json:"error_message"`
-	FailReason     string            `json:"fail_reason"`
-	StartedAt      *utils.FormatDate `json:"started_at"`
-	FinishedAt     *utils.FormatDate `json:"finished_at"`
-	CreatedAt      utils.FormatDate  `json:"created_at"`
+	ID               uint              `json:"id"`
+	ExportName       string            `json:"export_name"`
+	Scene            string            `json:"scene"`
+	SceneName        string            `json:"scene_name"`
+	TaskCode         string            `json:"task_code"`
+	TaskRunID        uint              `json:"task_run_id"`
+	TriggerUserID    uint              `json:"trigger_user_id"`
+	Status           string            `json:"status"`
+	StatusName       string            `json:"status_name"`
+	Stage            string            `json:"stage"`
+	StageName        string            `json:"stage_name"`
+	Queue            string            `json:"queue"`
+	Progress         uint8             `json:"progress"`
+	TotalCount       uint64            `json:"total_count"`
+	ProcessedCount   uint64            `json:"processed_count"`
+	FileID           uint              `json:"file_id"`
+	FileUUID         string            `json:"file_uuid"`
+	FileName         string            `json:"file_name"`
+	FileSize         uint64            `json:"file_size"`
+	FileURL          string            `json:"file_url"`
+	DownloadURL      string            `json:"download_url"`
+	HasFile          bool              `json:"has_file"`
+	DownloadReady    bool              `json:"download_ready"`
+	Format           string            `json:"format"`
+	ErrorMessage     string            `json:"error_message"`
+	FailReason       string            `json:"fail_reason"`
+	CanRetry         bool              `json:"can_retry"`
+	RetryBlockReason string            `json:"retry_block_reason"`
+	StartedAt        *utils.FormatDate `json:"started_at"`
+	FinishedAt       *utils.FormatDate `json:"finished_at"`
+	CreatedAt        utils.FormatDate  `json:"created_at"`
 }
 
 // ExportRecordListResources 导出记录列表响应。
@@ -74,35 +76,37 @@ func buildExportRecordBaseResources(data *model.SysExportRecord) ExportRecordBas
 	stage, stageName := exportRecordStage(data.Status, hasFile)
 	downloadURL := exportRecordDownloadURL(data)
 	return ExportRecordBaseResources{
-		ID:             data.ID,
-		ExportName:     sceneName,
-		Scene:          data.Scene,
-		SceneName:      sceneName,
-		TaskCode:       taskCode,
-		TaskRunID:      data.TaskRunID,
-		TriggerUserID:  data.TriggerUserID,
-		Status:         data.Status,
-		StatusName:     statusName,
-		Stage:          stage,
-		StageName:      stageName,
-		Queue:          data.Queue,
-		Progress:       data.Progress,
-		TotalCount:     data.TotalCount,
-		ProcessedCount: data.ProcessedCount,
-		FileID:         data.FileID,
-		FileUUID:       data.FileUUID,
-		FileName:       data.FileName,
-		FileSize:       data.FileSize,
-		FileURL:        downloadURL,
-		DownloadURL:    downloadURL,
-		HasFile:        hasFile,
-		DownloadReady:  hasFile,
-		Format:         data.Format,
-		ErrorMessage:   data.ErrorMessage,
-		FailReason:     strings.TrimSpace(data.ErrorMessage),
-		StartedAt:      data.StartedAt,
-		FinishedAt:     data.FinishedAt,
-		CreatedAt:      data.CreatedAt,
+		ID:               data.ID,
+		ExportName:       sceneName,
+		Scene:            data.Scene,
+		SceneName:        sceneName,
+		TaskCode:         taskCode,
+		TaskRunID:        data.TaskRunID,
+		TriggerUserID:    data.TriggerUserID,
+		Status:           data.Status,
+		StatusName:       statusName,
+		Stage:            stage,
+		StageName:        stageName,
+		Queue:            data.Queue,
+		Progress:         data.Progress,
+		TotalCount:       data.TotalCount,
+		ProcessedCount:   data.ProcessedCount,
+		FileID:           data.FileID,
+		FileUUID:         data.FileUUID,
+		FileName:         data.FileName,
+		FileSize:         data.FileSize,
+		FileURL:          downloadURL,
+		DownloadURL:      downloadURL,
+		HasFile:          hasFile,
+		DownloadReady:    hasFile,
+		Format:           data.Format,
+		ErrorMessage:     data.ErrorMessage,
+		FailReason:       strings.TrimSpace(data.ErrorMessage),
+		CanRetry:         data.CanRetry,
+		RetryBlockReason: data.RetryBlockReason,
+		StartedAt:        data.StartedAt,
+		FinishedAt:       data.FinishedAt,
+		CreatedAt:        data.CreatedAt,
 	}
 }
 

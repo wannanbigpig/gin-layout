@@ -10,12 +10,14 @@ import (
 )
 
 var taskRunStatusLabels = map[string]string{
-	model.TaskRunStatusPending:  "待执行",
-	model.TaskRunStatusRunning:  "执行中",
-	model.TaskRunStatusSuccess:  "成功",
-	model.TaskRunStatusFailed:   "失败",
-	model.TaskRunStatusCanceled: "已取消",
-	model.TaskRunStatusRetrying: "重试中",
+	model.TaskRunStatusPending:     "待执行",
+	model.TaskRunStatusRunning:     "执行中",
+	model.TaskRunStatusSuccess:     "成功",
+	model.TaskRunStatusFailed:      "失败",
+	model.TaskRunStatusCanceled:    "已取消",
+	model.TaskRunStatusRetrying:    "重试中",
+	model.TaskRunStatusTimeout:     "超时",
+	model.TaskRunStatusInterrupted: "已中断",
 }
 
 var taskActionDiffRules = []auditdiff.FieldRule{
@@ -26,12 +28,42 @@ var taskActionDiffRules = []auditdiff.FieldRule{
 	{Field: "queue", Label: "队列"},
 	{Field: "task_id", Label: "任务ID"},
 	{Field: "retry_from_run", Label: "重试来源执行记录ID"},
+	{Field: "retry_root_run", Label: "重试根执行记录ID"},
+	{Field: "retry_seq", Label: "重试序号"},
 	{Field: "payload_keys", Label: "Payload字段"},
 	{Field: "confirm", Label: "确认信息"},
 	{Field: "reason", Label: "操作原因"},
 	{Field: "canceled_by", Label: "取消人ID"},
 	{Field: "canceled_by_account", Label: "取消人账号"},
 	{Field: "cancel_reason", Label: "取消原因"},
+}
+
+var taskRecordPolicyDiffRules = []auditdiff.FieldRule{
+	{Field: "action", Label: "操作类型"},
+	{Field: "task_code", Label: "任务编码"},
+	{Field: "record_success_mode", Label: "成功明细策略"},
+	{Field: "record_success_rate", Label: "成功采样比例"},
+	{Field: "record_success_interval_seconds", Label: "成功记录间隔秒"},
+	{Field: "record_detail_on_manual", Label: "手动触发强制明细"},
+	{Field: "record_detail_on_failure", Label: "失败强制明细"},
+}
+
+var yesNoLabels = map[string]string{
+	"0": "否",
+	"1": "是",
+}
+
+var taskDefinitionStatusLabels = map[string]string{
+	"0": "禁用",
+	"1": "启用",
+}
+
+var taskOperationConfigDiffRules = []auditdiff.FieldRule{
+	{Field: "action", Label: "操作类型"},
+	{Field: "task_code", Label: "任务编码"},
+	{Field: "status", Label: "任务状态", ValueLabels: taskDefinitionStatusLabels},
+	{Field: "allow_manual", Label: "允许手动触发", ValueLabels: yesNoLabels},
+	{Field: "allow_retry", Label: "允许重试", ValueLabels: yesNoLabels},
 }
 
 // TaskRunAuditSnapshot 描述任务执行记录审计快照。
@@ -84,6 +116,8 @@ func BuildRetryAuditDiff(before *TaskRunAuditSnapshot, result map[string]any) st
 		"queue":          result["queue"],
 		"task_id":        result["task_id"],
 		"retry_from_run": result["retry_from_run"],
+		"retry_root_run": result["retry_root_run"],
+		"retry_seq":      result["retry_seq"],
 	}
 	items := auditdiff.BuildFieldDiff(beforeState, after, taskActionDiffRules)
 	return auditdiff.Marshal(items)
@@ -118,6 +152,32 @@ func BuildCancelAuditDiff(before *TaskRunAuditSnapshot, result map[string]any) s
 		after["cancel_reason"] = result["cancel_reason"]
 	}
 	items := auditdiff.BuildFieldDiff(beforeState, after, taskActionDiffRules)
+	return auditdiff.Marshal(items)
+}
+
+func BuildRecordPolicyAuditDiff(params *form.TaskRecordPolicyForm) string {
+	after := map[string]any{
+		"action":                          "record_policy",
+		"task_code":                       strings.TrimSpace(params.TaskCode),
+		"record_success_mode":             strings.TrimSpace(params.RecordSuccessMode),
+		"record_success_rate":             params.RecordSuccessRate,
+		"record_success_interval_seconds": params.RecordSuccessIntervalSeconds,
+		"record_detail_on_manual":         params.RecordDetailOnManual,
+		"record_detail_on_failure":        params.RecordDetailOnFailure,
+	}
+	items := auditdiff.BuildFieldDiff(nil, after, taskRecordPolicyDiffRules)
+	return auditdiff.Marshal(items)
+}
+
+func BuildOperationConfigAuditDiff(params *form.TaskOperationConfigForm) string {
+	after := map[string]any{
+		"action":       "operation_config",
+		"task_code":    strings.TrimSpace(params.TaskCode),
+		"status":       params.Status,
+		"allow_manual": params.AllowManual,
+		"allow_retry":  params.AllowRetry,
+	}
+	items := auditdiff.BuildFieldDiff(nil, after, taskOperationConfigDiffRules)
 	return auditdiff.Marshal(items)
 }
 

@@ -1,0 +1,210 @@
+package {{.ModuleSnake}}
+
+import (
+	"context"
+
+	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
+	"github.com/wannanbigpig/gin-layout/internal/resources"
+	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
+	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+)
+
+// {{.ServiceName}} {{.MenuTitle}}服务。
+type {{.ServiceName}} struct {
+	service.Base
+}
+
+// New{{.ServiceName}} 创建 {{.ServiceName}} 实例。
+func New{{.ServiceName}}() *{{.ServiceName}} {
+	return &{{.ServiceName}}{}
+}
+
+// {{.VarName}}OptionsLimit 选择器返回的最大条数。
+const {{.VarName}}OptionsLimit = 200
+
+// List 分页查询列表（接入数据权限）。
+func (s *{{.ServiceName}}) List(params *form.{{.ModelName}}List) interface{} {
+	condition, args := s.buildListCondition(params)
+
+	// 接入数据权限过滤
+	dataScopeCond, dataScopeArgs := s.buildDataScopeCondition()
+	if dataScopeCond != "" {
+		if condition != "" {
+			condition = "(" + condition + ") AND " + dataScopeCond
+		} else {
+			condition = dataScopeCond
+		}
+		args = append(args, dataScopeArgs...)
+	}
+
+	{{.VarName}}Model := model.New{{.ModelName}}()
+	total, collection, err := model.ListPageE(
+		{{.VarName}}Model,
+		params.Page,
+		params.PerPage,
+		condition,
+		args,
+		model.ListOptionalParams{OrderBy: "id desc"},
+	)
+	if err != nil {
+		return resources.ToRawCollection(params.Page, params.PerPage, 0, make([]*model.{{.ModelName}}, 0))
+	}
+
+	return resources.ToRawCollection(params.Page, params.PerPage, total, collection)
+}
+
+func (s *{{.ServiceName}}) buildListCondition(params *form.{{.ModelName}}List) (string, []any) {
+	qb := query_builder.New()
+{{- range .ListFields}}
+{{- if eq .GoType "string"}}
+	qb.AddLike("{{.ColumnName}}", params.{{.Name}})
+{{- else if eq .ColumnName "status"}}
+	qb.AddEq("{{.ColumnName}}", params.{{.Name}})
+{{- end}}
+{{- end}}
+	return qb.Build()
+}
+
+// buildDataScopeCondition 构建数据权限过滤条件。
+func (s *{{.ServiceName}}) buildDataScopeCondition() (string, []any) {
+	uid := s.GetAdminUserId()
+
+	input := access.DataScopeInput{
+		UID:          uid,
+		IsSuperAdmin: s.isSuperAdmin(),
+	}
+
+	filter := access.NewDataScopeFilter()
+	return filter.Build(s.context(), input, "dept_id", "created_by")
+}
+
+// Options 选择器：按关键词模糊搜索，供下拉选择器使用。
+func (s *{{.ServiceName}}) Options(keyword string) []resources.{{.ModelName}}OptionResources {
+	conditionStr, args := query_builder.New().
+		AddKeywordLike(keyword, {{range $i, $f := .ListFields}}{{if $i}}, {{end}}"{{$f.ColumnName}}"{{end}}).
+		Build()
+	_, collection, err := model.ListPageE(model.New{{.ModelName}}(), 1, {{.VarName}}OptionsLimit, conditionStr, args, model.ListOptionalParams{
+		SelectFields: []string{"id", "name"},
+		OrderBy:      "id desc",
+	})
+	if err != nil {
+		return []resources.{{.ModelName}}OptionResources{}
+	}
+	return resources.To{{.ModelName}}Options(collection)
+}
+
+// Create 新增记录。
+func (s *{{.ServiceName}}) Create(params *form.Create{{.ModelName}}) error {
+	{{.VarName}} := model.New{{.ModelName}}()
+{{- range .FormFields}}
+{{- if .IsForm}}
+	{{$.VarName}}.{{.Name}} = params.{{.Name}}
+{{- end}}
+{{- end}}
+	// 写入创建者
+	{{.VarName}}.CreatedBy = s.GetAdminUserId()
+	// 写入部门
+	deptID := s.getUserDeptId()
+	if deptID == 0 {
+		return e.NewBusinessError(e.DepartmentNotFound)
+	}
+	{{.VarName}}.DeptId = deptID
+
+	if err := {{.VarName}}.Create(); err != nil {
+		return e.NewBusinessError(e.FAILURE)
+	}
+	return nil
+}
+
+// Update 更新记录（校验行级权限）。
+func (s *{{.ServiceName}}) Update(params *form.Update{{.ModelName}}) error {
+	{{.VarName}} := model.New{{.ModelName}}()
+	condition, args := s.buildDetailCondition(params.Id)
+	if err := {{.VarName}}.GetDetail(condition, args...); err != nil || {{.VarName}}.ID == 0 {
+		return e.NewBusinessError(e.NotFound)
+	}
+
+{{- range .FormFields}}
+{{- if .IsForm}}
+	{{$.VarName}}.{{.Name}} = params.{{.Name}}
+{{- end}}
+{{- end}}
+
+	if err := {{.VarName}}.Save(); err != nil {
+		return e.NewBusinessError(e.FAILURE)
+	}
+	return nil
+}
+
+// Delete 删除记录（校验行级权限）。
+func (s *{{.ServiceName}}) Delete(id uint) error {
+	{{.VarName}} := model.New{{.ModelName}}()
+	condition, args := s.buildDetailCondition(id)
+	if err := {{.VarName}}.GetDetail(condition, args...); err != nil || {{.VarName}}.ID == 0 {
+		return e.NewBusinessError(e.NotFound)
+	}
+
+	if _, err := {{.VarName}}.DeleteByID(id); err != nil {
+		return e.NewBusinessError(e.FAILURE)
+	}
+	return nil
+}
+
+// Detail 获取详情（校验行级权限）。
+func (s *{{.ServiceName}}) Detail(id uint) (any, error) {
+	{{.VarName}} := model.New{{.ModelName}}()
+	condition, args := s.buildDetailCondition(id)
+	if err := {{.VarName}}.GetDetail(condition, args...); err != nil || {{.VarName}}.ID == 0 {
+		return nil, e.NewBusinessError(e.NotFound)
+	}
+
+	return resources.New{{.ModelName}}Transformer().ToStruct({{.VarName}}), nil
+}
+
+// buildDetailCondition 构建详情查询条件（包含数据权限）。
+func (s *{{.ServiceName}}) buildDetailCondition(id uint) (string, []any) {
+	condition := "id = ?"
+	args := []any{id}
+
+	dataScopeCond, dataScopeArgs := s.buildDataScopeCondition()
+	if dataScopeCond != "" {
+		condition = "(" + condition + ") AND " + dataScopeCond
+		args = append(args, dataScopeArgs...)
+	}
+
+	return condition, args
+}
+
+// getUserDeptId 获取当前用户的部门 ID。
+func (s *{{.ServiceName}}) getUserDeptId() uint {
+	uid := s.GetAdminUserId()
+	if uid == 0 {
+		return 0
+	}
+	deptIDs, err := model.NewAdminUserDeptMap().DeptIdsByUid(uid)
+	if err != nil || len(deptIDs) == 0 {
+		return 0
+	}
+	return deptIDs[0]
+}
+
+func (s *{{.ServiceName}}) isSuperAdmin() bool {
+	if ctx := s.GetCtx(); ctx != nil {
+		if principal := auth.GetAuthPrincipal(ctx); principal != nil {
+			return principal.IsSuperAdmin == global.Yes
+		}
+	}
+	return false
+}
+
+func (s *{{.ServiceName}}) context() context.Context {
+	if ctx := s.GetCtx(); ctx != nil && ctx.Request != nil {
+		return ctx.Request.Context()
+	}
+	return context.Background()
+}

@@ -196,11 +196,15 @@ func newJobsTestDB(t *testing.T) *gorm.DB {
 			status text,
 			attempt integer,
 			max_retry integer,
+			retry_of_run_id integer,
+			retry_root_run_id integer,
+			retry_seq integer,
 			payload text,
 			error_message text,
 			started_at datetime,
 			finished_at datetime,
-			duration_ms real
+			duration_ms real,
+			detail_record_mode text
 		)`,
 		`CREATE TABLE task_run_events (
 			id integer primary key autoincrement,

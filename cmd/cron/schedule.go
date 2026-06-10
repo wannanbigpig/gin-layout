@@ -23,11 +23,12 @@ type Scheduler struct {
 }
 
 type scheduledTask struct {
-	name      string
-	spec      string
-	specErr   error
-	run       func(context.Context) error
-	skipIfRun bool
+	name        string
+	spec        string
+	specErr     error
+	run         func(context.Context) error
+	enabledWhen func(context.Context) bool
+	skipIfRun   bool
 }
 
 // TaskBuilder 用于链式声明任务调度规则。
@@ -108,6 +109,12 @@ func (b *TaskBuilder) Cron(spec string) *TaskBuilder {
 	return b
 }
 
+// EnabledWhen 在任务触发时动态判断是否执行，适合读取后台运营开关。
+func (b *TaskBuilder) EnabledWhen(fn func(context.Context) bool) *TaskBuilder {
+	b.task.enabledWhen = fn
+	return b
+}
+
 // EveryFiveSeconds 每 5 秒执行一次，适合本地测试任务。
 func (b *TaskBuilder) EveryFiveSeconds() *TaskBuilder {
 	return b.Cron("0/5 * * * * *")
@@ -182,6 +189,10 @@ func (s *Scheduler) recordedJob(task *scheduledTask) cron.Job {
 
 		ctx := s.taskContext()
 		taskCode := "cron:" + task.name
+		if task.enabledWhen != nil && !task.enabledWhen(ctx) {
+			log.Logger.Info("定时任务已停用，跳过执行", zap.String("name", task.name))
+			return
+		}
 		run, recordErr := taskcenter.NewRunRecorder().Start(ctx, taskcenter.RunStart{
 			TaskCode: taskCode,
 			Kind:     model.TaskKindCron,

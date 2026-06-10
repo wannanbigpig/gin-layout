@@ -52,6 +52,8 @@ type wsClient struct {
 	conn      *websocket.Conn
 	mu        sync.Mutex
 	closeOnce sync.Once
+	subs      map[string]struct{} // 订阅的频道集合
+	subMu     sync.RWMutex
 }
 
 type hub struct {
@@ -162,10 +164,33 @@ func ServeWebsocket(w http.ResponseWriter, r *http.Request, claims *token.AdminC
 	go client.keepalive()
 
 	for {
-		if _, _, err := conn.ReadMessage(); err != nil {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
 			defaultHub.unregister(client)
 			return nil
 		}
+		// 处理客户端的订阅/退订消息
+		handleClientMessage(client, message)
+	}
+}
+
+// clientMessage 客户端发送的消息格式。
+type clientMessage struct {
+	Action  string `json:"action"`
+	Channel string `json:"channel"`
+}
+
+// handleClientMessage 处理客户端的订阅/退订消息。
+func handleClientMessage(client *wsClient, message []byte) {
+	var msg clientMessage
+	if err := json.Unmarshal(message, &msg); err != nil {
+		return
+	}
+	switch msg.Action {
+	case "subscribe":
+		client.SubscribeChannel(msg.Channel)
+	case "unsubscribe":
+		client.UnsubscribeChannel(msg.Channel)
 	}
 }
 
@@ -339,6 +364,117 @@ func dispatchRealtimeMessage(channel, raw string) {
 	}
 }
 
+// GenericMessage 通用 WS 消息格式，支持多种频道。
+type GenericMessage struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
+}
+
+// SubscribeChannel 客户端订阅指定频道。
+func (c *wsClient) SubscribeChannel(channel string) {
+	if channel == "" {
+		return
+	}
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	if c.subs == nil {
+		c.subs = make(map[string]struct{})
+	}
+	c.subs[channel] = struct{}{}
+}
+
+// UnsubscribeChannel 客户端退订指定频道。
+func (c *wsClient) UnsubscribeChannel(channel string) {
+	if channel == "" {
+		return
+	}
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	if c.subs != nil {
+		delete(c.subs, channel)
+	}
+}
+
+// IsSubscribed 检查客户端是否订阅了指定频道。
+func (c *wsClient) IsSubscribed(channel string) bool {
+	c.subMu.RLock()
+	defer c.subMu.RUnlock()
+	if c.subs == nil {
+		return false
+	}
+	_, ok := c.subs[channel]
+	return ok
+}
+
+// BroadcastToChannel 广播消息到指定频道的所有订阅者。
+func BroadcastToChannel(channel string, msg GenericMessage) {
+	defaultHub.broadcastToChannel(channel, msg)
+}
+
+// ChannelSubscriberCount 返回指定频道当前订阅连接数。
+func ChannelSubscriberCount(channel string) int {
+	return defaultHub.channelSubscriberCount(channel)
+}
+
+func (h *hub) broadcastToChannel(channel string, msg GenericMessage) {
+	h.mu.RLock()
+	var list []*wsClient
+	for _, clients := range h.clients {
+		for client := range clients {
+			if client.IsSubscribed(channel) {
+				list = append(list, client)
+			}
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range list {
+		if err := client.writeJSON(msg); err != nil {
+			h.unregister(client)
+		}
+	}
+}
+
+func (h *hub) channelSubscriberCount(channel string) int {
+	if channel == "" {
+		return 0
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	count := 0
+	for _, clients := range h.clients {
+		for client := range clients {
+			if client.IsSubscribed(channel) {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// BroadcastToAll 广播消息到所有连接的客户端。
+func BroadcastToAll(msg GenericMessage) {
+	defaultHub.broadcastToAll(msg)
+}
+
+func (h *hub) broadcastToAll(msg GenericMessage) {
+	h.mu.RLock()
+	var list []*wsClient
+	for _, clients := range h.clients {
+		for client := range clients {
+			list = append(list, client)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range list {
+		if err := client.writeJSON(msg); err != nil {
+			h.unregister(client)
+		}
+	}
+}
+
 func (h *hub) register(client *wsClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -362,6 +498,21 @@ func (h *hub) unregister(client *wsClient) {
 	client.closeOnce.Do(func() {
 		_ = client.conn.Close()
 	})
+}
+
+// OnlineCount 返回当前 WebSocket 在线连接数（只读，用于监控面板）。
+func OnlineCount() int {
+	return defaultHub.onlineCount()
+}
+
+func (h *hub) onlineCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	count := 0
+	for _, clients := range h.clients {
+		count += len(clients)
+	}
+	return count
 }
 
 func (h *hub) broadcast(event Event) {

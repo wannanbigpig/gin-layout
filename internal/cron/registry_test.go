@@ -16,8 +16,12 @@ func TestSyncBuiltinDefinitionsUpsert(t *testing.T) {
 
 	cfg := &config.Conf{}
 	cfg.EnableResetSystemCron = false
-	if err := syncBuiltinDefinitions(db, cfg); err != nil {
+	report, err := syncBuiltinDefinitionsWithReport(db, cfg)
+	if err != nil {
 		t.Fatalf("sync builtin definitions failed: %v", err)
+	}
+	if report.Total != 8 || report.Inserted != 8 || report.Updated != 0 || report.Unchanged != 0 {
+		t.Fatalf("unexpected first sync report: %+v", report)
 	}
 
 	assertTaskDefinitionCount(t, db, 8)
@@ -39,14 +43,65 @@ func TestSyncBuiltinDefinitionsUpsert(t *testing.T) {
 	assertTaskAllowManual(t, db, jobs.AuditLogTaskType, 0)
 	assertTaskAllowManual(t, db, jobs.TypeExportRequestLog, 0)
 	assertTaskAllowManual(t, db, jobs.TypeExportFileList, 0)
+	assertTaskRecordSuccessMode(t, db, jobs.AuditLogTaskType, model.TaskRecordSuccessNone)
+	assertTaskRecordSuccessMode(t, db, jobs.TypeExportRequestLog, model.TaskRecordSuccessAll)
 
 	cfg.EnableResetSystemCron = true
-	if err := syncBuiltinDefinitions(db, cfg); err != nil {
+	report, err = syncBuiltinDefinitionsWithReport(db, cfg)
+	if err != nil {
 		t.Fatalf("sync builtin definitions on second run failed: %v", err)
+	}
+	if report.Total != 8 || report.Inserted != 0 || report.Updated != 0 || report.Unchanged != 8 {
+		t.Fatalf("unexpected second sync report: %+v", report)
 	}
 
 	assertTaskDefinitionCount(t, db, 8)
-	assertTaskStatus(t, db, TaskCodeCronResetSystemData, 1)
+	assertTaskStatus(t, db, TaskCodeCronResetSystemData, 0)
+}
+
+func TestSyncBuiltinDefinitionsPreservesOperationalConfigAndUpdatesDefinitionFields(t *testing.T) {
+	db := newTaskDefinitionSyncTestDB(t)
+	now := "2026-06-09 10:00:00"
+	if err := db.Exec(`INSERT INTO task_definitions (
+		code, name, kind, queue, cron_spec, handler, status, allow_manual, allow_retry, is_high_risk,
+		record_success_mode, record_success_rate, record_success_interval_seconds, record_detail_on_manual,
+		record_detail_on_failure, remark, created_at, updated_at, deleted_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+		TaskCodeCronCleanExpiredFiles, "旧名称", model.TaskKindCron, "old_queue", "0 * * * * *", "old.handler",
+		model.TaskStatusDisabled, model.TaskManualNotAllowed, model.TaskRetryAllowed, model.TaskHighRisk,
+		model.TaskRecordSuccessNone, 7, 123, 0, 0, "旧备注", now, now,
+	).Error; err != nil {
+		t.Fatalf("insert existing task definition failed: %v", err)
+	}
+
+	report, err := syncBuiltinDefinitionsWithReport(db, &config.Conf{})
+	if err != nil {
+		t.Fatalf("sync builtin definitions failed: %v", err)
+	}
+	if report.Total != 8 || report.Inserted != 7 || report.Updated != 1 || report.Unchanged != 0 {
+		t.Fatalf("unexpected sync report: %+v", report)
+	}
+
+	var definition model.TaskDefinition
+	if err := db.Where("code = ?", TaskCodeCronCleanExpiredFiles).First(&definition).Error; err != nil {
+		t.Fatalf("query synced task definition failed: %v", err)
+	}
+	if definition.Name != "自动清理过期临时文件" ||
+		definition.CronSpec != "0 0 3 * * *" ||
+		definition.Handler != HandlerCronCleanExpiredFiles ||
+		definition.Remark == "旧备注" {
+		t.Fatalf("definition fields were not updated: %#v", definition)
+	}
+	if definition.Status != model.TaskStatusDisabled ||
+		definition.AllowManual != model.TaskManualNotAllowed ||
+		definition.AllowRetry != model.TaskRetryAllowed ||
+		definition.RecordSuccessMode != model.TaskRecordSuccessNone ||
+		definition.RecordSuccessRate != 7 ||
+		definition.RecordSuccessIntervalSeconds != 123 ||
+		definition.RecordDetailOnManual != 0 ||
+		definition.RecordDetailOnFailure != 0 {
+		t.Fatalf("operational config should be preserved: %#v", definition)
+	}
 }
 
 func assertTaskDefinitionCount(t *testing.T, db *gorm.DB, expected int64) {
@@ -97,6 +152,18 @@ func assertTaskQueue(t *testing.T, db *gorm.DB, code string, expected string) {
 	}
 }
 
+func assertTaskRecordSuccessMode(t *testing.T, db *gorm.DB, code string, expected string) {
+	t.Helper()
+
+	var definition model.TaskDefinition
+	if err := db.Where("code = ?", code).First(&definition).Error; err != nil {
+		t.Fatalf("query task definition(%s) failed: %v", code, err)
+	}
+	if definition.RecordSuccessMode != expected {
+		t.Fatalf("unexpected record_success_mode for %s: got=%s want=%s", code, definition.RecordSuccessMode, expected)
+	}
+}
+
 func newTaskDefinitionSyncTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -118,6 +185,11 @@ CREATE TABLE task_definitions (
     allow_manual integer NOT NULL DEFAULT 0,
     allow_retry integer NOT NULL DEFAULT 1,
     is_high_risk integer NOT NULL DEFAULT 0,
+    record_success_mode text NOT NULL DEFAULT 'all',
+    record_success_rate integer NOT NULL DEFAULT 100,
+    record_success_interval_seconds integer NOT NULL DEFAULT 0,
+    record_detail_on_manual integer NOT NULL DEFAULT 1,
+    record_detail_on_failure integer NOT NULL DEFAULT 1,
     remark text NOT NULL DEFAULT '',
     created_at datetime,
     updated_at datetime,

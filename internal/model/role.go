@@ -14,13 +14,15 @@ var RoleStatusDict modelDict.Dict = map[uint8]string{
 // Role 角色表
 type Role struct {
 	ContainsDeleteBaseModel
-	Code        string        `json:"code" gorm:"column:code;type:varchar(60);not null;default:'';comment:角色业务编码"`
-	IsSystem    uint8         `json:"is_system" gorm:"column:is_system;type:tinyint unsigned;not null;default:0;comment:是否系统保留对象"`
-	Name        string        `json:"name" gorm:"column:name;type:varchar(60);not null;default:'';comment:角色名称"`
-	Description string        `json:"description" gorm:"column:description;type:varchar(255);not null;default:'';comment:描述"`
-	Sort        uint          `json:"sort" gorm:"column:sort;type:mediumint unsigned;not null;default:0;comment:排序"`
-	MenuList    []RoleMenuMap `json:"menu_list,omitempty" gorm:"foreignkey:role_id;references:id;comment:菜单列表"`
-	Status      uint8         `json:"status" gorm:"column:status;type:tinyint unsigned;not null;default:1;comment:是否启用状态,1启用，0禁用"`
+	Code        string              `json:"code" gorm:"column:code;type:varchar(60);not null;default:'';comment:角色业务编码"`
+	IsSystem    uint8               `json:"is_system" gorm:"column:is_system;type:tinyint unsigned;not null;default:0;comment:是否系统保留对象"`
+	Name        string              `json:"name" gorm:"column:name;type:varchar(60);not null;default:'';comment:角色名称"`
+	Description string              `json:"description" gorm:"column:description;type:varchar(255);not null;default:'';comment:描述"`
+	Sort        uint                `json:"sort" gorm:"column:sort;type:mediumint unsigned;not null;default:0;comment:排序"`
+	MenuList    []RoleMenuMap       `json:"menu_list,omitempty" gorm:"foreignkey:role_id;references:id;comment:菜单列表"`
+	DeptList    []RoleDataScopeDept `json:"dept_list,omitempty" gorm:"foreignkey:role_id;references:id;comment:数据权限部门列表"`
+	Status      uint8               `json:"status" gorm:"column:status;type:tinyint unsigned;not null;default:1;comment:是否启用状态,1启用，0禁用"`
+	DataScope   uint8               `json:"data_scope" gorm:"column:data_scope;type:tinyint unsigned;not null;default:3;comment:数据权限范围:1全部,2本部门及子级,3本部门,4仅本人,5自定义部门"`
 }
 
 func NewRole() *Role {

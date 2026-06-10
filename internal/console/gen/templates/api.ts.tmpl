@@ -1,0 +1,32 @@
+import request from '@/utils/request'
+import type { {{.ModelName}}ListParams, {{.ModelName}}ListResult, {{.ModelName}}Detail, {{.ModelName}}CreateParams, {{.ModelName}}UpdateParams, {{.ModelName}}OptionItem } from '@/types/{{.ModuleSnake}}'
+
+/** 获取{{.MenuTitle}}列表 */
+export function get{{.ModelName}}List(params: {{.ModelName}}ListParams) {
+  return request.get<{{.ModelName}}ListResult>('/admin/v1/{{.TableName}}/list', { params })
+}
+
+/** 获取{{.MenuTitle}}选项 */
+export function get{{.ModelName}}Options(params?: { keyword?: string }) {
+  return request.get<{{.ModelName}}OptionItem[]>('/admin/v1/{{.TableName}}/options', { params })
+}
+
+/** 获取{{.MenuTitle}}详情 */
+export function get{{.ModelName}}Detail(id: number) {
+  return request.get<{{.ModelName}}Detail>('/admin/v1/{{.TableName}}/detail', { params: { id } })
+}
+
+/** 新增{{.MenuTitle}} */
+export function create{{.ModelName}}(data: {{.ModelName}}CreateParams) {
+  return request.post('/admin/v1/{{.TableName}}/create', data)
+}
+
+/** 更新{{.MenuTitle}} */
+export function update{{.ModelName}}(data: {{.ModelName}}UpdateParams) {
+  return request.post('/admin/v1/{{.TableName}}/update', data)
+}
+
+/** 删除{{.MenuTitle}} */
+export function delete{{.ModelName}}(id: number) {
+  return request.post('/admin/v1/{{.TableName}}/delete', { id })
+}
