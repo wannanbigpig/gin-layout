@@ -144,6 +144,12 @@ type CronTaskState struct {
 	BaseModel
 	TaskCode             string            `json:"task_code"`               // 任务唯一编码
 	CronSpec             string            `json:"cron_spec"`               // Cron 表达式
+	ActiveStatus         uint8             `json:"active_status"`           // 当前调度生效状态 1启用 0停用
+	ActiveCronSpec       string            `json:"active_cron_spec"`        // 当前调度进程实际生效的 Cron 表达式
+	LastSyncAt           *utils.FormatDate `json:"last_sync_at"`            // 最近调度同步时间
+	LastSyncStatus       string            `json:"last_sync_status"`        // 最近调度同步状态 success/failed
+	LastSyncError        string            `json:"last_sync_error"`         // 最近调度同步错误
+	SchedulerInstance    string            `json:"scheduler_instance"`      // 调度进程实例标识
 	LastRunID            uint              `json:"last_run_id"`             // 最近执行记录ID
 	LastStatus           string            `json:"last_status"`             // 最近执行状态
 	LastStartedAt        *utils.FormatDate `json:"last_started_at"`         // 最近开始时间

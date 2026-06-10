@@ -140,6 +140,6 @@ Interface tests and caller-side acceptance should cover these facts at minimum:
 | Select options, table tags, colors, localized labels | Use `sys_dict` |
 | Login lock limits, request-log masking fields, operational thresholds | Use `sys_config` |
 | Validator enums, permission modes, state transitions | Use code constants and validators |
-| Real cron enable/disable from admin UI | Use `task_definitions.status`; `cron` reads it before each trigger, while handler/spec still come from built-in code definitions |
+| Real cron enable/disable from admin UI | Use `task_definitions.status`; `cron` executes from an in-process cache, refreshes on admin-change notifications, and falls back to periodic reconcile. Handler safety still comes from the code registry, while `cron_spec` is a DB-owned operational setting |
 | Backend needs runtime policy reads | Read `sys_config` through domain helpers and keep defaults |
 | Display layer wants less enum hardcoding | Backend provides `dict/options`; caller fallbacks are maintained by the caller project |

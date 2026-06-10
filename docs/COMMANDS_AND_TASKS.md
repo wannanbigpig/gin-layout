@@ -115,8 +115,9 @@ go run main.go cron
 任务定义边界：
 
 - `BuiltinTaskDefinitions(cfg)` 定义内置任务集合、默认调度表达式和 handler 安全边界。
-- `task_definitions` 是内置任务定义同步后的运营配置表；已有任务会保留 `status/allow_manual/allow_retry/record_success_*` 等运营配置。
-- `cron` 进程启动时注册所有内置 cron 任务；每次触发前读取 `task_definitions.status`，后台启停无需重启 cron 进程，下一次调度触发即生效。
+- `task_definitions` 是内置任务定义同步后的运营配置表；已有任务会保留 `status/cron_spec/allow_manual/allow_retry/record_success_*` 等运营配置。
+- `cron` 进程以 `task_definitions` 为运行时真相：启动时加载启用任务到进程缓存，后台变更通过 Redis 通知刷新，周期 reconcile 兜底。
+- 定时任务执行前只读取本进程缓存，不直接查 DB；高风险任务在缓存缺失、过期或同步失败时 fail-closed。
 
 ### 5. 运行一次性命令
 
@@ -208,13 +209,13 @@ go run main.go cron
 - [cmd/cron/schedule.go](/Users/liuml/data/go/src/go-layout/cmd/cron/schedule.go)
   - 提供任务声明 DSL
 - [cmd/cron/tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go)
-  - 从内置任务定义中筛选启用的 cron 任务并注册到调度器
+  - 从 `task_definitions` 同步运行时调度、维护进程缓存并处理变更通知
 - [internal/cron/registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go)
   - 维护内置任务定义、cron handler 注册表和任务中心镜像同步
 
 ### 当前写法
 
-当前项目推荐先在 `internal/cron/registry.go` 声明内置任务定义，再由 `cmd/cron/tasks.go` 统一注册启用的 cron 任务：
+当前项目推荐先在 `internal/cron/registry.go` 声明内置任务定义，再同步到 `task_definitions` 作为运行时调度配置：
 
 ```go
 func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
@@ -232,9 +233,10 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 
 这样做的好处是：
 
-- 任务中心展示、手动触发、重试校验和 cron 注册共用一份代码内置定义
-- 名称、时间规则、handler、状态和高风险标记一眼能看出来
-- 高风险任务可以显式配置启用，默认不参与 cron 注册
+- 任务中心展示、手动触发、重试校验和运行时调度都能追溯到同一份内置定义
+- 名称、默认时间规则、handler 和高风险标记一眼能看出来
+- `handler` 只来自代码注册表；`status/cron_spec` 属于 DB 运营配置
+- 高风险任务可以显式启用；运行缓存异常时默认跳过执行
 - 不需要每次手写 `AddJob`、`Chain`、`Recover`
 
 ### 可用方法
@@ -286,7 +288,8 @@ schedule.Call("heartbeat", heartbeat).
 2. 在 [registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go) 注册 handler。
 3. 在 `BuiltinTaskDefinitions` 中新增 `kind=cron` 的任务定义。
 4. 运行 `go run main.go -c ./config.yaml command task scan-cron` 检查内置定义与 DB 镜像。
-5. 重启 `cron` 进程。
+5. 运行 `go run main.go -c ./config.yaml command task sync-definitions` 同步新增定义。
+6. 在后台确认 `status/cron_spec`，cron 进程会通过通知刷新；通知异常时由周期 reconcile 兜底。
 
 ## 队列使用说明
 
@@ -601,7 +604,8 @@ server, mux, err := asynqx.NewServer(cfg, registry)
 
 ## 推荐实践
 
-- 定时任务统一写在 [tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go)
+- 定时任务 handler 和内置定义统一维护在 `internal/cron/registry.go`
+- [tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go) 只维护 cron 进程运行时调度同步
 - 异步任务统一写在 `internal/jobs`
 - 一个任务类型只对应一个清晰的 payload
 - payload 尽量保持小而稳定

@@ -8,12 +8,13 @@ type adminUserEditableFields struct {
 }
 
 type adminUserOptionalFields struct {
-	PhoneNumber *string `form:"phone_number" json:"phone_number" label:"手机号" binding:"omitempty,phone_number"`
-	CountryCode *string `form:"country_code" json:"country_code" label:"国家代码" binding:"omitempty"`
-	Email       *string `form:"email" json:"email" label:"邮箱" binding:"omitempty,email"`
-	Status      *uint8  `form:"status" json:"status" label:"状态" binding:"omitempty,oneof=0 1"`
-	Avatar      *string `form:"avatar" json:"avatar" label:"头像" binding:"omitempty"`
-	DeptIds     *[]uint `form:"dept_ids" json:"dept_ids" label:"部门ID" binding:"omitempty,dive,gt=0"`
+	PhoneNumber  *string `form:"phone_number" json:"phone_number" label:"手机号" binding:"omitempty,phone_number"`
+	CountryCode  *string `form:"country_code" json:"country_code" label:"国家代码" binding:"omitempty"`
+	Email        *string `form:"email" json:"email" label:"邮箱" binding:"omitempty,email"`
+	Status       *uint8  `form:"status" json:"status" label:"状态" binding:"omitempty,oneof=0 1"`
+	IsSuperAdmin *uint8  `form:"is_super_admin" json:"is_super_admin" label:"是否超级管理员" binding:"omitempty,oneof=0 1"`
+	Avatar       *string `form:"avatar" json:"avatar" label:"头像" binding:"omitempty"`
+	DeptIds      *[]uint `form:"dept_ids" json:"dept_ids" label:"部门ID" binding:"omitempty,dive,gt=0"`
 }
 
 type CreateAdminUser struct {

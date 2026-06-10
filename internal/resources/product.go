@@ -13,6 +13,7 @@ type ProductResources struct {
 	Status      uint8            `json:"status"`
 	StatusName  string           `json:"status_name"`
 	DeptId      uint             `json:"dept_id"`
+	DeptName    string           `json:"dept_name"`
 	CreatedBy   uint             `json:"created_by"`
 	CreatedAt   utils.FormatDate `json:"created_at"`
 	UpdatedAt   utils.FormatDate `json:"updated_at"`
@@ -23,6 +24,9 @@ func (r *ProductResources) SetCustomFields(data *model.Product) {
 		return
 	}
 	r.StatusName = model.ProductStatusDict.Map(data.Status)
+	if data.Department.ID > 0 {
+		r.DeptName = data.Department.Name
+	}
 }
 
 type ProductTransformer struct {

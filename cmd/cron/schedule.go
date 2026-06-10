@@ -24,6 +24,7 @@ type Scheduler struct {
 }
 
 type scheduledTask struct {
+	taskCode    string
 	name        string
 	spec        string
 	specErr     error
@@ -35,13 +36,6 @@ type scheduledTask struct {
 // TaskBuilder 用于链式声明任务调度规则。
 type TaskBuilder struct {
 	task *scheduledTask
-}
-
-func registerTasks(crontab *cron.Cron, ctx context.Context) error {
-	logger := &cronLogger{}
-	schedule := NewScheduleWithContext(ctx, logger)
-	defineSchedule(schedule)
-	return schedule.Register(crontab)
 }
 
 // NewSchedule 创建任务声明器。
@@ -190,7 +184,10 @@ func recordedJob(ctx context.Context, task *scheduledTask) cron.Job {
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		taskCode := "cron:" + task.name
+		taskCode := task.taskCode
+		if taskCode == "" {
+			taskCode = "cron:" + task.name
+		}
 		if task.enabledWhen != nil && !task.enabledWhen(ctx) {
 			log.Logger.Info("定时任务已停用，跳过执行", zap.String("name", task.name))
 			return

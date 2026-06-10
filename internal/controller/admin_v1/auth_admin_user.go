@@ -55,14 +55,18 @@ func (api AdminUserController) GetUserMenuInfo(c *gin.Context) {
 // Create 新增管理员
 func (api AdminUserController) Create(c *gin.Context) {
 	handleAuditWrite(api.Api, c, form.NewCreateAdminUser, func(p *form.CreateAdminUser) (string, error) {
-		return admin.NewAdminUserService().CreateWithAuditDiff(p)
+		service := admin.NewAdminUserService()
+		service.SetAdminUserId(api.GetCurrentUserID(c))
+		return service.CreateWithAuditDiff(p)
 	})
 }
 
 // Update 更新管理员
 func (api AdminUserController) Update(c *gin.Context) {
 	handleAuditWrite(api.Api, c, form.NewUpdateAdminUser, func(p *form.UpdateAdminUser) (string, error) {
-		return admin.NewAdminUserService().UpdateWithAuditDiff(p)
+		service := admin.NewAdminUserService()
+		service.SetAdminUserId(api.GetCurrentUserID(c))
+		return service.UpdateWithAuditDiff(p)
 	})
 }
 

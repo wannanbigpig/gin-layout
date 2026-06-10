@@ -471,7 +471,7 @@ func requestLogLatencyStatsQuery(db *gorm.DB, start time.Time, end time.Time) *g
 		Where("execution_time_scope = ?", model.ExecutionTimeScopeRequest)
 }
 
-// buildErrorCodeStats 聚合指定时间窗口内的 response_status 分布，按数量降序取 TOP10。
+// buildErrorCodeStats 聚合指定时间窗口内 HTTP 错误 response_status 分布，按数量降序取 TOP10。
 func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCodeBucket {
 	if db == nil {
 		return nil
@@ -483,7 +483,7 @@ func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCod
 	var rows []row
 	if err := db.Table("request_logs").
 		Select("response_status AS status_code, COUNT(*) AS count").
-		Where("created_at >= ? AND created_at < ?", start, end).
+		Where("created_at >= ? AND created_at < ? AND response_status >= ?", start, end, 400).
 		Group("response_status").
 		Order("count DESC, response_status ASC").
 		Limit(10).

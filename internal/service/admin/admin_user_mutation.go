@@ -12,34 +12,44 @@ import (
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
+var loadAdminUserForSuperAdminCheck = func(id uint) (*model.AdminUser, error) {
+	user := model.NewAdminUsers()
+	if err := user.GetById(id); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 // Create 新增管理员用户。
 func (s *AdminUserService) Create(params *form.CreateAdminUser) error {
 	return s.saveAdminUserMutation(&adminUserEditParams{
-		Username:    params.Username,
-		Nickname:    params.Nickname,
-		Password:    params.Password,
-		PhoneNumber: params.PhoneNumber,
-		CountryCode: params.CountryCode,
-		Email:       params.Email,
-		Status:      params.Status,
-		Avatar:      params.Avatar,
-		DeptIds:     params.DeptIds,
+		Username:     params.Username,
+		Nickname:     params.Nickname,
+		Password:     params.Password,
+		PhoneNumber:  params.PhoneNumber,
+		CountryCode:  params.CountryCode,
+		Email:        params.Email,
+		Status:       params.Status,
+		IsSuperAdmin: params.IsSuperAdmin,
+		Avatar:       params.Avatar,
+		DeptIds:      params.DeptIds,
 	})
 }
 
 // Update 更新管理员用户。
 func (s *AdminUserService) Update(params *form.UpdateAdminUser) error {
 	return s.saveAdminUserMutation(&adminUserEditParams{
-		Id:          params.Id,
-		Username:    params.Username,
-		Nickname:    params.Nickname,
-		Password:    params.Password,
-		PhoneNumber: params.PhoneNumber,
-		CountryCode: params.CountryCode,
-		Email:       params.Email,
-		Status:      params.Status,
-		Avatar:      params.Avatar,
-		DeptIds:     params.DeptIds,
+		Id:           params.Id,
+		Username:     params.Username,
+		Nickname:     params.Nickname,
+		Password:     params.Password,
+		PhoneNumber:  params.PhoneNumber,
+		CountryCode:  params.CountryCode,
+		Email:        params.Email,
+		Status:       params.Status,
+		IsSuperAdmin: params.IsSuperAdmin,
+		Avatar:       params.Avatar,
+		DeptIds:      params.DeptIds,
 	})
 }
 
@@ -54,6 +64,7 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 	mutationFailedCode := e.CreateUserFailed
 	excludeID := uint(0)
 	oldStatus := uint8(0)
+	oldIsSuperAdmin := uint8(0)
 	adminUserModel := model.NewAdminUsers()
 
 	if params.Id > 0 {
@@ -63,8 +74,14 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 		}
 		excludeID = params.Id
 		oldStatus = adminUserModel.Status
+		oldIsSuperAdmin = adminUserModel.IsSuperAdmin
 	}
 	oldAvatar := adminUserModel.Avatar
+	if params.IsSuperAdmin != nil && (params.Id == 0 || oldIsSuperAdmin != *params.IsSuperAdmin) {
+		if !s.actorCanManageSuperAdmin() {
+			return e.NewBusinessError(e.AuthorizationErr)
+		}
+	}
 
 	var err error
 	if params.Id > 0 {
@@ -128,6 +145,13 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 				revokedReason: "管理员修改密码",
 			})
 		}
+		if params.Id > 0 && params.IsSuperAdmin != nil && oldIsSuperAdmin != *params.IsSuperAdmin {
+			pendingRevocations = append(pendingRevocations, userTokenRevocation{
+				userID:        adminUserModel.ID,
+				revokedCode:   model.RevokedCodeOther,
+				revokedReason: "管理员权限变更",
+			})
+		}
 
 		if params.DeptIds != nil {
 			deptIDs := access.UniqueUintSlice(*params.DeptIds)
@@ -145,6 +169,25 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 		return reloadErr
 	}
 	return s.handleMutationError(revokeErr, mutationFailedCode)
+}
+
+func (s *AdminUserService) actorCanManageSuperAdmin() bool {
+	actorID := s.GetAdminUserId()
+	if actorID == global.SuperAdminId {
+		return true
+	}
+	if actorID == 0 {
+		return false
+	}
+	actor := model.NewAdminUsers()
+	loaded, err := loadAdminUserForSuperAdminCheck(actorID)
+	if err != nil {
+		return false
+	}
+	if loaded != nil {
+		actor = loaded
+	}
+	return actor.IsSuperAdmin == global.Yes
 }
 
 // applyUpdateFields 应用更新场景的字段变更。
@@ -189,6 +232,12 @@ func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, pa
 			return e.NewBusinessError(e.SuperAdminCannotDisable)
 		}
 		adminUserModel.Status = *params.Status
+	}
+	if params.IsSuperAdmin != nil {
+		if *params.IsSuperAdmin == global.No && adminUserModel.ID == global.SuperAdminId {
+			return e.NewBusinessError(e.SuperAdminCannotModify)
+		}
+		adminUserModel.IsSuperAdmin = *params.IsSuperAdmin
 	}
 	if params.Avatar != nil {
 		adminUserModel.Avatar = *params.Avatar
@@ -238,6 +287,9 @@ func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, pa
 	}
 	if params.Status != nil {
 		adminUserModel.Status = *params.Status
+	}
+	if params.IsSuperAdmin != nil {
+		adminUserModel.IsSuperAdmin = *params.IsSuperAdmin
 	}
 	if adminUserModel.PhoneNumber != "" {
 		adminUserModel.FullPhoneNumber = adminUserModel.CountryCode + adminUserModel.PhoneNumber

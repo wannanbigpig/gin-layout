@@ -100,6 +100,12 @@ func (s *AdminUserService) GetUserInfo(id uint) (*resources.AdminUserResources, 
 // GetUserMenuInfo 获取用户权限信息。
 func (s *AdminUserService) GetUserMenuInfo(id uint, locale string) (any, error) {
 	adminUsersModel := model.NewAdminUsers()
+	menuModel := model.NewMenu()
+	menuI18nModel := model.NewMenuI18n()
+	return s.getUserMenuInfoWithModels(id, locale, adminUsersModel, menuModel, menuI18nModel)
+}
+
+func (s *AdminUserService) getUserMenuInfoWithModels(id uint, locale string, adminUsersModel *model.AdminUser, menuModel *model.Menu, menuI18nModel *model.MenuI18n) (any, error) {
 	err := adminUsersModel.GetById(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -107,8 +113,9 @@ func (s *AdminUserService) GetUserMenuInfo(id uint, locale string) (any, error) 
 		}
 		return nil, err
 	}
-	condition, args := s.userMenuQuery(id == global.SuperAdminId, nil)
-	if id != global.SuperAdminId {
+	isSuperAdmin := id == global.SuperAdminId || adminUsersModel.IsSuperAdmin == global.Yes
+	condition, args := s.userMenuQuery(isSuperAdmin, nil)
+	if !isSuperAdmin {
 		menuIDs, err := access.NewPermissionSyncCoordinator().AccessibleMenuIDs(id, true)
 		if err != nil {
 			return nil, err
@@ -116,10 +123,15 @@ func (s *AdminUserService) GetUserMenuInfo(id uint, locale string) (any, error) 
 		condition, args = s.userMenuQuery(false, menuIDs)
 	}
 
-	menus, err := model.ListE(model.NewMenu(), condition, args, model.ListOptionalParams{
-		OrderBy: "sort desc, id desc",
-	})
+	menuDB, err := menuModel.GetDB(menuModel)
 	if err != nil {
+		return nil, err
+	}
+	if condition != "" {
+		menuDB = menuDB.Where(condition, args...)
+	}
+	var menus []*model.Menu
+	if err := menuDB.Order("sort desc, id desc").Find(&menus).Error; err != nil {
 		return nil, err
 	}
 
@@ -130,7 +142,7 @@ func (s *AdminUserService) GetUserMenuInfo(id uint, locale string) (any, error) 
 		}
 		menuIDs = append(menuIDs, menu.ID)
 	}
-	titleMap, err := model.NewMenuI18n().LocalizedTitleMapByMenuIDs(menuIDs, []string{
+	titleMap, err := menuI18nModel.LocalizedTitleMapByMenuIDs(menuIDs, []string{
 		i18n.NormalizeLocale(locale),
 		i18n.LocaleZhCN,
 		i18n.LocaleEnUS,
@@ -232,16 +244,17 @@ func (s *AdminUserService) userMenuQuery(isSuperAdmin bool, menuIDs []uint) (str
 
 // adminUserEditParams 管理员用户编辑参数，字段使用指针支持部分更新。
 type adminUserEditParams struct {
-	Id          uint    // 用户 ID，0 表示新增
-	Username    *string // 用户名
-	Nickname    *string // 昵称
-	Password    *string // 密码
-	PhoneNumber *string // 手机号
-	CountryCode *string // 国家代码
-	Email       *string // 邮箱
-	Status      *uint8  // 状态
-	Avatar      *string // 头像
-	DeptIds     *[]uint // 关联的部门 ID 列表
+	Id           uint    // 用户 ID，0 表示新增
+	Username     *string // 用户名
+	Nickname     *string // 昵称
+	Password     *string // 密码
+	PhoneNumber  *string // 手机号
+	CountryCode  *string // 国家代码
+	Email        *string // 邮箱
+	Status       *uint8  // 状态
+	IsSuperAdmin *uint8  // 是否超级管理员
+	Avatar       *string // 头像
+	DeptIds      *[]uint // 关联的部门 ID 列表
 }
 
 // UploadAvatar 专门用于上传用户头像。

@@ -115,8 +115,9 @@ Used for:
 Task definition boundary:
 
 - `BuiltinTaskDefinitions(cfg)` defines the built-in task set, default cron expressions, and handler safety boundary.
-- `task_definitions` is the operational table synced from built-ins; existing tasks preserve operational settings such as `status/allow_manual/allow_retry/record_success_*`.
-- The `cron` process registers all built-in cron tasks on startup. Before each trigger, it reads `task_definitions.status`, so admin enable/disable changes take effect on the next scheduled trigger without restarting the cron process.
+- `task_definitions` is the operational table synced from built-ins; existing tasks preserve operational settings such as `status/cron_spec/allow_manual/allow_retry/record_success_*`.
+- The `cron` process treats `task_definitions` as the runtime source of truth: it loads enabled tasks into an in-process cache on startup, refreshes via Redis notifications after admin changes, and uses periodic reconcile as a fallback.
+- Before execution, scheduled jobs read only the in-process cache, not the DB directly. High-risk jobs fail closed when the cache is missing, stale, or marked with a sync failure.
 
 ### 5. Run One-Off Commands
 
@@ -208,13 +209,13 @@ The current scheduling code is split into 3 files:
 - [cmd/cron/schedule.go](/Users/liuml/data/go/src/go-layout/cmd/cron/schedule.go)
   - scheduling DSL
 - [cmd/cron/tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go)
-  - filters enabled cron definitions and registers them into the scheduler
+  - syncs runtime scheduling from `task_definitions`, maintains the process cache, and handles change notifications
 - [internal/cron/registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go)
   - owns built-in task definitions, cron handler registration, and task-center mirror sync
 
 ### Current Style
 
-The project now recommends declaring built-in task definitions in `internal/cron/registry.go`, while `cmd/cron/tasks.go` registers enabled cron definitions into the scheduler:
+The project now recommends declaring built-in task definitions in `internal/cron/registry.go`, then syncing them into `task_definitions` as runtime scheduling configuration:
 
 ```go
 func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
@@ -232,9 +233,10 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 
 Why this is simpler:
 
-- task-center display, manual trigger checks, retry checks, and cron registration share the same built-in code definition
-- name, schedule, handler, status, and high-risk flags are visible at a glance
-- risky jobs can be explicitly enabled instead of being registered into cron by default
+- task-center display, manual trigger checks, retry checks, and runtime scheduling all trace back to the same built-in definition
+- names, default schedules, handlers, and high-risk flags are visible at a glance
+- `handler` comes only from the code registry; `status/cron_spec` are DB-owned operational settings
+- high-risk jobs can be explicitly enabled, and they are skipped when the runtime cache is stale or unhealthy
 - no need to repeat `AddJob`, `Chain`, and `Recover` manually
 
 ### Available Methods
@@ -286,7 +288,8 @@ schedule.Call("heartbeat", heartbeat).
 2. Register its handler in [registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go).
 3. Add a `kind=cron` task definition to `BuiltinTaskDefinitions`.
 4. Run `go run main.go -c ./config.yaml command task scan-cron` to compare built-in definitions with the DB mirror.
-5. Restart the `cron` process.
+5. Run `go run main.go -c ./config.yaml command task sync-definitions` to sync the new definition.
+6. Confirm `status/cron_spec` in the admin UI. The cron process refreshes via notification, with periodic reconcile as a fallback.
 
 ## Queue Usage
 
@@ -599,7 +602,8 @@ By default, prefer:
 
 ## Recommended Practices
 
-- keep scheduled jobs in [tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go)
+- keep scheduled handlers and built-in definitions under `internal/cron/registry.go`
+- [tasks.go](/Users/liuml/data/go/src/go-layout/cmd/cron/tasks.go) only owns cron runtime scheduling sync
 - keep async jobs under `internal/jobs`
 - keep one clear payload per task type
 - keep payloads small and stable

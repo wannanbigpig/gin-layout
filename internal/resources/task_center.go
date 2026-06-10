@@ -189,6 +189,13 @@ type CronTaskStateResources struct {
 	TaskCode             string            `json:"task_code"`
 	CronSpec             string            `json:"cron_spec"`
 	CronSpecDescription  string            `json:"cron_spec_description"`
+	ActiveStatus         uint8             `json:"active_status"`
+	ActiveCronSpec       string            `json:"active_cron_spec"`
+	ActiveCronSpecDesc   string            `json:"active_cron_spec_description"`
+	LastSyncAt           *utils.FormatDate `json:"last_sync_at"`
+	LastSyncStatus       string            `json:"last_sync_status"`
+	LastSyncError        string            `json:"last_sync_error"`
+	SchedulerInstance    string            `json:"scheduler_instance"`
 	LastRunID            uint              `json:"last_run_id"`
 	LastStatus           string            `json:"last_status"`
 	LastStartedAt        *utils.FormatDate `json:"last_started_at"`
@@ -206,6 +213,7 @@ func (r *CronTaskStateResources) SetCustomFields(data *model.CronTaskState) {
 		return
 	}
 	r.CronSpecDescription = cronexpr.Describe(data.CronSpec)
+	r.ActiveCronSpecDesc = cronexpr.Describe(data.ActiveCronSpec)
 }
 
 // CronTaskStateTransformer 定时任务状态资源转换器。

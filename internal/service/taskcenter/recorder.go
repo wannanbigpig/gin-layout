@@ -493,7 +493,14 @@ func upsertCronState(tx *gorm.DB, run *model.TaskRun, cronSpec string, lastError
 		assignments = append(assignments, "cron_spec")
 	}
 
-	return tx.Clauses(clause.OnConflict{
+	return tx.Omit(
+		"active_status",
+		"active_cron_spec",
+		"last_sync_at",
+		"last_sync_status",
+		"last_sync_error",
+		"scheduler_instance",
+	).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "task_code"}},
 		DoUpdates: clause.AssignmentColumns(assignments),
 	}).Create(state).Error

@@ -2,101 +2,20 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 )
-
-func TestDefineScheduleRegistersDefaultDisabledTasksForRuntimeSwitch(t *testing.T) {
-	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
-		cfg.EnableResetSystemCron = false
-	})
-	defer restoreConfig()
-	restoreStatus := setCronTaskStatusForTest(nil)
-	defer restoreStatus()
-
-	schedule := NewSchedule(&cronLogger{})
-	defineSchedule(schedule)
-
-	if !hasScheduledTask(schedule, "reset-system-data") {
-		t.Fatal("expected reset-system-data task to be registered for runtime switch")
-	}
-	if !hasScheduledTask(schedule, "demo") {
-		t.Fatal("expected demo task to be registered for runtime switch")
-	}
-	if taskEnabled(t, schedule, "demo") {
-		t.Fatal("expected demo task to be disabled by default")
-	}
-	if taskEnabled(t, schedule, "reset-system-data") {
-		t.Fatal("expected reset-system-data task to be disabled by default")
-	}
-}
-
-func TestDefineScheduleRegistersResetTaskWhenEnabled(t *testing.T) {
-	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
-		cfg.EnableResetSystemCron = true
-	})
-	defer restoreConfig()
-	restoreStatus := setCronTaskStatusForTest(nil)
-	defer restoreStatus()
-
-	schedule := NewSchedule(&cronLogger{})
-	defineSchedule(schedule)
-
-	if !hasScheduledTask(schedule, "reset-system-data") {
-		t.Fatal("expected reset-system-data task to be registered when enabled")
-	}
-	if !taskEnabled(t, schedule, "reset-system-data") {
-		t.Fatal("expected reset-system-data task to be enabled when config enables it")
-	}
-}
-
-func TestDefineScheduleUsesDBStatusToEnableTaskWithoutRestart(t *testing.T) {
-	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
-		cfg.EnableResetSystemCron = false
-	})
-	defer restoreConfig()
-	restoreStatus := setCronTaskStatusForTest(map[string]uint8{
-		"cron:demo": model.TaskStatusEnabled,
-	})
-	defer restoreStatus()
-
-	schedule := NewSchedule(&cronLogger{})
-	defineSchedule(schedule)
-
-	if !hasScheduledTask(schedule, "demo") {
-		t.Fatal("expected demo task to be registered")
-	}
-	if !taskEnabled(t, schedule, "demo") {
-		t.Fatal("expected demo task to be enabled when DB status enables it")
-	}
-}
-
-func TestDefineScheduleUsesDBStatusToDisableTaskWithoutRestart(t *testing.T) {
-	restoreStatus := setCronTaskStatusForTest(map[string]uint8{
-		"cron:file-access-flush": model.TaskStatusDisabled,
-	})
-	defer restoreStatus()
-
-	schedule := NewSchedule(&cronLogger{})
-	defineSchedule(schedule)
-
-	if !hasScheduledTask(schedule, "file-access-flush") {
-		t.Fatal("expected file-access-flush task to be registered")
-	}
-	if taskEnabled(t, schedule, "file-access-flush") {
-		t.Fatal("expected file-access-flush task to be disabled when DB status disables it")
-	}
-}
 
 func TestRuntimeCronRegistryReconcilesDefinitionChanges(t *testing.T) {
 	crontab := cron.New(cron.WithSeconds())
 	registry := newRuntimeCronRegistry(context.Background(), crontab, &cronLogger{})
 
-	restoreDefinitions := setCronTaskDefinitionsForTest([]cronTaskDefinition{
+	restoreDefinitions := setCronTaskDefinitionsForTest(t, []cronTaskDefinition{
 		{
 			TaskCode: "cron:demo",
 			TaskName: "demo",
@@ -106,14 +25,14 @@ func TestRuntimeCronRegistryReconcilesDefinitionChanges(t *testing.T) {
 		},
 	})
 	registry.reconcileOnce(context.Background())
-	restoreDefinitions()
 
 	if len(registry.tasks) != 1 || len(crontab.Entries()) != 1 {
 		t.Fatalf("expected one runtime task, got tasks=%d entries=%d", len(registry.tasks), len(crontab.Entries()))
 	}
 	firstEntry := registry.tasks["cron:demo"].entryID
 
-	restoreDefinitions = setCronTaskDefinitionsForTest([]cronTaskDefinition{
+	restoreDefinitions()
+	restoreDefinitions = setCronTaskDefinitionsForTest(t, []cronTaskDefinition{
 		{
 			TaskCode: "cron:demo",
 			TaskName: "demo",
@@ -123,7 +42,6 @@ func TestRuntimeCronRegistryReconcilesDefinitionChanges(t *testing.T) {
 		},
 	})
 	registry.reconcileOnce(context.Background())
-	restoreDefinitions()
 
 	if len(registry.tasks) != 1 || registry.tasks["cron:demo"].definition.CronSpec != "0 0 5 * * *" {
 		t.Fatalf("expected runtime task spec to be replaced, got %#v", registry.tasks["cron:demo"])
@@ -132,7 +50,8 @@ func TestRuntimeCronRegistryReconcilesDefinitionChanges(t *testing.T) {
 		t.Fatal("expected cron entry to be replaced when cron spec changes")
 	}
 
-	restoreDefinitions = setCronTaskDefinitionsForTest([]cronTaskDefinition{
+	restoreDefinitions()
+	restoreDefinitions = setCronTaskDefinitionsForTest(t, []cronTaskDefinition{
 		{
 			TaskCode: "cron:demo",
 			TaskName: "demo",
@@ -142,52 +61,147 @@ func TestRuntimeCronRegistryReconcilesDefinitionChanges(t *testing.T) {
 		},
 	})
 	registry.reconcileOnce(context.Background())
-	restoreDefinitions()
 
 	if len(registry.tasks) != 0 || len(crontab.Entries()) != 0 {
 		t.Fatalf("expected disabled task to be removed, got tasks=%d entries=%d", len(registry.tasks), len(crontab.Entries()))
 	}
+	restoreDefinitions()
 }
 
-func hasScheduledTask(schedule *Scheduler, name string) bool {
-	for _, task := range schedule.tasks {
-		if task.name == name {
-			return true
-		}
+func TestRuntimeCronRegistryKeepsLowRiskTaskRunningWhenDefinitionLoadFails(t *testing.T) {
+	registry := newRuntimeRegistryWithTask(t, cronTaskDefinition{
+		TaskCode: "cron:demo",
+		TaskName: "demo",
+		CronSpec: "0 0 4 * * *",
+		Handler:  "cron.demo",
+		Status:   model.TaskStatusEnabled,
+	})
+	restoreDefinitions := setCronTaskDefinitionsErrorForTest(t, errors.New("db down"))
+	registry.reconcileOnce(context.Background())
+	restoreDefinitions()
+
+	if len(registry.tasks) != 1 {
+		t.Fatalf("expected existing task to be kept, got %d", len(registry.tasks))
 	}
-	return false
+	if !registry.taskCanRun("cron:demo", "0 0 4 * * *") {
+		t.Fatal("expected low-risk task to keep running from cache")
+	}
 }
 
-func taskEnabled(t *testing.T, schedule *Scheduler, name string) bool {
+func TestRuntimeCronRegistryFailClosesHighRiskTaskWhenDefinitionLoadFails(t *testing.T) {
+	registry := newRuntimeRegistryWithTask(t, cronTaskDefinition{
+		TaskCode:   "cron:reset-system-data",
+		TaskName:   "reset-system-data",
+		CronSpec:   "0 0 4 * * *",
+		Handler:    "cron.reset-system-data",
+		Status:     model.TaskStatusEnabled,
+		IsHighRisk: model.TaskHighRisk,
+	})
+	restoreDefinitions := setCronTaskDefinitionsErrorForTest(t, errors.New("db down"))
+	registry.reconcileOnce(context.Background())
+	restoreDefinitions()
+
+	if registry.taskCanRun("cron:reset-system-data", "0 0 4 * * *") {
+		t.Fatal("expected high-risk task to fail closed when sync failed")
+	}
+}
+
+func TestRuntimeCronRegistryFailClosesHighRiskTaskWhenCacheIsStale(t *testing.T) {
+	registry := newRuntimeRegistryWithTask(t, cronTaskDefinition{
+		TaskCode:   "cron:reset-system-data",
+		TaskName:   "reset-system-data",
+		CronSpec:   "0 0 4 * * *",
+		Handler:    "cron.reset-system-data",
+		Status:     model.TaskStatusEnabled,
+		IsHighRisk: model.TaskHighRisk,
+	})
+	registry.mu.Lock()
+	current := registry.tasks["cron:reset-system-data"]
+	current.loadedAt = time.Now().Add(-cronRuntimeCacheMaxAge - time.Second)
+	registry.tasks["cron:reset-system-data"] = current
+	registry.mu.Unlock()
+
+	if registry.taskCanRun("cron:reset-system-data", "0 0 4 * * *") {
+		t.Fatal("expected high-risk task to fail closed when cache is stale")
+	}
+}
+
+func TestRuntimeCronRegistryRejectsInvalidSpec(t *testing.T) {
+	crontab := cron.New(cron.WithSeconds())
+	registry := newRuntimeCronRegistry(context.Background(), crontab, &cronLogger{})
+	restoreDefinitions := setCronTaskDefinitionsForTest(t, []cronTaskDefinition{
+		{
+			TaskCode: "cron:demo",
+			TaskName: "demo",
+			CronSpec: "bad spec",
+			Handler:  "cron.demo",
+			Status:   model.TaskStatusEnabled,
+		},
+	})
+	registry.reconcileOnce(context.Background())
+	restoreDefinitions()
+
+	if len(registry.tasks) != 0 || len(crontab.Entries()) != 0 {
+		t.Fatalf("expected invalid task not to be registered, got tasks=%d entries=%d", len(registry.tasks), len(crontab.Entries()))
+	}
+}
+
+func TestRuntimeCronRegistryRuntimeStateUpdatesOnlyWhenChanged(t *testing.T) {
+	registry := newRuntimeCronRegistry(context.Background(), cron.New(cron.WithSeconds()), &cronLogger{})
+	definition := cronTaskDefinition{
+		TaskCode: "cron:demo",
+		TaskName: "demo",
+		CronSpec: "0 0 4 * * *",
+		Handler:  "cron.demo",
+		Status:   model.TaskStatusEnabled,
+	}
+
+	updates := registry.appendRuntimeStateUpdateIfChanged(nil, definition, model.TaskStatusEnabled, cronRuntimeSyncSuccess, nil)
+	if len(updates) != 1 {
+		t.Fatalf("expected first state update, got %d", len(updates))
+	}
+	registry.markRuntimeStatesRecorded(updates)
+
+	updates = registry.appendRuntimeStateUpdateIfChanged(nil, definition, model.TaskStatusEnabled, cronRuntimeSyncSuccess, nil)
+	if len(updates) != 0 {
+		t.Fatalf("expected unchanged state to skip update, got %d", len(updates))
+	}
+
+	updates = registry.appendRuntimeStateUpdateIfChanged(nil, definition, model.TaskStatusDisabled, cronRuntimeSyncSuccess, nil)
+	if len(updates) != 1 {
+		t.Fatalf("expected active status change to record update, got %d", len(updates))
+	}
+}
+
+func newRuntimeRegistryWithTask(t *testing.T, definition cronTaskDefinition) *runtimeCronRegistry {
 	t.Helper()
-	for _, task := range schedule.tasks {
-		if task.name != name {
-			continue
-		}
-		if task.enabledWhen == nil {
-			return true
-		}
-		return task.enabledWhen(context.Background())
+	crontab := cron.New(cron.WithSeconds())
+	registry := newRuntimeCronRegistry(context.Background(), crontab, &cronLogger{})
+	restoreDefinitions := setCronTaskDefinitionsForTest(t, []cronTaskDefinition{definition})
+	registry.reconcileOnce(context.Background())
+	restoreDefinitions()
+	if len(registry.tasks) != 1 {
+		t.Fatalf("expected one runtime task, got %d", len(registry.tasks))
 	}
-	t.Fatalf("task %s not found", name)
-	return false
+	return registry
 }
 
-func setCronTaskStatusForTest(statuses map[string]uint8) func() {
-	previous := loadCronTaskStatus
-	loadCronTaskStatus = func(_ context.Context, taskCode string) (uint8, bool, error) {
-		status, ok := statuses[taskCode]
-		return status, ok, nil
-	}
-	return func() {
-		loadCronTaskStatus = previous
-	}
-}
-
-func setCronTaskDefinitionsForTest(definitions []cronTaskDefinition) func() {
+func setCronTaskDefinitionsForTest(t *testing.T, definitions []cronTaskDefinition) func() {
+	t.Helper()
 	previous := loadCronTaskDefinitions
 	loadCronTaskDefinitions = func(context.Context) ([]cronTaskDefinition, error) {
 		return definitions, nil
+	}
+	return func() {
+		loadCronTaskDefinitions = previous
+	}
+}
+
+func setCronTaskDefinitionsErrorForTest(t *testing.T, err error) func() {
+	t.Helper()
+	previous := loadCronTaskDefinitions
+	loadCronTaskDefinitions = func(context.Context) ([]cronTaskDefinition, error) {
+		return nil, err
 	}
 	return func() {
 		loadCronTaskDefinitions = previous

@@ -3,6 +3,8 @@ package product
 import (
 	"context"
 
+	"gorm.io/gorm"
+
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -40,19 +42,25 @@ func (s *ProductService) List(params *form.ProductList) interface{} {
 	}
 
 	productModel := model.NewProduct()
+	listOptions := model.ListOptionalParams{
+		OrderBy: "id desc",
+		Preload: map[string]func(db *gorm.DB) *gorm.DB{
+			"Department": nil,
+		},
+	}
 	total, collection, err := model.ListPageE(
 		productModel,
 		params.Page,
 		params.PerPage,
 		condition,
 		args,
-		model.ListOptionalParams{OrderBy: "id desc"},
+		listOptions,
 	)
 	if err != nil {
-		return resources.ToRawCollection(params.Page, params.PerPage, 0, make([]*model.Product, 0))
+		return resources.NewProductTransformer().ToCollection(params.Page, params.PerPage, 0, []*model.Product{})
 	}
 
-	return resources.ToRawCollection(params.Page, params.PerPage, total, collection)
+	return resources.NewProductTransformer().ToCollection(params.Page, params.PerPage, total, collection)
 }
 
 func (s *ProductService) buildListCondition(params *form.ProductList) (string, []any) {
@@ -160,7 +168,7 @@ func (s *ProductService) Detail(id uint) (any, error) {
 	product := model.NewProduct()
 	// 查询产品时加上数据权限条件，确保只能查看有权限的数据
 	condition, args := s.buildDetailCondition(id)
-	if err := product.GetDetail(condition, args...); err != nil || product.ID == 0 {
+	if err := s.loadProductDetail(product, condition, args...); err != nil || product.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 
@@ -181,6 +189,14 @@ func (s *ProductService) buildDetailCondition(id uint) (string, []any) {
 	}
 
 	return condition, args
+}
+
+func (s *ProductService) loadProductDetail(product *model.Product, condition string, args ...any) error {
+	db, err := product.GetDB(product)
+	if err != nil {
+		return err
+	}
+	return db.Preload("Department").Where(condition, args...).First(product).Error
 }
 
 // getUserDeptId 获取当前用户的默认部门 ID（取第一个部门）。

@@ -43,6 +43,8 @@ var executeCronHandler = func(ctx context.Context, handler string, payload map[s
 	return taskcron.ExecuteHandler(ctx, handler, payload)
 }
 
+var notifyTaskDefinitionChanged = NotifyTaskDefinitionChanged
+
 type exportTaskService interface {
 	CreateRecordForTask(ctx context.Context, input baseservice.ExportTaskBootstrapInput) (*model.SysExportRecord, bool, error)
 	HasRecordForTaskRun(ctx context.Context, taskRunID uint) (bool, error)
@@ -172,6 +174,11 @@ func (s *TaskCenterService) UpdateTaskOperationConfig(ctx context.Context, param
 		Where("code = ? AND deleted_at = 0", taskCode).
 		Updates(updates).Error; err != nil {
 		return nil, err
+	}
+	if err := notifyTaskDefinitionChanged(taskCode); err != nil {
+		log.Logger.Warn("发布任务定义变更通知失败",
+			zap.String("task_code", taskCode),
+			zap.Error(err))
 	}
 	definition.Status = params.Status
 	definition.AllowManual = params.AllowManual

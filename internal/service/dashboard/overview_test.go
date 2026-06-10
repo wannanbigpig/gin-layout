@@ -221,19 +221,20 @@ func TestBuildErrorCodeStatsOrderedDesc(t *testing.T) {
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 
-	// 500 出现 3 次，404 出现 2 次，403 出现 1 次，200/302 也应参与全量响应状态码分布。
+	// 500 出现 3 次，404 出现 2 次，403 出现 1 次，101/200/302 不应进入错误响应状态码分布。
 	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
 	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
 	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
 	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 404)
 	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 404)
 	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 403)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 101)
 	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 200)
 	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 302)
 
 	buckets := buildErrorCodeStats(db, todayStart, tomorrowStart)
-	if len(buckets) != 5 {
-		t.Fatalf("expected 5 buckets, got %d", len(buckets))
+	if len(buckets) != 3 {
+		t.Fatalf("expected 3 buckets, got %d", len(buckets))
 	}
 	if buckets[0].StatusCode != 500 || buckets[0].Count != 3 {
 		t.Fatalf("bucket[0] expected 500/3, got %+v", buckets[0])
@@ -241,14 +242,8 @@ func TestBuildErrorCodeStatsOrderedDesc(t *testing.T) {
 	if buckets[1].StatusCode != 404 || buckets[1].Count != 2 {
 		t.Fatalf("bucket[1] expected 404/2, got %+v", buckets[1])
 	}
-	if buckets[2].StatusCode != 200 || buckets[2].Count != 1 {
-		t.Fatalf("bucket[2] expected 200/1, got %+v", buckets[2])
-	}
-	if buckets[3].StatusCode != 302 || buckets[3].Count != 1 {
-		t.Fatalf("bucket[3] expected 302/1, got %+v", buckets[3])
-	}
-	if buckets[4].StatusCode != 403 || buckets[4].Count != 1 {
-		t.Fatalf("bucket[4] expected 403/1, got %+v", buckets[4])
+	if buckets[2].StatusCode != 403 || buckets[2].Count != 1 {
+		t.Fatalf("bucket[2] expected 403/1, got %+v", buckets[2])
 	}
 }
 

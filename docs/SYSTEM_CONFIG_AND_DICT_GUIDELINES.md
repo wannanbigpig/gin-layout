@@ -140,6 +140,6 @@
 | 页面下拉、tag、颜色、多语言 label | 放 `sys_dict` |
 | 登录锁定次数、审计脱敏字段、可运营阈值 | 放 `sys_config` |
 | validator 枚举、权限模式、状态机流转 | 放代码常量与校验 |
-| 定时任务是否真实启停 | 放 `task_definitions.status`，`cron` 每次触发前读取；handler/spec 仍以代码内置定义为准 |
+| 定时任务是否真实启停 | 放 `task_definitions.status`，`cron` 通过进程缓存执行，后台变更用通知刷新并由周期 reconcile 兜底；handler 仍以代码注册表为安全边界，`cron_spec` 属于 DB 运营配置 |
 | 后端需要运行时读取策略 | 通过领域化 helper 读取 `sys_config`，并保留默认值 |
 | 展示层需要减少硬编码枚举 | 后端提供 `dict/options`；调用方 fallback 由调用方项目维护 |

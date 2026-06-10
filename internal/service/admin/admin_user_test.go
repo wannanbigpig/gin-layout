@@ -11,6 +11,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	"gorm.io/driver/sqlite"
@@ -75,6 +76,25 @@ func TestAdminUserMenuQuery(t *testing.T) {
 	}
 }
 
+func TestGetUserMenuInfoTreatsIsSuperAdminAsFullAccess(t *testing.T) {
+	db := setupAdminUserMenuInfoTestDB(t)
+	adminUserModel := model.NewAdminUsers()
+	adminUserModel.SetDB(db)
+	menuModel := model.NewMenu()
+	menuModel.SetDB(db)
+	menuI18nModel := model.NewMenuI18n()
+	menuI18nModel.SetDB(db)
+
+	result, err := NewAdminUserService().getUserMenuInfoWithModels(2, "zh-CN", adminUserModel, menuModel, menuI18nModel)
+	if err != nil {
+		t.Fatalf("GetUserMenuInfo returned error: %v", err)
+	}
+
+	if !menuTreeContainsCode(result, "task:cancel") {
+		t.Fatalf("expected is_super_admin user to receive task:cancel menu, got %#v", result)
+	}
+}
+
 func TestAdminUserHandleMutationErrorKeepsBusinessError(t *testing.T) {
 	service := NewAdminUserService()
 	businessErr := e.NewBusinessError(e.FAILURE, "business")
@@ -83,6 +103,96 @@ func TestAdminUserHandleMutationErrorKeepsBusinessError(t *testing.T) {
 	if got != businessErr {
 		t.Fatalf("expected original business error, got %#v", got)
 	}
+}
+
+func setupAdminUserMenuInfoTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to create sqlite db: %v", err)
+	}
+	statements := []string{
+		`CREATE TABLE admin_user (
+			id integer primary key,
+			username text,
+			is_super_admin integer not null default 0,
+			deleted_at integer not null default 0
+		)`,
+		`CREATE TABLE menu (
+			id integer primary key,
+			created_at datetime,
+			updated_at datetime,
+			deleted_at integer not null default 0,
+			icon text,
+			code text,
+			path text,
+			full_path text,
+			is_show integer,
+			is_new_window integer,
+			sort integer,
+			type integer,
+			pid integer,
+			level integer,
+			pids text,
+			children_num integer,
+			description text,
+			is_auth integer,
+			is_external_links integer,
+			name text,
+			component_key text,
+			animate_enter text,
+			animate_leave text,
+			animate_duration real,
+			status integer,
+			redirect text
+		)`,
+		`CREATE TABLE menu_i18n (
+			id integer primary key autoincrement,
+			menu_id integer,
+			locale text,
+			title text
+		)`,
+		`INSERT INTO admin_user (id, username, is_super_admin, deleted_at) VALUES (2, 'ops-admin', 1, 0)`,
+		`INSERT INTO menu (id, deleted_at, code, path, full_path, is_show, is_new_window, sort, type, pid, level, pids, children_num, is_auth, is_external_links, name, component_key, animate_duration, status)
+			VALUES (10, 0, 'task', 'task', '/task', 1, 0, 100, 2, 0, 1, '0', 1, 1, 0, 'Task', 'system:task', 0, 1)`,
+		`INSERT INTO menu (id, deleted_at, code, path, full_path, is_show, is_new_window, sort, type, pid, level, pids, children_num, is_auth, is_external_links, name, component_key, animate_duration, status)
+			VALUES (11, 0, 'task:cancel', '', '', 1, 0, 90, 3, 10, 2, '0,10', 0, 1, 0, '', '', 0, 1)`,
+		`INSERT INTO menu_i18n (menu_id, locale, title) VALUES (10, 'zh-CN', '任务中心'), (11, 'zh-CN', '取消任务')`,
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("execute sqlite setup failed: %v", err)
+		}
+	}
+	return db
+}
+
+func menuTreeContainsCode(value any, code string) bool {
+	switch tree := value.(type) {
+	case []*resources.MenuCollectionResources:
+		for _, item := range tree {
+			if menuNodeContainsCode(item, code) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func menuNodeContainsCode(item *resources.MenuCollectionResources, code string) bool {
+	if item == nil {
+		return false
+	}
+	if item.Code == code {
+		return true
+	}
+	for _, child := range item.Children {
+		if menuNodeContainsCode(child, code) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAdminUserHandleMutationErrorWrapsPlainError(t *testing.T) {
@@ -223,6 +333,120 @@ func TestApplyUpdateFieldsRejectsSuperAdminPasswordChange(t *testing.T) {
 	})
 
 	assertBusinessErrorMessage(t, err, e.SuperAdminCannotModify, "系统默认超级管理员不允许修改密码")
+}
+
+func TestApplyCreateFieldsSetsIsSuperAdmin(t *testing.T) {
+	service := NewAdminUserService()
+	username := "ops_admin"
+	nickname := "Ops Admin"
+	password := "password123"
+	isSuperAdmin := global.Yes
+	adminUserModel := &model.AdminUser{}
+
+	err := service.applyCreateFields(adminUserModel, &adminUserEditParams{
+		Username:     &username,
+		Nickname:     &nickname,
+		Password:     &password,
+		IsSuperAdmin: &isSuperAdmin,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if adminUserModel.IsSuperAdmin != global.Yes {
+		t.Fatalf("expected is_super_admin=%d, got %d", global.Yes, adminUserModel.IsSuperAdmin)
+	}
+}
+
+func TestApplyUpdateFieldsSetsIsSuperAdmin(t *testing.T) {
+	service := NewAdminUserService()
+	isSuperAdmin := global.Yes
+	adminUserModel := &model.AdminUser{}
+
+	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
+		Id:           2,
+		IsSuperAdmin: &isSuperAdmin,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if adminUserModel.IsSuperAdmin != global.Yes {
+		t.Fatalf("expected is_super_admin=%d, got %d", global.Yes, adminUserModel.IsSuperAdmin)
+	}
+}
+
+func TestApplyUpdateFieldsRejectsDefaultSuperAdminFlagRemoval(t *testing.T) {
+	service := NewAdminUserService()
+	isSuperAdmin := global.No
+	adminUserModel := &model.AdminUser{
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+			BaseModel: model.BaseModel{ID: global.SuperAdminId},
+		},
+		IsSuperAdmin: global.Yes,
+	}
+
+	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
+		Id:           global.SuperAdminId,
+		IsSuperAdmin: &isSuperAdmin,
+	})
+
+	assertBusinessErrorMessage(t, err, e.SuperAdminCannotModify, "系统默认超级管理员不允许修改密码")
+}
+
+func TestAdminUserMutationRejectsSuperAdminFlagChangeByNonSuperAdmin(t *testing.T) {
+	service := NewAdminUserService()
+	service.SetAdminUserId(2)
+	isSuperAdmin := global.Yes
+
+	restoreLoader := replaceSuperAdminCheckLoader(t, &model.AdminUser{IsSuperAdmin: global.No}, nil)
+	defer restoreLoader()
+
+	err := service.saveAdminUserMutation(&adminUserEditParams{
+		Username:     stringPtr("ops_admin"),
+		Nickname:     stringPtr("Ops Admin"),
+		Password:     stringPtr("password123"),
+		IsSuperAdmin: &isSuperAdmin,
+	})
+
+	assertBusinessErrorMessage(t, err, e.AuthorizationErr, "暂无权限")
+}
+
+func TestAdminUserMutationAllowsSuperAdminFlagChangeBySuperAdmin(t *testing.T) {
+	service := NewAdminUserService()
+	service.SetAdminUserId(2)
+	isSuperAdmin := global.Yes
+
+	restoreLoader := replaceSuperAdminCheckLoader(t, &model.AdminUser{IsSuperAdmin: global.Yes}, nil)
+	defer restoreLoader()
+
+	err := service.saveAdminUserMutation(&adminUserEditParams{
+		Username:     stringPtr("ops_admin"),
+		Nickname:     stringPtr("Ops Admin"),
+		Password:     stringPtr("password123"),
+		IsSuperAdmin: &isSuperAdmin,
+	})
+
+	if err == nil {
+		t.Fatal("expected later DB error after super admin authorization passes")
+	}
+	var businessErr *e.BusinessError
+	if errors.As(err, &businessErr) && businessErr.GetCode() == e.AuthorizationErr {
+		t.Fatalf("expected super admin actor not to be rejected by authorization, got %v", err)
+	}
+}
+
+func replaceSuperAdminCheckLoader(t *testing.T, user *model.AdminUser, err error) func() {
+	t.Helper()
+	previous := loadAdminUserForSuperAdminCheck
+	loadAdminUserForSuperAdminCheck = func(uint) (*model.AdminUser, error) {
+		return user, err
+	}
+	return func() {
+		loadAdminUserForSuperAdminCheck = previous
+	}
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func TestValidateAvatarFileAllowsRealJPGPNGAndWebP(t *testing.T) {

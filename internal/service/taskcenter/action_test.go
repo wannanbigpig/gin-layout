@@ -190,6 +190,12 @@ func (s *stubInspector) GetAllQueueStats(ctx context.Context) ([]*queue.QueueSta
 func TestUpdateTaskOperationConfigUpdatesDefinition(t *testing.T) {
 	db := newTaskCenterTestDB(t)
 	insertTaskDefinition(t, db, "task:config", model.TaskRecordSuccessAll)
+	notified := make([]string, 0, 1)
+	restoreNotify := setTaskDefinitionChangeNotifierForTest(func(taskCode string) error {
+		notified = append(notified, taskCode)
+		return nil
+	})
+	defer restoreNotify()
 	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
 		return &model.TaskDefinition{
 			Code:        taskCode,
@@ -227,6 +233,43 @@ func TestUpdateTaskOperationConfigUpdatesDefinition(t *testing.T) {
 	}
 	if stored.Status != model.TaskStatusDisabled || stored.AllowManual != model.TaskManualAllowed || stored.AllowRetry != model.TaskRetryNotAllowed || stored.CronSpec != "0 0 4 * * *" {
 		t.Fatalf("unexpected stored definition: status=%d allow_manual=%d allow_retry=%d cron_spec=%s", stored.Status, stored.AllowManual, stored.AllowRetry, stored.CronSpec)
+	}
+	if len(notified) != 1 || notified[0] != "task:config" {
+		t.Fatalf("expected task definition change notification, got %#v", notified)
+	}
+}
+
+func TestUpdateTaskOperationConfigDoesNotFailWhenNotificationFails(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	insertTaskDefinition(t, db, "task:config", model.TaskRecordSuccessAll)
+	restoreNotify := setTaskDefinitionChangeNotifierForTest(func(taskCode string) error {
+		if taskCode != "task:config" {
+			t.Fatalf("unexpected task code: %s", taskCode)
+		}
+		return stderrors.New("redis down")
+	})
+	defer restoreNotify()
+	restoreDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:        taskCode,
+			Kind:        model.TaskKindCron,
+			CronSpec:    "0 0 3 * * *",
+			Status:      model.TaskStatusEnabled,
+			AllowManual: model.TaskManualNotAllowed,
+			AllowRetry:  model.TaskRetryAllowed,
+		}, nil
+	})
+	defer restoreDefinition()
+
+	_, err := NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db}).UpdateTaskOperationConfig(context.Background(), &form.TaskOperationConfigForm{
+		TaskCode:    "task:config",
+		Status:      model.TaskStatusDisabled,
+		AllowManual: model.TaskManualAllowed,
+		AllowRetry:  model.TaskRetryNotAllowed,
+		CronSpec:    "0 0 4 * * *",
+	})
+	if err != nil {
+		t.Fatalf("expected notification failure not to block update, got %v", err)
 	}
 }
 
@@ -1147,5 +1190,13 @@ func setCronExecutorForTest(executor func(ctx context.Context, handler string, p
 	executeCronHandler = executor
 	return func() {
 		executeCronHandler = previous
+	}
+}
+
+func setTaskDefinitionChangeNotifierForTest(notifier func(taskCode string) error) func() {
+	previous := notifyTaskDefinitionChanged
+	notifyTaskDefinitionChanged = notifier
+	return func() {
+		notifyTaskDefinitionChanged = previous
 	}
 }
