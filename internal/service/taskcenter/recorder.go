@@ -20,6 +20,9 @@ const (
 	maxErrorBytes   = 8 * 1024
 )
 
+// ErrTaskRunStatusChanged 当任务执行记录的状态已被其他操作（如取消）修改时返回此错误。
+var ErrTaskRunStatusChanged = errors.New("task run status has already been changed")
+
 // RunStart 描述一次任务开始执行时的上下文。
 type RunStart struct {
 	TaskCode       string
@@ -315,14 +318,18 @@ func (r *recorder) Finish(ctx context.Context, run *model.TaskRun, input RunFini
 	return db.Transaction(func(tx *gorm.DB) error {
 		detail := resolveDetailDecision(tx, run, status)
 		run.DetailRecordMode = detail.Mode
-		if err := tx.Model(&model.TaskRun{}).Where("id = ?", run.ID).Updates(map[string]any{
+		result := tx.Model(&model.TaskRun{}).Where("id = ? AND status IN ?", run.ID, []string{model.TaskRunStatusRunning, model.TaskRunStatusPending}).Updates(map[string]any{
 			"status":             run.Status,
 			"error_message":      run.ErrorMessage,
 			"finished_at":        run.FinishedAt,
 			"duration_ms":        run.DurationMS,
 			"detail_record_mode": run.DetailRecordMode,
-		}).Error; err != nil {
-			return err
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrTaskRunStatusChanged
 		}
 		if err := tx.Create(newEvent(run.ID, eventType, eventMessage, finishMeta(input))).Error; err != nil {
 			return err

@@ -1,9 +1,11 @@
 package menu
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
 
@@ -34,7 +36,7 @@ func (s *MenuService) Create(params *form.CreateMenu, _ string) error {
 		Pid:             params.Pid,
 		Description:     params.Description,
 		ApiList:         params.ApiList,
-		ComponentKey:       params.ComponentKey,
+		ComponentKey:    params.ComponentKey,
 		Status:          params.Status,
 		Redirect:        params.Redirect,
 		IsExternalLinks: params.IsExternalLinks,
@@ -62,7 +64,7 @@ func (s *MenuService) Update(params *form.UpdateMenu, _ string) error {
 		Pid:             params.Pid,
 		Description:     params.Description,
 		ApiList:         params.ApiList,
-		ComponentKey:       params.ComponentKey,
+		ComponentKey:    params.ComponentKey,
 		Status:          params.Status,
 		Redirect:        params.Redirect,
 		IsExternalLinks: params.IsExternalLinks,
@@ -109,9 +111,8 @@ type menuEditContext struct {
 // 2. 构建树形层级（pids, level, full_path）
 // 3. 检查层级深度
 // 4. 填充菜单字段
-// 5. 验证唯一字段（code, name, path）
-// 6. 验证 API 列表
-// 7. 事务保存：菜单数据、级联更新子菜单、更新子菜单数量、同步菜单权限
+// 5. 验证 API 列表
+// 6. 事务保存：带行锁验证唯一字段、菜单数据、级联更新子菜单、更新子菜单数量、同步菜单权限
 func (s *MenuService) applyMenuMutation(params *menuMutation) (*model.Menu, error) {
 	menu, editContext, err := s.prepareMutationContext(params)
 	if err != nil {
@@ -131,19 +132,16 @@ func (s *MenuService) applyMenuMutation(params *menuMutation) (*model.Menu, erro
 		return nil, e.NewBusinessError(e.MaxMenuDepth)
 	}
 
-	// 4) 填充字段并验证唯一性
+	// 4) 填充字段
 	s.assignMenuFields(menu, params)
-	if err := s.validateUniqueFields(menu, params, editContext.excludeId); err != nil {
-		return nil, err
-	}
 
 	// 5) 规范化关联 API 列表（仅保留有效且去重后的 ID）
 	if err := s.normalizeMenuAPIList(params); err != nil {
 		return nil, err
 	}
 
-	// 6) 持久化及事务后处理
-	if err := s.executeEditTransaction(menu, params.ApiList, params.TitleI18n, editContext); err != nil {
+	// 6) 持久化及事务后处理（唯一性校验在事务内执行，使用行锁防止并发冲突）
+	if err := s.executeEditTransaction(menu, params, editContext); err != nil {
 		return nil, err
 	}
 	return menu, nil
@@ -318,28 +316,37 @@ func (s *MenuService) assignMenuFields(menu *model.Menu, params *menuMutation) {
 }
 
 // validateUniqueFields 验证菜单唯一字段：code、name、full_path。
-func (s *MenuService) validateUniqueFields(menu *model.Menu, params *menuMutation, excludeId uint) error {
+// 使用行锁（FOR UPDATE）防止并发事务同时通过校验导致重复数据。
+// 必须在事务内调用，tx 为当前事务的数据库连接。
+func (s *MenuService) validateUniqueFields(tx *gorm.DB, menu *model.Menu, params *menuMutation, excludeId uint) error {
+	checkModel := model.NewMenu()
+	checkModel.SetDB(tx)
+
 	// 验证 code 唯一性
-	codeExists, err := menu.ExistsExcludeId("code", params.Code, excludeId)
-	if err != nil {
-		return err
-	}
-	if params.Code != "" && codeExists {
-		return e.NewBusinessError(e.MenuCodeExists)
+	if params.Code != "" {
+		codeExists, err := checkModel.ExistsWithLockExcludeId("code", params.Code, excludeId)
+		if err != nil {
+			return err
+		}
+		if codeExists {
+			return e.NewBusinessError(e.MenuCodeExists)
+		}
 	}
 
 	// 验证 name 唯一性
-	nameExists, err := menu.ExistsExcludeId("name", params.Name, excludeId)
-	if err != nil {
-		return err
-	}
-	if params.Name != "" && nameExists {
-		return e.NewBusinessError(e.MenuRouteNameExists)
+	if params.Name != "" {
+		nameExists, err := checkModel.ExistsWithLockExcludeId("name", params.Name, excludeId)
+		if err != nil {
+			return err
+		}
+		if nameExists {
+			return e.NewBusinessError(e.MenuRouteNameExists)
+		}
 	}
 
 	// 验证 full_path 唯一性（按钮类型除外）
 	if params.Type != model.BUTTON && menu.Path != "" {
-		pathExists, err := menu.ExistsExcludeId("full_path", menu.FullPath, excludeId)
+		pathExists, err := checkModel.ExistsWithLockExcludeId("full_path", menu.FullPath, excludeId)
 		if err != nil {
 			return err
 		}
@@ -352,23 +359,31 @@ func (s *MenuService) validateUniqueFields(menu *model.Menu, params *menuMutatio
 
 // executeEditTransaction 执行菜单编辑事务。
 // 处理逻辑：
-// 1. 保存菜单数据
-// 2. 级联更新子菜单的 level、pids、full_path
-// 3. 更新原父菜单和新父菜单的子菜单数量
-// 4. 更新菜单关联的 API 权限
-// 5. 同步受影响用户的权限缓存
-func (s *MenuService) executeEditTransaction(menu *model.Menu, apiList []uint, titleI18n map[string]string, editContext *menuEditContext) error {
+// 1. 带行锁验证唯一字段（code, name, full_path），防止并发插入导致重复
+// 2. 保存菜单数据
+// 3. 级联更新子菜单的 level、pids、full_path
+// 4. 更新原父菜单和新父菜单的子菜单数量
+// 5. 更新菜单关联的 API 权限
+// 6. 同步受影响用户的权限缓存
+func (s *MenuService) executeEditTransaction(menu *model.Menu, params *menuMutation, editContext *menuEditContext) error {
 	db, err := menu.GetDB()
 	if err != nil {
 		return err
 	}
 
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
-		// 保存菜单数据
-		if err := s.persistMenu(menu, tx); err != nil {
+		// 带行锁验证唯一字段，防止并发插入导致重复数据
+		if err := s.validateUniqueFields(tx, menu, params, editContext.excludeId); err != nil {
 			return err
 		}
-		if err := model.NewMenuI18n().UpsertMenuTitles(menu.ID, titleI18n, tx); err != nil {
+		// 保存菜单数据
+		if err := s.persistMenu(menu, tx); err != nil {
+			if businessErr := menuUniqueConstraintBusinessError(err); businessErr != nil {
+				return businessErr
+			}
+			return err
+		}
+		if err := model.NewMenuI18n().UpsertMenuTitles(menu.ID, params.TitleI18n, tx); err != nil {
 			return err
 		}
 		// 级联更新子菜单
@@ -379,13 +394,45 @@ func (s *MenuService) executeEditTransaction(menu *model.Menu, apiList []uint, t
 			return err
 		}
 		// 更新菜单关联的 API 权限
-		return s.updateMenuPermissions(menu, apiList, tx)
+		return s.updateMenuPermissions(menu, params.ApiList, tx)
 	})
 	if err != nil {
 		return err
 	}
 	// 同步受影响用户的权限缓存
 	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByMenus([]uint{menu.ID})
+}
+
+func menuUniqueConstraintBusinessError(err error) error {
+	if err == nil {
+		return nil
+	}
+	const (
+		codeKey = "uniq_menu_code_active"
+		nameKey = "uniq_menu_name_active"
+		pathKey = "uniq_menu_full_path_active"
+	)
+	message := err.Error()
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		message = mysqlErr.Message
+	}
+	switch {
+	case strings.Contains(message, codeKey):
+		return e.NewBusinessError(e.MenuCodeExists)
+	case strings.Contains(message, nameKey):
+		return e.NewBusinessError(e.MenuRouteNameExists)
+	case strings.Contains(message, pathKey):
+		return e.NewBusinessError(e.MenuPathExists)
+	case strings.Contains(message, "UNIQUE constraint failed") && strings.Contains(message, "menu.active_code_unique"):
+		return e.NewBusinessError(e.MenuCodeExists)
+	case strings.Contains(message, "UNIQUE constraint failed") && strings.Contains(message, "menu.active_name_unique"):
+		return e.NewBusinessError(e.MenuRouteNameExists)
+	case strings.Contains(message, "UNIQUE constraint failed") && strings.Contains(message, "menu.active_full_path_unique"):
+		return e.NewBusinessError(e.MenuPathExists)
+	default:
+		return nil
+	}
 }
 
 // persistMenu 持久化菜单数据。

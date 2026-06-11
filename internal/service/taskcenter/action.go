@@ -552,6 +552,9 @@ func (s *TaskCenterService) CancelTask(ctx context.Context, runID uint, triggerU
 		CanceledByAccount: triggerAccount,
 		CancelReason:      strings.TrimSpace(cancelReason),
 	}); err != nil {
+		if errors.Is(err, ErrTaskRunStatusChanged) {
+			return nil, e.NewBusinessError(e.InvalidParameter, "任务已完成或状态已变化，无法取消")
+		}
 		return nil, err
 	}
 	if err := newExportTaskService().MarkCanceledIfExists(ctx, runModel.ID, cancelReason); err != nil {

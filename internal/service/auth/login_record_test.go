@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -78,6 +79,40 @@ func TestRecordLoginLogLoginRollsBackWhenUserUpdateFails(t *testing.T) {
 	if logCount != 0 {
 		t.Fatalf("expected login log insert rolled back, got %d", logCount)
 	}
+}
+
+func TestEnqueueLoginLogAfterStopFallsBackWithoutPanic(t *testing.T) {
+	resetLoginLogWorkerForTest()
+	StopLoginLogWorker(time.Second)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("enqueueLoginLogAsync panicked after stop: %v", r)
+		}
+	}()
+	if enqueueLoginLogAsync(&model.AdminLoginLogs{Username: "admin"}) {
+		t.Fatal("expected enqueue to return false after worker stopped")
+	}
+	done := make(chan struct{})
+	go func() {
+		loginLogWorkerWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected no worker to be started after stop")
+	}
+}
+
+func resetLoginLogWorkerForTest() {
+	StopLoginLogWorker(time.Second)
+	loginLogQueueMu.Lock()
+	loginLogQueue = nil
+	loginLogWorkerState.stopped = false
+	loginLogWorkerWg = sync.WaitGroup{}
+	loginLogQueueOnce = sync.Once{}
+	loginLogQueueMu.Unlock()
 }
 
 func newLoginRecordTestDB(t *testing.T, withLastLoginColumn bool) *gorm.DB {

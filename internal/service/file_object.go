@@ -205,13 +205,32 @@ func findPendingUploadSession(tx *gorm.DB, token string, uploadType string, uid 
 	return session, nil
 }
 
+func findCompletingUploadSession(tx *gorm.DB, sessionID uint, uid uint, uploadType string) (*model.UploadSession, error) {
+	if tx == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var session model.UploadSession
+	if err := tx.Clauses(clauseLockForUpdate()).
+		Where("id = ? AND owner_uid = ? AND upload_type = ?", sessionID, uid, uploadType).
+		First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "upload session not found")
+		}
+		return nil, err
+	}
+	if session.Status != model.UploadSessionStatusCompleting {
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "complete_token is already used")
+	}
+	return &session, nil
+}
+
 func markUploadSessionCompleted(tx *gorm.DB, session *model.UploadSession, fileID uint, objectID uint) error {
 	if tx == nil || session == nil {
 		return nil
 	}
 	now := time.Now()
 	res := tx.Model(&model.UploadSession{}).
-		Where("id = ? AND status = ?", session.ID, model.UploadSessionStatusPending).
+		Where("id = ? AND status IN ?", session.ID, []string{model.UploadSessionStatusPending, model.UploadSessionStatusCompleting}).
 		Updates(map[string]any{
 			"status":         model.UploadSessionStatusCompleted,
 			"file_id":        fileID,
@@ -226,6 +245,41 @@ func markUploadSessionCompleted(tx *gorm.DB, session *model.UploadSession, fileI
 		return pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "complete_token is already used")
 	}
 	return nil
+}
+
+func claimUploadSessionCompleting(tx *gorm.DB, session *model.UploadSession) error {
+	if tx == nil || session == nil {
+		return nil
+	}
+	res := tx.Model(&model.UploadSession{}).
+		Where("id = ? AND status = ?", session.ID, model.UploadSessionStatusPending).
+		Updates(map[string]any{
+			"status":     model.UploadSessionStatusCompleting,
+			"updated_at": time.Now(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "complete_token is already used")
+	}
+	session.Status = model.UploadSessionStatusCompleting
+	return nil
+}
+
+func restoreUploadSessionPending(ctx context.Context, db *gorm.DB, sessionID uint) {
+	if db == nil || sessionID == 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_ = db.WithContext(ctx).Model(&model.UploadSession{}).
+		Where("id = ? AND status = ?", sessionID, model.UploadSessionStatusCompleting).
+		Updates(map[string]any{
+			"status":     model.UploadSessionStatusPending,
+			"updated_at": time.Now(),
+		}).Error
 }
 
 func validateDirectCompleteSession(session *model.UploadSession, params *form.FileUploadComplete, uid uint) error {

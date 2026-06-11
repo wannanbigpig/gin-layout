@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 
+	"gorm.io/gorm/clause"
+
 	"github.com/wannanbigpig/gin-layout/internal/model/modelDict"
 )
 
@@ -134,6 +136,29 @@ func (m *Menu) ExistsExcludeId(field string, value string, excludeId uint) (bool
 	if err := db.Model(m).
 		Select("1").
 		Where(field+" = ? AND id != ? AND deleted_at = 0", value, excludeId).
+		Limit(1).
+		Scan(&exists).Error; err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+// ExistsWithLockExcludeId 带行锁检查指定字段值的记录是否存在（排除指定 ID）。
+// 必须在事务内调用，用于防止并发插入导致唯一字段冲突。
+func (m *Menu) ExistsWithLockExcludeId(field string, value string, excludeId uint) (bool, error) {
+	if !isAllowedMenuUniqueField(field) {
+		return false, fmt.Errorf("unsupported menu unique field: %s", field)
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return false, err
+	}
+	var exists bool
+	if err := db.Model(m).
+		Select("1").
+		Where(clause.Eq{Column: clause.Column{Name: field}, Value: value}).
+		Where("id != ? AND deleted_at = 0", excludeId).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Limit(1).
 		Scan(&exists).Error; err != nil {
 		return false, err

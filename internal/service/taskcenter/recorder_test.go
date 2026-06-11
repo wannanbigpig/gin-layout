@@ -248,6 +248,38 @@ func TestRecorderFinishCancelWritesOperatorMeta(t *testing.T) {
 	}
 }
 
+func TestRecorderFinishStatusChangedDoesNotWriteFinishEvent(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	recorder := NewRecorderWithDB(db)
+
+	run, err := recorder.Start(context.Background(), RunStart{
+		TaskCode: "demo:send",
+		Kind:     model.TaskKindAsync,
+		Source:   model.TaskSourceQueue,
+		SourceID: "task-1",
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if err := db.Model(&model.TaskRun{}).Where("id = ?", run.ID).Update("status", model.TaskRunStatusCanceled).Error; err != nil {
+		t.Fatalf("mark run canceled failed: %v", err)
+	}
+
+	err = recorder.Finish(context.Background(), run, RunFinish{})
+	if !errors.Is(err, ErrTaskRunStatusChanged) {
+		t.Fatalf("expected ErrTaskRunStatusChanged, got %v", err)
+	}
+	var successEvents int64
+	if err := db.Model(&model.TaskRunEvent{}).
+		Where("run_id = ? AND event_type = ?", run.ID, model.TaskEventSuccess).
+		Count(&successEvents).Error; err != nil {
+		t.Fatalf("count success events failed: %v", err)
+	}
+	if successEvents != 0 {
+		t.Fatalf("expected no success event when status changed, got %d", successEvents)
+	}
+}
+
 func TestRecorderEnqueuePersistsRetryChain(t *testing.T) {
 	db := newTaskCenterTestDB(t)
 	recorder := NewRecorderWithDB(db)

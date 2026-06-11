@@ -35,7 +35,10 @@ func (api LoginController) Login(c *gin.Context) {
 	loginService := auth.NewLoginService()
 	logInfo := loginService.BuildLoginLogInfo(c)
 	if err := loginService.CheckLoginAllowed(params.UserName); err != nil {
-		loginService.HandleLoginFailure(params.UserName, loginService.ExtractErrorMessage(err), logInfo, false)
+		if handleErr := loginService.HandleLoginFailure(params.UserName, loginService.ExtractErrorMessage(err), logInfo, false); handleErr != nil {
+			// 登录本身已经失败；失败处理链路的写库错误只记录，不覆盖原始业务提示。
+			loginService.LogLoginFailureHandleError(params.UserName, handleErr)
+		}
 		api.Err(c, err)
 		return
 	}
@@ -43,7 +46,9 @@ func (api LoginController) Login(c *gin.Context) {
 	// 校验验证码
 	if !captcha.Verify(params.CaptchaID, params.Captcha) {
 		// 记录验证码错误日志
-		loginService.HandleLoginFailure(params.UserName, "验证码错误", logInfo, true)
+		if handleErr := loginService.HandleLoginFailure(params.UserName, "验证码错误", logInfo, true); handleErr != nil {
+			loginService.LogLoginFailureHandleError(params.UserName, handleErr)
+		}
 		api.FailCode(c, errors.CaptchaErr)
 		return
 	}

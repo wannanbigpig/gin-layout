@@ -52,6 +52,7 @@ func (s *AdminUserService) handleMutationError(err error, fallbackCode int) erro
 		return businessErr
 	}
 
+	log.Logger.Error("操作失败，原始错误已记录", zap.Error(err), zap.Int("fallback_code", fallbackCode))
 	return e.NewBusinessError(fallbackCode)
 }
 

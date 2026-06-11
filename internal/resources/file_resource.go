@@ -72,6 +72,9 @@ func NewFileResourceTransformer() FileResourceTransformer {
 }
 
 func (r *FileResourceResources) SetCustomFields(data *model.UploadFiles) {
+	if data == nil {
+		return
+	}
 	r.URL = buildFileResourceURL(data.UUID)
 	r.ThumbnailURL = buildFileThumbnailURL(data)
 	r.DeletedAt = uint(data.DeletedAt)
@@ -254,6 +257,9 @@ func NewFileReferenceTransformer() FileReferenceTransformer {
 }
 
 func (r *FileReferenceResources) SetCustomFields(data *model.UploadFileReference) {
+	if data == nil {
+		return
+	}
 	r.SourceName = fileReferenceSourceName(data.OwnerType)
 	r.FieldName = fileReferenceFieldName(data.OwnerField)
 }

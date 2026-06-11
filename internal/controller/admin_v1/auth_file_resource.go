@@ -349,7 +349,7 @@ func (api FileResourceController) UploadComplete(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().CompleteDirectUpload(params, api.GetCurrentUserID(c))
+	result, err := service.NewFileResourceService().CompleteDirectUploadWithContext(c.Request.Context(), params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -362,7 +362,7 @@ func (api FileResourceController) UploadCompleteBatch(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().CompleteDirectUploadBatch(params, api.GetCurrentUserID(c))
+	result, err := service.NewFileResourceService().CompleteDirectUploadBatchWithContext(c.Request.Context(), params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -390,7 +390,7 @@ func (api FileResourceController) MultipartComplete(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().MultipartComplete(params, api.GetCurrentUserID(c))
+	result, err := service.NewFileResourceService().MultipartCompleteWithContext(c.Request.Context(), params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return

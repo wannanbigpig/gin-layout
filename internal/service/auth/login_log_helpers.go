@@ -80,25 +80,10 @@ func (s *LoginService) RecordLoginFailLog(username, failReason string, logInfo L
 	}
 
 	loginLog := s.buildLoginLog(0, username, "", "", "", time.Time{}, logInfo, model.LoginStatusFail, failReason, model.LoginTypeLogin)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logLoginAsyncError("记录登录失败日志 panic",
-					zap.String("operation", "record_login_fail_log"),
-					zap.String("username", username),
-					zap.String("fail_reason", failReason),
-					zap.Any("recover", r))
-			}
-		}()
-		if err := loginLog.Create(); err != nil {
-			logLoginAsyncError("记录登录失败日志出错",
-				zap.String("operation", "record_login_fail_log"),
-				zap.String("username", username),
-				zap.String("fail_reason", failReason),
-				zap.String("ip", logInfo.IP),
-				zap.Error(err))
-		}
-	}()
+	if enqueueLoginLogAsync(loginLog) {
+		return
+	}
+	writeLoginLogAsync(loginLog)
 }
 
 // calculateTokenHash 计算 Token 的 SHA256 哈希值。
@@ -112,4 +97,13 @@ func logLoginAsyncError(message string, fields ...zap.Field) {
 		return
 	}
 	log.Logger.Error(message, fields...)
+}
+
+func (s *LoginService) LogLoginFailureHandleError(username string, err error) {
+	if err == nil || log.Logger == nil {
+		return
+	}
+	log.Logger.Warn("处理登录失败状态失败",
+		zap.String("username", username),
+		zap.Error(err))
 }

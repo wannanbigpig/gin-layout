@@ -25,20 +25,69 @@ import (
 const loginLogAsyncBufferSize = 256
 
 var (
-	loginLogQueueOnce sync.Once
-	loginLogQueue     chan *model.AdminLoginLogs
+	loginLogQueueMu     sync.RWMutex
+	loginLogQueueOnce   sync.Once
+	loginLogQueue       chan *model.AdminLoginLogs
+	loginLogWorkerWg    sync.WaitGroup
+	loginLogWorkerState struct {
+		stopped bool
+	}
 )
 
 // initLoginLogWorker 懒启动单 worker，从队列拉取并落库登录日志。
 // 单 worker 已足够：登录链路 QPS 远低于落库吞吐，且单写入串行化便于失败时降级。
 func initLoginLogWorker() {
 	loginLogQueueOnce.Do(func() {
+		loginLogQueueMu.Lock()
+		defer loginLogQueueMu.Unlock()
+		if loginLogWorkerState.stopped {
+			return
+		}
 		loginLogQueue = make(chan *model.AdminLoginLogs, loginLogAsyncBufferSize)
+		loginLogWorkerWg.Add(1)
 		go runLoginLogWorker(loginLogQueue)
 	})
 }
 
+// StopLoginLogWorker 关闭登录日志异步队列并等待 worker 退出。
+// 如果 worker 从未启动（懒初始化未触发），则为 no-op。
+// timeout 控制等待 worker 处理完剩余条目的最大时长。
+func StopLoginLogWorker(timeout time.Duration) {
+	loginLogQueueMu.Lock()
+	if loginLogWorkerState.stopped {
+		loginLogQueueMu.Unlock()
+		return
+	}
+	loginLogWorkerState.stopped = true
+	queue := loginLogQueue
+	if queue != nil {
+		close(queue)
+	}
+	loginLogQueueMu.Unlock()
+
+	if queue == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		loginLogWorkerWg.Wait()
+		close(done)
+	}()
+	if timeout <= 0 {
+		<-done
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		if log.Logger != nil {
+			log.Logger.Warn("login log async worker drain timed out", zap.Duration("timeout", timeout))
+		}
+	}
+}
+
 func runLoginLogWorker(queue <-chan *model.AdminLoginLogs) {
+	defer loginLogWorkerWg.Done()
 	defer func() {
 		if r := recover(); r != nil && log.Logger != nil {
 			log.Logger.Error("login log async worker panic",
@@ -76,10 +125,17 @@ func enqueueLoginLogAsync(entry *model.AdminLoginLogs) bool {
 		return true
 	}
 	initLoginLogWorker()
+	loginLogQueueMu.RLock()
+	if loginLogWorkerState.stopped || loginLogQueue == nil {
+		loginLogQueueMu.RUnlock()
+		return false
+	}
 	select {
 	case loginLogQueue <- entry:
+		loginLogQueueMu.RUnlock()
 		return true
 	default:
+		loginLogQueueMu.RUnlock()
 		return false
 	}
 }
@@ -192,14 +248,18 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	startTime := time.Now()
 	if err := s.ensureLoginAllowed(username); err != nil {
 		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
-		s.HandleLoginFailure(username, s.extractErrorMessage(err), logInfo, false)
+		if handleErr := s.HandleLoginFailure(username, s.extractErrorMessage(err), logInfo, false); handleErr != nil {
+			return nil, handleErr
+		}
 		return nil, err
 	}
 
 	adminUser, err := s.validateUser(username, password)
 	if err != nil {
 		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
-		s.HandleLoginFailure(username, s.extractErrorMessage(err), logInfo, s.shouldCountLockFailure(err))
+		if handleErr := s.HandleLoginFailure(username, s.extractErrorMessage(err), logInfo, s.shouldCountLockFailure(err)); handleErr != nil {
+			return nil, handleErr
+		}
 		return nil, err
 	}
 
@@ -207,7 +267,9 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	accessToken, err := s.generateAccessToken(claims)
 	if err != nil {
 		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
-		s.HandleLoginFailure(username, "生成Token失败", logInfo, false)
+		if handleErr := s.HandleLoginFailure(username, "生成Token失败", logInfo, false); handleErr != nil {
+			return nil, handleErr
+		}
 		return nil, e.NewBusinessError(e.TokenGenerateFailed)
 	}
 

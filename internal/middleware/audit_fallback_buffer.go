@@ -39,12 +39,13 @@ type bufferedAuditItem struct {
 //   - 单个后台 worker 拉取最多 batchSize 条或等待最长 flushInterval 时间后批量落库。
 //   - 退出阶段调用 Stop() 阻塞至缓冲清空或达到 drain 超时。
 type auditFallbackBuffer struct {
-	mu      sync.Mutex
-	items   []*bufferedAuditItem
-	notify  chan struct{}
-	stopCh  chan struct{}
-	doneCh  chan struct{}
-	started bool
+	mu       sync.Mutex
+	items    []*bufferedAuditItem
+	notify   chan struct{}
+	stopCh   chan struct{}
+	doneCh   chan struct{}
+	stopOnce sync.Once
+	started  bool
 
 	// 启动后固化的配置参数（避免运行中动态变更带来的复杂性）。
 	capacity      int
@@ -257,16 +258,12 @@ func (b *auditFallbackBuffer) Stop(drainTimeout time.Duration) {
 		b.mu.Unlock()
 		return
 	}
+	stopOnce := &b.stopOnce
 	stopCh := b.stopCh
 	doneCh := b.doneCh
 	b.mu.Unlock()
 
-	select {
-	case <-stopCh:
-		// already stopped
-	default:
-		close(stopCh)
-	}
+	stopOnce.Do(func() { close(stopCh) })
 
 	if drainTimeout <= 0 {
 		return

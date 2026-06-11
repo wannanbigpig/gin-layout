@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	sysConfigCacheSyncChannel = "sys_config:cache:refresh"
-	sysConfigCacheSyncTimeout = 3 * time.Second
+	sysConfigCacheSyncChannel    = "sys_config:cache:refresh"
+	sysConfigCacheSyncTimeout    = 3 * time.Second
+	sysConfigSubscribeMaxBackoff = 30 * time.Second
 )
 
 type sysConfigCacheSyncPayload struct {
@@ -32,6 +33,8 @@ var (
 	sysConfigSubscriberState   = struct {
 		mu      sync.Mutex
 		started bool
+		cancel  context.CancelFunc
+		done    chan struct{}
 	}{}
 )
 
@@ -77,27 +80,95 @@ func ensureSysConfigCacheSyncSubscriber() {
 		sysConfigSubscriberState.mu.Unlock()
 		return
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	sysConfigSubscriberState.started = true
+	sysConfigSubscriberState.cancel = cancel
+	sysConfigSubscriberState.done = make(chan struct{})
 	sysConfigSubscriberState.mu.Unlock()
 
-	go runSysConfigCacheSyncSubscriber(client)
+	go runSysConfigCacheSyncSubscriber(ctx, client)
 }
 
-func runSysConfigCacheSyncSubscriber(client *redis.Client) {
-	ctx := context.Background()
-	pubsub := client.Subscribe(ctx, sysConfigCacheSyncChannel)
+func StopSysConfigCacheSyncSubscriber(timeout time.Duration) {
+	sysConfigSubscriberState.mu.Lock()
+	cancel := sysConfigSubscriberState.cancel
+	done := sysConfigSubscriberState.done
+	sysConfigSubscriberState.mu.Unlock()
+
+	if cancel == nil || done == nil {
+		return
+	}
+	cancel()
+	if timeout <= 0 {
+		<-done
+		return
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		if log.Logger != nil {
+			log.Logger.Warn("系统参数缓存刷新订阅退出超时", zap.Duration("timeout", timeout))
+		}
+	}
+}
+
+func runSysConfigCacheSyncSubscriber(ctx context.Context, client *redis.Client) {
 	defer func() {
-		_ = pubsub.Close()
 		sysConfigSubscriberState.mu.Lock()
+		done := sysConfigSubscriberState.done
 		sysConfigSubscriberState.started = false
+		sysConfigSubscriberState.cancel = nil
+		sysConfigSubscriberState.done = nil
 		sysConfigSubscriberState.mu.Unlock()
+		if done != nil {
+			close(done)
+		}
 	}()
+
+	backoff := time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		connected, err := receiveSysConfigCacheChanges(ctx, client)
+		if ctx.Err() != nil {
+			return
+		}
+		if connected {
+			backoff = time.Second
+		}
+		if log.Logger != nil {
+			log.Logger.Warn("系统参数缓存刷新订阅中断，准备重连",
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		if backoff < sysConfigSubscribeMaxBackoff {
+			backoff *= 2
+			if backoff > sysConfigSubscribeMaxBackoff {
+				backoff = sysConfigSubscribeMaxBackoff
+			}
+		}
+	}
+}
+
+func receiveSysConfigCacheChanges(ctx context.Context, client *redis.Client) (connected bool, err error) {
+	pubsub := client.Subscribe(ctx, sysConfigCacheSyncChannel)
+	defer func() { _ = pubsub.Close() }()
 
 	if _, err := pubsub.Receive(ctx); err != nil {
 		if log.Logger != nil {
 			log.Logger.Warn("订阅系统参数缓存刷新通道失败", zap.Error(err))
 		}
-		return
+		return false, err
 	}
 
 	for {
@@ -106,7 +177,7 @@ func runSysConfigCacheSyncSubscriber(client *redis.Client) {
 			if log.Logger != nil {
 				log.Logger.Warn("系统参数缓存刷新订阅中断", zap.Error(err))
 			}
-			return
+			return true, err
 		}
 
 		payload, ok := decodeSysConfigCacheSyncPayload(message.Payload)

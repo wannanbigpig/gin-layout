@@ -103,9 +103,10 @@ const (
 	UploadSessionTypeMultipart = "multipart"
 	UploadSessionTypeReuse     = "reuse"
 
-	UploadSessionStatusPending   = "pending"
-	UploadSessionStatusCompleted = "completed"
-	UploadSessionStatusExpired   = "expired"
+	UploadSessionStatusPending    = "pending"
+	UploadSessionStatusCompleting = "completing"
+	UploadSessionStatusCompleted  = "completed"
+	UploadSessionStatusExpired    = "expired"
 )
 
 type UploadSession struct {

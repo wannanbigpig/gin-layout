@@ -118,6 +118,7 @@ type fakeActionRecorder struct {
 	enqueueInputs []RunStart
 	startInputs   []RunStart
 	finishInputs  []RunFinish
+	finishErr     error
 }
 
 type stubInspector struct {
@@ -158,7 +159,7 @@ func (f *fakeActionRecorder) Finish(ctx context.Context, run *model.TaskRun, inp
 	_ = ctx
 	_ = run
 	f.finishInputs = append(f.finishInputs, input)
-	return nil
+	return f.finishErr
 }
 
 func (s *stubInspector) DeleteTask(ctx context.Context, queueName, taskID string) error {
@@ -1158,6 +1159,41 @@ func TestCancelTaskReturnsDependencyNotReadyWhenInspectorUnavailable(t *testing.
 	}
 	if be.GetCode() != e.ServiceDependencyNotReady {
 		t.Fatalf("expected code %d, got %d", e.ServiceDependencyNotReady, be.GetCode())
+	}
+}
+
+func TestCancelTaskConvertsStatusChangedError(t *testing.T) {
+	restoreLoader := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
+		return &model.TaskRun{
+			BaseModel: model.BaseModel{ID: runID},
+			TaskCode:  "demo:send",
+			Kind:      model.TaskKindAsync,
+			SourceID:  "task-1",
+			Queue:     "default",
+			Status:    model.TaskRunStatusPending,
+		}, nil
+	})
+	defer restoreLoader()
+
+	restoreRecorder := SetRecorderForTesting(&fakeActionRecorder{finishErr: ErrTaskRunStatusChanged})
+	defer restoreRecorder()
+
+	restoreInspector := queue.SetInspectorForTesting(&stubInspector{})
+	defer restoreInspector()
+
+	_, err := NewTaskCenterService().CancelTask(context.Background(), 101, 1, "tester", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var be *e.BusinessError
+	if !stderrors.As(err, &be) {
+		t.Fatalf("expected business error, got %T", err)
+	}
+	if be.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected code %d, got %d", e.InvalidParameter, be.GetCode())
+	}
+	if !strings.Contains(err.Error(), "无法取消") {
+		t.Fatalf("expected friendly cancel message, got %v", err)
 	}
 }
 

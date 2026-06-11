@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -584,12 +585,26 @@ func (s *FileResourceService) UploadCredentialBatch(params *form.FileUploadCrede
 }
 
 func (s *FileResourceService) CompleteDirectUpload(params *form.FileUploadComplete, uid uint) (*resources.FileResourceResources, error) {
-	return s.completeDirectUploadWithPath(params, uid, nil)
+	return s.CompleteDirectUploadWithContext(context.Background(), params, uid)
 }
 
-func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUploadComplete, uid uint, pathResolver func(uint) (string, error)) (*resources.FileResourceResources, error) {
+func (s *FileResourceService) CompleteDirectUploadWithContext(ctx context.Context, params *form.FileUploadComplete, uid uint) (*resources.FileResourceResources, error) {
+	return s.completeDirectUploadWithPath(ctx, params, uid, nil)
+}
+
+func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, params *form.FileUploadComplete, uid uint, pathResolver func(uint) (string, error)) (*resources.FileResourceResources, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	db, err := s.dbOrDefault()
 	if err != nil {
+		return nil, err
+	}
+	sniffTarget, err := s.resolveDirectUploadMimeSniffTarget(ctx, params, uid)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateUploadObjectMime(ctx, "direct upload", sniffTarget.storageDriver, sniffTarget.bucket, sniffTarget.objectKey, sniffTarget.mimeType); err != nil {
 		return nil, err
 	}
 	var uploadFile *model.UploadFiles
@@ -656,6 +671,7 @@ func (s *FileResourceService) completeDirectUploadWithPath(params *form.FileUplo
 		if fileUUID == "" {
 			fileUUID = strings.ReplaceAll(uuid.NewString(), "-", "")
 		}
+
 		fileType, err := resolveUploadFileType(params.FileType, mimeType)
 		if err != nil {
 			return err
@@ -744,6 +760,13 @@ func normalizeCompleteItem(parent *form.FileUploadCompleteBatch, item form.FileU
 }
 
 func (s *FileResourceService) CompleteDirectUploadBatch(params *form.FileUploadCompleteBatch, uid uint) (*resources.FileUploadCompleteBatchResult, error) {
+	return s.CompleteDirectUploadBatchWithContext(context.Background(), params, uid)
+}
+
+func (s *FileResourceService) CompleteDirectUploadBatchWithContext(ctx context.Context, params *form.FileUploadCompleteBatch, uid uint) (*resources.FileUploadCompleteBatchResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	total := len(params.Items)
 	result := &resources.FileUploadCompleteBatchResult{
 		Total: int64(total),
@@ -782,7 +805,7 @@ func (s *FileResourceService) CompleteDirectUploadBatch(params *form.FileUploadC
 		go func(index int, it form.FileUploadCompleteBatchItem) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			data, err := s.completeDirectUploadWithPath(normalizeCompleteItem(params, it), uid, getLogicalPath)
+			data, err := s.completeDirectUploadWithPath(ctx, normalizeCompleteItem(params, it), uid, getLogicalPath)
 			var itemResult *resources.FileUploadCompleteBatchItemResult
 			if err != nil {
 				itemResult = &resources.FileUploadCompleteBatchItemResult{
@@ -1373,13 +1396,28 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit, uidA
 
 // MultipartComplete 分片上传完成。
 func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComplete, uid uint) (*resources.FileResourceResources, error) {
+	return s.MultipartCompleteWithContext(context.Background(), params, uid)
+}
+
+func (s *FileResourceService) MultipartCompleteWithContext(ctx context.Context, params *form.FileMultipartComplete, uid uint) (*resources.FileResourceResources, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	db, err := s.dbOrDefault()
 	if err != nil {
 		return nil, err
 	}
+	sniffTarget, err := s.prepareMultipartCompleteObject(ctx, params, uid)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateUploadObjectMime(ctx, "multipart upload", sniffTarget.storageDriver, sniffTarget.bucket, sniffTarget.objectKey, sniffTarget.mimeType); err != nil {
+		restoreUploadSessionPending(context.Background(), db, sniffTarget.sessionID)
+		return nil, err
+	}
 	var uploadFile *model.UploadFiles
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
-		session, err := findPendingUploadSession(tx, params.CompleteToken, model.UploadSessionTypeMultipart, uid)
+		session, err := findCompletingUploadSession(tx, sniffTarget.sessionID, uid, model.UploadSessionTypeMultipart)
 		if err != nil {
 			return err
 		}
@@ -1401,24 +1439,6 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 				return err
 			}
 		} else {
-			if strings.TrimSpace(session.UploadID) == "" {
-				return fmt.Errorf("upload_id is required")
-			}
-			completeParts, err := validateMultipartCompleteParts(params.Parts)
-			if err != nil {
-				return err
-			}
-			driver, _, err := s.storageDriverByName(context.Background(), storageDriver)
-			if err != nil {
-				return err
-			}
-			mp, ok := driver.(filestorage.MultipartCapable)
-			if !ok {
-				return pkgErrors.NewBusinessError(pkgErrors.LocalStorageMultipartUnsupported)
-			}
-			if err := mp.CompleteMultipartUpload(context.Background(), session.Bucket, session.ObjectKey, session.UploadID, completeParts); err != nil {
-				return err
-			}
 			object, reusedObject, err = ensureFileObject(tx, uploadFileObjectInput{
 				StorageDriver: storageDriver,
 				StorageBase:   storageBaseForDriver(storageDriver, session.IsPublic == global.Yes, session.Bucket),
@@ -1447,6 +1467,7 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 		hash := session.Hash
 		mimeType := session.MimeType
 		fileUUID := strings.ReplaceAll(uuid.NewString(), "-", "")
+
 		fileType, err := resolveUploadFileType(params.FileType, mimeType)
 		if err != nil {
 			return err
@@ -1506,6 +1527,7 @@ func (s *FileResourceService) MultipartComplete(params *form.FileMultipartComple
 		return nil
 	})
 	if err != nil {
+		restoreUploadSessionPending(context.Background(), db, sniffTarget.sessionID)
 		return nil, err
 	}
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
@@ -1740,6 +1762,175 @@ func isMimeCompatible(actual, expected string) bool {
 		}
 	}
 	return false
+}
+
+// mimeSniffHeaderSize 读取前 512 字节用于 MIME 类型嗅探。
+const mimeSniffHeaderSize = 512
+
+type uploadMimeSniffTarget struct {
+	sessionID     uint
+	storageDriver string
+	bucket        string
+	objectKey     string
+	mimeType      string
+}
+
+func (s *FileResourceService) resolveDirectUploadMimeSniffTarget(ctx context.Context, params *form.FileUploadComplete, uid uint) (uploadMimeSniffTarget, error) {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	session, err := findPendingUploadSession(db.WithContext(ctx), params.CompleteToken, model.UploadSessionTypeDirect, uid)
+	if err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	if err := validateDirectCompleteSession(session, params, uid); err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	if err := requireUploadSessionObject(session); err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	target := uploadMimeSniffTarget{
+		storageDriver: session.StorageDriver,
+		bucket:        session.Bucket,
+		objectKey:     session.ObjectKey,
+		mimeType:      session.MimeType,
+	}
+	if session.FileObjectID > 0 {
+		object, err := findFileObjectByID(db.WithContext(ctx), session.FileObjectID)
+		if err != nil {
+			return uploadMimeSniffTarget{}, err
+		}
+		if err := validateFileObjectMatchesSession(object, session); err != nil {
+			return uploadMimeSniffTarget{}, err
+		}
+		target.bucket = object.Bucket
+		target.objectKey = object.ObjectKey
+	}
+	return target, nil
+}
+
+func (s *FileResourceService) prepareMultipartCompleteObject(ctx context.Context, params *form.FileMultipartComplete, uid uint) (target uploadMimeSniffTarget, err error) {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	var session *model.UploadSession
+	if err := access.RunInTransaction(db.WithContext(ctx), func(tx *gorm.DB) error {
+		var findErr error
+		session, findErr = findPendingUploadSession(tx, params.CompleteToken, model.UploadSessionTypeMultipart, uid)
+		if findErr != nil {
+			return findErr
+		}
+		if err := validateMultipartCompleteSession(session, params, uid); err != nil {
+			return err
+		}
+		if err := requireUploadSessionObject(session); err != nil {
+			return err
+		}
+		return claimUploadSessionCompleting(tx, session)
+	}); err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	claimedSessionID := session.ID
+	defer func() {
+		if err != nil && claimedSessionID > 0 {
+			restoreUploadSessionPending(context.Background(), db, claimedSessionID)
+		}
+	}()
+	target = uploadMimeSniffTarget{
+		sessionID:     session.ID,
+		storageDriver: session.StorageDriver,
+		bucket:        session.Bucket,
+		objectKey:     session.ObjectKey,
+		mimeType:      session.MimeType,
+	}
+	if session.FileObjectID > 0 {
+		object, err := findFileObjectByID(db.WithContext(ctx), session.FileObjectID)
+		if err != nil {
+			return uploadMimeSniffTarget{}, err
+		}
+		if err := validateFileObjectMatchesSession(object, session); err != nil {
+			return uploadMimeSniffTarget{}, err
+		}
+		target.bucket = object.Bucket
+		target.objectKey = object.ObjectKey
+		return target, nil
+	}
+	if strings.TrimSpace(session.UploadID) == "" {
+		return uploadMimeSniffTarget{}, fmt.Errorf("upload_id is required")
+	}
+	completeParts, err := validateMultipartCompleteParts(params.Parts)
+	if err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	driver, _, err := s.storageDriverByName(ctx, session.StorageDriver)
+	if err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	mp, ok := driver.(filestorage.MultipartCapable)
+	if !ok {
+		return uploadMimeSniffTarget{}, pkgErrors.NewBusinessError(pkgErrors.LocalStorageMultipartUnsupported)
+	}
+	if err := mp.CompleteMultipartUpload(ctx, session.Bucket, session.ObjectKey, session.UploadID, completeParts); err != nil {
+		return uploadMimeSniffTarget{}, err
+	}
+	return target, nil
+}
+
+func (s *FileResourceService) validateUploadObjectMime(ctx context.Context, operation, storageDriver, bucket, objectKey, mimeType string) error {
+	sniffedMIME, valid, sniffErr := s.sniffAndValidateMimeType(ctx, storageDriver, bucket, objectKey, mimeType)
+	if sniffErr != nil {
+		log.Warn(operation+" MIME sniff failed",
+			zap.String("bucket", bucket), zap.String("object_key", objectKey), zap.Error(sniffErr))
+		return pkgErrors.NewBusinessError(pkgErrors.FileMimeTypeNotAllowed)
+	}
+	if !valid {
+		log.Warn(operation+" MIME mismatch: declared vs detected",
+			zap.String("declared", mimeType), zap.String("detected", sniffedMIME),
+			zap.String("object_key", objectKey))
+		return pkgErrors.NewBusinessError(pkgErrors.FileMimeTypeNotAllowed)
+	}
+	return nil
+}
+
+// sniffAndValidateMimeType 从已上传对象中读取前 512 字节，使用 http.DetectContentType 嗅探真实 MIME 类型，
+// 与声明的 declaredMIME 进行宽松比较。返回值：
+//   - sniffedMIME: 嗅探到的 MIME 类型（失败时返回空串）
+//   - valid: 声明 MIME 与嗅探结果是否兼容
+//   - err: 非 nil 表示读取对象失败（调用方应拒绝完成上传）
+func (s *FileResourceService) sniffAndValidateMimeType(ctx context.Context, storageDriver, bucket, objectKey, declaredMIME string) (sniffedMIME string, valid bool, err error) {
+	driver, _, err := s.storageDriverByName(ctx, storageDriver)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve storage driver for MIME sniff: %w", err)
+	}
+	reader, err := driver.Open(ctx, bucket, objectKey)
+	if err != nil {
+		return "", false, fmt.Errorf("open object for MIME sniff: %w", err)
+	}
+	defer reader.Close()
+	buf := make([]byte, mimeSniffHeaderSize)
+	// io.ReadFull 返回 io.EOF 或 io.ErrUnexpectedEOF 表示文件不足 512 字节，这不算错误。
+	n, readErr := io.ReadFull(reader, buf)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return "", false, fmt.Errorf("read object for MIME sniff: %w", readErr)
+	}
+	if n == 0 {
+		return "", false, fmt.Errorf("empty object for MIME sniff")
+	}
+	buf = buf[:n]
+	sniffedMIME = http.DetectContentType(buf)
+
+	// 有些检测结果会带 charset 参数，只取 MIME 部分
+	if idx := strings.Index(sniffedMIME, ";"); idx >= 0 {
+		sniffedMIME = strings.TrimSpace(sniffedMIME[:idx])
+	}
+
+	if declaredMIME == "" {
+		return sniffedMIME, true, nil
+	}
+	valid = isMimeCompatible(sniffedMIME, declaredMIME)
+	return sniffedMIME, valid, nil
 }
 
 // SystemTempFolderName 系统临时文件夹常量，对前端隐藏。

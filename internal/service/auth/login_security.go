@@ -34,14 +34,22 @@ func (s *LoginService) CheckLoginAllowed(username string) error {
 }
 
 // HandleLoginFailure 统一处理登录失败：记录失败日志，并按策略累加失败计数。
-func (s *LoginService) HandleLoginFailure(username, failReason string, logInfo LoginLogInfo, countTowardLock bool) {
+// 当 countTowardLock 为 true 且失败计数更新遇到真实数据库错误时，返回 error 以触发 fail-closed。
+// 表不存在或依赖未就绪等部署阶段问题不会阻断登录流程。
+func (s *LoginService) HandleLoginFailure(username, failReason string, logInfo LoginLogInfo, countTowardLock bool) error {
 	s.RecordLoginFailLog(username, failReason, logInfo)
 	if !countTowardLock {
-		return
+		return nil
 	}
 	if err := s.incrementLoginFailState(username); err != nil {
+		if isTableNotFoundErr(err) || e.IsDependencyNotReady(err) {
+			log.Logger.Warn("更新登录失败计数失败（表或依赖未就绪）", zap.String("username", username), zap.Error(err))
+			return nil
+		}
 		log.Logger.Warn("更新登录失败计数失败", zap.String("username", username), zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 func (s *LoginService) ensureLoginAllowed(username string) error {

@@ -21,13 +21,16 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/service/dashboard"
 	"github.com/wannanbigpig/gin-layout/internal/service/notification"
+	"github.com/wannanbigpig/gin-layout/internal/service/sys_config"
 )
 
 const (
-	defaultHost            = "0.0.0.0"
-	defaultPort            = 9001
-	gracefulShutdownTimout = 10 * time.Second
-	auditDrainTimeout      = 5 * time.Second
+	defaultHost             = "0.0.0.0"
+	defaultPort             = 9001
+	gracefulShutdownTimout  = 10 * time.Second
+	auditDrainTimeout       = 5 * time.Second
+	loginLogDrainTimeout    = 3 * time.Second
+	realtimeShutdownTimeout = 5 * time.Second
 )
 
 var (
@@ -105,7 +108,11 @@ func waitForShutdown(server *http.Server, errChan <-chan error) error {
 	if err := server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("shutdown http server failed: %w", err)
 	}
+	notification.StopRealtimeSubscriber(realtimeShutdownTimeout)
 	middleware.StopAuditLogQueueDrain(auditDrainTimeout)
+	auth.StopLoginLogWorker(loginLogDrainTimeout)
+	sys_config.StopSysConfigCacheSyncSubscriber(gracefulShutdownTimout)
+	notification.ShutdownRealtimeDispatcher()
 	dashboard.StopMonitorPush(gracefulShutdownTimout)
 	if err := data.Shutdown(); err != nil {
 		return fmt.Errorf("shutdown data resources failed: %w", err)

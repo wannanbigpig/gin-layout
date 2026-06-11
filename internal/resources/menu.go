@@ -158,6 +158,9 @@ func (r *MenuCollectionResources) GetPID() uint {
 
 // SetCustomFields 填充菜单树节点的扩展字段。
 func (r *MenuCollectionResources) SetCustomFields(data *model.Menu) {
+	if data == nil {
+		return
+	}
 	r.TypeName = data.MenuTypeMap()
 }
 
