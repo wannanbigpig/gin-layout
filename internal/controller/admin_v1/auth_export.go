@@ -3,6 +3,7 @@ package admin_v1
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -82,7 +83,13 @@ func submitAsyncExport(api controller.Api, c *gin.Context, req asyncExportReques
 	req.payload["task_run_id"] = run.ID
 
 	// 再把真实导出任务投递到异步队列；worker 消费时会回写这条 run 记录的执行状态和结果。
-	jobInfo, publishErr := queue.PublishJSON(c.Request.Context(), req.taskCode, req.queueName, req.payload, queue.WithTaskID(taskID))
+	// 导出类任务使用保守的重试和超时限制，避免卡住的任务永久占用并发槽。
+	jobInfo, publishErr := queue.PublishJSON(c.Request.Context(), req.taskCode, req.queueName, req.payload,
+		queue.WithTaskID(taskID),
+		queue.WithMaxRetry(2),
+		queue.WithTimeout(5*time.Minute),
+		queue.WithRetention(24*time.Hour),
+	)
 	if publishErr != nil {
 		_ = recorder.Finish(c.Request.Context(), run, taskcenter.RunFinish{
 			Status: model.TaskRunStatusFailed,

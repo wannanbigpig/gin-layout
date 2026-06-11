@@ -531,6 +531,48 @@ func TestTriggerTaskRecordsConfirmAndReason(t *testing.T) {
 	}
 }
 
+func TestTriggerTaskHighRiskCronFailsClosedWhenTaskLockUnavailable(t *testing.T) {
+	restoreTaskDefinition := setTaskDefinitionLoaderForTest(func(taskCode string) (*model.TaskDefinition, error) {
+		return &model.TaskDefinition{
+			Code:        taskCode,
+			Kind:        model.TaskKindCron,
+			Handler:     taskcron.HandlerCronDemo,
+			Status:      1,
+			AllowManual: 1,
+			IsHighRisk:  model.TaskHighRisk,
+		}, nil
+	})
+	defer restoreTaskDefinition()
+
+	previousAcquireTaskLock := acquireTaskLock
+	acquireTaskLock = func(ctx context.Context, taskCode string) (*TaskLock, error) {
+		_ = ctx
+		if taskCode != "cron:demo" {
+			t.Fatalf("unexpected task code: %s", taskCode)
+		}
+		return nil, ErrTaskLockRedisDown
+	}
+	defer func() { acquireTaskLock = previousAcquireTaskLock }()
+
+	var executed bool
+	restoreExecutor := setCronExecutorForTest(func(ctx context.Context, handler string, payload map[string]any) error {
+		executed = true
+		return nil
+	})
+	defer restoreExecutor()
+
+	_, err := NewTaskCenterService().TriggerTask(context.Background(), &form.TaskTriggerForm{
+		TaskCode: "cron:demo",
+		Confirm:  "CONFIRM",
+	}, 1, "tester")
+	if !stderrors.Is(err, ErrTaskLockRedisDown) {
+		t.Fatalf("expected task lock redis down error, got %v", err)
+	}
+	if executed {
+		t.Fatal("expected cron handler not to execute when high-risk task lock is unavailable")
+	}
+}
+
 func TestRetryTaskRespectsCurrentDefinition(t *testing.T) {
 	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
 		return &model.TaskRun{

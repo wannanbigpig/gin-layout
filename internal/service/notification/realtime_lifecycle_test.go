@@ -16,9 +16,9 @@ func TestHubUnregisterIsIdempotentUnderConcurrentCalls(t *testing.T) {
 	serverConn, clientConn, cleanup := newRealtimeTestPair(t)
 	defer cleanup()
 
-	h := &hub{clients: make(map[uint]map[*wsClient]struct{})}
+	h := &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
 	client := &wsClient{userID: 7, conn: serverConn}
-	h.register(client)
+	_ = h.register(client)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -46,10 +46,10 @@ func TestShutdownRealtimeDispatcherSendsCloseFrame(t *testing.T) {
 	defer cleanup()
 
 	previousHub := defaultHub
-	defaultHub = &hub{clients: make(map[uint]map[*wsClient]struct{})}
+	defaultHub = &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
 	defer func() { defaultHub = previousHub }()
 
-	defaultHub.register(&wsClient{userID: 11, conn: serverConn})
+	_ = defaultHub.register(&wsClient{userID: 11, conn: serverConn})
 
 	ShutdownRealtimeDispatcher()
 
@@ -60,19 +60,51 @@ func TestShutdownRealtimeDispatcherSendsCloseFrame(t *testing.T) {
 }
 
 func TestHubChannelSubscriberCountOnlyCountsMatchingSubscriptions(t *testing.T) {
-	h := &hub{clients: make(map[uint]map[*wsClient]struct{})}
+	h := &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
 	monitorClient := &wsClient{userID: 1}
 	otherClient := &wsClient{userID: 2}
 	monitorClient.SubscribeChannel("monitor")
 	otherClient.SubscribeChannel("other")
-	h.register(monitorClient)
-	h.register(otherClient)
+	_ = h.register(monitorClient)
+	_ = h.register(otherClient)
 
 	if got := h.channelSubscriberCount("monitor"); got != 1 {
 		t.Fatalf("expected one monitor subscriber, got %d", got)
 	}
 	if got := h.channelSubscriberCount("missing"); got != 0 {
 		t.Fatalf("expected zero missing-channel subscribers, got %d", got)
+	}
+}
+
+func TestHubRegisterEnforcesPerUserConnectionLimit(t *testing.T) {
+	h := &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: 1, maxConnsTotal: 10}
+	first := &wsClient{userID: 7}
+	second := &wsClient{userID: 7}
+
+	if err := h.register(first); err != nil {
+		t.Fatalf("expected first connection to register, got %v", err)
+	}
+	if err := h.register(second); err == nil {
+		t.Fatal("expected second same-user connection to be rejected")
+	}
+	if got := h.onlineCount(); got != 1 {
+		t.Fatalf("expected one registered connection after reject, got %d", got)
+	}
+}
+
+func TestHubRegisterEnforcesTotalConnectionLimit(t *testing.T) {
+	h := &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: 10, maxConnsTotal: 1}
+	first := &wsClient{userID: 7}
+	second := &wsClient{userID: 8}
+
+	if err := h.register(first); err != nil {
+		t.Fatalf("expected first connection to register, got %v", err)
+	}
+	if err := h.register(second); err == nil {
+		t.Fatal("expected second global connection to be rejected")
+	}
+	if got := h.onlineCount(); got != 1 {
+		t.Fatalf("expected one registered connection after reject, got %d", got)
 	}
 }
 

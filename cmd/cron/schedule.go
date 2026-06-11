@@ -10,6 +10,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
+	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/cronexpr"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
@@ -31,6 +32,7 @@ type scheduledTask struct {
 	run         func(context.Context) error
 	enabledWhen func(context.Context) bool
 	skipIfRun   bool
+	isHighRisk  bool
 }
 
 // TaskBuilder 用于链式声明任务调度规则。
@@ -192,6 +194,20 @@ func recordedJob(ctx context.Context, task *scheduledTask) cron.Job {
 			log.Logger.Info("定时任务已停用，跳过执行", zap.String("name", task.name))
 			return
 		}
+
+		// 高危 cron 任务需要获取分布式锁，防止多实例并发执行。
+		if task.isHighRisk {
+			lock, lockErr := acquireCronTaskLock(ctx, taskCode)
+			if lockErr != nil {
+				log.Logger.Error("高危定时任务获取分布式锁失败，跳过执行",
+					zap.String("name", task.name),
+					zap.String("task_code", taskCode),
+					zap.Error(lockErr))
+				return
+			}
+			defer lock.Release(ctx)
+		}
+
 		run, recordErr := taskcenter.NewRunRecorder().Start(ctx, taskcenter.RunStart{
 			TaskCode: taskCode,
 			Kind:     model.TaskKindCron,
@@ -299,4 +315,18 @@ func parseTimePart(name, raw string, min, max int) (int, error) {
 		return 0, fmt.Errorf("%s value out of range [%d,%d]: %d", name, min, max, value)
 	}
 	return value, nil
+}
+
+// acquireCronTaskLock 获取高风险定时任务分布式锁。
+// Redis 不可用时返回 error（fail-closed）。
+var acquireCronTaskLock = func(ctx context.Context, taskCode string) (*taskcenter.TaskLock, error) {
+	client := data.RedisClient()
+	if client == nil {
+		return nil, fmt.Errorf("redis 不可用，无法获取高危任务锁")
+	}
+	lock := taskcenter.NewTaskLock(client, taskCode)
+	if err := lock.Acquire(ctx); err != nil {
+		return nil, err
+	}
+	return lock, nil
 }

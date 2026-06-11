@@ -100,36 +100,18 @@ func (s *LoginService) incrementLoginFailState(username string) error {
 	}
 
 	state := model.NewLoginSecurityState()
-	db, err := state.GetDB()
+	lockMinutes := int(policy.LockDuration.Minutes())
+	if lockMinutes < 1 {
+		lockMinutes = defaultLoginLockMinutes
+	}
+	err := state.IncrementFailCount(username, policy.MaxFailures, lockMinutes)
 	if err != nil {
-		if e.IsDependencyNotReady(err) {
+		if isTableNotFoundErr(err) || e.IsDependencyNotReady(err) {
 			return nil
 		}
 		return err
 	}
-
-	now := time.Now()
-	return db.Transaction(func(tx *gorm.DB) error {
-		current := model.NewLoginSecurityState()
-		current.SetDB(tx)
-		findErr := current.FindByUsername(username)
-		if findErr != nil {
-			if isTableNotFoundErr(findErr) {
-				return nil
-			}
-			if !stderrors.Is(findErr, gorm.ErrRecordNotFound) {
-				return findErr
-			}
-			next := model.NewLoginSecurityState()
-			next.SetDB(tx)
-			next.Username = username
-			applyLoginFailState(next, now, policy)
-			return next.Save()
-		}
-
-		applyLoginFailState(current, now, policy)
-		return current.Save()
-	})
+	return nil
 }
 
 func (s *LoginService) clearLoginFailState(username string) error {

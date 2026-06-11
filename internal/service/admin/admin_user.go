@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -58,6 +59,14 @@ func (s *AdminUserService) handleMutationError(err error, fallbackCode int) erro
 
 var revokeUserTokensFunc = func(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) error {
 	return auth.NewLoginService().RevokeUserTokens(userID, revokedCode, revokedReason, tx)
+}
+
+type adminDataScopeFilter interface {
+	Build(ctx context.Context, input access.DataScopeInput, deptCol, ownerCol string) (string, []any)
+}
+
+var newAdminDataScopeFilter = func() adminDataScopeFilter {
+	return access.NewDataScopeFilter()
 }
 
 func (s *AdminUserService) revokeUserTokens(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) error {
@@ -157,6 +166,18 @@ func (s *AdminUserService) getUserMenuInfoWithModels(id uint, locale string, adm
 // List 返回管理员分页列表。
 func (s *AdminUserService) List(params *form.AdminUserList) *resources.Collection {
 	conditionStr, args := s.buildListCondition(params)
+
+	// 接入数据权限过滤
+	dsCond, dsArgs := s.buildDataScopeCondition()
+	if dsCond != "" {
+		if conditionStr != "" {
+			conditionStr = conditionStr + " AND " + dsCond
+		} else {
+			conditionStr = dsCond
+		}
+		args = append(args, dsArgs...)
+	}
+
 	adminUserModel := model.NewAdminUsers()
 	total, collection, err := model.ListPageE(adminUserModel, params.Page, params.PerPage, conditionStr, args, s.adminUserListOptions())
 	if err != nil {
@@ -164,6 +185,50 @@ func (s *AdminUserService) List(params *form.AdminUserList) *resources.Collectio
 		return resources.NewAdminUserTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
 	}
 	return resources.NewAdminUserTransformer().ToCollection(params.Page, params.PerPage, total, collection)
+}
+
+// buildDataScopeCondition 构建数据权限过滤条件。
+// 管理员和部门是多对多关系（通过 admin_user_department_map 表），使用 EXISTS 子查询过滤。
+func (s *AdminUserService) buildDataScopeCondition() (string, []any) {
+	uid := s.GetAdminUserId()
+
+	// 从上下文获取 AuthPrincipal 判断是否超管
+	isSuperAdmin := false
+	if ctx := s.GetCtx(); ctx != nil {
+		if principal := auth.GetAuthPrincipal(ctx); principal != nil {
+			isSuperAdmin = principal.IsSuperAdmin == global.Yes
+		}
+	}
+
+	input := access.DataScopeInput{
+		UID:          uid,
+		IsSuperAdmin: isSuperAdmin,
+	}
+
+	filter := newAdminDataScopeFilter()
+	cond, filterArgs := filter.Build(s.context(), input, "admin_user_department_map.dept_id", "admin_user.id")
+	if cond == "" {
+		return "", nil
+	}
+
+	return wrapAdminUserDeptScopeCondition(cond), filterArgs
+}
+
+func wrapAdminUserDeptScopeCondition(cond string) string {
+	deptPredicate := "admin_user_department_map.dept_id IN (?)"
+	deptExists := fmt.Sprintf(
+		"EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND %s)",
+		deptPredicate,
+	)
+	return strings.ReplaceAll(cond, deptPredicate, deptExists)
+}
+
+// context 返回标准 context.Context，用于 DataScopeFilter 等需要 context.Context 的场景。
+func (s *AdminUserService) context() context.Context {
+	if ctx := s.GetCtx(); ctx != nil && ctx.Request != nil {
+		return ctx.Request.Context()
+	}
+	return context.Background()
 }
 
 // adminUserOptionsLimit 选择器远程搜索返回的最大条数。

@@ -1,6 +1,7 @@
 package casbinx
 
 import (
+	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,11 +96,12 @@ func (pc *PermCache) Get(userID uint, resource, action string) (bool, bool) {
 	return entry.allowed, true
 }
 
-// Set 写入或刷新缓存条目，使用当前 TTL。
+// Set 写入或刷新缓存条目，使用当前 TTL + 随机抖动（0~30s）防止缓存雪崩。
 func (pc *PermCache) Set(userID uint, resource, action string, allowed bool) {
+	jitter := time.Duration(rand.Intn(30)) * time.Second
 	pc.entries.Store(PermCacheKey(userID, resource, action), &permCacheEntry{
 		allowed:   allowed,
-		expiresAt: time.Now().UnixNano() + pc.ttl.Load(),
+		expiresAt: time.Now().UnixNano() + pc.ttl.Load() + int64(jitter),
 	})
 }
 

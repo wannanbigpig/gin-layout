@@ -3,8 +3,16 @@ app:
   app_env: local
   debug: true
   language: zh_CN
-#  allow_degraded_startup: false   # service 启动时依赖初始化失败是否继续启动；仅建议在需要“先起服务再排障”场景开启
+#  allow_degraded_startup: false   # service 启动时依赖初始化失败是否继续启动；仅建议在需要”先起服务再排障”场景开启
 #  enable_reset_system_cron: false # 高风险：是否启用 reset-system-data 定时任务；默认关闭，避免误重建系统数据
+  # 速率限制（全局限流，基于 IP 的内存令牌桶，单实例保护）
+#  rate_limit_enabled: true        # 是否启用全局限流，默认开启
+#  rate_limit_rps: 20              # 每 IP 每秒允许的请求数，默认 20
+#  rate_limit_burst: 40            # 每 IP 突发请求上限，默认 40
+  # 登录接口专项限流（比全局限流更严格，可单独关闭）
+#  login_rate_limit_enabled: true  # 是否启用登录接口限流，默认开启
+#  login_rate_limit_rps: 1         # 登录接口每 IP 每秒允许的请求数，默认 1
+#  login_rate_limit_burst: 5       # 登录接口每 IP 突发请求上限，默认 5
 #  watch_config: false
 #  base_path: ""
 #  base_url: "https://example.com"  # 文件访问的基础URL，用于拼接本地文件访问地址
@@ -104,3 +112,27 @@ storage:
   local:
     public_base_path: "./storage/public"
     private_base_path: "./storage/private"
+  # 文件类型白名单（可选，不配置时使用默认值）
+  # allowed_extensions:          # 允许的文件扩展名
+  #   - ".jpg"
+  #   - ".jpeg"
+  #   - ".png"
+  #   - ".gif"
+  #   - ".webp"
+  #   - ".pdf"
+  #   - ".txt"
+  #   - ".csv"
+  #   - ".xlsx"
+  #   - ".docx"
+  #   # - "*"                    # 允许任意扩展名
+  # allowed_mime_types:          # 允许的 MIME 类型
+  #   - "image/jpeg"
+  #   - "image/png"
+  #   - "image/gif"
+  #   - "image/webp"
+  #   - "application/pdf"
+  #   - "text/plain"
+  #   - "text/csv"
+  #   - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  #   - "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  #   # - "*/*"                  # 允许任意 MIME 类型

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/wannanbigpig/gin-layout/data"
 	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/cronexpr"
@@ -44,6 +46,22 @@ var executeCronHandler = func(ctx context.Context, handler string, payload map[s
 }
 
 var notifyTaskDefinitionChanged = NotifyTaskDefinitionChanged
+
+// acquireTaskLock 获取高风险任务分布式锁。Redis 不可用时 fail-closed（拒绝执行）。
+var acquireTaskLock = func(ctx context.Context, taskCode string) (*TaskLock, error) {
+	client := data.RedisClient()
+	if client == nil {
+		return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "Redis 不可用，无法获取高危任务锁")
+	}
+	lock := NewTaskLock(client, taskCode)
+	if err := lock.Acquire(ctx); err != nil {
+		if errors.Is(err, ErrTaskLockHeld) {
+			return nil, e.NewBusinessError(e.InvalidParameter, "该高危任务正在其他实例执行中，请稍后重试")
+		}
+		return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "Redis 不可用，无法获取高危任务锁")
+	}
+	return lock, nil
+}
 
 type exportTaskService interface {
 	CreateRecordForTask(ctx context.Context, input baseservice.ExportTaskBootstrapInput) (*model.SysExportRecord, bool, error)
@@ -228,7 +246,17 @@ func (s *TaskCenterService) triggerAsyncTask(ctx context.Context, definition *mo
 		return nil, err
 	}
 
-	jobInfo, publishErr := queue.PublishJSON(ctx, definition.Code, queueName, payload, queue.WithTaskID(taskID))
+	// 导出类任务使用保守的重试和超时限制，避免卡住的任务永久占用并发槽；
+	// 其他任务由 Asynq 默认策略处理（25 次重试、无超时）。
+	options := []queue.JobOption{queue.WithTaskID(taskID)}
+	if isExportTaskCode(definition.Code) {
+		options = append(options,
+			queue.WithMaxRetry(2),
+			queue.WithTimeout(5*time.Minute),
+			queue.WithRetention(24*time.Hour),
+		)
+	}
+	jobInfo, publishErr := queue.PublishJSON(ctx, definition.Code, queueName, payload, options...)
 	if publishErr != nil {
 		finishErr := recorder.Finish(ctx, run, RunFinish{
 			Status: model.TaskRunStatusFailed,
@@ -270,6 +298,15 @@ func (s *TaskCenterService) triggerCronTask(ctx context.Context, definition *mod
 	rawPayload, marshalErr := json.Marshal(payload)
 	if marshalErr != nil {
 		return nil, e.NewBusinessError(e.InvalidParameter, "payload 不是合法 JSON 对象")
+	}
+
+	// 高危 cron 任务需要获取分布式锁，防止多实例并发执行。
+	if definition.IsHighRisk == model.TaskHighRisk {
+		lock, lockErr := acquireTaskLock(ctx, definition.Code)
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		defer lock.Release(ctx)
 	}
 
 	run, err := NewRunRecorder().Start(ctx, RunStart{

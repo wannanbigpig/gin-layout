@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/rand"
 	"net/http"
 	"os"
@@ -32,6 +33,15 @@ const (
 	// realtimeRecheckEveryPings 心跳主动反查频率：每 N 次 ping（约 N×realtimePingPeriod）
 	// 调用一次 auth.IsPrincipalValid，作为 Redis 强踢消息丢失与 token 过期的兜底层。
 	realtimeRecheckEveryPings = 10
+
+	// wsMaxConnsPerUser 每用户最大 WebSocket 连接数，超出时拒绝新连接。
+	wsMaxConnsPerUser = 5
+	// wsMaxConnsTotal 全局最大 WebSocket 连接数，超出时拒绝新连接。
+	wsMaxConnsTotal = 5000
+	// wsReadLimit 客户端单条消息最大字节数（1KB），超出时服务端主动断开。
+	wsReadLimit = 1024
+	// wsPongWait 客户端 pong 响应超时时间，超过未收到 pong 则断开连接。
+	wsPongWait = 60 * time.Second
 )
 
 type redisEventPayload struct {
@@ -57,15 +67,22 @@ type wsClient struct {
 }
 
 type hub struct {
-	mu      sync.RWMutex
-	clients map[uint]map[*wsClient]struct{}
+	mu              sync.RWMutex
+	clients         map[uint]map[*wsClient]struct{}
+	totalConns      int
+	maxConnsPerUser int
+	maxConnsTotal   int
 }
 
 // wsOriginChecker 可在测试中替换为始终允许的实现。
 var wsOriginChecker = checkWebSocketOrigin
 
 var (
-	defaultHub = &hub{clients: make(map[uint]map[*wsClient]struct{})}
+	defaultHub = &hub{
+		clients:         make(map[uint]map[*wsClient]struct{}),
+		maxConnsPerUser: wsMaxConnsPerUser,
+		maxConnsTotal:   wsMaxConnsTotal,
+	}
 	upgrader   = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return wsOriginChecker(r) },
 	}
@@ -153,13 +170,22 @@ func ServeWebsocket(w http.ResponseWriter, r *http.Request, claims *token.AdminC
 	if err != nil {
 		return err
 	}
+
+	// 限制客户端单条消息大小，超出时服务端主动断开连接。
+	conn.SetReadLimit(wsReadLimit)
+
 	client := &wsClient{
 		userID:    claims.UserID,
 		sessionID: claims.ID,
 		claims:    claims,
 		conn:      conn,
 	}
-	defaultHub.register(client)
+	if err := defaultHub.register(client); err != nil {
+		closeMsg := websocket.FormatCloseMessage(websocket.ClosePolicyViolation, err.Error())
+		_ = conn.WriteMessage(websocket.CloseMessage, closeMsg)
+		_ = conn.Close()
+		return nil
+	}
 
 	go client.keepalive()
 
@@ -475,13 +501,27 @@ func (h *hub) broadcastToAll(msg GenericMessage) {
 	}
 }
 
-func (h *hub) register(client *wsClient) {
+func (h *hub) register(client *wsClient) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	// 全局连接数限制
+	if h.totalConns >= h.maxConnsTotal {
+		return errors.New("max total connections reached")
+	}
+
+	// 每用户连接数限制
+	userConns := h.clients[client.userID]
+	if len(userConns) >= h.maxConnsPerUser {
+		return errors.New("max connections per user reached")
+	}
+
 	if h.clients[client.userID] == nil {
 		h.clients[client.userID] = make(map[*wsClient]struct{})
 	}
 	h.clients[client.userID][client] = struct{}{}
+	h.totalConns++
+	return nil
 }
 
 func (h *hub) unregister(client *wsClient) {
@@ -489,9 +529,12 @@ func (h *hub) unregister(client *wsClient) {
 	defer h.mu.Unlock()
 	clients := h.clients[client.userID]
 	if clients != nil {
-		delete(clients, client)
-		if len(clients) == 0 {
-			delete(h.clients, client.userID)
+		if _, ok := clients[client]; ok {
+			delete(clients, client)
+			h.totalConns--
+			if len(clients) == 0 {
+				delete(h.clients, client.userID)
+			}
 		}
 	}
 	// 用 sync.Once 保护连接关闭，避免多路径并发调用导致 close-of-closed
@@ -582,6 +625,12 @@ func (c *wsClient) closeWithCode(code int, reason string) {
 }
 
 func (c *wsClient) keepalive() {
+	// 设置 pong 超时：客户端必须在 wsPongWait 内回复 pong，否则连接将被 ReadMessage 错误触发关闭。
+	c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
+
 	ticker := time.NewTicker(realtimePingPeriod)
 	defer ticker.Stop()
 	pings := 0

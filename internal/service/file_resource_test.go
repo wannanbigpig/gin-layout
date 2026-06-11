@@ -591,6 +591,56 @@ func TestFileResourceCompleteDirectUploadRejectsMimeMismatch(t *testing.T) {
 	}
 }
 
+func TestFileResourceCompleteDirectUploadUsesSessionSizeForActualSizeCheck(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	hash := strings.Repeat("b", 64)
+	driver := fakeStatFileResourceDriver{
+		fakeFileResourceDriver: fakeFileResourceDriver{
+			name:    model.StorageDriverAliyunOSS,
+			content: []byte("plain text content"),
+		},
+		statSize: 9,
+	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, nil
+		},
+	})
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "note.txt",
+		Size:       12,
+		Hash:       hash,
+		MimeType:   "text/plain",
+		IsPublic:   global.Yes,
+	}, 1)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
+
+	_, err = service.CompleteDirectUpload(&form.FileUploadComplete{
+		CompleteToken: credential.CompleteToken,
+		OriginName:    "note.txt",
+		Size:          9, // 客户端伪造为实际大小；服务端必须仍按 session.Size=12 校验
+		Hash:          hash,
+		MimeType:      "text/plain",
+		IsPublic:      global.Yes,
+		Driver:        model.StorageDriverAliyunOSS,
+		Bucket:        credential.Bucket,
+		ObjectKey:     credential.ObjectKey,
+	}, 1)
+	if err == nil {
+		t.Fatal("expected actual size mismatch against session size to be rejected")
+	}
+	var bizErr *e.BusinessError
+	if !stderrors.As(err, &bizErr) || bizErr.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected InvalidParameter for size mismatch, got: %v", err)
+	}
+}
+
 func TestFileResourceMimeSniffFailsClosedOnStorageErrors(t *testing.T) {
 	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
 		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
@@ -1063,6 +1113,59 @@ func TestFileResourceMultipartCompleteDoesNotCompleteStorageTwiceForSameToken(t 
 	}
 	if completeCalls != 1 {
 		t.Fatalf("expected storage complete once, got %d", completeCalls)
+	}
+}
+
+func TestFileResourceMultipartCompleteUsesSessionSizeForActualSizeCheck(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	hash := strings.Repeat("d", 64)
+	driver := fakeStatFileResourceDriver{
+		fakeFileResourceDriver: fakeFileResourceDriver{
+			name:                model.StorageDriverAliyunOSS,
+			content:             []byte("plain text content"),
+			onCompleteMultipart: func() {},
+		},
+		statSize: 9,
+	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, nil
+		},
+	})
+	initResult, err := service.MultipartInit(&form.FileMultipartInit{
+		OriginName: "note.txt",
+		Size:       12,
+		MimeType:   "text/plain",
+		Hash:       hash,
+		IsPublic:   global.Yes,
+	}, 8)
+	if err != nil {
+		t.Fatalf("multipart init failed: %v", err)
+	}
+
+	_, err = service.MultipartComplete(&form.FileMultipartComplete{
+		CompleteToken: initResult.CompleteToken,
+		UploadID:      initResult.UploadID,
+		OriginName:    "note.txt",
+		Size:          9, // 客户端伪造为实际大小；服务端必须仍按 session.Size=12 校验
+		Hash:          hash,
+		MimeType:      "text/plain",
+		IsPublic:      global.Yes,
+		Driver:        model.StorageDriverAliyunOSS,
+		Bucket:        initResult.Bucket,
+		ObjectKey:     initResult.ObjectKey,
+		Parts:         []form.MultipartCompletePart{{PartNumber: 1, ETag: "etag"}},
+	}, 8)
+	if err == nil {
+		t.Fatal("expected multipart actual size mismatch against session size to be rejected")
+	}
+	var bizErr *e.BusinessError
+	if !stderrors.As(err, &bizErr) || bizErr.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected InvalidParameter for size mismatch, got: %v", err)
 	}
 }
 
@@ -1793,6 +1896,19 @@ func (d fakeFileResourceDriver) Delete(context.Context, string, string) error {
 	return nil
 }
 
+type fakeStatFileResourceDriver struct {
+	fakeFileResourceDriver
+	statSize int64
+	statErr  error
+}
+
+func (d fakeStatFileResourceDriver) Stat(context.Context, string, string) (filestorage.ObjectStat, error) {
+	if d.statErr != nil {
+		return filestorage.ObjectStat{}, d.statErr
+	}
+	return filestorage.ObjectStat{Size: d.statSize}, nil
+}
+
 func (d fakeFileResourceDriver) URL(string, string, bool) string {
 	return ""
 }
@@ -2109,6 +2225,23 @@ func TestFileResourceUploadLimits(t *testing.T) {
 		t.Fatalf("expected local upload to succeed with wildcard, got: %v", err)
 	}
 
+	// 3a-1. 默认白名单下，浏览器/客户端未提供可靠 MIME 时允许通过安全扩展名推导
+	serviceDefault := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: "aliyun_oss"}, filestorage.DefaultConfig(), "aliyun_oss", nil
+		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.DefaultConfig(), nil
+		},
+	})
+	headerOctetText := newMultipartFileHeader(t, "test.txt", []byte("hello"))
+	headerOctetText.Header.Set("Content-Type", "application/octet-stream")
+	_, err = serviceDefault.UploadLocal([]*multipart.FileHeader{headerOctetText}, &form.FileLocalUpload{IsPublic: global.Yes}, 1)
+	if err != nil {
+		t.Fatalf("expected .txt upload with octet-stream to pass default whitelist, got: %v", err)
+	}
+
 	// 3b. 直传凭证通过通配符校验
 	_, err = servicePass.UploadCredential(&form.FileUploadCredential{
 		OriginName: "test.txt",
@@ -2218,6 +2351,47 @@ func TestFileResourceUploadLimits(t *testing.T) {
 	}
 	if !stderrors.As(err, &bizErr) || bizErr.GetCode() != e.FileMimeTypeNotAllowed {
 		t.Fatalf("expected FileMimeTypeNotAllowed (11013) error for local upload extension tamper, got: %v", err)
+	}
+}
+
+func TestFileResourceDefaultWhitelistAllowsOctetStreamForKnownExtensions(t *testing.T) {
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.DefaultConfig(), model.StorageDriverAliyunOSS, nil
+		},
+	})
+
+	tests := []struct {
+		name     string
+		filename string
+		mimeType string
+	}{
+		{name: "txt empty mime", filename: "readme.txt", mimeType: ""},
+		{name: "png octet stream", filename: "avatar.png", mimeType: "application/octet-stream"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := service.validateFileLimit(tt.filename, 12, tt.mimeType); err != nil {
+				t.Fatalf("expected %s with mime %q to pass default whitelist, got %v", tt.filename, tt.mimeType, err)
+			}
+		})
+	}
+}
+
+func TestFileResourceDefaultWhitelistRejectsExecutableExtension(t *testing.T) {
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.DefaultConfig(), model.StorageDriverAliyunOSS, nil
+		},
+	})
+
+	err := service.validateFileLimit("payload.exe", 12, "application/octet-stream")
+	if err == nil {
+		t.Fatal("expected executable extension to be rejected by default whitelist")
+	}
+	var bizErr *e.BusinessError
+	if !stderrors.As(err, &bizErr) || bizErr.GetCode() != e.FileMimeTypeNotAllowed {
+		t.Fatalf("expected FileMimeTypeNotAllowed for executable extension, got %v", err)
 	}
 }
 

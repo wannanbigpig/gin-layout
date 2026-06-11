@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/data"
@@ -51,6 +53,13 @@ type DataScopeSnapshot struct {
 // 当前数据权限由业务 service 显式接入；系统管理、日志、文件、任务等治理模块不默认套用。
 type DataScopeFilter struct{}
 
+var (
+	dataScopeSingleflightGroup  singleflight.Group
+	computeScopeForSingleflight = func(f *DataScopeFilter, ctx context.Context, uid uint) (*scopeResult, error) {
+		return f.computeScope(ctx, uid)
+	}
+)
+
 // NewDataScopeFilter 创建数据权限过滤器。
 func NewDataScopeFilter() *DataScopeFilter {
 	return &DataScopeFilter{}
@@ -68,26 +77,36 @@ func (f *DataScopeFilter) Build(ctx context.Context, input DataScopeInput, deptC
 	}
 
 	// 尝试从缓存读取
-	scopeResult, err := f.getFromCache(ctx, input.UID)
+	result, err := f.getFromCache(ctx, input.UID)
 	if err != nil {
-		// 缓存未命中，从数据库计算
-		scopeResult, err = f.computeScope(ctx, input.UID)
-		if err != nil {
+		// 缓存未命中，使用 singleflight 防止并发回源
+		cacheKey := fmt.Sprintf("%s%d", dataScopeCachePrefix, input.UID)
+		v, sfErr, _ := dataScopeSingleflightGroup.Do(cacheKey, func() (interface{}, error) {
+			return computeScopeForSingleflight(f, ctx, input.UID)
+		})
+		if sfErr != nil {
 			log.Error("DataScopeFilter: compute scope failed, denying access",
 				zap.Uint("uid", input.UID),
-				zap.Error(err))
+				zap.Error(sfErr))
 			return "1=0", nil
 		}
+		computed, ok := v.(*scopeResult)
+		if !ok {
+			log.Error("DataScopeFilter: invalid scope result type",
+				zap.Uint("uid", input.UID))
+			return "1=0", nil
+		}
+		result = computed
 		// 写入缓存（异步，不阻塞主流程）
-		go f.setToCache(context.Background(), input.UID, scopeResult)
+		go f.setToCache(context.Background(), input.UID, result)
 	}
 
 	return buildScopeCondition(scopeConditionInput{
-		ScopeAll:    scopeResult.ScopeAll,
-		DeptIDs:     scopeResult.DeptIDs,
-		OwnerUID:    scopeResult.OwnerUID,
-		HasDeptIDs:  scopeResult.HasDeptIDs,
-		HasOwnerUID: scopeResult.HasOwnerUID,
+		ScopeAll:    result.ScopeAll,
+		DeptIDs:     result.DeptIDs,
+		OwnerUID:    result.OwnerUID,
+		HasDeptIDs:  result.HasDeptIDs,
+		HasOwnerUID: result.HasOwnerUID,
 		DeptCol:     deptCol,
 		OwnerCol:    ownerCol,
 	})
@@ -370,7 +389,9 @@ func (f *DataScopeFilter) setToCache(ctx context.Context, uid uint, result *scop
 		return
 	}
 
-	if err := client.Set(ctx, f.cacheKey(uid), data, dataScopeCacheTTL).Err(); err != nil {
+	jitter := time.Duration(rand.Intn(30)) * time.Second
+	ttl := dataScopeCacheTTL + jitter
+	if err := client.Set(ctx, f.cacheKey(uid), data, ttl).Err(); err != nil {
 		log.Error("DataScopeFilter: set cache failed", zap.Uint("uid", uid), zap.Error(err))
 	}
 }

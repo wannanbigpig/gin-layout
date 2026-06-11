@@ -221,6 +221,7 @@ func (r *runtimeCronRegistry) addTask(definition cronTaskDefinition) (cron.Entry
 		Cron(cronSpec).
 		WithoutOverlapping()
 	builder.task.taskCode = taskCode
+	builder.task.isHighRisk = definition.IsHighRisk == model.TaskHighRisk
 	entryID, err := registerScheduledTask(r.crontab, r.logger, r.ctx, builder.task)
 	if err != nil {
 		return 0, err

@@ -607,6 +607,10 @@ func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, 
 	if err := s.validateUploadObjectMime(ctx, "direct upload", sniffTarget.storageDriver, sniffTarget.bucket, sniffTarget.objectKey, sniffTarget.mimeType); err != nil {
 		return nil, err
 	}
+	// 事务外校验实际文件大小：防止攻击者伪造小 size 上传超限文件
+	if err := s.validateActualObjectSize(ctx, sniffTarget.storageDriver, sniffTarget.bucket, sniffTarget.objectKey, sniffTarget.declaredSize); err != nil {
+		return nil, err
+	}
 	var uploadFile *model.UploadFiles
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		session, err := findPendingUploadSession(tx, params.CompleteToken, model.UploadSessionTypeDirect, uid)
@@ -1038,7 +1042,8 @@ func (s *FileResourceService) CreateFromLocalPath(ctx context.Context, path stri
 }
 
 func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params *form.FileLocalUpload, uid uint) (*resources.FileResourceResources, error) {
-	if err := s.validateFileLimit(file.Filename, file.Size, file.Header.Get("Content-Type")); err != nil {
+	mimeType := normalizeUploadMimeType(file.Header.Get("Content-Type"), filepath.Ext(file.Filename), true)
+	if err := s.validateFileLimit(file.Filename, file.Size, mimeType); err != nil {
 		return nil, err
 	}
 	db, err := s.dbOrDefault()
@@ -1058,6 +1063,7 @@ func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params 
 	if err != nil {
 		return nil, err
 	}
+	result.MimeType = normalizeUploadMimeType(result.MimeType, firstNonEmpty(result.Ext, filepath.Ext(file.Filename)), true)
 	absBasePath, err := filepath.Abs(basePath)
 	if err != nil {
 		cleanupStoredUpload(result.Path)
@@ -1415,6 +1421,11 @@ func (s *FileResourceService) MultipartCompleteWithContext(ctx context.Context, 
 		restoreUploadSessionPending(context.Background(), db, sniffTarget.sessionID)
 		return nil, err
 	}
+	// 事务外校验实际文件大小：防止攻击者伪造小 size 上传超限文件
+	if err := s.validateActualObjectSize(ctx, sniffTarget.storageDriver, sniffTarget.bucket, sniffTarget.objectKey, sniffTarget.declaredSize); err != nil {
+		restoreUploadSessionPending(context.Background(), db, sniffTarget.sessionID)
+		return nil, err
+	}
 	var uploadFile *model.UploadFiles
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		session, err := findCompletingUploadSession(tx, sniffTarget.sessionID, uid, model.UploadSessionTypeMultipart)
@@ -1663,12 +1674,11 @@ func (s *FileResourceService) validateFileLimit(fileName string, size int64, mim
 			if expectedMime := mime.TypeByExtension(matchedPattern); expectedMime != "" {
 				expectedMime = strings.ToLower(strings.TrimSpace(strings.Split(expectedMime, ";")[0]))
 
-				cleanMime := strings.ToLower(strings.TrimSpace(mimeType))
-				cleanMime = strings.Split(cleanMime, ";")[0] // 去除参数部分
+				cleanMime := normalizeUploadMimeType(mimeType, fileExt, true)
 
-				if cleanMime == "" && fileName != "" {
+				if (cleanMime == "" || cleanMime == "application/octet-stream") && fileName != "" {
 					if guessedMime := mime.TypeByExtension(fileExt); guessedMime != "" {
-						cleanMime = strings.ToLower(strings.TrimSpace(strings.Split(guessedMime, ";")[0]))
+						cleanMime = normalizeUploadMimeType(guessedMime, "", false)
 					}
 				}
 
@@ -1685,12 +1695,12 @@ func (s *FileResourceService) validateFileLimit(fileName string, size int64, mim
 
 	if len(cfg.AllowedMimeTypes) > 0 {
 		allowed := false
-		cleanMime := strings.ToLower(strings.TrimSpace(mimeType))
+		cleanMime := normalizeUploadMimeType(mimeType, filepath.Ext(fileName), true)
 
-		if cleanMime == "" && fileName != "" {
+		if (cleanMime == "" || cleanMime == "application/octet-stream") && fileName != "" {
 			ext := filepath.Ext(fileName)
 			if ext != "" {
-				cleanMime = strings.ToLower(strings.TrimSpace(mime.TypeByExtension(ext)))
+				cleanMime = normalizeUploadMimeType(mime.TypeByExtension(ext), "", false)
 			}
 		}
 
@@ -1727,6 +1737,19 @@ func (s *FileResourceService) validateFileLimit(fileName string, size int64, mim
 	}
 
 	return nil
+}
+
+func normalizeUploadMimeType(mimeType, ext string, inferFromExt bool) string {
+	cleanMime := strings.ToLower(strings.TrimSpace(mimeType))
+	if idx := strings.Index(cleanMime, ";"); idx >= 0 {
+		cleanMime = strings.TrimSpace(cleanMime[:idx])
+	}
+	if inferFromExt && (cleanMime == "" || cleanMime == "application/octet-stream") {
+		if guessedMime := mime.TypeByExtension(ext); guessedMime != "" {
+			return normalizeUploadMimeType(guessedMime, "", false)
+		}
+	}
+	return cleanMime
 }
 
 func isMimeCompatible(actual, expected string) bool {
@@ -1773,6 +1796,40 @@ type uploadMimeSniffTarget struct {
 	bucket        string
 	objectKey     string
 	mimeType      string
+	declaredSize  uint
+}
+
+// validateActualObjectSize 从存储驱动读取对象的实际大小，校验：
+// 1. 实际大小不超过配置上限（MaxFileSizeMB）
+// 2. 实际大小与 session 中声明的大小一致
+// 如果驱动不支持 Stat，则跳过校验（向后兼容）。
+func (s *FileResourceService) validateActualObjectSize(ctx context.Context, storageDriver, bucket, objectKey string, declaredSize uint) error {
+	driver, cfg, err := s.storageDriverByName(ctx, storageDriver)
+	if err != nil {
+		return fmt.Errorf("resolve storage driver for size validation: %w", err)
+	}
+	sc, ok := driver.(filestorage.StatCapable)
+	if !ok {
+		return nil // 驱动不支持 Stat，跳过校验
+	}
+	stat, err := sc.Stat(ctx, bucket, objectKey)
+	if err != nil {
+		return fmt.Errorf("stat object for size validation: %w", err)
+	}
+	// 校验实际大小不超过配置上限
+	maxSizeMB := cfg.MaxFileSizeMB
+	if maxSizeMB <= 0 {
+		maxSizeMB = 10
+	}
+	maxSizeBytes := int64(maxSizeMB) * 1024 * 1024
+	if stat.Size > maxSizeBytes {
+		return pkgErrors.NewBusinessError(pkgErrors.FileTooLarge)
+	}
+	// 校验实际大小与声明大小一致
+	if declaredSize > 0 && stat.Size != int64(declaredSize) {
+		return pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "actual file size does not match declared size")
+	}
+	return nil
 }
 
 func (s *FileResourceService) resolveDirectUploadMimeSniffTarget(ctx context.Context, params *form.FileUploadComplete, uid uint) (uploadMimeSniffTarget, error) {
@@ -1795,6 +1852,7 @@ func (s *FileResourceService) resolveDirectUploadMimeSniffTarget(ctx context.Con
 		bucket:        session.Bucket,
 		objectKey:     session.ObjectKey,
 		mimeType:      session.MimeType,
+		declaredSize:  session.Size,
 	}
 	if session.FileObjectID > 0 {
 		object, err := findFileObjectByID(db.WithContext(ctx), session.FileObjectID)
@@ -1844,6 +1902,7 @@ func (s *FileResourceService) prepareMultipartCompleteObject(ctx context.Context
 		bucket:        session.Bucket,
 		objectKey:     session.ObjectKey,
 		mimeType:      session.MimeType,
+		declaredSize:  session.Size,
 	}
 	if session.FileObjectID > 0 {
 		object, err := findFileObjectByID(db.WithContext(ctx), session.FileObjectID)

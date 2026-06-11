@@ -234,6 +234,109 @@ func TestLoginCaptchaRouteRemainsAvailableWithoutMysql(t *testing.T) {
 	}
 }
 
+func TestSetRoutersGlobalRateLimitDefaultEnabled(t *testing.T) {
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Mysql.Enable = false
+		cfg.RateLimitEnabled = true
+		cfg.RateLimitRPS = 1
+		cfg.RateLimitBurst = 1
+		cfg.LoginRateLimitEnabled = false
+	})
+	defer restoreConfig()
+
+	engine, err := SetRouters()
+	if err != nil {
+		t.Fatalf("SetRouters returned error: %v", err)
+	}
+
+	first := httptest.NewRecorder()
+	firstReq := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	firstReq.RemoteAddr = "10.10.0.1:1234"
+	engine.ServeHTTP(first, firstReq)
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected first request status %d, got %d", http.StatusOK, first.Code)
+	}
+
+	second := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	secondReq.RemoteAddr = "10.10.0.1:1234"
+	engine.ServeHTTP(second, secondReq)
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second request status %d, got %d", http.StatusTooManyRequests, second.Code)
+	}
+}
+
+func TestLoginRouteUsesDedicatedRateLimit(t *testing.T) {
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Mysql.Enable = false
+		cfg.RateLimitEnabled = true
+		cfg.RateLimitRPS = 100
+		cfg.RateLimitBurst = 100
+		cfg.LoginRateLimitEnabled = true
+		cfg.LoginRateLimitRPS = 1
+		cfg.LoginRateLimitBurst = 1
+	})
+	defer restoreConfig()
+
+	engine, err := SetRouters()
+	if err != nil {
+		t.Fatalf("SetRouters returned error: %v", err)
+	}
+
+	first := httptest.NewRecorder()
+	firstReq := httptest.NewRequest(http.MethodPost, "/admin/v1/login", strings.NewReader(`{}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstReq.RemoteAddr = "10.10.0.2:1234"
+	engine.ServeHTTP(first, firstReq)
+	if first.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected first login request status %d, got %d", http.StatusServiceUnavailable, first.Code)
+	}
+
+	second := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodPost, "/admin/v1/login", strings.NewReader(`{}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondReq.RemoteAddr = "10.10.0.2:1234"
+	engine.ServeHTTP(second, secondReq)
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second login request status %d, got %d", http.StatusTooManyRequests, second.Code)
+	}
+
+	captcha := httptest.NewRecorder()
+	captchaReq := httptest.NewRequest(http.MethodGet, "/admin/v1/login-captcha", nil)
+	captchaReq.RemoteAddr = "10.10.0.2:1234"
+	engine.ServeHTTP(captcha, captchaReq)
+	if captcha.Code != http.StatusOK {
+		t.Fatalf("expected captcha request status %d, got %d", http.StatusOK, captcha.Code)
+	}
+}
+
+func TestLoginRateLimitCanBeDisabled(t *testing.T) {
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Mysql.Enable = false
+		cfg.RateLimitEnabled = false
+		cfg.LoginRateLimitEnabled = false
+		cfg.LoginRateLimitRPS = 1
+		cfg.LoginRateLimitBurst = 1
+	})
+	defer restoreConfig()
+
+	engine, err := SetRouters()
+	if err != nil {
+		t.Fatalf("SetRouters returned error: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/admin/v1/login", strings.NewReader(`{}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.RemoteAddr = "10.10.0.3:1234"
+		engine.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected disabled login limiter request %d status %d, got %d", i, http.StatusServiceUnavailable, recorder.Code)
+		}
+	}
+}
+
 func TestReadinessRouteReportsMysqlUnavailable(t *testing.T) {
 	restoreState := disableDependenciesForReadinessTest(t)
 	defer restoreState()

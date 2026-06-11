@@ -69,6 +69,21 @@ func (d *AliyunOSSDriver) Delete(ctx context.Context, bucket, objectKey string) 
 	return err
 }
 
+func (d *AliyunOSSDriver) Stat(ctx context.Context, bucket, objectKey string) (ObjectStat, error) {
+	out, err := d.client.HeadObject(ctx, &oss.HeadObjectRequest{
+		Bucket: oss.Ptr(firstNonEmpty(bucket, d.bucket)),
+		Key:    oss.Ptr(objectKey),
+	})
+	if err != nil {
+		return ObjectStat{}, err
+	}
+	stat := ObjectStat{Size: out.ContentLength}
+	if out.ContentType != nil {
+		stat.ContentType = *out.ContentType
+	}
+	return stat, nil
+}
+
 func (d *AliyunOSSDriver) URL(bucket, objectKey string, isPublic bool) string {
 	if !isPublic || d.publicDomain == "" || objectKey == "" {
 		return ""

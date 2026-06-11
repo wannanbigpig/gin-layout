@@ -6,6 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
+)
+
+const (
+	defaultHTTPTimeout = 30 * time.Second
+	defaultMaxBodySize = 10 << 20 // 10MB
 )
 
 // HttpRequest 封装带状态的 HTTP 请求客户端。
@@ -43,9 +49,14 @@ func (hr *HttpRequest) GetRequest(url string, params *url.Values, args ...any) *
 
 // Request 构造并发送 HTTP 请求。
 func (hr *HttpRequest) Request(method string, url string, body io.Reader, args ...any) *HttpRequest {
+	if hr.Client.Timeout == 0 {
+		hr.Client.Timeout = defaultHTTPTimeout
+	}
+
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		hr.Error = err
+		return hr
 	}
 
 	if args != nil {
@@ -85,8 +96,15 @@ func (hr *HttpRequest) ParseBytes() (body []byte, err error) {
 		}
 	}()
 
-	body, err = io.ReadAll(hr.Response.Body)
-	return body, err
+	reader := io.LimitReader(hr.Response.Body, defaultMaxBodySize+1)
+	body, err = io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > defaultMaxBodySize {
+		return nil, errors.New("http response body too large")
+	}
+	return body, nil
 }
 
 // Raw 以字符串形式返回原始响应体。

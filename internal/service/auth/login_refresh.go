@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/mssola/useragent"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/data"
@@ -107,17 +109,26 @@ func (s *LoginService) acquireRedisLock(lockKey string) (func(), bool, error) {
 	lockCtx, lockCancel := context.WithTimeout(context.Background(), refreshLockRedisTimeout)
 	defer lockCancel()
 
-	locked, err := redisClient.SetNX(lockCtx, lockKey, "1", refreshLockTTL).Result()
+	lockToken := uuid.New().String()
+	locked, err := redisClient.SetNX(lockCtx, lockKey, lockToken, refreshLockTTL).Result()
 	if err != nil {
 		return nil, false, err
 	}
 	if !locked {
 		return nil, false, nil
 	}
+
+	releaseScript := redis.NewScript(`
+		if redis.call("get", KEYS[1]) == ARGV[1] then
+			return redis.call("del", KEYS[1])
+		end
+		return 0
+	`)
+
 	return func() {
 		unlockCtx, unlockCancel := context.WithTimeout(context.Background(), refreshLockRedisTimeout)
 		defer unlockCancel()
-		if err := redisClient.Del(unlockCtx, lockKey).Err(); err != nil {
+		if err := releaseScript.Run(unlockCtx, redisClient, []string{lockKey}, lockToken).Err(); err != nil {
 			log.Logger.Warn("释放刷新 token Redis 锁失败", zap.Error(err), zap.String("lock_key", lockKey))
 		}
 	}, true, nil

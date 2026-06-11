@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"mime/multipart"
 	"net/http"
@@ -38,6 +39,100 @@ func TestAdminUserBuildListCondition(t *testing.T) {
 	if len(args) != 7 {
 		t.Fatalf("unexpected args len: %d", len(args))
 	}
+}
+
+type fakeAdminDataScopeFilter struct {
+	cond string
+	args []any
+}
+
+func (f fakeAdminDataScopeFilter) Build(_ context.Context, _ access.DataScopeInput, deptCol, ownerCol string) (string, []any) {
+	if f.cond != "" {
+		return f.cond, f.args
+	}
+	return "(" + deptCol + " IN (?) OR " + ownerCol + " = ?)", []any{[]uint{20}, uint(3)}
+}
+
+func TestAdminUserDataScopeConditionExecutesWithDepartmentMap(t *testing.T) {
+	previous := newAdminDataScopeFilter
+	newAdminDataScopeFilter = func() adminDataScopeFilter {
+		return fakeAdminDataScopeFilter{}
+	}
+	defer func() {
+		newAdminDataScopeFilter = previous
+	}()
+
+	service := NewAdminUserService()
+	service.SetAdminUserId(9)
+	condition, args := service.buildDataScopeCondition()
+	expected := "(EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND admin_user_department_map.dept_id IN (?)) OR admin_user.id = ?)"
+	if condition != expected {
+		t.Fatalf("unexpected data scope condition: %s", condition)
+	}
+	if !strings.Contains(condition, "admin_user_department_map.uid = admin_user.id") {
+		t.Fatalf("expected condition to join through admin_user_department_map: %s", condition)
+	}
+
+	db := setupAdminUserDataScopeSQLiteDB(t)
+	var ids []uint
+	if err := db.Table("admin_user").
+		Where(condition, args...).
+		Order("id asc").
+		Pluck("id", &ids).Error; err != nil {
+		t.Fatalf("data scope condition should execute on sqlite: %v", err)
+	}
+
+	want := []uint{2, 3}
+	if len(ids) != len(want) {
+		t.Fatalf("unexpected scoped ids: got=%v want=%v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("unexpected scoped ids: got=%v want=%v", ids, want)
+		}
+	}
+}
+
+func TestWrapAdminUserDeptScopeConditionKeepsOwnerOutsideExists(t *testing.T) {
+	condition := wrapAdminUserDeptScopeCondition("(admin_user_department_map.dept_id IN (?) OR admin_user.id = ?)")
+	expected := "(EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND admin_user_department_map.dept_id IN (?)) OR admin_user.id = ?)"
+	if condition != expected {
+		t.Fatalf("unexpected wrapped condition: %s", condition)
+	}
+}
+
+func setupAdminUserDataScopeSQLiteDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to create sqlite db: %v", err)
+	}
+	statements := []string{
+		`CREATE TABLE admin_user (
+			id integer primary key,
+			username text,
+			deleted_at integer not null default 0
+		)`,
+		`CREATE TABLE admin_user_department_map (
+			id integer primary key autoincrement,
+			uid integer not null,
+			dept_id integer not null
+		)`,
+		`INSERT INTO admin_user (id, username, deleted_at) VALUES
+			(1, 'out-of-scope', 0),
+			(2, 'dept-match', 0),
+			(3, 'self-match-without-dept-map', 0)`,
+		`INSERT INTO admin_user_department_map (uid, dept_id) VALUES
+			(1, 10),
+			(2, 20)`,
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("execute sqlite setup failed: %v", err)
+		}
+	}
+	return db
 }
 
 func TestUniqueUintSlice(t *testing.T) {

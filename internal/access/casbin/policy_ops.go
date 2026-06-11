@@ -5,6 +5,8 @@ import (
 
 	"github.com/casbin/casbin/v3"
 	"gorm.io/gorm"
+
+	"github.com/wannanbigpig/gin-layout/internal/model"
 )
 
 // newEnforcerFromDBFunc 可替换的 Enforcer 构建函数，测试时注入 mock。
@@ -75,33 +77,49 @@ func (e *CasbinEnforcer) EditPolicyPermissionsBatch(subjectPolicies map[string][
 	})
 }
 
-// EditPolicyRoles 编辑策略角色
+// EditPolicyRoles 编辑策略角色。
+// 有外部事务时直接在该事务内操作；无事务时内部开启事务保证原子性。
 func (e *CasbinEnforcer) EditPolicyRoles(user string, policy []string, tx ...*gorm.DB) error {
-	return e.execute(firstTx(tx), func(enforcer casbin.IEnforcer) error {
-		_, err := enforcer.DeleteRolesForUser(user)
-		if err != nil {
-			return err
+	if execTx := firstTxOrBound(tx, e.tx); execTx != nil {
+		if !isInTransaction(execTx) {
+			return errors.New("请先通过 GORM 开启事务")
 		}
-
-		rules := make([][]string, 0, len(policy))
-		for _, role := range policy {
-			if role != "" {
-				rules = append(rules, []string{user, role})
-			}
-		}
-		if len(rules) == 0 {
-			return nil
-		}
-
-		ok, err := enforcer.AddGroupingPolicies(rules)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return errors.New("添加权限失败~")
-		}
-		return nil
+		return replaceRolesInDB(execTx, user, policy)
+	}
+	// 无外部事务时，内部开启事务保证删除与插入的原子性
+	db, err := model.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		return replaceRolesInDB(tx, user, policy)
 	})
+}
+
+func replaceRolesInDB(tx *gorm.DB, user string, roles []string) error {
+	// 1. 删除旧的角色映射
+	if err := tx.Where("v0 = ? AND ptype = 'g'", user).Delete(&casbinPolicyRule{}).Error; err != nil {
+		return err
+	}
+	// 2. 批量插入新的角色映射
+	if len(roles) == 0 {
+		return nil
+	}
+	rows := make([]casbinPolicyRule, 0, len(roles))
+	for _, role := range roles {
+		if role == "" {
+			continue
+		}
+		rows = append(rows, casbinPolicyRule{
+			Ptype: "g",
+			V0:    user,
+			V1:    role,
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return tx.CreateInBatches(rows, 100).Error
 }
 
 // WithTransaction 在指定事务下执行 Casbin 操作。

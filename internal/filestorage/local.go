@@ -70,6 +70,18 @@ func (d *LocalDriver) Exists(_ context.Context, bucket, objectKey string) (bool,
 	return false, err
 }
 
+func (d *LocalDriver) Stat(_ context.Context, bucket, objectKey string) (ObjectStat, error) {
+	target, err := d.resolve(bucket, objectKey)
+	if err != nil {
+		return ObjectStat{}, err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return ObjectStat{}, err
+	}
+	return ObjectStat{Size: info.Size()}, nil
+}
+
 func (d *LocalDriver) Delete(_ context.Context, bucket, objectKey string) error {
 	path, err := d.resolve(bucket, objectKey)
 	if err != nil {

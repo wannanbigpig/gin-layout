@@ -39,6 +39,8 @@ func SetupRouter() (*gin.Engine, error) {
 	if cfg != nil {
 		cfg.BasePath = rootPath
 		cfg.Mysql.PrintSql = false
+		cfg.RateLimitEnabled = false
+		cfg.LoginRateLimitEnabled = false
 	}
 	// 2、初始化zap日志
 	if err := logger.InitLogger(); err != nil {

@@ -77,7 +77,10 @@ func (api AdminUserController) List(c *gin.Context) {
 		return
 	}
 
-	result := admin.NewAdminUserService().List(params)
+	svc := admin.NewAdminUserService()
+	svc.SetCtx(c)
+	svc.SetAdminUserId(api.GetCurrentUserID(c))
+	result := svc.List(params)
 	api.Success(c, result)
 }
 

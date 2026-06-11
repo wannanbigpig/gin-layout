@@ -76,7 +76,12 @@ func (api CommonController) GetFile(c *gin.Context) {
 	var currentUID uint
 	var checkAuth bool
 	if uid, exists := c.Get(global.ContextKeyUID); exists {
-		currentUID = uid.(uint)
+		uidVal, ok := uid.(uint)
+		if !ok {
+			api.FailCode(c, errors.InvalidParameter)
+			return
+		}
+		currentUID = uidVal
 		checkAuth = true
 		commonService.SetAdminUserId(currentUID)
 	} else {

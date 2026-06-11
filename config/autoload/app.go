@@ -46,6 +46,18 @@ type AppConfig struct {
 	// EnableResetSystemCron 是否启用高风险的系统重建定时任务。
 	// 默认 false，避免在非预期环境触发系统数据重建。
 	EnableResetSystemCron bool `mapstructure:"enable_reset_system_cron"`
+	// RateLimitEnabled 是否启用全局 IP 级速率限制，默认开启
+	RateLimitEnabled bool `mapstructure:"rate_limit_enabled"`
+	// RateLimitRPS 每 IP 每秒允许的请求数（令牌桶速率），默认 20
+	RateLimitRPS float64 `mapstructure:"rate_limit_rps"`
+	// RateLimitBurst 每 IP 突发请求上限（令牌桶容量），默认 40
+	RateLimitBurst int `mapstructure:"rate_limit_burst"`
+	// LoginRateLimitEnabled 是否启用登录接口 IP 级速率限制，默认开启
+	LoginRateLimitEnabled bool `mapstructure:"login_rate_limit_enabled"`
+	// LoginRateLimitRPS 登录接口每 IP 每秒允许的请求数（令牌桶速率），默认 1
+	LoginRateLimitRPS float64 `mapstructure:"login_rate_limit_rps"`
+	// LoginRateLimitBurst 登录接口每 IP 突发请求上限（令牌桶容量），默认 5
+	LoginRateLimitBurst int `mapstructure:"login_rate_limit_burst"`
 }
 
 var App = AppConfig{
@@ -65,6 +77,12 @@ var App = AppConfig{
 	CorsCredentials:       false,                 // 默认不允许携带凭证
 	AllowDegradedStartup:  false,                 // 默认关闭降级启动，依赖初始化失败时直接退出
 	EnableResetSystemCron: false,                 // 默认关闭高风险系统重建定时任务
+	RateLimitEnabled:      true,                  // 默认开启全局限流
+	RateLimitRPS:          20,                    // 默认每 IP 每秒 20 请求
+	RateLimitBurst:        40,                    // 默认每 IP 突发上限 40
+	LoginRateLimitEnabled: true,                  // 默认开启登录接口限流
+	LoginRateLimitRPS:     1,                     // 默认登录接口每 IP 每秒 1 请求
+	LoginRateLimitBurst:   5,                     // 默认登录接口每 IP 突发上限 5
 }
 
 func getDefaultPath() (path string) {

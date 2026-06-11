@@ -12,6 +12,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/csvutil"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -146,14 +147,14 @@ func (s *FileResourceService) generateFileListExportCSV(params *form.FileResourc
 		for _, row := range rows {
 			if err := writer.Write([]string{
 				strconv.FormatUint(uint64(row.ID), 10),
-				row.UUID,
-				row.OriginName,
-				row.FileType,
-				row.MimeType,
+				csvutil.SanitizeCell(row.UUID),
+				csvutil.SanitizeCell(row.OriginName),
+				csvutil.SanitizeCell(row.FileType),
+				csvutil.SanitizeCell(row.MimeType),
 				strconv.FormatUint(uint64(row.Size), 10),
 				strconv.Itoa(int(row.IsPublic)),
-				row.StorageDriver,
-				row.StorageStatus,
+				csvutil.SanitizeCell(row.StorageDriver),
+				csvutil.SanitizeCell(row.StorageStatus),
 				strconv.FormatUint(uint64(row.FolderID), 10),
 				row.CreatedAt.String(),
 			}); err != nil {

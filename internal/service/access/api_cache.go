@@ -25,6 +25,8 @@ const (
 	apiCacheRedisTimeout        = 3 * time.Second
 	apiCacheRefreshTotalTimeout = 15 * time.Second
 	apiCacheWriteBatch          = 500
+	apiNullMarkerTTL            = 30 * time.Second
+	apiNullMarkerValue          = "__NULL__"
 )
 
 // ApiRouteInfo 描述接口路由的鉴权模式和展示名称。
@@ -134,6 +136,10 @@ func (s *ApiRouteCacheService) ResetMetrics() {
 
 func (s *ApiRouteCacheService) cacheKey(route string, method string) string {
 	return fmt.Sprintf("%s:%s", method, route)
+}
+
+func (s *ApiRouteCacheService) nullMarkerKey(cacheKey string) string {
+	return fmt.Sprintf("%s:null:%s", apiRedisKey, cacheKey)
 }
 
 func redisContext() (context.Context, context.CancelFunc) {
@@ -283,6 +289,14 @@ func (s *ApiRouteCacheService) GetRouteInfo(route string, method string) (*ApiRo
 	if cfg.Redis.Enable && client != nil {
 		ctx, cancel := redisContext()
 		defer cancel()
+
+		// 先检查空值标记（单独 String key，支持独立 TTL）
+		nullKey := s.nullMarkerKey(cacheKey)
+		if nullVal, nullErr := client.Get(ctx, nullKey).Result(); nullErr == nil && nullVal == apiNullMarkerValue {
+			s.metrics.cacheHitTotal.Add(1)
+			return nil, gorm.ErrRecordNotFound
+		}
+
 		val, err := client.HGet(ctx, apiRedisKey, cacheKey).Result()
 		if err == nil {
 			var cacheInfo ApiRouteInfo
@@ -327,6 +341,19 @@ func (s *ApiRouteCacheService) loadRouteInfoFromSource(route string, method stri
 
 	api := model.NewApi()
 	if err := api.GetDetail("route = ? AND method = ? AND deleted_at = 0", route, method); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 缓存空值标记 30 秒，防止缓存穿透
+			cfg := s.currentConfig()
+			client := data.RedisClient()
+			if cfg.Redis.Enable && client != nil {
+				ctx, cancel := redisContext()
+				defer cancel()
+				nullKey := s.nullMarkerKey(s.cacheKey(route, method))
+				if setErr := client.Set(ctx, nullKey, apiNullMarkerValue, apiNullMarkerTTL).Err(); setErr != nil {
+					logError("api 路由空值标记写入 Redis 失败", setErr, route, method)
+				}
+			}
+		}
 		return nil, err
 	}
 

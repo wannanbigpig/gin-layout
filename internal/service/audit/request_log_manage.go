@@ -18,6 +18,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/csvutil"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/sensitive"
 	"github.com/wannanbigpig/gin-layout/internal/service/sys_config"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -416,20 +417,20 @@ func writeRequestLogRows(db *gorm.DB, rows *sql.Rows, writer *csv.Writer) (int, 
 		}
 		if err := writer.Write([]string{
 			strconv.FormatUint(uint64(record.ID), 10),
-			record.RequestID,
-			record.OperatorAccount,
-			record.OperatorName,
-			record.IP,
-			record.RequestKind,
-			record.ExecutionTimeScope,
-			record.Method,
-			record.BaseURL,
-			record.OperationName,
+			csvutil.SanitizeCell(record.RequestID),
+			csvutil.SanitizeCell(record.OperatorAccount),
+			csvutil.SanitizeCell(record.OperatorName),
+			csvutil.SanitizeCell(record.IP),
+			csvutil.SanitizeCell(record.RequestKind),
+			csvutil.SanitizeCell(record.ExecutionTimeScope),
+			csvutil.SanitizeCell(record.Method),
+			csvutil.SanitizeCell(record.BaseURL),
+			csvutil.SanitizeCell(record.OperationName),
 			strconv.Itoa(record.OperationStatus),
 			strconv.Itoa(int(record.IsHighRisk)),
 			strconv.Itoa(record.ResponseStatus),
 			strconv.FormatInt(record.ExecutionTimeUs, 10),
-			record.ChangeDiff,
+			csvutil.SanitizeCell(record.ChangeDiff),
 			record.CreatedAt.String(),
 		}); err != nil {
 			return count, lastCreatedAt, lastID, err

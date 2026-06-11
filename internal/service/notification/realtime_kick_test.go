@@ -79,9 +79,9 @@ func TestHubKickSingleSessionOnlyKicksTarget(t *testing.T) {
 	otherServer, otherClient, cleanupOther := newServerClientPair(t)
 	defer cleanupOther()
 
-	h := &hub{clients: make(map[uint]map[*wsClient]struct{})}
-	h.register(&wsClient{userID: 7, sessionID: "sess-target", conn: targetServer})
-	h.register(&wsClient{userID: 7, sessionID: "sess-other", conn: otherServer})
+	h := &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
+	_ = h.register(&wsClient{userID: 7, sessionID: "sess-target", conn: targetServer})
+	_ = h.register(&wsClient{userID: 7, sessionID: "sess-other", conn: otherServer})
 
 	h.kick(auth.SessionControl{UserID: 7, SessionID: "sess-target", Code: auth.SessionControlCodeKicked})
 
@@ -102,9 +102,9 @@ func TestHubKickAllSessionsWhenSessionIDEmpty(t *testing.T) {
 	server2, client2, cleanup2 := newServerClientPair(t)
 	defer cleanup2()
 
-	h := &hub{clients: make(map[uint]map[*wsClient]struct{})}
-	h.register(&wsClient{userID: 9, sessionID: "sess-a", conn: server1})
-	h.register(&wsClient{userID: 9, sessionID: "sess-b", conn: server2})
+	h := &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
+	_ = h.register(&wsClient{userID: 9, sessionID: "sess-a", conn: server1})
+	_ = h.register(&wsClient{userID: 9, sessionID: "sess-b", conn: server2})
 
 	h.kick(auth.SessionControl{UserID: 9, SessionID: "", Code: auth.SessionControlCodeKicked})
 
@@ -127,9 +127,9 @@ func TestHubKickHandlesDuplicateSessionID(t *testing.T) {
 	server2, client2, cleanup2 := newServerClientPair(t)
 	defer cleanup2()
 
-	h := &hub{clients: make(map[uint]map[*wsClient]struct{})}
-	h.register(&wsClient{userID: 5, sessionID: "same-jti", conn: server1})
-	h.register(&wsClient{userID: 5, sessionID: "same-jti", conn: server2})
+	h := &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
+	_ = h.register(&wsClient{userID: 5, sessionID: "same-jti", conn: server1})
+	_ = h.register(&wsClient{userID: 5, sessionID: "same-jti", conn: server2})
 
 	h.mu.RLock()
 	registered := len(h.clients[5])

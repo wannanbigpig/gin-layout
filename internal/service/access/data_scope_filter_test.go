@@ -2,7 +2,10 @@ package access
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -137,6 +140,59 @@ func TestDataScopeFilterBuild_NonSuperAdminNoCache(t *testing.T) {
 	// Without DB/Redis, computeScope will fail → 1=0
 	if cond != "1=0" {
 		t.Fatalf("expected 1=0 when DB unavailable, got: %q", cond)
+	}
+}
+
+func TestDataScopeFilterBuildSingleflightSharedAcrossInstances(t *testing.T) {
+	previousCompute := computeScopeForSingleflight
+	defer func() {
+		computeScopeForSingleflight = previousCompute
+	}()
+
+	var calls int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	computeScopeForSingleflight = func(_ *DataScopeFilter, _ context.Context, uid uint) (*scopeResult, error) {
+		if uid != 42 {
+			t.Fatalf("unexpected uid: %d", uid)
+		}
+		if atomic.AddInt32(&calls, 1) == 1 {
+			close(started)
+			<-release
+		}
+		return &scopeResult{
+			OwnerUID:    uid,
+			HasOwnerUID: true,
+		}, nil
+	}
+
+	input := DataScopeInput{UID: 42, IsSuperAdmin: false}
+	results := make(chan string, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		cond, _ := NewDataScopeFilter().Build(context.Background(), input, "dept_id", "created_by")
+		results <- cond
+	}()
+	<-started
+	go func() {
+		defer wg.Done()
+		cond, _ := NewDataScopeFilter().Build(context.Background(), input, "dept_id", "created_by")
+		results <- cond
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(results)
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("expected one shared compute call, got %d", got)
+	}
+	for cond := range results {
+		if cond != "created_by = ?" {
+			t.Fatalf("unexpected condition: %s", cond)
+		}
 	}
 }
 

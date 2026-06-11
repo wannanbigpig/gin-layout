@@ -46,6 +46,7 @@ func SetRoutersWithTree(routeTree RouteGroupDef) (*gin.Engine, error) {
 func createEngine() (*gin.Engine, error) {
 	var engine *gin.Engine
 	cfg := config.GetConfig()
+	globalRateLimit := buildGlobalRateLimitConfig(cfg)
 
 	// 启动时校验 CORS 配置
 	middleware.ValidateCORSConfig(cfg)
@@ -55,7 +56,10 @@ func createEngine() (*gin.Engine, error) {
 		engine = gin.New()
 		engine.Use(
 			middleware.CorsHandler(),
-			middleware.RequestCostHandler(), // 请求耗时统计
+			middleware.SecurityHeadersHandler(),          // HTTP 安全响应头
+			middleware.RateLimitHandler(globalRateLimit), // 全局 IP 级速率限制
+			loginRateLimitHandler(),                      // 登录接口专项速率限制
+			middleware.RequestCostHandler(),              // 请求耗时统计
 			middleware.RequestLocaleHandler(),
 			middleware.ParseTokenHandler(), // 全局token解析（所有路由都走）
 			gin.Logger(),
@@ -68,7 +72,10 @@ func createEngine() (*gin.Engine, error) {
 		engine = ReleaseRouter()
 		engine.Use(
 			middleware.CorsHandler(),
-			middleware.RequestCostHandler(), // 请求耗时统计
+			middleware.SecurityHeadersHandler(),          // HTTP 安全响应头
+			middleware.RateLimitHandler(globalRateLimit), // 全局 IP 级速率限制
+			loginRateLimitHandler(),                      // 登录接口专项速率限制
+			middleware.RequestCostHandler(),              // 请求耗时统计
 			middleware.RequestLocaleHandler(),
 			middleware.ParseTokenHandler(), // 全局token解析（所有路由都走）
 			middleware.CustomRecovery(),
@@ -85,6 +92,42 @@ func createEngine() (*gin.Engine, error) {
 	}
 
 	return engine, nil
+}
+
+func buildGlobalRateLimitConfig(cfg *config.Conf) middleware.RateLimitConfig {
+	if cfg == nil {
+		return middleware.RateLimitConfig{Enabled: false}
+	}
+	return middleware.RateLimitConfig{
+		Enabled: cfg.RateLimitEnabled,
+		RPS:     cfg.RateLimitRPS,
+		Burst:   cfg.RateLimitBurst,
+		Name:    "global",
+	}
+}
+
+func buildLoginRateLimitConfig() middleware.RateLimitConfig {
+	cfg := config.GetConfig()
+	if cfg == nil {
+		return middleware.RateLimitConfig{Enabled: false}
+	}
+	return middleware.RateLimitConfig{
+		Enabled: cfg.LoginRateLimitEnabled,
+		RPS:     cfg.LoginRateLimitRPS,
+		Burst:   cfg.LoginRateLimitBurst,
+		Name:    "login",
+	}
+}
+
+func loginRateLimitHandler() gin.HandlerFunc {
+	handler := middleware.RateLimitHandler(buildLoginRateLimitConfig())
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodPost || c.Request.URL.Path != "/admin/v1/login" {
+			c.Next()
+			return
+		}
+		handler(c)
+	}
 }
 
 // ReleaseRouter 生产模式使用官方建议设置为 release 模式
@@ -197,8 +240,8 @@ func buildMySQLReadiness(cfg *config.Conf) dependencyStatus {
 	}
 
 	message := "mysql connection is unavailable"
-	if mysqlStatus.Error != nil {
-		message = mysqlStatus.Error.Error()
+	if mysqlStatus.Error == nil {
+		message = "ok"
 	}
 	return dependencyStatus{
 		Enabled:  true,
@@ -228,8 +271,8 @@ func buildRedisReadiness(cfg *config.Conf) dependencyStatus {
 	}
 
 	message := "redis client is unavailable"
-	if redisStatus.Error != nil {
-		message = redisStatus.Error.Error()
+	if redisStatus.Error == nil {
+		message = "ok"
 	}
 	return dependencyStatus{
 		Enabled:  true,
@@ -258,8 +301,8 @@ func buildQueueReadiness(cfg *config.Conf) dependencyStatus {
 	}
 
 	message := "queue publisher is unavailable"
-	if err := queue.PublisherInitError(); err != nil {
-		message = err.Error()
+	if err := queue.PublisherInitError(); err == nil {
+		message = "ok"
 	}
 	return dependencyStatus{
 		Enabled:  true,

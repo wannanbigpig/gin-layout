@@ -17,8 +17,10 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	pkgErrors "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	dateutils "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
 )
 
@@ -188,10 +190,12 @@ func consumeUploadSession(tx *gorm.DB, completeToken string, ownerUID uint, allo
 		return nil, fmt.Errorf("upload session is not pending")
 	}
 	if !session.ExpiresAt.IsZero() && time.Now().After(session.ExpiresAt.Time) {
-		_ = tx.Model(&model.UploadSession{}).Where("id = ?", session.ID).Updates(map[string]any{
+		if err := tx.Model(&model.UploadSession{}).Where("id = ?", session.ID).Updates(map[string]any{
 			"status":     model.UploadSessionStatusExpired,
 			"updated_at": time.Now(),
-		}).Error
+		}).Error; err != nil {
+			log.Logger.Warn("更新上传会话过期状态失败", zap.Uint("session_id", session.ID), zap.Error(err))
+		}
 		return nil, fmt.Errorf("upload session expired")
 	}
 	return &session, nil
@@ -274,12 +278,14 @@ func restoreUploadSessionPending(ctx context.Context, db *gorm.DB, sessionID uin
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_ = db.WithContext(ctx).Model(&model.UploadSession{}).
+	if err := db.WithContext(ctx).Model(&model.UploadSession{}).
 		Where("id = ? AND status = ?", sessionID, model.UploadSessionStatusCompleting).
 		Updates(map[string]any{
 			"status":     model.UploadSessionStatusPending,
 			"updated_at": time.Now(),
-		}).Error
+		}).Error; err != nil {
+		log.Logger.Warn("恢复上传会话为 pending 状态失败", zap.Uint("session_id", sessionID), zap.Error(err))
+	}
 }
 
 func validateDirectCompleteSession(session *model.UploadSession, params *form.FileUploadComplete, uid uint) error {
@@ -500,10 +506,12 @@ func (s *FileResourceService) deleteObjectIfUnreferenced(db *gorm.DB, objectID u
 		return err
 	}
 	if err := s.deletePhysicalObject(object); err != nil {
-		_ = db.Model(&model.UploadFileObject{}).Where("id = ?", objectID).Updates(map[string]any{
+		if updateErr := db.Model(&model.UploadFileObject{}).Where("id = ?", objectID).Updates(map[string]any{
 			"status":     model.StorageStatusDeleteFailed,
 			"updated_at": time.Now(),
-		}).Error
+		}).Error; updateErr != nil {
+			log.Logger.Warn("更新文件对象删除失败状态失败", zap.Uint("object_id", objectID), zap.Error(updateErr))
+		}
 		return fmt.Errorf("delete physical object: %w", err)
 	}
 	return db.Delete(&model.UploadFileObject{}, objectID).Error
