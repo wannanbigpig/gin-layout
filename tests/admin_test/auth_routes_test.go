@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	c "github.com/wannanbigpig/gin-layout/config"
-	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
 )
 
@@ -69,23 +69,30 @@ func TestCheckTokenWithAuthorization(t *testing.T) {
 	assert.Equal(t, true, data["result"])
 }
 
-func TestProtectedAuthRoutesRequireLogin(t *testing.T) {
-	testCases := []struct {
-		name  string
-		route string
-		body  string
-	}{
-		{name: "退出登录需要登录", route: "/admin/v1/auth/logout", body: `{}`},
+func TestLogoutIsIdempotentWithoutLogin(t *testing.T) {
+	body := `{}`
+	resp := performRequestWithHeaders(http.MethodPost, "/admin/v1/auth/logout", &body, "", map[string]string{
+		"X-Requested-With": "XMLHttpRequest",
+	})
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	result := decodeResult(t, resp)
+	assert.Equal(t, e.SUCCESS, result.Code)
+	if cookies := resp.Result().Cookies(); assert.NotEmpty(t, cookies) {
+		assert.Equal(t, "refresh_token", cookies[0].Name)
+		assert.Equal(t, -1, cookies[0].MaxAge)
+		assert.True(t, cookies[0].HttpOnly)
 	}
+}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			body := tc.body
-			resp := anonymousPostRequest(tc.route, &body)
-
-			assert.Equal(t, http.StatusUnauthorized, resp.Code)
+func TestAuthCookieEndpointsRequireCSRFHeader(t *testing.T) {
+	body := `{}`
+	for _, route := range []string{"/admin/v1/auth/logout", "/admin/v1/auth/refresh"} {
+		t.Run(route, func(t *testing.T) {
+			resp := anonymousPostRequest(route, &body)
+			assert.Equal(t, http.StatusForbidden, resp.Code)
 			result := decodeResult(t, resp)
-			assert.Equal(t, e.NotLogin, result.Code)
+			assert.Equal(t, e.AuthorizationErr, result.Code)
 		})
 	}
 }
@@ -137,7 +144,9 @@ func TestLogoutUpdatesDatabase(t *testing.T) {
 
 	// 调用退出登录接口（使用登录后返回的 token）
 	logoutHeader := "Bearer " + accessToken
-	logoutResp := performRequest(http.MethodPost, "/admin/v1/auth/logout", &bodyStr, logoutHeader)
+	logoutResp := performRequestWithHeaders(http.MethodPost, "/admin/v1/auth/logout", &bodyStr, logoutHeader, map[string]string{
+		"X-Requested-With": "XMLHttpRequest",
+	})
 	assert.Equal(t, http.StatusOK, logoutResp.Code)
 	logoutResult := decodeResult(t, logoutResp)
 	assert.Equal(t, e.SUCCESS, logoutResult.Code)

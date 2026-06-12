@@ -87,6 +87,10 @@ func anonymousGetRequest(route string, queryParams *url.Values) *httptest.Respon
 }
 
 func performRequest(method, route string, body *string, authHeader string) *httptest.ResponseRecorder {
+	return performRequestWithHeaders(method, route, body, authHeader, nil)
+}
+
+func performRequestWithHeaders(method, route string, body *string, authHeader string, headers map[string]string) *httptest.ResponseRecorder {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewBufferString(*body)
@@ -98,6 +102,9 @@ func performRequest(method, route string, body *string, authHeader string) *http
 	}
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 
 	recorder := httptest.NewRecorder()

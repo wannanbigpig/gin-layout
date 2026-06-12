@@ -42,6 +42,7 @@ type auditQueueDeps struct {
 	Enqueue      func(ctx context.Context, kind string, snapshot *audit.AuditLogSnapshot) error
 	Persist      func(snapshot *audit.AuditLogSnapshot) error
 	PersistBatch func(ctx context.Context, snapshots []*audit.AuditLogSnapshot) error
+	RecordStat   func(snapshot *audit.AuditLogSnapshot) error
 }
 
 // activeDeps 原子持有审计落库依赖。后台 worker goroutine 会并发读取，测试会在还原时写入，
@@ -53,6 +54,7 @@ func init() {
 		Enqueue:      jobs.EnqueueAuditLog,
 		Persist:      audit.PersistAuditLog,
 		PersistBatch: audit.PersistAuditLogsBatch,
+		RecordStat:   audit.RecordDailyRequestStat,
 	})
 }
 
@@ -70,6 +72,7 @@ func setAuditQueueDepsForTesting(deps auditQueueDeps) func() {
 		Enqueue:      deps.Enqueue,
 		Persist:      deps.Persist,
 		PersistBatch: deps.PersistBatch,
+		RecordStat:   deps.RecordStat,
 	}
 	if next.Enqueue == nil {
 		next.Enqueue = jobs.EnqueueAuditLog
@@ -79,6 +82,9 @@ func setAuditQueueDepsForTesting(deps auditQueueDeps) func() {
 	}
 	if next.PersistBatch == nil {
 		next.PersistBatch = audit.PersistAuditLogsBatch
+	}
+	if next.RecordStat == nil {
+		next.RecordStat = audit.RecordDailyRequestStat
 	}
 	activeDeps.Store(&next)
 
@@ -149,6 +155,18 @@ func enqueueAuditLog(_ *gin.Context, kind string, snapshot *audit.AuditLogSnapsh
 
 	// 队列恢复后复位告警开关，保证下次不可用时仍能打首条告警。
 	queueUnavailableLogged.Store(false)
+}
+
+func recordRequestStat(kind string, snapshot *audit.AuditLogSnapshot) {
+	if kind != jobs.AuditLogKindRequest && kind != jobs.AuditLogKindPanic {
+		return
+	}
+	if err := currentDeps().RecordStat(snapshot); err != nil {
+		log.Warn("Record request stats failed",
+			zap.String("kind", kind),
+			zap.String("request_id", snapshot.RequestID),
+			zap.Error(err))
+	}
 }
 
 // auditStorageInCooldown 判断当前是否处于"存储不可用且冷却期未到"的短路状态。

@@ -57,6 +57,14 @@ func adminOtherGroup(deps *ControllerDeps) RouteGroupDef {
 				},
 			},
 			{
+				Prefix:    "auth",
+				GroupCode: "auth_public",
+				Routes: []RouteDef{
+					POST("refresh", "刷新 Token", AuthModeNone, middleware.DatabaseReadyGuard(), middleware.AuthCookieCSRFGuard(), deps.Login.Refresh).WithDesc("通过 HttpOnly refresh_token Cookie 刷新访问令牌"),
+					POST("logout", "退出登录", AuthModeNone, middleware.DatabaseReadyGuard(), middleware.AuthCookieCSRFGuard(), deps.Login.Logout).WithDesc("退出登录并清除 HttpOnly refresh_token Cookie"),
+				},
+			},
+			{
 				Prefix:    "common",
 				GroupCode: "common_ws",
 				Routes: []RouteDef{
@@ -118,7 +126,6 @@ func authGroup(deps *ControllerDeps) RouteGroupDef {
 		Prefix:    "auth",
 		GroupCode: "auth",
 		Routes: []RouteDef{
-			POST("logout", "退出登录", AuthModeLogin, deps.Login.Logout),
 			GET("check-token", "检查 Token", AuthModeLogin, deps.Login.CheckToken).WithDesc("验证 Token 有效性"),
 		},
 		Children: []RouteGroupDef{

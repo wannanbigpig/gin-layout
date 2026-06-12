@@ -7,6 +7,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/service/audit"
 )
 
 const (
@@ -55,11 +56,22 @@ func prepareRequestLogging(c *gin.Context) *responseRecorder {
 
 // finalizeRequestLogging 在业务处理后统一执行日志收尾（仅审计日志）。
 func finalizeRequestLogging(c *gin.Context, recorder *responseRecorder) {
+	if c == nil || c.Request == nil || recorder == nil {
+		return
+	}
+	if _, ws := websocketLoggingPaths[c.Request.URL.Path]; ws {
+		return
+	}
+
+	resp := parseResponse(c, recorder)
+	snapshot := buildRequestAuditLogSnapshot(c, recorder, resp)
+	recordRequestStat(jobs.AuditLogKindRequest, snapshot)
+
 	if shouldSkipRequestLogging(c, recorder) {
 		return
 	}
 
-	publishRequestAuditLog(c, recorder)
+	publishRequestAuditLog(c, snapshot)
 }
 
 // logRequest 兼容旧调用入口，统一委托到收尾阶段。
@@ -88,11 +100,8 @@ func shouldSkipRequestLogging(c *gin.Context, recorder *responseRecorder) bool {
 	return recorder.statusCode == http.StatusNotFound
 }
 
-// publishRequestAuditLog 构建请求审计快照并投递到审计日志链路。
-func publishRequestAuditLog(c *gin.Context, recorder *responseRecorder) {
-	// 先提取不可变快照，再发布审计日志，避免在日志中间件内耦合过多细节。
-	resp := parseResponse(c, recorder)
-	snapshot := buildRequestAuditLogSnapshot(c, recorder, resp)
+// publishRequestAuditLog 投递已构建的请求审计快照。
+func publishRequestAuditLog(c *gin.Context, snapshot *audit.AuditLogSnapshot) {
 	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }
 
@@ -127,5 +136,6 @@ func LogWebSocketConnection(c *gin.Context, opts ...WebSocketAuditOptions) {
 	}
 	snapshot.RequestKind = model.RequestKindWebSocket
 	snapshot.ResponseStatus = option.ResponseStatus
+	recordRequestStat(jobs.AuditLogKindRequest, snapshot)
 	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }

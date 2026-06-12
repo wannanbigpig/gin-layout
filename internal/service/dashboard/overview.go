@@ -1,10 +1,11 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -119,20 +120,11 @@ func (s *OverviewService) Overview() (*Overview, error) {
 		return nil, err
 	}
 
-	requestsToday, err := countRows(db.Table("request_logs").Where("created_at >= ? AND created_at < ?", todayStart, tomorrowStart))
+	requestsToday, errorsToday, err := requestStatsForRange(db, todayStart, tomorrowStart)
 	if err != nil {
 		return nil, err
 	}
-	requestsYesterday, err := countRows(db.Table("request_logs").Where("created_at >= ? AND created_at < ?", yesterdayStart, todayStart))
-	if err != nil {
-		return nil, err
-	}
-
-	errorsToday, err := countRows(db.Table("request_logs").Where("created_at >= ? AND created_at < ? AND (operation_status <> 0 OR response_status >= 400)", todayStart, tomorrowStart))
-	if err != nil {
-		return nil, err
-	}
-	errorsYesterday, err := countRows(db.Table("request_logs").Where("created_at >= ? AND created_at < ? AND (operation_status <> 0 OR response_status >= 400)", yesterdayStart, todayStart))
+	requestsYesterday, errorsYesterday, err := requestStatsForRange(db, yesterdayStart, todayStart)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +167,25 @@ func (s *OverviewService) Overview() (*Overview, error) {
 		ErrorCodes:   errorCodes,
 		Storage:      storage,
 	}, nil
+}
+
+func requestStatsForRange(db *gorm.DB, start time.Time, end time.Time) (int64, int64, error) {
+	if db == nil {
+		return 0, 0, nil
+	}
+
+	type statSum struct {
+		TotalRequests int64
+		ErrorRequests int64
+	}
+	var stat statSum
+	if err := db.Table("daily_request_stats").
+		Select("COALESCE(SUM(total_requests), 0) AS total_requests, COALESCE(SUM(error_requests), 0) AS error_requests").
+		Where("date >= ? AND date < ?", statsDateKey(start), statsDateKey(end)).
+		Scan(&stat).Error; err != nil {
+		return 0, 0, err
+	}
+	return stat.TotalRequests, stat.ErrorRequests, nil
 }
 
 func countRows(db *gorm.DB) (int64, error) {
@@ -306,29 +317,12 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 		Count int64
 	}
 
+	requestMap, errorMap, err := requestTrendFromStats(db, sevenDaysAgo, todayStart.AddDate(0, 0, 1))
+	if err != nil {
+		return nil, err
+	}
+
 	dateExpr := requestLogDateExpr(db)
-
-	// 查询每日请求数
-	var requestCounts []dayCount
-	if err := db.Table("request_logs").
-		Select(dateExpr+" AS date, COUNT(*) AS count").
-		Where("created_at >= ? AND created_at < ?", sevenDaysAgo, todayStart.AddDate(0, 0, 1)).
-		Group(dateExpr).
-		Order("date ASC").
-		Scan(&requestCounts).Error; err != nil {
-		return nil, err
-	}
-
-	// 查询每日错误数
-	var errorCounts []dayCount
-	if err := db.Table("request_logs").
-		Select(dateExpr+" AS date, COUNT(*) AS count").
-		Where("created_at >= ? AND created_at < ? AND (operation_status <> 0 OR response_status >= 400)", sevenDaysAgo, todayStart.AddDate(0, 0, 1)).
-		Group(dateExpr).
-		Order("date ASC").
-		Scan(&errorCounts).Error; err != nil {
-		return nil, err
-	}
 
 	// 查询每日登录数
 	var loginCounts []dayCount
@@ -341,15 +335,6 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 		return nil, err
 	}
 
-	// 将查询结果映射到日期
-	requestMap := make(map[string]int64, len(requestCounts))
-	for _, c := range requestCounts {
-		requestMap[c.Date] = c.Count
-	}
-	errorMap := make(map[string]int64, len(errorCounts))
-	for _, c := range errorCounts {
-		errorMap[c.Date] = c.Count
-	}
 	loginMap := make(map[string]int64, len(loginCounts))
 	for _, c := range loginCounts {
 		loginMap[c.Date] = c.Count
@@ -373,6 +358,32 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 	}, nil
 }
 
+func requestTrendFromStats(db *gorm.DB, start time.Time, end time.Time) (map[string]int64, map[string]int64, error) {
+	type row struct {
+		Date         string
+		RequestCount int64
+		ErrorCount   int64
+	}
+	dateExpr := dailyRequestStatsDateExpr(db)
+	var rows []row
+	if err := db.Table("daily_request_stats").
+		Select(dateExpr+" AS date, COALESCE(SUM(total_requests), 0) AS request_count, COALESCE(SUM(error_requests), 0) AS error_count").
+		Where("date >= ? AND date < ?", statsDateKey(start), statsDateKey(end)).
+		Group(dateExpr).
+		Order("date ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, nil, err
+	}
+
+	requests := make(map[string]int64, len(rows))
+	errors := make(map[string]int64, len(rows))
+	for _, item := range rows {
+		requests[item.Date] = item.RequestCount
+		errors[item.Date] = item.ErrorCount
+	}
+	return requests, errors, nil
+}
+
 func requestLogDateExpr(db *gorm.DB) string {
 	if db == nil || db.Dialector == nil {
 		panic("requestLogDateExpr: db or db.Dialector is nil")
@@ -391,6 +402,25 @@ func requestLogDateExpr(db *gorm.DB) string {
 	}
 }
 
+func dailyRequestStatsDateExpr(db *gorm.DB) string {
+	if db == nil || db.Dialector == nil {
+		panic("dailyRequestStatsDateExpr: db or db.Dialector is nil")
+	}
+
+	switch db.Dialector.Name() {
+	case "sqlite":
+		return "strftime('%Y-%m-%d', date)"
+	case "mysql":
+		return "DATE_FORMAT(date, '%Y-%m-%d')"
+	default:
+		panic(fmt.Sprintf("dailyRequestStatsDateExpr: unsupported database driver: %s", db.Dialector.Name()))
+	}
+}
+
+func statsDateKey(t time.Time) string {
+	return t.Format("2006-01-02")
+}
+
 // responseTimeBucketDefs 定义耗时分桶边界，遵循左闭右开规则，最后一个桶为开区间。
 // 边界归属：100ms 落入 100_300ms；300ms 落入 300_1000ms；1000ms 落入 1s_3s；3000ms 落入 gt_3s。
 var responseTimeBucketDefs = []struct {
@@ -405,51 +435,47 @@ var responseTimeBucketDefs = []struct {
 	{Label: "gt_3s", LowerMs: 3000, UpperMs: 0},
 }
 
-// buildResponseTimeStats 聚合今日 request_logs.execution_time_us（微秒）的分桶分布与平均耗时（输出毫秒）。
-//
-// 单次扫描：用 SUM(CASE WHEN ...) 一并算出各分桶计数与 AVG，避免“每桶一条 COUNT + 一条 AVG”
-// 造成对 request_logs 的多次全窗口扫描（原实现每次调用要扫 6 遍，dashboard 热路径开销翻倍）。
+// buildResponseTimeStats 聚合 daily_request_stats 的请求耗时分桶与平均耗时（输出毫秒）。
 func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *ResponseTimeStats {
 	if db == nil {
 		return nil
 	}
 
-	selectParts := make([]string, 0, len(responseTimeBucketDefs)+1)
-	for i, def := range responseTimeBucketDefs {
-		// LowerMs/UpperMs 均为内部定义的 int 常量，非外部输入，可安全内联。
-		conds := make([]string, 0, 2)
-		if def.LowerMs > 0 {
-			conds = append(conds, fmt.Sprintf("execution_time_us >= %d", def.LowerMs*1000))
-		}
-		if def.UpperMs > 0 {
-			conds = append(conds, fmt.Sprintf("execution_time_us < %d", def.UpperMs*1000))
-		}
-		when := "1=1"
-		if len(conds) > 0 {
-			when = strings.Join(conds, " AND ")
-		}
-		selectParts = append(selectParts, fmt.Sprintf("COALESCE(SUM(CASE WHEN %s THEN 1 ELSE 0 END), 0) AS b%d", when, i))
+	type row struct {
+		TotalRequests       int64
+		DurationLt100ms     int64
+		Duration100To300ms  int64
+		Duration300To1000ms int64
+		Duration1sTo3s      int64
+		DurationGt3s        int64
+		TotalDurationMs     int64
 	}
-	selectParts = append(selectParts, "COALESCE(AVG(execution_time_us), 0) / 1000.0 AS avg_ms")
-
-	row := requestLogLatencyStatsQuery(db, start, end).
-		Select(strings.Join(selectParts, ", ")).
-		Row()
-
-	counts := make([]int64, len(responseTimeBucketDefs))
-	var avgMs float64
-	dest := make([]any, 0, len(counts)+1)
-	for i := range counts {
-		dest = append(dest, &counts[i])
-	}
-	dest = append(dest, &avgMs)
-	if err := row.Scan(dest...); err != nil {
+	var stat row
+	if err := db.Table("daily_request_stats").
+		Select(`
+			COALESCE(SUM(total_requests), 0) AS total_requests,
+			COALESCE(SUM(duration_lt_100ms), 0) AS duration_lt100ms,
+			COALESCE(SUM(duration_100_300ms), 0) AS duration100_to300ms,
+			COALESCE(SUM(duration_300_1000ms), 0) AS duration300_to1000ms,
+			COALESCE(SUM(duration_1s_3s), 0) AS duration1s_to3s,
+			COALESCE(SUM(duration_gt_3s), 0) AS duration_gt3s,
+			COALESCE(SUM(total_duration_ms), 0) AS total_duration_ms
+		`).
+		Where("date >= ? AND date < ?", statsDateKey(start), statsDateKey(end)).
+		Scan(&stat).Error; err != nil {
 		if log.Logger != nil {
 			log.Logger.Warn("统计请求耗时分桶失败", zap.Error(err))
 		}
 		return nil
 	}
 
+	counts := []int64{
+		stat.DurationLt100ms,
+		stat.Duration100To300ms,
+		stat.Duration300To1000ms,
+		stat.Duration1sTo3s,
+		stat.DurationGt3s,
+	}
 	stats := &ResponseTimeStats{
 		Buckets: make([]ResponseTimeBucket, 0, len(responseTimeBucketDefs)),
 	}
@@ -461,14 +487,11 @@ func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *Respon
 			Count:   counts[i],
 		})
 	}
-	stats.AvgMs = math.Round(avgMs*100) / 100
+	if stat.TotalRequests > 0 {
+		avgMs := float64(stat.TotalDurationMs) / float64(stat.TotalRequests)
+		stats.AvgMs = math.Round(avgMs*100) / 100
+	}
 	return stats
-}
-
-func requestLogLatencyStatsQuery(db *gorm.DB, start time.Time, end time.Time) *gorm.DB {
-	return db.Table("request_logs").
-		Where("created_at >= ? AND created_at < ?", start, end).
-		Where("execution_time_scope = ?", model.ExecutionTimeScopeRequest)
 }
 
 // buildErrorCodeStats 聚合指定时间窗口内 HTTP 错误 response_status 分布，按数量降序取 TOP10。
@@ -476,28 +499,62 @@ func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCod
 	if db == nil {
 		return nil
 	}
-	type row struct {
-		StatusCode int
-		Count      int64
-	}
-	var rows []row
-	if err := db.Table("request_logs").
-		Select("response_status AS status_code, COUNT(*) AS count").
-		Where("created_at >= ? AND created_at < ? AND response_status >= ?", start, end, 400).
-		Group("response_status").
-		Order("count DESC, response_status ASC").
-		Limit(10).
+	var rows []statusDistributionRow
+	if err := db.Table("daily_request_stats").
+		Select("http_status_distribution AS distribution").
+		Where("date >= ? AND date < ?", statsDateKey(start), statsDateKey(end)).
 		Scan(&rows).Error; err != nil {
 		if log.Logger != nil {
 			log.Logger.Warn("统计响应状态码分布失败", zap.Error(err))
 		}
 		return nil
 	}
-	buckets := make([]ErrorCodeBucket, 0, len(rows))
-	for _, r := range rows {
-		buckets = append(buckets, ErrorCodeBucket(r))
+	return topErrorCodeBuckets(rows, true)
+}
+
+type statusDistributionRow struct {
+	Distribution string
+}
+
+func topErrorCodeBuckets(rows []statusDistributionRow, httpErrorsOnly bool) []ErrorCodeBucket {
+	counts := map[int]int64{}
+	for _, row := range rows {
+		if row.Distribution == "" {
+			continue
+		}
+		values := map[string]int64{}
+		if err := json.Unmarshal([]byte(row.Distribution), &values); err != nil {
+			continue
+		}
+		for key, count := range values {
+			statusCode, err := strconv.Atoi(key)
+			if err != nil {
+				continue
+			}
+			if httpErrorsOnly && statusCode < 400 {
+				continue
+			}
+			counts[statusCode] += count
+		}
+	}
+	buckets := make([]ErrorCodeBucket, 0, len(counts))
+	for statusCode, count := range counts {
+		buckets = append(buckets, ErrorCodeBucket{StatusCode: statusCode, Count: count})
+	}
+	sortErrorCodeBuckets(buckets)
+	if len(buckets) > 10 {
+		return buckets[:10]
 	}
 	return buckets
+}
+
+func sortErrorCodeBuckets(buckets []ErrorCodeBucket) {
+	sort.Slice(buckets, func(i, j int) bool {
+		if buckets[i].Count == buckets[j].Count {
+			return buckets[i].StatusCode < buckets[j].StatusCode
+		}
+		return buckets[i].Count > buckets[j].Count
+	})
 }
 
 // buildStorageStats 统计 upload_files 表中存活文件的总量、总大小，并按 file_type 聚合。

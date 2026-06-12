@@ -131,26 +131,32 @@ func buildErrorDistribution(db *gorm.DB, start time.Time, end time.Time) ErrorDi
 	}
 
 	type categoryCount struct {
-		FourXX    int64
-		FiveXX    int64
-		BizFailed int64
+		ErrorRequests int64
 	}
 	var counts categoryCount
-	if err := db.Table("request_logs").
-		Select(`
-			COALESCE(SUM(CASE WHEN response_status >= 400 AND response_status < 500 THEN 1 ELSE 0 END), 0) AS four_xx,
-			COALESCE(SUM(CASE WHEN response_status >= 500 THEN 1 ELSE 0 END), 0) AS five_xx,
-			COALESCE(SUM(CASE WHEN operation_status <> 0 AND response_status < 400 THEN 1 ELSE 0 END), 0) AS biz_failed
-		`).
-		Where("created_at >= ? AND created_at < ?", start, end).
+	if err := db.Table("daily_request_stats").
+		Select("COALESCE(SUM(error_requests), 0) AS error_requests").
+		Where("date >= ? AND date < ?", statsDateKey(start), statsDateKey(end)).
 		Scan(&counts).Error; err != nil {
-		logger.Warn("query request_logs error distribution failed", zap.Error(err))
+		logger.Warn("query daily_request_stats error distribution failed", zap.Error(err))
 	}
 
-	distribution.Categories[0].Count = counts.FourXX
-	distribution.Categories[1].Count = counts.FiveXX
-	distribution.Categories[2].Count = counts.BizFailed
-	distribution.Total = counts.FourXX + counts.FiveXX + counts.BizFailed
+	httpErrorTotal := int64(0)
+	for _, bucket := range distribution.StatusCode {
+		httpErrorTotal += bucket.Count
+		if bucket.StatusCode >= 400 && bucket.StatusCode < 500 {
+			distribution.Categories[0].Count += bucket.Count
+		}
+		if bucket.StatusCode >= 500 {
+			distribution.Categories[1].Count += bucket.Count
+		}
+	}
+	bizFailureTotal := int64(0)
+	for _, bucket := range distribution.BizStatusCodes {
+		bizFailureTotal += bucket.Count
+	}
+	distribution.Categories[2].Count = bizFailureTotal
+	distribution.Total = counts.ErrorRequests
 
 	return distribution
 }
@@ -159,24 +165,12 @@ func buildBizStatusCodeStats(db *gorm.DB, start time.Time, end time.Time) []Erro
 	if db == nil {
 		return nil
 	}
-	type row struct {
-		StatusCode int
-		Count      int64
-	}
-	var rows []row
-	if err := db.Table("request_logs").
-		Select("operation_status AS status_code, COUNT(*) AS count").
-		Where("created_at >= ? AND created_at < ? AND operation_status <> ?", start, end, 0).
-		Group("operation_status").
-		Order("count DESC, operation_status ASC").
-		Limit(10).
+	var rows []statusDistributionRow
+	if err := db.Table("daily_request_stats").
+		Select("biz_status_distribution AS distribution").
+		Where("date >= ? AND date < ?", statsDateKey(start), statsDateKey(end)).
 		Scan(&rows).Error; err != nil {
 		return nil
 	}
-
-	buckets := make([]ErrorCodeBucket, 0, len(rows))
-	for _, r := range rows {
-		buckets = append(buckets, ErrorCodeBucket(r))
-	}
-	return buckets
+	return topErrorCodeBuckets(rows, false)
 }

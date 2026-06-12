@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/config/autoload"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	req "github.com/wannanbigpig/gin-layout/internal/pkg/request"
@@ -117,6 +118,40 @@ func TestBuildLoginLogInfoFallbacksUnknownForMissingUserAgent(t *testing.T) {
 	}
 	if logInfo.Browser != "Unknown" {
 		t.Fatalf("expected unknown browser fallback, got %q", logInfo.Browser)
+	}
+}
+
+func TestLogoutClearsCookieWhenAccessTokenInvalid(t *testing.T) {
+	initControllerAuthTest(t)
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Jwt.RefreshCookieName = "refresh_token"
+		cfg.Jwt.RefreshCookiePath = "/admin/v1/auth"
+		cfg.Jwt.RefreshCookieSameSite = "Lax"
+		cfg.Mysql = autoload.MysqlConfig{Enable: false}
+	})
+	defer restoreConfig()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/admin/v1/auth/logout", nil)
+	ctx.Request.Header.Set("Authorization", "Bearer invalid-token")
+	ctx.Request.AddCookie(&http.Cookie{Name: "refresh_token", Value: "invalid-refresh"})
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+	ctx.Set(global.ContextKeyRequestID, "test-request-id")
+
+	NewLoginController().Logout(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected http status 200, got %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	cookies := recorder.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected clear refresh cookie")
+	}
+	clearCookie := cookies[0]
+	if clearCookie.Name != "refresh_token" || clearCookie.MaxAge != -1 || clearCookie.Path != "/admin/v1/auth" || !clearCookie.HttpOnly {
+		t.Fatalf("unexpected clear cookie: %#v", clearCookie)
 	}
 }
 

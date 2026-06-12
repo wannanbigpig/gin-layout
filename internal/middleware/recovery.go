@@ -63,6 +63,10 @@ func handlePanic(c *gin.Context, err interface{}) {
 
 	// 为 panic 请求补充异步审计日志，避免绕过 CustomLogger 的落库流程。
 	snapshot := buildPanicAuditLogSnapshot(c, errStr)
+	if snapshot != nil {
+		snapshot.ResponseStatus = http.StatusInternalServerError
+	}
+	recordRequestStat(jobs.AuditLogKindPanic, snapshot)
 	enqueueAuditLog(c, jobs.AuditLogKindPanic, snapshot)
 
 	// 返回错误响应

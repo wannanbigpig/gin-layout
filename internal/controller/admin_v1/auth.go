@@ -2,11 +2,14 @@ package admin_v1
 
 import (
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	req "github.com/wannanbigpig/gin-layout/internal/pkg/request"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
@@ -59,6 +62,7 @@ func (api LoginController) Login(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	loginService.SetRefreshCookie(c, result.RefreshToken)
 	diff := auditdiff.Marshal(auditdiff.BuildFieldDiff(nil, map[string]any{
 		"action":   "login",
 		"username": params.UserName,
@@ -83,17 +87,19 @@ func (api LoginController) LoginCaptcha(c *gin.Context) {
 
 // Logout 管理员用户退出登录
 func (api LoginController) Logout(c *gin.Context) {
+	loginService := auth.NewLoginService()
 	accessToken, err := req.GetAccessToken(c)
-	if err != nil {
-		// Token提取失败，视为已退出
-		api.Success(c, nil)
-		return
+	if err == nil {
+		if err := loginService.Logout(accessToken); err != nil {
+			log.Logger.Warn("退出登录时撤销 access token 失败，继续清理 refresh cookie", zap.Error(err))
+		}
 	}
-
-	if err := auth.NewLoginService().Logout(accessToken); err != nil {
-		api.Err(c, err)
-		return
+	if refreshToken, cookieErr := loginService.RefreshTokenFromCookie(c); cookieErr == nil {
+		if err := loginService.RevokeRefreshToken(refreshToken, model.RevokedCodeUserLogout, "用户主动登出（退出登录）"); err != nil {
+			log.Logger.Warn("退出登录时撤销 refresh token 失败，继续清理 refresh cookie", zap.Error(err))
+		}
 	}
+	loginService.ClearRefreshCookie(c)
 	diff := auditdiff.Marshal(auditdiff.BuildFieldDiff(nil, map[string]any{
 		"action": "logout",
 	}, []auditdiff.FieldRule{
@@ -101,6 +107,23 @@ func (api LoginController) Logout(c *gin.Context) {
 	}))
 	middleware.SetAuditChangeDiffRaw(c, diff)
 	api.Success(c, nil)
+}
+
+func (api LoginController) Refresh(c *gin.Context) {
+	loginService := auth.NewLoginService()
+	refreshToken, err := loginService.RefreshTokenFromCookie(c)
+	if err != nil {
+		api.FailCode(c, errors.RefreshTokenInvalid)
+		return
+	}
+	logInfo := loginService.BuildLoginLogInfo(c)
+	result, newRefreshToken, err := loginService.RefreshByToken(refreshToken, logInfo)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	loginService.SetRefreshCookie(c, newRefreshToken)
+	api.Success(c, result)
 }
 
 // CheckToken 检查Token是否有效

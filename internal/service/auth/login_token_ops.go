@@ -43,9 +43,6 @@ func (s *LoginService) resolvePrincipalFromClaims(claims *token.AdminCustomClaim
 	}
 
 	principal := newAuthPrincipalFromClaims(claims)
-	if s.mysqlReadyFn() {
-		s.tryRefreshPrincipalFn(principal)
-	}
 	return principal, true
 }
 

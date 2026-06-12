@@ -12,7 +12,7 @@ func BuildConfigDiff(oldConfig, newConfig *Conf) ConfigDiff {
 	diff.LoggerChanged = !reflect.DeepEqual(oldConfig.Logger, newConfig.Logger)
 	diff.MysqlChanged = !reflect.DeepEqual(oldConfig.Mysql, newConfig.Mysql)
 	diff.RedisChanged = !reflect.DeepEqual(oldConfig.Redis, newConfig.Redis)
-	diff.JWTChanged = oldConfig.Jwt.TTL != newConfig.Jwt.TTL || oldConfig.Jwt.RefreshTTL != newConfig.Jwt.RefreshTTL
+	diff.JWTChanged = !reflect.DeepEqual(oldConfig.Jwt, newConfig.Jwt)
 	diff.JWTSecretChanged = oldConfig.Jwt.SecretKey != newConfig.Jwt.SecretKey
 	diff.BaseURLChanged = oldConfig.BaseURL != newConfig.BaseURL
 	diff.CORSChanged = !reflect.DeepEqual(oldConfig.CorsOrigins, newConfig.CorsOrigins) ||
@@ -39,7 +39,7 @@ func BuildConfigDiff(oldConfig, newConfig *Conf) ConfigDiff {
 		diff.ChangedFields = append(diff.ChangedFields, "redis.*")
 	}
 	if diff.JWTChanged {
-		diff.ChangedFields = append(diff.ChangedFields, "jwt.ttl", "jwt.refresh_ttl")
+		diff.ChangedFields = append(diff.ChangedFields, "jwt.*")
 	}
 	if diff.JWTSecretChanged {
 		diff.ChangedFields = append(diff.ChangedFields, "jwt.secret_key")

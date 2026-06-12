@@ -288,6 +288,84 @@ func TestShouldDropBySamplingKeepsOneOutOfN(t *testing.T) {
 	}
 }
 
+func TestFinalizeRequestLoggingRecordsStatsBeforeAuditSampling(t *testing.T) {
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.Enable = true
+		cfg.Queue.AuditSampleGetKeepEvery = 10
+		cfg.Queue.AuditSampleSlowKeepThresholdMs = 1000
+	})
+	defer restoreConfig()
+
+	atomicResetSampleCounter()
+	resetAuditFallbackBufferForTesting()
+	defer resetAuditFallbackBufferForTesting()
+
+	statsCount := 0
+	enqueued := 0
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Enqueue: func(_ context.Context, _ string, _ *auditsvc.AuditLogSnapshot) error {
+			enqueued++
+			return nil
+		},
+		RecordStat: func(_ *auditsvc.AuditLogSnapshot) error {
+			statsCount++
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	for i := 0; i < 3; i++ {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/demo", nil)
+		ctx.Set(global.ContextKeyRequestID, "req-sampled-"+itoa(i))
+		ctx.Set(global.ContextKeyRequestStartTime, time.Now().Add(-10*time.Millisecond))
+
+		respRecorder := createResponseRecorder(ctx)
+		finalizeRequestLogging(ctx, respRecorder)
+	}
+
+	if statsCount != 3 {
+		t.Fatalf("expected stats to record every request before sampling, got %d", statsCount)
+	}
+	if enqueued != 0 {
+		t.Fatalf("expected sampled requests not to be enqueued, got %d", enqueued)
+	}
+}
+
+func TestFinalizeRequestLoggingRecordsStatsForSkippedAuditPath(t *testing.T) {
+	statsCount := 0
+	enqueued := 0
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Enqueue: func(_ context.Context, _ string, _ *auditsvc.AuditLogSnapshot) error {
+			enqueued++
+			return nil
+		},
+		RecordStat: func(_ *auditsvc.AuditLogSnapshot) error {
+			statsCount++
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/ping", nil)
+	ctx.Set(global.ContextKeyRequestID, "req-ping")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+
+	respRecorder := createResponseRecorder(ctx)
+	finalizeRequestLogging(ctx, respRecorder)
+
+	if statsCount != 1 {
+		t.Fatalf("expected skipped audit path to still record stats, got %d", statsCount)
+	}
+	if enqueued != 0 {
+		t.Fatalf("expected skipped audit path not to enqueue audit log, got %d", enqueued)
+	}
+}
+
 // TestShouldDropBySamplingDoesNotDropHighRiskOrWrites 验证高风险与写请求不参与采样丢弃。
 func TestShouldDropBySamplingDoesNotDropHighRiskOrWrites(t *testing.T) {
 	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {

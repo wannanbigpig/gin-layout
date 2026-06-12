@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -27,6 +28,9 @@ var errRedisUnavailable = errors.New("redis client is not available")
 // Logout 退出登录。
 func (s *LoginService) Logout(accessToken string) error {
 	s.ensureRuntimeDeps()
+	if strings.TrimSpace(accessToken) == "" {
+		return nil
+	}
 	claims, err := s.parseToken(accessToken)
 	if err != nil {
 		return err
@@ -54,6 +58,26 @@ func (s *LoginService) Logout(accessToken string) error {
 	s.kickSession(claims.UserID, claims.ID, SessionControlCodeKicked, "用户主动登出")
 
 	return nil
+}
+
+func (s *LoginService) RevokeRefreshToken(refreshToken string, revokedCode uint8, revokedReason string) error {
+	refreshToken = strings.TrimSpace(refreshToken)
+	if refreshToken == "" {
+		return nil
+	}
+	hash := s.calculateTokenHash(refreshToken)
+	loginLog := model.NewAdminLoginLogs()
+	db := s.loginLogDB
+	if db == nil {
+		var err error
+		db, err = loginLog.GetDB()
+		if err != nil {
+			return err
+		}
+	}
+	loginLog.SetDB(db)
+	_, err := loginLog.RevokeActiveByRefreshTokenHash(hash, revokedCode, revokedReason, utils.FormatDate{Time: time.Now().UTC()})
+	return err
 }
 
 // parseToken 解析 Token。
@@ -123,6 +147,30 @@ func (s *LoginService) addTokensToBlacklist(loginLogs []model.AdminLoginLogs) er
 		return nil
 	}
 
+	now := time.Now().UTC()
+	type blacklistItem struct {
+		key string
+		ttl time.Duration
+	}
+	items := make([]blacklistItem, 0, len(loginLogs))
+	for _, item := range loginLogs {
+		if item.JwtID == "" {
+			continue
+		}
+		remainingTime := s.calculateRemainingTime(item.TokenExpires, now)
+		if remainingTime <= 0 {
+			continue
+		}
+		items = append(items, blacklistItem{
+			key: s.getBlacklistKey(item.JwtID),
+			ttl: remainingTime,
+		})
+	}
+
+	if len(items) == 0 {
+		return nil
+	}
+
 	redisClient := data.RedisClient()
 	if redisClient == nil {
 		if err := data.GetRedisInitError(); err != nil {
@@ -133,27 +181,11 @@ func (s *LoginService) addTokensToBlacklist(loginLogs []model.AdminLoginLogs) er
 	ctx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
 	defer cancel()
 	pipe := redisClient.Pipeline()
-
-	now := time.Now()
-	queued := 0
-	for _, item := range loginLogs {
-		if item.JwtID == "" {
-			continue
-		}
-		remainingTime := s.calculateRemainingTime(item.TokenExpires, now)
-		if remainingTime <= 0 {
-			continue
-		}
-		blacklistKey := s.getBlacklistKey(item.JwtID)
-		pipe.Set(ctx, blacklistKey, "1", remainingTime)
-		queued++
-	}
-
-	if queued == 0 {
-		return nil
+	for _, item := range items {
+		pipe.Set(ctx, item.key, "1", item.ttl)
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
-		log.Logger.Error("批量将 token 加入 Redis 黑名单失败", zap.Error(err), zap.Int("count", queued))
+		log.Logger.Error("批量将 token 加入 Redis 黑名单失败", zap.Error(err), zap.Int("count", len(items)))
 		return err
 	}
 	return nil
@@ -180,25 +212,29 @@ func (s *LoginService) RevokeUserTokens(userId uint, revokedCode uint8, revokedR
 	loginLog := model.NewAdminLoginLogs()
 	if existingTx := access.FirstTx(tx); existingTx != nil {
 		loginLog.SetDB(existingTx)
+	} else if s.loginLogDB != nil {
+		loginLog.SetDB(s.loginLogDB)
 	} else {
 		if _, err := loginLog.GetDB(); err != nil {
 			return err
 		}
 	}
 
-	loginLogs, err := loginLog.FindActiveTokensByUserId(userId, time.Now())
+	loginLogs, err := loginLog.FindActiveTokensByUserId(userId, time.Now().UTC())
 	if err != nil || len(loginLogs) == 0 {
 		return err
 	}
 
-	jwtIds := collectJWTIDs(loginLogs)
-	if len(jwtIds) == 0 {
+	loginLogIds := collectLoginLogIDs(loginLogs)
+	if len(loginLogIds) == 0 {
 		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), revokeLogAsyncTimeout)
 	defer cancel()
-	if err := s.markTokensRevokedFn(ctx, jwtIds, revokedCode, revokedReason); err != nil {
+	// 用户禁用/强制下线需要撤销“会话行”，因为 access token 可能已过期，
+	// 但同一行上的 refresh token 仍可能有效；只按 jwt_id 更新会漏掉这类会话。
+	if err := s.markLoginLogRowsRevoked(ctx, loginLogIds, revokedCode, revokedReason, tx...); err != nil {
 		return err
 	}
 	blacklistErr := s.addTokensToBlacklist(loginLogs)
@@ -217,12 +253,12 @@ func (s *LoginService) kickSession(userID uint, sessionID string, code int, reas
 	})
 }
 
-func collectJWTIDs(loginLogs []model.AdminLoginLogs) []string {
-	jwtIds := make([]string, 0, len(loginLogs))
+func collectLoginLogIDs(loginLogs []model.AdminLoginLogs) []uint {
+	ids := make([]uint, 0, len(loginLogs))
 	for _, item := range loginLogs {
-		if item.JwtID != "" {
-			jwtIds = append(jwtIds, item.JwtID)
+		if item.ID != 0 {
+			ids = append(ids, item.ID)
 		}
 	}
-	return jwtIds
+	return ids
 }

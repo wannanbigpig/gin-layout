@@ -10,6 +10,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"go.uber.org/zap"
 )
 
@@ -34,7 +35,7 @@ func (s *LoginService) isTokenRevokedInLog(jwtId string) bool {
 }
 
 func (s *LoginService) markTokensRevoked(ctx context.Context, jwtIds []string, revokedCode uint8, revokedReason string) error {
-	now := time.Now()
+	now := time.Now().UTC()
 	revokedAt := utils.FormatDate{Time: now}
 
 	loginLog := model.NewAdminLoginLogs()
@@ -51,6 +52,30 @@ func (s *LoginService) markTokensRevoked(ctx context.Context, jwtIds []string, r
 	}
 	loginLog.SetDB(db)
 	return loginLog.UpdateRevokedStatusByJwtIds(jwtIds, revokedCode, revokedReason, revokedAt)
+}
+
+func (s *LoginService) markLoginLogRowsRevoked(ctx context.Context, ids []uint, revokedCode uint8, revokedReason string, tx ...*gorm.DB) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	revokedAt := utils.FormatDate{Time: time.Now().UTC()}
+	loginLog := model.NewAdminLoginLogs()
+	db := s.loginLogDB
+	if existingTx := access.FirstTx(tx); existingTx != nil {
+		db = existingTx
+	}
+	if db == nil {
+		var err error
+		db, err = loginLog.GetDB()
+		if err != nil {
+			return err
+		}
+	}
+	if ctx != nil {
+		db = db.WithContext(ctx)
+	}
+	loginLog.SetDB(db)
+	return loginLog.UpdateRevokedStatusByIds(ids, revokedCode, revokedReason, revokedAt)
 }
 
 func logRevokeError(message string, fields ...zap.Field) {

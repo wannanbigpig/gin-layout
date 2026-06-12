@@ -151,10 +151,6 @@ type LoginService struct {
 	tokenRevokedLookupFn func(jwtID string) bool
 	// mysqlReadyFn 判断 MySQL 依赖是否可用。
 	mysqlReadyFn func() bool
-	// refreshLockStore 在 Redis 不可用时提供进程内刷新锁。
-	refreshLockStore *refreshTokenLock
-	// tryRefreshPrincipalFn 执行 principal 自动刷新逻辑。
-	tryRefreshPrincipalFn func(principal *AuthPrincipal)
 	// markTokensRevokedFn 批量标记 token 为撤销状态。
 	markTokensRevokedFn func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
 	// writeTokenToBlacklistFn 将 token 写入 Redis 黑名单。
@@ -173,10 +169,6 @@ type LoginServiceDeps struct {
 	TokenRevokedLookup func(jwtID string) bool
 	// MySQLReady 自定义 MySQL 可用性判断逻辑。
 	MySQLReady func() bool
-	// RefreshLockStore 自定义内存刷新锁存储实现。
-	RefreshLockStore *refreshTokenLock
-	// TryRefreshPrincipal 自定义自动刷新 principal 的执行入口。
-	TryRefreshPrincipal func(principal *AuthPrincipal)
 	// MarkTokensRevoked 自定义 token 撤销标记逻辑。
 	MarkTokensRevoked func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error
 	// WriteTokenToBlacklist 自定义写 Redis 黑名单逻辑。
@@ -197,8 +189,6 @@ func NewLoginServiceWithDeps(deps LoginServiceDeps) *LoginService {
 		blacklistLookupFn:       deps.BlacklistLookup,
 		tokenRevokedLookupFn:    deps.TokenRevokedLookup,
 		mysqlReadyFn:            deps.MySQLReady,
-		refreshLockStore:        deps.RefreshLockStore,
-		tryRefreshPrincipalFn:   deps.TryRefreshPrincipal,
 		markTokensRevokedFn:     deps.MarkTokensRevoked,
 		writeTokenToBlacklistFn: deps.WriteTokenToBlacklist,
 		loginLogDB:              deps.LoginLogDB,
@@ -219,12 +209,6 @@ func (s *LoginService) ensureRuntimeDeps() {
 	}
 	if s.mysqlReadyFn == nil {
 		s.mysqlReadyFn = data.MysqlReady
-	}
-	if s.refreshLockStore == nil {
-		s.refreshLockStore = defaultRefreshLockStore()
-	}
-	if s.tryRefreshPrincipalFn == nil {
-		s.tryRefreshPrincipalFn = s.tryRefreshToken
 	}
 	if s.markTokensRevokedFn == nil {
 		s.markTokensRevokedFn = func(ctx context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
@@ -274,7 +258,11 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	}
 
 	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
-	if err := s.recordLoginLog(adminUser, claims, accessToken, "", logInfo, model.LoginTypeLogin); err != nil {
+	loginLog, refreshToken, err := s.issueRefreshToken(adminUser, claims, accessToken, logInfo, model.LoginTypeLogin)
+	if err != nil {
+		return nil, e.NewBusinessError(e.TokenGenerateFailed)
+	}
+	if err := s.persistLoginLog(loginLog, true); err != nil {
 		return nil, e.NewBusinessError(e.LoginFailed)
 	}
 	if err := s.clearLoginFailState(username); err != nil && !isTableNotFoundErr(err) {
@@ -283,7 +271,7 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 
 	return &TokenResponse{
 		AccessToken:  accessToken,
-		RefreshToken: "",
+		RefreshToken: refreshToken,
 		TokenType:    tokenTypeBearer,
 		ExpiresAt:    claims.ExpiresAt.Unix(),
 	}, nil
@@ -323,14 +311,20 @@ func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.A
 	if s.loginLogDB != nil {
 		loginLog.SetDB(s.loginLogDB)
 	}
+	return s.persistLoginLog(loginLog, logType == model.LoginTypeLogin)
+}
 
-	if logType == model.LoginTypeLogin {
+func (s *LoginService) persistLoginLog(loginLog *model.AdminLoginLogs, updateLastLogin bool) error {
+	if loginLog == nil {
+		return nil
+	}
+	if updateLastLogin {
 		updates := map[string]any{
-			"last_ip":    logInfo.IP,
+			"last_ip":    loginLog.IP,
 			"last_login": utils.FormatDate{Time: time.Now()},
 		}
-		if err := s.updateUserLastLogin(adminUser.ID, updates); err != nil {
-			log.Logger.Error("更新用户最后登录信息失败", zap.Error(err), zap.Uint("user_id", adminUser.ID))
+		if err := s.updateUserLastLogin(loginLog.UID, updates); err != nil {
+			log.Logger.Error("更新用户最后登录信息失败", zap.Error(err), zap.Uint("user_id", loginLog.UID))
 			return err
 		}
 	}
@@ -341,7 +335,7 @@ func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.A
 
 	// 队列不可用或指定了自定义 DB 时同步落库兜底，避免登录日志丢失。
 	if err := loginLog.Create(); err != nil {
-		log.Logger.Error("记录登录日志失败", zap.Error(err), zap.Uint("user_id", adminUser.ID), zap.String("username", adminUser.Username))
+		log.Logger.Error("记录登录日志失败", zap.Error(err), zap.Uint("user_id", loginLog.UID), zap.String("username", loginLog.Username))
 		return err
 	}
 	return nil
@@ -354,37 +348,6 @@ func (s *LoginService) updateUserLastLogin(userID uint, updates map[string]any) 
 		adminUserModel.SetDB(s.loginLogDB)
 	}
 	return adminUserModel.UpdateById(userID, updates)
-}
-
-// Refresh 刷新 Token。
-func (s *LoginService) Refresh(id uint, logInfo LoginLogInfo) (*TokenResponse, error) {
-	startTime := time.Now()
-
-	adminUserModel := model.NewAdminUsers()
-	if err := adminUserModel.GetById(id); err != nil {
-		return nil, e.NewBusinessError(e.UpdateUserFailed)
-	}
-	if adminUserModel.Status != model.AdminUserStatusEnabled {
-		return nil, e.NewBusinessError(e.UserDisable)
-	}
-
-	claims := s.newAdminCustomClaims(adminUserModel)
-	accessToken, err := s.generateAccessToken(claims)
-	if err != nil {
-		return nil, e.NewBusinessError(e.TokenGenerateFailed)
-	}
-
-	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
-	if err := s.recordLoginLog(adminUserModel, claims, accessToken, "", logInfo, model.LoginTypeRefresh); err != nil {
-		log.Logger.Error("记录刷新token日志失败", zap.Error(err), zap.Uint("user_id", id))
-	}
-
-	return &TokenResponse{
-		AccessToken:  accessToken,
-		RefreshToken: "",
-		TokenType:    tokenTypeBearer,
-		ExpiresAt:    claims.ExpiresAt.Unix(),
-	}, nil
 }
 
 // newAdminCustomClaims 创建管理员自定义 Claims。

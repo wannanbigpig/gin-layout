@@ -3,6 +3,8 @@ package model
 import (
 	"time"
 
+	"gorm.io/gorm/clause"
+
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model/modelDict"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
@@ -133,6 +135,17 @@ func (m *AdminLoginLogs) FindByJwtId(jwtId string) error {
 	return db.Where("jwt_id = ? AND deleted_at = 0", jwtId).First(m).Error
 }
 
+// FindActiveByRefreshTokenHashForUpdate 根据 refresh token hash 查找活跃会话并加行锁。
+func (m *AdminLoginLogs) FindActiveByRefreshTokenHashForUpdate(refreshTokenHash string, now time.Time) error {
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("refresh_token_hash = ? AND deleted_at = 0 AND is_revoked = ? AND login_status = ? AND refresh_expires IS NOT NULL AND refresh_expires > ?",
+			refreshTokenHash, IsRevokedNo, LoginStatusSuccess, now).First(m).Error
+}
+
 // UpdateRevokedStatusByJwtIds 批量更新 token 撤销状态。
 func (m *AdminLoginLogs) UpdateRevokedStatusByJwtIds(jwtIds []string, revokedCode uint8, revokedReason string, revokedAt utils.FormatDate) error {
 	if len(jwtIds) == 0 {
@@ -151,6 +164,46 @@ func (m *AdminLoginLogs) UpdateRevokedStatusByJwtIds(jwtIds []string, revokedCod
 		}).Error
 }
 
+// UpdateRevokedStatusByIds 按登录日志行批量撤销会话。
+//
+// 双 Token 下，access token 可能已经过期，但 refresh token 仍然有效；用户禁用、
+// 强制下线这类“撤销会话”动作必须以登录日志行本身为准，不能只依赖 jwt_id。
+func (m *AdminLoginLogs) UpdateRevokedStatusByIds(ids []uint, revokedCode uint8, revokedReason string, revokedAt utils.FormatDate) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return err
+	}
+	return db.Model(&AdminLoginLogs{}).Where("id IN ? AND deleted_at = 0 AND is_revoked = ?", ids, IsRevokedNo).
+		Updates(map[string]interface{}{
+			"is_revoked":     IsRevokedYes,
+			"revoked_code":   revokedCode,
+			"revoked_reason": revokedReason,
+			"revoked_at":     revokedAt,
+		}).Error
+}
+
+// RevokeActiveByRefreshTokenHash 撤销指定 refresh token hash 对应的活跃会话。
+func (m *AdminLoginLogs) RevokeActiveByRefreshTokenHash(refreshTokenHash string, revokedCode uint8, revokedReason string, revokedAt utils.FormatDate) (int64, error) {
+	if refreshTokenHash == "" {
+		return 0, nil
+	}
+	db, err := m.GetDB()
+	if err != nil {
+		return 0, err
+	}
+	result := db.Model(&AdminLoginLogs{}).Where("refresh_token_hash = ? AND deleted_at = 0 AND is_revoked = ?", refreshTokenHash, IsRevokedNo).
+		Updates(map[string]interface{}{
+			"is_revoked":     IsRevokedYes,
+			"revoked_code":   revokedCode,
+			"revoked_reason": revokedReason,
+			"revoked_at":     revokedAt,
+		})
+	return result.RowsAffected, result.Error
+}
+
 // FindActiveTokensByUserId 查询用户未过期的活跃 token 列表。
 func (m *AdminLoginLogs) FindActiveTokensByUserId(userId uint, now time.Time) ([]AdminLoginLogs, error) {
 	db, err := m.GetDB()
@@ -158,7 +211,7 @@ func (m *AdminLoginLogs) FindActiveTokensByUserId(userId uint, now time.Time) ([
 		return nil, err
 	}
 	var loginLogs []AdminLoginLogs
-	err = db.Where("uid = ? AND deleted_at = 0 AND is_revoked = ? AND login_status = ? AND token_expires IS NOT NULL AND token_expires > ?",
-		userId, IsRevokedNo, LoginStatusSuccess, now).Find(&loginLogs).Error
+	err = db.Where("uid = ? AND deleted_at = 0 AND is_revoked = ? AND login_status = ? AND ((token_expires IS NOT NULL AND token_expires > ?) OR (refresh_expires IS NOT NULL AND refresh_expires > ?))",
+		userId, IsRevokedNo, LoginStatusSuccess, now, now).Find(&loginLogs).Error
 	return loginLogs, err
 }

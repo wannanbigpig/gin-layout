@@ -28,6 +28,22 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 			operation_status integer,
 			execution_time_us integer
 		)`,
+		`CREATE TABLE daily_request_stats (
+			id integer primary key autoincrement,
+			date date unique,
+			total_requests integer default 0,
+			error_requests integer default 0,
+			duration_lt_100ms integer default 0,
+			duration_100_300ms integer default 0,
+			duration_300_1000ms integer default 0,
+			duration_1s_3s integer default 0,
+			duration_gt_3s integer default 0,
+			total_duration_ms integer default 0,
+			http_status_distribution text,
+			biz_status_distribution text,
+			created_at datetime,
+			updated_at datetime
+		)`,
 		`CREATE TABLE upload_files (
 			id integer primary key autoincrement,
 			created_at datetime,
@@ -112,6 +128,57 @@ func insertRequestLog(t *testing.T, db *gorm.DB, createdAt time.Time, baseURL st
 	}
 }
 
+func insertDailyRequestStat(t *testing.T, db *gorm.DB, statDate time.Time, totalRequests int64, errorRequests int64) {
+	t.Helper()
+	if err := db.Exec(`INSERT INTO daily_request_stats (date, total_requests, error_requests, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		statsDateKey(statDate), totalRequests, errorRequests, statDate, statDate).Error; err != nil {
+		t.Fatalf("insert daily_request_stats failed: %v", err)
+	}
+}
+
+func insertDailyRequestStatFull(t *testing.T, db *gorm.DB, statDate time.Time, values map[string]any) {
+	t.Helper()
+	defaults := map[string]any{
+		"date":                     statsDateKey(statDate),
+		"total_requests":           int64(0),
+		"error_requests":           int64(0),
+		"duration_lt_100ms":        int64(0),
+		"duration_100_300ms":       int64(0),
+		"duration_300_1000ms":      int64(0),
+		"duration_1s_3s":           int64(0),
+		"duration_gt_3s":           int64(0),
+		"total_duration_ms":        int64(0),
+		"http_status_distribution": "{}",
+		"biz_status_distribution":  "{}",
+		"created_at":               statDate,
+		"updated_at":               statDate,
+	}
+	for key, value := range values {
+		defaults[key] = value
+	}
+	if err := db.Exec(`INSERT INTO daily_request_stats (
+		date, total_requests, error_requests,
+		duration_lt_100ms, duration_100_300ms, duration_300_1000ms, duration_1s_3s, duration_gt_3s,
+		total_duration_ms, http_status_distribution, biz_status_distribution, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		defaults["date"],
+		defaults["total_requests"],
+		defaults["error_requests"],
+		defaults["duration_lt_100ms"],
+		defaults["duration_100_300ms"],
+		defaults["duration_300_1000ms"],
+		defaults["duration_1s_3s"],
+		defaults["duration_gt_3s"],
+		defaults["total_duration_ms"],
+		defaults["http_status_distribution"],
+		defaults["biz_status_distribution"],
+		defaults["created_at"],
+		defaults["updated_at"],
+	).Error; err != nil {
+		t.Fatalf("insert full daily_request_stats failed: %v", err)
+	}
+}
+
 func insertStreamRequestLog(t *testing.T, db *gorm.DB, createdAt time.Time, baseURL string, execMs float64, responseStatus int) {
 	t.Helper()
 	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, base_url, request_kind, execution_time_scope, response_status, operation_status, execution_time_us) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
@@ -135,22 +202,24 @@ func TestBuildResponseTimeStatsBucketBoundaries(t *testing.T) {
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
-	yesterday := todayStart.AddDate(0, 0, -1).Add(2 * time.Hour)
 
-	// 落入 lt_100ms
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 50, 200)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 99.9, 200)
-	// 边界：100ms 应进入 100_300ms
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 100, 200)
-	// 边界：300ms 应进入 300_1000ms
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 300, 200)
-	// 边界：1000ms 应进入 1s_3s
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 1000, 500)
-	// 边界：3000ms 应进入 gt_3s
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 3000, 500)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 5000, 500)
-	// 昨日数据不应计入今日
-	insertRequestLog(t, db, yesterday, "", 50, 200)
+	insertDailyRequestStatFull(t, db, todayStart, map[string]any{
+		"total_requests":           int64(7),
+		"error_requests":           int64(3),
+		"duration_lt_100ms":        int64(2),
+		"duration_100_300ms":       int64(1),
+		"duration_300_1000ms":      int64(1),
+		"duration_1s_3s":           int64(1),
+		"duration_gt_3s":           int64(2),
+		"total_duration_ms":        int64(9549),
+		"http_status_distribution": `{"200":4,"500":3}`,
+	})
+	insertDailyRequestStatFull(t, db, todayStart.AddDate(0, 0, -1), map[string]any{
+		"total_requests":           int64(1),
+		"duration_lt_100ms":        int64(1),
+		"total_duration_ms":        int64(50),
+		"http_status_distribution": `{"200":1}`,
+	})
 
 	stats := buildResponseTimeStats(db, todayStart, tomorrowStart)
 	if stats == nil {
@@ -181,39 +250,6 @@ func TestBuildResponseTimeStatsBucketBoundaries(t *testing.T) {
 	}
 }
 
-func TestBuildResponseTimeStatsOnlyCountsRequestScope(t *testing.T) {
-	db := newDashboardTestDB(t)
-
-	now := time.Now()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	tomorrowStart := todayStart.AddDate(0, 0, 1)
-
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "/admin/v1/dashboard/overview", 120, 200)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), notificationWSRequestPath, 85000, 200)
-	insertStreamRequestLog(t, db, todayStart.Add(2*time.Hour), "/admin/v1/system/file/upload/credential/batch", 2200, 200)
-
-	stats := buildResponseTimeStats(db, todayStart, tomorrowStart)
-	if stats == nil {
-		t.Fatal("expected non-nil stats")
-	}
-	if stats.AvgMs != 120 {
-		t.Fatalf("expected avg_ms=120 after excluding non-request scopes, got %v", stats.AvgMs)
-	}
-
-	expected := map[string]int64{
-		"lt_100ms":   0,
-		"100_300ms":  1,
-		"300_1000ms": 0,
-		"1s_3s":      0,
-		"gt_3s":      0,
-	}
-	for _, bucket := range stats.Buckets {
-		if bucket.Count != expected[bucket.Label] {
-			t.Fatalf("bucket %s: expected count %d, got %d", bucket.Label, expected[bucket.Label], bucket.Count)
-		}
-	}
-}
-
 func TestBuildErrorCodeStatsOrderedDesc(t *testing.T) {
 	db := newDashboardTestDB(t)
 
@@ -222,15 +258,11 @@ func TestBuildErrorCodeStatsOrderedDesc(t *testing.T) {
 	tomorrowStart := todayStart.AddDate(0, 0, 1)
 
 	// 500 出现 3 次，404 出现 2 次，403 出现 1 次，101/200/302 不应进入错误响应状态码分布。
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 500)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 404)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 404)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 403)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 101)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 200)
-	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 302)
+	insertDailyRequestStatFull(t, db, todayStart, map[string]any{
+		"total_requests":           int64(9),
+		"error_requests":           int64(6),
+		"http_status_distribution": `{"500":3,"404":2,"403":1,"101":1,"200":1,"302":1}`,
+	})
 
 	buckets := buildErrorCodeStats(db, todayStart, tomorrowStart)
 	if len(buckets) != 3 {
@@ -341,9 +373,22 @@ func TestBuildStatisticsAggregatesSummaryAndTrend(t *testing.T) {
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	insertRequestLog(t, db, todayStart.Add(-2*24*time.Hour).Add(time.Hour), "", 120, 200)
-	insertRequestLog(t, db, todayStart.Add(-time.Hour), "", 220, 500)
-	insertRequestLog(t, db, todayStart.Add(-time.Hour), "", 360, 404)
+	insertDailyRequestStatFull(t, db, todayStart.AddDate(0, 0, -2), map[string]any{
+		"total_requests":           int64(1),
+		"duration_100_300ms":       int64(1),
+		"total_duration_ms":        int64(120),
+		"http_status_distribution": `{"200":1}`,
+		"biz_status_distribution":  `{}`,
+	})
+	insertDailyRequestStatFull(t, db, todayStart, map[string]any{
+		"total_requests":           int64(2),
+		"error_requests":           int64(2),
+		"duration_100_300ms":       int64(1),
+		"duration_300_1000ms":      int64(1),
+		"total_duration_ms":        int64(580),
+		"http_status_distribution": `{"500":1,"404":1}`,
+		"biz_status_distribution":  `{"10001":1}`,
+	})
 
 	insertUploadFile(t, db, "image", 2048, 0)
 	insertUploadFile(t, db, "pdf", 4096, 0)
@@ -375,6 +420,51 @@ func TestBuildStatisticsAggregatesSummaryAndTrend(t *testing.T) {
 	}
 	if stats.Storage == nil || stats.Storage.TotalCount != 2 {
 		t.Fatalf("unexpected storage stats: %#v", stats.Storage)
+	}
+}
+
+func TestRequestStatsForRangeUsesDailyStatsBeforeRequestLogs(t *testing.T) {
+	db := newDashboardTestDB(t)
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+
+	insertDailyRequestStat(t, db, todayStart, 20, 3)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 200)
+	insertRequestLog(t, db, todayStart.Add(2*time.Hour), "", 10, 500)
+
+	requests, errors, err := requestStatsForRange(db, todayStart, tomorrowStart)
+	if err != nil {
+		t.Fatalf("requestStatsForRange returned error: %v", err)
+	}
+	if requests != 20 || errors != 3 {
+		t.Fatalf("expected stats table values 20/3, got %d/%d", requests, errors)
+	}
+}
+
+func TestBuildTrendDataUsesDailyStatsOnly(t *testing.T) {
+	db := newDashboardTestDB(t)
+
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterday := todayStart.AddDate(0, 0, -1)
+
+	insertDailyRequestStat(t, db, todayStart, 30, 4)
+	insertRequestLog(t, db, todayStart.Add(time.Hour), "", 10, 200)
+	insertRequestLog(t, db, todayStart.Add(2*time.Hour), "", 10, 500)
+	insertRequestLog(t, db, yesterday.Add(time.Hour), "", 10, 200)
+	insertRequestLog(t, db, yesterday.Add(2*time.Hour), "", 10, 500)
+
+	trend, err := buildTrendData(db, todayStart)
+	if err != nil {
+		t.Fatalf("buildTrendData returned error: %v", err)
+	}
+	if trend.Requests[len(trend.Requests)-1] != 30 || trend.Errors[len(trend.Errors)-1] != 4 {
+		t.Fatalf("expected today stats 30/4, got %d/%d", trend.Requests[len(trend.Requests)-1], trend.Errors[len(trend.Errors)-1])
+	}
+	if trend.Requests[len(trend.Requests)-2] != 0 || trend.Errors[len(trend.Errors)-2] != 0 {
+		t.Fatalf("expected yesterday stats to remain 0 without daily_request_stats, got %d/%d", trend.Requests[len(trend.Requests)-2], trend.Errors[len(trend.Errors)-2])
 	}
 }
 
