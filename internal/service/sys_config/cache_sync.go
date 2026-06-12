@@ -3,6 +3,8 @@ package sys_config
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -133,7 +135,7 @@ func runSysConfigCacheSyncSubscriber(ctx context.Context, client *redis.Client) 
 			return
 		}
 		connected, err := receiveSysConfigCacheChanges(ctx, client)
-		if ctx.Err() != nil {
+		if isSysConfigCacheSyncClosing(ctx, err) {
 			return
 		}
 		if connected {
@@ -163,8 +165,13 @@ func runSysConfigCacheSyncSubscriber(ctx context.Context, client *redis.Client) 
 func receiveSysConfigCacheChanges(ctx context.Context, client *redis.Client) (connected bool, err error) {
 	pubsub := client.Subscribe(ctx, sysConfigCacheSyncChannel)
 	defer func() { _ = pubsub.Close() }()
+	stopClosing := closePubSubOnContextDone(ctx, pubsub)
+	defer stopClosing()
 
 	if _, err := pubsub.Receive(ctx); err != nil {
+		if isSysConfigCacheSyncClosing(ctx, err) {
+			return false, err
+		}
 		if log.Logger != nil {
 			log.Logger.Warn("订阅系统参数缓存刷新通道失败", zap.Error(err))
 		}
@@ -174,6 +181,9 @@ func receiveSysConfigCacheChanges(ctx context.Context, client *redis.Client) (co
 	for {
 		message, err := pubsub.ReceiveMessage(ctx)
 		if err != nil {
+			if isSysConfigCacheSyncClosing(ctx, err) {
+				return true, err
+			}
 			if log.Logger != nil {
 				log.Logger.Warn("系统参数缓存刷新订阅中断", zap.Error(err))
 			}
@@ -188,6 +198,35 @@ func receiveSysConfigCacheChanges(ctx context.Context, client *redis.Client) (co
 			log.Logger.Warn("处理系统参数缓存刷新通知失败", zap.Error(err))
 		}
 	}
+}
+
+func closePubSubOnContextDone(ctx context.Context, pubsub *redis.PubSub) func() {
+	if ctx == nil || pubsub == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = pubsub.Close()
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
+}
+
+func isSysConfigCacheSyncClosing(ctx context.Context, err error) bool {
+	if ctx != nil && ctx.Err() != nil {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "use of closed network connection") || strings.Contains(msg, "redis: client is closed")
 }
 
 func decodeSysConfigCacheSyncPayload(raw string) (sysConfigCacheSyncPayload, bool) {

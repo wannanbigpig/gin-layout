@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -83,7 +84,7 @@ var (
 		maxConnsPerUser: wsMaxConnsPerUser,
 		maxConnsTotal:   wsMaxConnsTotal,
 	}
-	upgrader   = websocket.Upgrader{
+	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return wsOriginChecker(r) },
 	}
 	realtimeSourceID = buildRealtimeSourceID()
@@ -213,6 +214,10 @@ func handleClientMessage(client *wsClient, message []byte) {
 		return
 	}
 	switch msg.Action {
+	case "ping":
+		if err := client.writeJSON(GenericMessage{Type: "pong"}); err != nil {
+			defaultHub.unregister(client)
+		}
 	case "subscribe":
 		client.SubscribeChannel(msg.Channel)
 	case "unsubscribe":
@@ -317,10 +322,15 @@ func runRealtimeSubscriber(ctx context.Context, client *redis.Client) {
 	for {
 		// 每次循环重新订阅，首次和重连均走此路径
 		pubsub := client.Subscribe(ctx, realtimeChannel, sessionControlChannel)
+		stopClosing := closeRealtimePubSubOnContextDone(ctx, pubsub)
 
 		// 等待确认订阅成功
 		if _, err := pubsub.Receive(ctx); err != nil {
+			stopClosing()
 			_ = pubsub.Close()
+			if isRealtimeSubscriberClosing(ctx, err) {
+				return
+			}
 			if log.Logger != nil {
 				log.Logger.Warn("订阅系统消息实时通道失败，准备重试",
 					zap.Error(err), zap.Duration("backoff", backoff))
@@ -341,7 +351,11 @@ func runRealtimeSubscriber(ctx context.Context, client *redis.Client) {
 		for {
 			message, err := pubsub.ReceiveMessage(ctx)
 			if err != nil {
+				stopClosing()
 				_ = pubsub.Close()
+				if isRealtimeSubscriberClosing(ctx, err) {
+					return
+				}
 				if log.Logger != nil {
 					log.Logger.Warn("系统消息实时订阅中断，准备重连",
 						zap.Error(err), zap.Duration("backoff", backoff))
@@ -359,6 +373,35 @@ func runRealtimeSubscriber(ctx context.Context, client *redis.Client) {
 			return
 		}
 	}
+}
+
+func closeRealtimePubSubOnContextDone(ctx context.Context, pubsub *redis.PubSub) func() {
+	if ctx == nil || pubsub == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = pubsub.Close()
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
+}
+
+func isRealtimeSubscriberClosing(ctx context.Context, err error) bool {
+	if ctx != nil && ctx.Err() != nil {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "use of closed network connection") || strings.Contains(msg, "redis: client is closed")
 }
 
 // realtimeNextBackoff 计算下一次退避间隔，指数递增至上限，并加随机 jitter 避免雷群效应。

@@ -7,6 +7,8 @@ import (
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"github.com/wannanbigpig/gin-layout/internal/model"
 )
 
 func newRequestStatsTestDB(t *testing.T) *gorm.DB {
@@ -41,9 +43,9 @@ func TestRecordDailyRequestStatIncrementsCounters(t *testing.T) {
 	now := time.Date(2026, 6, 12, 10, 30, 0, 0, time.Local)
 
 	inputs := []*AuditLogSnapshot{
-		{RequestID: "req-1", ResponseStatus: http.StatusOK, OperationStatus: 0, ExecutionTimeUs: 50_000},
-		{RequestID: "req-2", ResponseStatus: http.StatusInternalServerError, OperationStatus: 0, ExecutionTimeUs: 150_000},
-		{RequestID: "req-3", ResponseStatus: http.StatusOK, OperationStatus: 10001, ExecutionTimeUs: 3_500_000},
+		{RequestID: "req-1", RequestKind: model.RequestKindHTTP, ResponseStatus: http.StatusOK, OperationStatus: 0, ExecutionTimeUs: 50_000},
+		{RequestID: "req-2", RequestKind: model.RequestKindHTTP, ResponseStatus: http.StatusInternalServerError, OperationStatus: 0, ExecutionTimeUs: 150_000},
+		{RequestID: "req-3", RequestKind: model.RequestKindHTTP, ResponseStatus: http.StatusOK, OperationStatus: 10001, ExecutionTimeUs: 3_500_000},
 	}
 	for _, input := range inputs {
 		if err := recordDailyRequestStat(db, input, now); err != nil {
@@ -78,5 +80,30 @@ func TestRecordDailyRequestStatIncrementsCounters(t *testing.T) {
 	}
 	if got.TotalDuration != 3700 {
 		t.Fatalf("expected total duration 3700ms, got %d", got.TotalDuration)
+	}
+}
+
+func TestRecordDailyRequestStatSkipsWebSocket(t *testing.T) {
+	db := newRequestStatsTestDB(t)
+	now := time.Date(2026, 6, 12, 10, 30, 0, 0, time.Local)
+
+	snapshot := &AuditLogSnapshot{
+		RequestID:          "ws-req",
+		RequestKind:        model.RequestKindWebSocket,
+		ResponseStatus:     http.StatusSwitchingProtocols,
+		OperationStatus:    0,
+		ExecutionTimeUs:    90_000_000,
+		ExecutionTimeScope: model.ExecutionTimeScopeConnection,
+	}
+	if err := recordDailyRequestStat(db, snapshot, now); err != nil {
+		t.Fatalf("recordDailyRequestStat returned error: %v", err)
+	}
+
+	var count int64
+	if err := db.Table("daily_request_stats").Count(&count).Error; err != nil {
+		t.Fatalf("count daily_request_stats failed: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected websocket request not to create daily stats, got %d rows", count)
 	}
 }

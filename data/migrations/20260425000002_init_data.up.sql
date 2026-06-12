@@ -46,7 +46,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (1, 'ep:menu', '', '', '/', '', 'Home', 'home:index', '', '', 0.00, 1, 1, 0, 0, 0, 100, 2, 0, 1, '0', 3, '', @init_time, @init_time, 0),
 (2, 'ant-design:lock-outlined', '', 'permission', '/permission', 'AdminUserList', 'Permission', '', '', '', 0.00, 1, 1, 1, 0, 0, 99, 1, 0, 1, '0', 0, '', @init_time, @init_time, 0),
 (3, 'ant-design:api-outlined', '', 'list', '/permission/list', '', 'PermissionList', 'permission:api', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 2, 2, '0,2', 2, '', @init_time, @init_time, 0),
-(4, 'ant-design:menu-outlined', '', 'menu-list', '/permission/menu-list', '', 'MenuList', 'permission:menuList', '', '', 0.00, 1, 1, 1, 0, 0, 105, 2, 2, 2, '0,2', 5, '', @init_time, @init_time, 0),
+(4, 'ant-design:menu-outlined', '', 'menu-list', '/permission/menu-list', '', 'MenuList', 'permission:menuList', '', '', 0.00, 1, 1, 1, 0, 0, 105, 2, 2, 2, '0,2', 6, '', @init_time, @init_time, 0),
 (5, 'lucide:info', '', '/about', '/about', '', 'About', 'about:index', '', '', 0.00, 1, 1, 1, 0, 0, 78, 2, 0, 1, '0', 0, '', @init_time, @init_time, 0),
 (7, 'ep:user', '', 'admin-user-list', '/permission/admin-user-list', '', 'AdminUserList', 'permission:adminUser', '', '', 0.00, 1, 1, 1, 0, 0, 120, 2, 2, 2, '0,2', 5, '', @init_time, @init_time, 0),
 (8, 'ant-design:usergroup-add-outlined', '', 'role-list', '/permission/role-list', '', 'RoleList', 'permission:role', '', '', 0.00, 1, 1, 1, 0, 0, 115, 2, 2, 2, '0,2', 4, '', @init_time, @init_time, 0),
@@ -59,6 +59,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (15, 'ant-design:plus-circle-outlined', 'menu:addChild', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 4, 3, '0,2,4', 0, '', @init_time, @init_time, 0),
 (16, 'ant-design:edit-filled', 'menu:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 4, 3, '0,2,4', 0, '', @init_time, @init_time, 0),
 (17, 'ant-design:delete-outlined', 'menu:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 4, 3, '0,2,4', 0, '', @init_time, @init_time, 0),
+(27, 'ep:refresh', 'menu:refreshPermissionCache', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 4, 3, '0,2,4', 0, '', @init_time, @init_time, 0),
 (18, 'ant-design:plus-outlined', 'role:add', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 8, 3, '0,2,8', 0, '', @init_time, @init_time, 0),
 (19, 'ant-design:edit-filled', 'role:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 8, 3, '0,2,8', 0, '', @init_time, @init_time, 0),
 (20, 'ant-design:delete-outlined', 'role:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 8, 3, '0,2,8', 0, '', @init_time, @init_time, 0),
@@ -203,6 +204,7 @@ SELECT `id`,
            WHEN 15 THEN '新增下级'
            WHEN 16 THEN '编辑'
            WHEN 17 THEN '删除'
+           WHEN 27 THEN '刷新权限缓存'
            WHEN 18 THEN '新增角色'
            WHEN 19 THEN '编辑'
            WHEN 20 THEN '删除'
@@ -311,6 +313,7 @@ SELECT `id`,
            WHEN 15 THEN 'Add Child'
            WHEN 16 THEN 'Edit'
            WHEN 17 THEN 'Delete'
+           WHEN 27 THEN 'Refresh Permission Cache'
            WHEN 18 THEN 'Add Role'
            WHEN 19 THEN 'Edit'
            WHEN 20 THEN 'Delete'

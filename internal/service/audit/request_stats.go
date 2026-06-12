@@ -12,7 +12,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 )
 
-// RecordDailyRequestStat increments the real request counter before audit-log sampling.
+// RecordDailyRequestStat increments the real HTTP request counter before audit-log sampling.
 func RecordDailyRequestStat(snapshot *AuditLogSnapshot) error {
 	if snapshot == nil || snapshot.RequestID == "" {
 		return nil
@@ -26,6 +26,9 @@ func RecordDailyRequestStat(snapshot *AuditLogSnapshot) error {
 
 func recordDailyRequestStat(db *gorm.DB, snapshot *AuditLogSnapshot, now time.Time) error {
 	if db == nil || snapshot == nil || snapshot.RequestID == "" {
+		return nil
+	}
+	if snapshot.RequestKind != model.RequestKindHTTP {
 		return nil
 	}
 

@@ -126,6 +126,20 @@ func TestDefaultMenuAPIBindingsPutTaskStatsUnderStatsPermission(t *testing.T) {
 	}
 }
 
+func TestDefaultMenuAPIBindingsPutRefreshMenuPermissionsUnderDedicatedPermission(t *testing.T) {
+	service := NewMenuAPIDefaultsService()
+	var menuCodes []string
+	for _, binding := range service.bindings {
+		if binding.Route == "/admin/v1/menu/update-all-menu-permissions" && binding.Method == http.MethodPost {
+			menuCodes = append(menuCodes, binding.MenuCode)
+		}
+	}
+
+	if len(menuCodes) != 1 || menuCodes[0] != "menu:refreshPermissionCache" {
+		t.Fatalf("expected refresh menu permissions to bind only menu:refreshPermissionCache, got %#v", menuCodes)
+	}
+}
+
 func TestCollectMenuAPIBindingKeysKeepsUniqueValues(t *testing.T) {
 	bindings := []defaultMenuAPIBinding{
 		{MenuCode: "menu:list", Route: "/admin/v1/menu/list", Method: http.MethodGet},
