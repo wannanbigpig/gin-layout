@@ -160,18 +160,23 @@ func (r *runtimeCronRegistry) reconcileOnce(ctx context.Context) {
 			r.tasks[code] = current
 			continue
 		}
-		if exists {
-			r.crontab.Remove(current.entryID)
-			delete(r.tasks, code)
-		}
 		entryID, err := r.addTask(definition)
 		if err != nil {
 			log.Logger.Warn("定时任务运行配置注册失败",
 				zap.String("task_code", code),
 				zap.String("schedule", definition.CronSpec),
 				zap.Error(err))
-			updates = r.appendRuntimeStateUpdateIfChanged(updates, definition, model.TaskStatusDisabled, cronRuntimeSyncFailed, err)
+			if exists {
+				current.syncErr = err.Error()
+				r.tasks[code] = current
+				updates = r.appendRuntimeStateUpdateIfChanged(updates, definition, model.TaskStatusEnabled, cronRuntimeSyncFailed, err)
+			} else {
+				updates = r.appendRuntimeStateUpdateIfChanged(updates, definition, model.TaskStatusDisabled, cronRuntimeSyncFailed, err)
+			}
 			continue
+		}
+		if exists {
+			r.crontab.Remove(current.entryID)
 		}
 		r.tasks[code] = runtimeCronTask{
 			definition: definition,

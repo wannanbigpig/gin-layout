@@ -157,3 +157,11 @@ func TestCheckJwtSecretKeyAllowsLocalWeakSecret(t *testing.T) {
 		t.Fatalf("expected local weak secret key to pass, got %v", err)
 	}
 }
+
+func TestResolveEnvVarReturnsEmptyWhenMissing(t *testing.T) {
+	t.Setenv("MISSING_JWT_SECRET_FOR_TEST", "")
+
+	if got := resolveEnvVar("${MISSING_JWT_SECRET_FOR_TEST}"); got != "" {
+		t.Fatalf("expected missing env placeholder to resolve empty, got %q", got)
+	}
+}

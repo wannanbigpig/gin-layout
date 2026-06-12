@@ -36,7 +36,7 @@ func CustomRecovery() gin.HandlerFunc {
 func handlePanic(c *gin.Context, err interface{}) {
 	errStr := "服务器内部错误"
 	cfg := config.GetConfig()
-	if cfg != nil && cfg.Debug {
+	if cfg != nil && cfg.Debug && gin.Mode() != gin.ReleaseMode {
 		errStr = fmt.Sprintf("%v", err)
 	}
 

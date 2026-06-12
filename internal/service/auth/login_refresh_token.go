@@ -70,9 +70,9 @@ func (s *LoginService) generateRefreshToken(user *model.AdminUser) (string, Refr
 	now := time.Now().UTC()
 	refreshTTL := cfg.Jwt.RefreshTokenTTL
 	if refreshTTL <= 0 {
-		refreshTTL = 7 * 24 * time.Hour
+		refreshTTL = int((7 * 24 * time.Hour).Seconds())
 	}
-	expiresAt := now.Add(time.Second * refreshTTL)
+	expiresAt := now.Add(time.Duration(refreshTTL) * time.Second)
 	claims := RefreshClaims{
 		UserID:   user.ID,
 		TokenID:  uuid.NewString(),

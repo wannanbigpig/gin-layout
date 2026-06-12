@@ -146,6 +146,40 @@ func TestRuntimeCronRegistryRejectsInvalidSpec(t *testing.T) {
 	}
 }
 
+func TestRuntimeCronRegistryKeepsExistingTaskWhenReplacementRegistrationFails(t *testing.T) {
+	registry := newRuntimeRegistryWithTask(t, cronTaskDefinition{
+		TaskCode: "cron:demo",
+		TaskName: "demo",
+		CronSpec: "0 0 4 * * *",
+		Handler:  "cron.demo",
+		Status:   model.TaskStatusEnabled,
+	})
+	oldTask := registry.tasks["cron:demo"]
+
+	restoreDefinitions := setCronTaskDefinitionsForTest(t, []cronTaskDefinition{
+		{
+			TaskCode: "cron:demo",
+			TaskName: "demo",
+			CronSpec: "bad spec",
+			Handler:  "cron.demo",
+			Status:   model.TaskStatusEnabled,
+		},
+	})
+	registry.reconcileOnce(context.Background())
+	restoreDefinitions()
+
+	current := registry.tasks["cron:demo"]
+	if current.entryID != oldTask.entryID || current.definition.CronSpec != oldTask.definition.CronSpec {
+		t.Fatalf("expected old task to be kept, got %#v", current)
+	}
+	if current.syncErr == "" {
+		t.Fatal("expected replacement failure to be recorded on existing task")
+	}
+	if !registry.taskCanRun("cron:demo", oldTask.definition.CronSpec) {
+		t.Fatal("expected old low-risk task to keep running")
+	}
+}
+
 func TestRuntimeCronRegistryRuntimeStateUpdatesOnlyWhenChanged(t *testing.T) {
 	registry := newRuntimeCronRegistry(context.Background(), cron.New(cron.WithSeconds()), &cronLogger{})
 	definition := cronTaskDefinition{

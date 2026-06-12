@@ -233,12 +233,80 @@ func (s *FileResourceService) BatchDelete(ids []uint, deletedBy uint, reason str
 		return result, nil
 	}
 
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+
+	uniqueIDs := make([]uint, 0, len(ids))
+	seen := make(map[uint]struct{}, len(ids))
 	for _, id := range ids {
-		if err := s.Delete(id, deletedBy, reason); err != nil {
-			result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, err))
+		if id == 0 {
 			continue
 		}
-		result.Deleted++
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIDs = append(uniqueIDs, id)
+	}
+	if len(uniqueIDs) == 0 {
+		for _, id := range ids {
+			result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, e.NewBusinessError(e.NotFound)))
+		}
+		result.Failed = len(result.Failures)
+		return result, nil
+	}
+
+	var files []model.UploadFiles
+	if err := db.Where("id IN ? AND deleted_at = 0", uniqueIDs).Find(&files).Error; err != nil {
+		return nil, err
+	}
+	existing := make(map[uint]struct{}, len(files))
+	for _, file := range files {
+		existing[file.ID] = struct{}{}
+	}
+
+	refsByFileID, err := NewFileReferenceService(db).ReferencesByFileIDs(uniqueIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	deletableIDs := make([]uint, 0, len(uniqueIDs))
+	for _, id := range ids {
+		if _, ok := existing[id]; !ok {
+			result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, e.NewBusinessError(e.NotFound)))
+			continue
+		}
+		if refs := refsByFileID[id]; len(refs) > 0 {
+			result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, NewFileReferencedDeleteError(buildFileReferenceResources(refs))))
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			continue
+		}
+		delete(seen, id)
+		deletableIDs = append(deletableIDs, id)
+	}
+
+	if len(deletableIDs) > 0 {
+		err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+			if err := tx.Model(&model.UploadFiles{}).Where("id IN ? AND deleted_at = 0", deletableIDs).Updates(map[string]any{
+				"deleted_by":     deletedBy,
+				"deleted_reason": reason,
+			}).Error; err != nil {
+				return err
+			}
+			deleteResult := tx.Where("id IN ? AND deleted_at = 0", deletableIDs).Delete(&model.UploadFiles{})
+			if deleteResult.Error != nil {
+				return deleteResult.Error
+			}
+			result.Deleted = int(deleteResult.RowsAffected)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	result.Failed = len(result.Failures)
@@ -570,6 +638,24 @@ func (s *FileResourceService) descendantFolderIDs(folderID uint) []uint {
 	db, err := s.dbOrDefault()
 	if err != nil || folderID == 0 {
 		return nil
+	}
+	if db.Dialector.Name() == "mysql" {
+		var ids []uint
+		err := db.Raw(`
+			WITH RECURSIVE descendants AS (
+				SELECT id FROM upload_file_folders WHERE parent_id = ? AND deleted_at = 0
+				UNION ALL
+				SELECT f.id
+				FROM upload_file_folders f
+				INNER JOIN descendants d ON f.parent_id = d.id
+				WHERE f.deleted_at = 0
+			)
+			SELECT id FROM descendants
+		`, folderID).Scan(&ids).Error
+		if err == nil {
+			return ids
+		}
+		log.Logger.Warn("递归查询目录子级失败，回退到逐层查询", zap.Error(err), zap.Uint("folder_id", folderID))
 	}
 	var ids []uint
 	current := []uint{folderID}

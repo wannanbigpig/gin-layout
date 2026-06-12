@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	auditLogBatchSize         = 1000
-	auditLogMinRetentionDays  = 7
-	auditLogDefaultRetention  = 30
+	auditLogBatchSize        = 1000
+	auditLogMinRetentionDays = 7
+	auditLogDefaultRetention = 30
 )
 
 var cleanAuditLogsGetDB = model.GetDB
@@ -65,6 +65,9 @@ func CleanAuditLogsHandler(ctx context.Context, _ map[string]any) error {
 // getAuditLogRetentionDays 从配置读取保留天数，带最小值保护。
 func getAuditLogRetentionDays() int {
 	cfg := config.GetConfig()
+	if cfg == nil {
+		return auditLogDefaultRetention
+	}
 	days := cfg.Queue.AuditLogRetentionDays
 	if days < auditLogMinRetentionDays {
 		if days > 0 {

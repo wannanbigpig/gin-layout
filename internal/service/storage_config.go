@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -236,10 +237,10 @@ func upsertStorageSysConfig(tx *gorm.DB, key, value, valueType string, sensitive
 	configModel := model.NewSysConfig()
 	configModel.SetDB(tx)
 	err := configModel.FindByKey(key)
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		configModel.ConfigKey = key
 	}
 	configModel.ConfigValue = value

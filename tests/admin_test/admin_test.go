@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	now := time.Now().UTC()
-	expiresAt := now.Add(time.Second * c.Config.Jwt.TTL)
+	expiresAt := now.Add(time.Duration(c.Config.Jwt.TTL) * time.Second)
 	claims := token.AdminCustomClaims{
 		AdminUserInfo: token.AdminUserInfo{
 			UserID:       1,

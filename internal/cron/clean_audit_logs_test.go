@@ -34,6 +34,15 @@ func TestGetAuditLogRetentionDaysUsesDefaultForUnsetValue(t *testing.T) {
 	}
 }
 
+func TestGetAuditLogRetentionDaysUsesDefaultWhenConfigNil(t *testing.T) {
+	restoreConfig := config.ReplaceConfigForTesting(nil)
+	defer restoreConfig()
+
+	if got := getAuditLogRetentionDays(); got != auditLogDefaultRetention {
+		t.Fatalf("expected default retention %d, got %d", auditLogDefaultRetention, got)
+	}
+}
+
 func TestBatchDeleteByCutoffPhysicallyDeletesSoftDeletedLoginLogs(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

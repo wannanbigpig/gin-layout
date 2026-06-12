@@ -2,6 +2,7 @@ package taskcenter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -164,7 +165,7 @@ func loadTaskRetryChainSummaries(ctx context.Context, db *gorm.DB, rootRunIDs []
 			Where("retry_root_run_id = ? AND retry_seq = ?", rows[i].RetryRootRunID, rows[i].MaxSeq).
 			Order("id DESC").
 			First(&latest).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
 			return result, err

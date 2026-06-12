@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -108,6 +109,22 @@ func TestRateLimit_DifferentIPs(t *testing.T) {
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("X-Forwarded-For", "10.0.0.2")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRateLimit_WithContextCanBeCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := gin.New()
+	r.Use(RateLimitHandlerWithContext(ctx, RateLimitConfig{Enabled: true, RPS: 1, Burst: 1}))
+	r.GET("/test", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	cancel()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }

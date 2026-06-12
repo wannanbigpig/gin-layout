@@ -1,15 +1,13 @@
 package autoload
 
-import "time"
-
 // JwtConfig 定义 JWT 相关配置。
 type JwtConfig struct {
 	// TTL Access Token 有效期（秒），默认 1800 秒（30 分钟）。
-	TTL time.Duration `mapstructure:"ttl"`
+	TTL int `mapstructure:"ttl"`
 	// RefreshTTL 旧版自动刷新阈值（已废弃，新双 Token 方案不再使用）。
-	RefreshTTL time.Duration `mapstructure:"refresh_ttl"`
+	RefreshTTL int `mapstructure:"refresh_ttl"`
 	// RefreshTokenTTL Refresh Token 有效期（秒），默认 7 天。
-	RefreshTokenTTL time.Duration `mapstructure:"refresh_token_ttl"`
+	RefreshTokenTTL int `mapstructure:"refresh_token_ttl"`
 	// RefreshCookieName Refresh Token Cookie 名称。
 	RefreshCookieName string `mapstructure:"refresh_cookie_name"`
 	// RefreshCookiePath Refresh Token Cookie 路径，按浏览器可见 API 路径配置。

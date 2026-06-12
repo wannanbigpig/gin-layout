@@ -94,10 +94,10 @@ func (m *AdminUser) SyncUserRows(userIDs []uint) ([]SyncUserRow, error) {
 		return nil, err
 	}
 	var rows []SyncUserRow
-	if err := db.Table(m.TableName()).
+	if err := db.Model(m).
 		Select("id,status,is_super_admin").
 		Where("id IN ? AND deleted_at = 0", userIDs).
-		Scan(&rows).Error; err != nil {
+		Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil

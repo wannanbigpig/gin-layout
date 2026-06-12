@@ -2,7 +2,6 @@ package utils
 
 import (
 	"crypto/rand"
-	"regexp"
 	"strings"
 
 	"github.com/samber/lo"
@@ -68,16 +67,43 @@ func RandString(n int) string {
 // TrimPrefixAndSuffixAND 去除字符串前后的 AND（不区分大小写，忽略多余空白）
 func TrimPrefixAndSuffixAND(s string) string {
 	s = strings.TrimSpace(s)
-
-	// 正则匹配开头或结尾的 AND（忽略大小写和空白）
-	re := regexp.MustCompile(`(?i)^(AND\s+)|(\s+AND)$`)
 	for {
-		trimmed := re.ReplaceAllString(s, "")
-		if trimmed == s {
+		next := trimLeadingAND(trimTrailingAND(s))
+		next = strings.TrimSpace(next)
+		if next == s {
 			break
 		}
-		s = strings.TrimSpace(trimmed)
+		s = next
 	}
-
 	return s
+}
+
+func trimLeadingAND(s string) string {
+	if len(s) < 3 || !strings.EqualFold(s[:3], "and") {
+		return s
+	}
+	if len(s) == 3 {
+		return ""
+	}
+	if !isSQLConditionBoundary(rune(s[3])) {
+		return s
+	}
+	return strings.TrimSpace(s[3:])
+}
+
+func trimTrailingAND(s string) string {
+	if len(s) < 3 || !strings.EqualFold(s[len(s)-3:], "and") {
+		return s
+	}
+	if len(s) == 3 {
+		return ""
+	}
+	if !isSQLConditionBoundary(rune(s[len(s)-4])) {
+		return s
+	}
+	return strings.TrimSpace(s[:len(s)-3])
+}
+
+func isSQLConditionBoundary(ch rune) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 }

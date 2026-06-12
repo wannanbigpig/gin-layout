@@ -41,6 +41,28 @@ func TestDesensitizeRule(b *testing.T) {
 		b.Error("邮箱脱敏失败")
 	}
 }
+
+func TestTrimPrefixAndSuffixAND(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "trims repeated boundary and", in: "   AND AND name = ? AND  ", want: "name = ?"},
+		{name: "keeps word prefix", in: "android = ? AND", want: "android = ?"},
+		{name: "keeps word suffix", in: "AND brand = ?", want: "brand = ?"},
+		{name: "all and", in: " AND ", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TrimPrefixAndSuffixAND(tt.in); got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
 func BenchmarkTrimPrefixAndSuffixAND(b *testing.B) {
 	input := "   AND AND name = 'Tom' AND age = 18 AND  "
 	for i := 0; i < b.N; i++ {

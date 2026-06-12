@@ -159,6 +159,25 @@ func (s *FileReferenceService) ReferencesByFileID(fileID uint) ([]*model.UploadF
 	return rows, err
 }
 
+func (s *FileReferenceService) ReferencesByFileIDs(fileIDs []uint) (map[uint][]*model.UploadFileReference, error) {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uint][]*model.UploadFileReference)
+	if len(fileIDs) == 0 || !db.Migrator().HasTable(&model.UploadFileReference{}) {
+		return result, nil
+	}
+	var rows []*model.UploadFileReference
+	if err := db.Where("file_id IN ?", fileIDs).Order("created_at DESC, id DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.FileID] = append(result[row.FileID], row)
+	}
+	return result, nil
+}
+
 func ExtractFileUUID(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

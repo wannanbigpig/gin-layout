@@ -266,5 +266,5 @@ func resolveEnvVar(val string) string {
 	if envVal := os.Getenv(envKey); envVal != "" {
 		return envVal
 	}
-	return val
+	return ""
 }

@@ -348,6 +348,58 @@ func TestLogoutTreatsRedisWriteFailureAsSuccessAfterDatabaseRevocation(t *testin
 	}
 }
 
+func TestLogoutRevokesTokenWithoutExpirationAndSkipsBlacklist(t *testing.T) {
+	secretKey := testkit.SecretKey("auth-logout-no-exp")
+	service := NewLoginServiceWithDeps(LoginServiceDeps{
+		ConfigProvider: func() *config.Conf {
+			return &config.Conf{
+				Jwt: autoload.JwtConfig{
+					SecretKey: secretKey,
+				},
+			}
+		},
+	})
+
+	revoked := false
+	blacklistWriteCalled := false
+	service.markTokensRevokedFn = func(_ context.Context, jwtIDs []string, revokedCode uint8, revokedReason string) error {
+		revoked = true
+		if len(jwtIDs) != 1 || jwtIDs[0] != "jwt-logout-no-exp" {
+			t.Fatalf("unexpected jwt ids: %#v", jwtIDs)
+		}
+		return nil
+	}
+	service.writeTokenToBlacklistFn = func(jwtID string, remainingTime time.Duration) error {
+		blacklistWriteCalled = true
+		return nil
+	}
+
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 1, Username: "tester"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    global.Issuer,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   global.PcAdminSubject,
+			NotBefore: jwt.NewNumericDate(time.Now()),
+			ID:        "jwt-logout-no-exp",
+		},
+	}
+	accessToken, err := signTokenForTest(claims, secretKey)
+	if err != nil {
+		t.Fatalf("generate token failed: %v", err)
+	}
+
+	if err := service.Logout(accessToken); err != nil {
+		t.Fatalf("expected logout to succeed without exp, got %v", err)
+	}
+	if !revoked {
+		t.Fatal("expected database revocation to be invoked")
+	}
+	if blacklistWriteCalled {
+		t.Fatal("expected blacklist write to be skipped when exp is missing")
+	}
+}
+
 func signTokenForTest(claims jwt.Claims, secret string) (string, error) {
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return jwtToken.SignedString([]byte(secret))

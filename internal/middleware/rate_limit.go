@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -27,8 +28,16 @@ type ipLimiter struct {
 // 基于内存令牌桶实现，适用于单实例部署场景。
 // 配置关闭时直接透传，不影响已有行为。
 func RateLimitHandler(cfg RateLimitConfig) gin.HandlerFunc {
+	return RateLimitHandlerWithContext(context.Background(), cfg)
+}
+
+// RateLimitHandlerWithContext 返回可随 ctx 结束而停止清理循环的限流中间件。
+func RateLimitHandlerWithContext(ctx context.Context, cfg RateLimitConfig) gin.HandlerFunc {
 	if !cfg.Enabled {
 		return func(c *gin.Context) { c.Next() }
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if cfg.RPS <= 0 {
 		cfg.RPS = 1
@@ -44,8 +53,14 @@ func RateLimitHandler(cfg RateLimitConfig) gin.HandlerFunc {
 
 	// 后台清理过期条目，避免内存泄漏
 	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
 		for {
-			time.Sleep(time.Minute)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
 			mu.Lock()
 			for ip, v := range visitors {
 				if time.Since(v.lastSeen) > 3*time.Minute {

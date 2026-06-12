@@ -171,7 +171,7 @@ func adminUserGroup(deps *ControllerDeps) RouteGroupDef {
 func permissionGroup(deps *ControllerDeps) RouteGroupDef {
 	return RouteGroupDef{
 		Prefix:    "permission",
-		GroupCode: "api",
+		GroupCode: "permission",
 		Routes: []RouteDef{
 			POST("update", "更新接口", AuthModeAuth, deps.Api.Update),
 			GET("list", "接口列表", AuthModeAuth, deps.Api.List),

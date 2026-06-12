@@ -37,7 +37,7 @@ func (s *LoginService) Logout(accessToken string) error {
 	}
 
 	exp, err := claims.GetExpirationTime()
-	if err != nil || exp == nil {
+	if err != nil {
 		return err
 	}
 
@@ -45,14 +45,16 @@ func (s *LoginService) Logout(accessToken string) error {
 		return err
 	}
 
-	remainingTime := time.Until(exp.Time)
-	if err := s.writeTokenToBlacklistFn(claims.ID, remainingTime); err != nil {
-		log.Logger.Warn("Redis blacklist write failed after database revocation, treat logout as success",
-			zap.String("jwt_id", claims.ID),
-			zap.Bool("redis_unavailable", errors.Is(err, errRedisUnavailable)),
-			zap.Error(err))
-		s.kickSession(claims.UserID, claims.ID, SessionControlCodeKicked, "用户主动登出")
-		return nil
+	if exp != nil {
+		remainingTime := time.Until(exp.Time)
+		if err := s.writeTokenToBlacklistFn(claims.ID, remainingTime); err != nil {
+			log.Logger.Warn("Redis blacklist write failed after database revocation, treat logout as success",
+				zap.String("jwt_id", claims.ID),
+				zap.Bool("redis_unavailable", errors.Is(err, errRedisUnavailable)),
+				zap.Error(err))
+			s.kickSession(claims.UserID, claims.ID, SessionControlCodeKicked, "用户主动登出")
+			return nil
+		}
 	}
 
 	s.kickSession(claims.UserID, claims.ID, SessionControlCodeKicked, "用户主动登出")

@@ -92,7 +92,7 @@ type AdminCustomClaims struct {
 func NewAdminCustomClaims(user *model.AdminUser) AdminCustomClaims {
 	cfg := c.GetConfig()
 	now := time.Now().UTC()
-	expiresAt := now.Add(time.Second * cfg.Jwt.TTL)
+	expiresAt := now.Add(time.Duration(cfg.Jwt.TTL) * time.Second)
 	// phoneRule := &utils.DesensitizeRule{KeepPrefixLen: 3, KeepSuffixLen: 4, MaskChar: '*'}
 	// emailRule := &utils.DesensitizeRule{KeepPrefixLen: 2, KeepSuffixLen: 0, MaskChar: '*', Separator: '@', FixedMaskLength: 3}
 	return AdminCustomClaims{

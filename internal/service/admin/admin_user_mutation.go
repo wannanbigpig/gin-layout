@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"errors"
+
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
@@ -312,7 +314,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	adminUserModel := model.NewAdminUsers()
 	err := adminUserModel.GetById(uid)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return e.NewBusinessError(e.UserDoesNotExist)
 		}
 		return err

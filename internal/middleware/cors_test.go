@@ -139,8 +139,41 @@ func TestCorsHandlerAllowsWildcardMethodsAndHeaders(t *testing.T) {
 	if got := recorder.Header().Get("Access-Control-Allow-Methods"); got != "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS" {
 		t.Fatalf("unexpected allow methods: %q", got)
 	}
-	if got := recorder.Header().Get("Access-Control-Allow-Headers"); got != "Authorization,Content-Type" {
+	if got := recorder.Header().Get("Access-Control-Allow-Headers"); got != "Authorization, Content-Type, Accept, Origin, X-Requested-With, Accept-Language, X-CSRF-Token, X-Request-ID" {
 		t.Fatalf("unexpected allow headers: %q", got)
+	}
+}
+
+func TestCorsHandlerDoesNotReflectArbitraryRequestHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	restoreConfig := config.ReplaceConfigForTesting(&config.Conf{
+		AppConfig: autoload.AppConfig{
+			CorsOrigins: []string{"*"},
+			CorsHeaders: []string{"*"},
+		},
+	})
+	t.Cleanup(restoreConfig)
+
+	recorder := httptest.NewRecorder()
+	ctx, engine := gin.CreateTestContext(recorder)
+	engine.Use(CorsHandler())
+	engine.OPTIONS("/demo", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/demo", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Headers", "X-Evil-Header")
+	ctx.Request = req
+
+	engine.HandleContext(ctx)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Headers"); got == "X-Evil-Header" {
+		t.Fatalf("expected safe default headers, got reflected header %q", got)
 	}
 }
 

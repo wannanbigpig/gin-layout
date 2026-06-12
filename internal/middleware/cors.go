@@ -13,6 +13,17 @@ var builtInDefaultMethods = [...]string{
 	"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
 }
 
+var builtInDefaultHeaders = [...]string{
+	"Authorization",
+	"Content-Type",
+	"Accept",
+	"Origin",
+	"X-Requested-With",
+	"Accept-Language",
+	"X-CSRF-Token",
+	"X-Request-ID",
+}
+
 // ValidateCORSConfig 校验 CORS 配置的合法性。
 // cors_origins 包含 "*" 且 cors_credentials 为 true 是安全风险（浏览器不允许通配符 origin + credentials），
 // 启动时应检测并告警。
@@ -92,19 +103,17 @@ func defaultMethods() []string {
 func getAllowedHeaders(c *gin.Context, cfg *config.Conf) string {
 	if len(cfg.CorsHeaders) > 0 {
 		if hasWildcardValue(cfg.CorsHeaders) {
-			requestHeaders := c.Request.Header.Get("Access-Control-Request-Headers")
-			if requestHeaders != "" {
-				return requestHeaders
-			}
-			return "*"
+			return strings.Join(defaultHeaders(), ", ")
 		}
 		return strings.Join(cfg.CorsHeaders, ", ")
 	}
-	requestHeaders := c.Request.Header.Get("Access-Control-Request-Headers")
-	if requestHeaders != "" {
-		return requestHeaders
-	}
-	return "*"
+	return strings.Join(defaultHeaders(), ", ")
+}
+
+func defaultHeaders() []string {
+	headers := make([]string, len(builtInDefaultHeaders))
+	copy(headers, builtInDefaultHeaders[:])
+	return headers
 }
 
 func getExposeHeaders(cfg *config.Conf) string {
