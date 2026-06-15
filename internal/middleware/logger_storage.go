@@ -81,7 +81,7 @@ func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operation
 
 	operatorMeta := collectAuditOperatorMeta(c)
 	isHighRisk := resolveAuditHighRisk(c, requestMeta.method)
-	changeDiff := resolveAuditChangeDiff(c, isHighRisk, requestMeta.requestBody, responseBody)
+	changeDiff := resolveAuditChangeDiff(c)
 
 	return &auditsvc.AuditLogSnapshot{
 		RequestID:          requestMeta.requestID,
@@ -288,36 +288,30 @@ func resolveAuditHighRisk(c *gin.Context, method string) uint8 {
 	}
 }
 
-func resolveAuditChangeDiff(c *gin.Context, isHighRisk uint8, requestBody, responseBody string) string {
-	if c != nil {
-		if raw, exists := c.Get(global.ContextKeyAuditChangeDiff); exists {
-			switch value := raw.(type) {
-			case string:
-				if strings.TrimSpace(value) != "" {
-					return value
-				}
-			default:
-				bytes, err := json.Marshal(value)
-				if err == nil {
-					return string(bytes)
-				}
-			}
+// resolveAuditChangeDiff 返回本次请求的变更差异 JSON。
+// 只返回显式通过 SetAuditChangeDiff / SetAuditChangeDiffRaw 写入的值；
+// 对于未显式设置的高危操作，不再自动填充 request_body / response_body，
+// 因为"变更差异"应只在真正修改数据时才有意义。
+func resolveAuditChangeDiff(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	raw, exists := c.Get(global.ContextKeyAuditChangeDiff)
+	if !exists {
+		return ""
+	}
+	switch value := raw.(type) {
+	case string:
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	default:
+		bytes, err := json.Marshal(value)
+		if err == nil {
+			return string(bytes)
 		}
 	}
-
-	if isHighRisk == 0 || (requestBody == "" && responseBody == "") {
-		return ""
-	}
-
-	payload := map[string]any{
-		"request_body":  requestBody,
-		"response_body": responseBody,
-	}
-	bytes, err := json.Marshal(payload)
-	if err != nil {
-		return ""
-	}
-	return string(bytes)
+	return ""
 }
 
 func operationStatusFromResponse(recorder *responseRecorder, resp *response.Result) int {
