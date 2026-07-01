@@ -95,6 +95,21 @@ func (api FileResourceController) Detail(c *gin.Context) {
 	api.Success(c, detail)
 }
 
+// Update 更新文件资源展示信息。
+func (api FileResourceController) Update(c *gin.Context) {
+	params := form.NewFileUpdateForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+
+	result, err := service.NewFileResourceService().UpdateFile(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
 // Delete 删除文件资源。
 func (api FileResourceController) Delete(c *gin.Context) {
 	params := form.NewFileResourceIDForm()

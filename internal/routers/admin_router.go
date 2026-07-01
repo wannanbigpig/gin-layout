@@ -290,6 +290,7 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					POST("folder/update", "更新文件目录", AuthModeAuth, deps.File.FolderUpdate),
 					POST("folder/delete", "删除文件目录", AuthModeAuth, deps.File.FolderDelete),
 					POST("folder/move", "移动文件目录", AuthModeAuth, deps.File.FolderMove),
+					POST("update", "更新文件资源", AuthModeAuth, deps.File.Update),
 					POST("move", "移动文件资源", AuthModeAuth, deps.File.Move),
 					POST("upload/local", "本地上传文件资源", AuthModeAuth, deps.File.UploadLocal),
 					POST("upload/credential", "获取文件直传凭证", AuthModeAuth, deps.File.UploadCredential),

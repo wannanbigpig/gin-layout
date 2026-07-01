@@ -39,6 +39,7 @@ import (
 type FolderStatsResult struct {
 	FileCount        int64 `json:"file_count"`
 	ChildFolderCount int64 `json:"child_folder_count"`
+	TotalSize        int64 `json:"total_size"`
 }
 
 func (s *FileResourceService) FolderTree(includeHidden bool) ([]*resources.FileFolderResources, error) {
@@ -58,6 +59,7 @@ func (s *FileResourceService) FolderTree(includeHidden bool) ([]*resources.FileF
 	if err != nil {
 		return nil, err
 	}
+	creatorNames := s.queryFolderCreatorNames(folders)
 	transformer := resources.NewFileFolderTransformer()
 	nodes := make(map[uint]*resources.FileFolderResources, len(folders))
 	roots := make([]*resources.FileFolderResources, 0)
@@ -67,6 +69,7 @@ func (s *FileResourceService) FolderTree(includeHidden bool) ([]*resources.FileF
 			node.FileCount = stat.FileCount
 			node.TotalSize = stat.TotalSize
 		}
+		fillFolderCreatorName(node, creatorNames)
 		nodes[folder.ID] = node
 		if folder.ParentID == 0 {
 			roots = append(roots, node)
@@ -112,7 +115,7 @@ func (s *FileResourceService) CreateFolder(params *form.FileFolderCreate, uid ui
 	if err := db.Create(folder).Error; err != nil {
 		return nil, err
 	}
-	return resources.NewFileFolderTransformer().ToStruct(folder), nil
+	return s.buildFolderResource(folder), nil
 }
 
 func (s *FileResourceService) UpdateFolder(params *form.FileFolderUpdate, uid uint) (*resources.FileFolderResources, error) {
@@ -153,7 +156,7 @@ func (s *FileResourceService) UpdateFolder(params *form.FileFolderUpdate, uid ui
 	if err != nil {
 		return nil, err
 	}
-	return resources.NewFileFolderTransformer().ToStruct(&updated), nil
+	return s.buildFolderResource(&updated), nil
 }
 
 // FolderStats 查询目录下的文件数和子目录数（供删除前确认使用）。
@@ -174,8 +177,12 @@ func (s *FileResourceService) FolderStats(id uint) (*FolderStatsResult, error) {
 	if err := db.Model(&model.UploadFiles{}).Where("folder_id IN ?", allFolderIDs).Count(&fileCount).Error; err != nil {
 		return nil, err
 	}
+	var totalSize int64
+	if err := db.Model(&model.UploadFiles{}).Where("folder_id IN ?", allFolderIDs).Select("COALESCE(SUM(size), 0)").Scan(&totalSize).Error; err != nil {
+		return nil, err
+	}
 	childFolderCount := int64(len(allFolderIDs) - 1)
-	return &FolderStatsResult{FileCount: fileCount, ChildFolderCount: childFolderCount}, nil
+	return &FolderStatsResult{FileCount: fileCount, ChildFolderCount: childFolderCount, TotalSize: totalSize}, nil
 }
 
 // DeleteFolder 级联删除目录及其所有子目录和文件。
@@ -292,7 +299,46 @@ func (s *FileResourceService) MoveFolder(params *form.FileFolderMove, uid uint) 
 	if err != nil {
 		return nil, err
 	}
-	return resources.NewFileFolderTransformer().ToStruct(&moved), nil
+	return s.buildFolderResource(&moved), nil
+}
+
+func (s *FileResourceService) buildFolderResource(folder *model.UploadFileFolder) *resources.FileFolderResources {
+	node := resources.NewFileFolderTransformer().ToStruct(folder)
+	fillFolderCreatorName(node, s.queryFolderCreatorNames([]*model.UploadFileFolder{folder}))
+	return node
+}
+
+func (s *FileResourceService) queryFolderCreatorNames(folders []*model.UploadFileFolder) map[uint]uploaderInfo {
+	if len(folders) == 0 {
+		return nil
+	}
+	uidSet := make(map[uint]struct{})
+	uids := make([]uint, 0, len(folders))
+	for _, folder := range folders {
+		if folder == nil || folder.CreatedBy == 0 {
+			continue
+		}
+		if _, exists := uidSet[folder.CreatedBy]; exists {
+			continue
+		}
+		uidSet[folder.CreatedBy] = struct{}{}
+		uids = append(uids, folder.CreatedBy)
+	}
+	return s.queryUploaderNames(uids)
+}
+
+func fillFolderCreatorName(node *resources.FileFolderResources, creatorNames map[uint]uploaderInfo) {
+	if node == nil || node.CreatedBy == 0 {
+		return
+	}
+	info, exists := creatorNames[node.CreatedBy]
+	if !exists {
+		return
+	}
+	node.CreatorName = info.Nickname
+	node.CreatorUsername = info.Username
+	node.UploaderName = info.Nickname
+	node.UploaderUsername = info.Username
 }
 
 func (s *FileResourceService) MoveFiles(params *form.FileMove) (*resources.FileMoveResult, error) {

@@ -91,6 +91,15 @@ func NewFileFolderMoveForm() *FileFolderMove {
 	return &FileFolderMove{}
 }
 
+type FileUpdate struct {
+	ID         uint   `form:"id" json:"id" binding:"required,gt=0"`
+	OriginName string `form:"origin_name" json:"origin_name" binding:"required,max=255"`
+}
+
+func NewFileUpdateForm() *FileUpdate {
+	return &FileUpdate{}
+}
+
 type FileMove struct {
 	IDs      []uint `form:"ids" json:"ids" binding:"required,dive,gt=0"`
 	FolderID uint   `form:"folder_id" json:"folder_id" binding:"omitempty"`

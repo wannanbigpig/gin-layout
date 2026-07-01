@@ -15,5 +15,7 @@ func init() {
 		LocalStorageMultipartUnsupported: "本地存储不支持分片上传",
 		FileTooLarge:                     "文件大小超出限制",
 		FileMimeTypeNotAllowed:           "不支持的文件类型",
+		FileNameExists:                   "同级目录下已存在同名文件",
+		FileNameInvalid:                  "文件名称不合法",
 	})
 }

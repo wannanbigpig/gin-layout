@@ -289,6 +289,16 @@
                     "name": "FileMimeTypeNotAllowed",
                     "code": 11013,
                     "source": "internal/pkg/errors/code_file.go"
+                },
+                {
+                    "name": "FileNameExists",
+                    "code": 11014,
+                    "source": "internal/pkg/errors/code_file.go"
+                },
+                {
+                    "name": "FileNameInvalid",
+                    "code": 11015,
+                    "source": "internal/pkg/errors/code_file.go"
                 }
             ]
         },

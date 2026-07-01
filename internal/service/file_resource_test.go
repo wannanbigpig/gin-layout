@@ -186,6 +186,73 @@ func TestFileResourceMoveFilesReturnsStatsAndUpdatesLogicalPath(t *testing.T) {
 	}
 }
 
+func TestFileResourceUpdateFileRenamesDisplayName(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	folder := model.UploadFileFolder{Name: "docs", LogicalPath: "/docs"}
+	if err := db.Create(&folder).Error; err != nil {
+		t.Fatalf("create folder failed: %v", err)
+	}
+	file := model.UploadFiles{
+		FolderID:      folder.ID,
+		OriginName:    "old.txt",
+		DisplayName:   "old.txt",
+		Name:          "physical-object-name",
+		Path:          "physical/path",
+		ObjectKey:     "physical/object-key",
+		Ext:           "txt",
+		UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()),
+		StorageDriver: model.StorageDriverLocal,
+		StorageStatus: model.StorageStatusStored,
+	}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatalf("create upload file failed: %v", err)
+	}
+
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).UpdateFile(&form.FileUpdate{ID: file.ID, OriginName: "new-name.pdf"})
+	if err != nil {
+		t.Fatalf("update file failed: %v", err)
+	}
+	resource, ok := result.(*resources.FileResourceResources)
+	if !ok {
+		t.Fatalf("expected file resource result, got %#v", result)
+	}
+	if resource.OriginName != "new-name.pdf" || resource.DisplayName != "new-name.pdf" || resource.Ext != "pdf" {
+		t.Fatalf("unexpected renamed resource: %#v", resource)
+	}
+
+	var stored model.UploadFiles
+	if err := db.First(&stored, file.ID).Error; err != nil {
+		t.Fatalf("query renamed file failed: %v", err)
+	}
+	if stored.OriginName != "new-name.pdf" || stored.DisplayName != "new-name.pdf" || stored.Ext != "pdf" {
+		t.Fatalf("unexpected renamed file: %#v", stored)
+	}
+	if stored.Name != "physical-object-name" || stored.Path != "physical/path" || stored.ObjectKey != "physical/object-key" {
+		t.Fatalf("physical storage fields should not be renamed: %#v", stored)
+	}
+}
+
+func TestFileResourceUpdateFileRejectsDuplicateName(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	folder := model.UploadFileFolder{Name: "docs", LogicalPath: "/docs"}
+	if err := db.Create(&folder).Error; err != nil {
+		t.Fatalf("create folder failed: %v", err)
+	}
+	files := []model.UploadFiles{
+		{FolderID: folder.ID, OriginName: "a.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()), StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{FolderID: folder.ID, OriginName: "b.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+1), StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+	}
+	if err := db.Create(&files).Error; err != nil {
+		t.Fatalf("create upload files failed: %v", err)
+	}
+
+	_, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).UpdateFile(&form.FileUpdate{ID: files[0].ID, OriginName: "b.txt"})
+	var businessErr *e.BusinessError
+	if !stderrors.As(err, &businessErr) || businessErr.GetCode() != e.FileNameExists {
+		t.Fatalf("expected FileNameExists business error, got %v", err)
+	}
+}
+
 func TestFileResourceUploadLocalRecordsLocationFields(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	config.Config.BasePath = t.TempDir()
@@ -1542,13 +1609,14 @@ func TestFolderStatsCountsDescendants(t *testing.T) {
 	}
 
 	files := []model.UploadFiles{
-		{OriginName: "parent.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()), FolderID: parent.ID, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
-		{OriginName: "child.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+1), FolderID: child.ID, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
-		{OriginName: "grand.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+2), FolderID: grandChild.ID, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{OriginName: "parent.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()), FolderID: parent.ID, Size: 100, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{OriginName: "child.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+1), FolderID: child.ID, Size: 200, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
+		{OriginName: "grand.txt", UUID: fmt.Sprintf("%032x", time.Now().UnixNano()+2), FolderID: grandChild.ID, Size: 300, StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored},
 		{
 			OriginName:    "deleted.txt",
 			UUID:          fmt.Sprintf("%032x", time.Now().UnixNano()+3),
 			FolderID:      child.ID,
+			Size:          400,
 			StorageDriver: model.StorageDriverLocal,
 			StorageStatus: model.StorageStatusStored,
 			ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
@@ -1564,7 +1632,7 @@ func TestFolderStatsCountsDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FolderStats failed: %v", err)
 	}
-	if stats.FileCount != 3 || stats.ChildFolderCount != 2 {
+	if stats.FileCount != 3 || stats.ChildFolderCount != 2 || stats.TotalSize != 600 {
 		t.Fatalf("expected recursive file_count=3 child_folder_count=2, got %#v", stats)
 	}
 }
@@ -1807,6 +1875,12 @@ func execFileResourceTestSchema(t *testing.T, db *gorm.DB) {
 			owner_field text not null default '',
 			created_at datetime,
 			updated_at datetime
+		)`,
+		`CREATE TABLE admin_user (
+			id integer primary key autoincrement,
+			nickname text not null default '',
+			username text not null default '',
+			deleted_at integer not null default 0
 		)`,
 		// 与生产迁移 uniq_folder_name_deleted 对齐：同目录同名活跃记录唯一。
 		`CREATE UNIQUE INDEX uniq_folder_name_deleted ON upload_files (folder_id, origin_name, deleted_at)`,
@@ -2514,6 +2588,33 @@ func TestFolderTreeIncludesHiddenWhenRequested(t *testing.T) {
 	}
 	if len(result) != 2 {
 		t.Fatalf("expected 2 folders (including hidden), got %d", len(result))
+	}
+}
+
+func TestFolderTreeFillsCreatorName(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+
+	if err := db.Exec("INSERT INTO admin_user (id, nickname, username) VALUES (?, ?, ?)", 11, "超级管理员", "admin").Error; err != nil {
+		t.Fatalf("create admin user failed: %v", err)
+	}
+	folder := model.UploadFileFolder{Name: "folder", LogicalPath: "/folder", CreatedBy: 11, UpdatedBy: 11}
+	if err := db.Create(&folder).Error; err != nil {
+		t.Fatalf("create folder failed: %v", err)
+	}
+
+	result, err := service.FolderTree(false)
+	if err != nil {
+		t.Fatalf("FolderTree failed: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 folder, got %d", len(result))
+	}
+	if result[0].CreatorName != "超级管理员" || result[0].CreatorUsername != "admin" {
+		t.Fatalf("unexpected creator info: name=%q username=%q", result[0].CreatorName, result[0].CreatorUsername)
+	}
+	if result[0].UploaderName != "超级管理员" || result[0].UploaderUsername != "admin" {
+		t.Fatalf("unexpected uploader fallback: name=%q username=%q", result[0].UploaderName, result[0].UploaderUsername)
 	}
 }
 

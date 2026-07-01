@@ -15,5 +15,7 @@ func init() {
 		LocalStorageMultipartUnsupported: "local storage does not support multipart upload",
 		FileTooLarge:                     "file size exceeds the limit",
 		FileMimeTypeNotAllowed:           "file type is not allowed",
+		FileNameExists:                   "a file with the same name already exists in this directory",
+		FileNameInvalid:                  "invalid file name",
 	})
 }

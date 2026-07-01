@@ -108,6 +108,7 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "file:update", Route: "/admin/v1/system/file/folder/update", Method: "POST"},
 	{MenuCode: "file:delete", Route: "/admin/v1/system/file/folder/delete", Method: "POST"},
 	{MenuCode: "file:update", Route: "/admin/v1/system/file/folder/move", Method: "POST"},
+	{MenuCode: "file:update", Route: "/admin/v1/system/file/update", Method: "POST"},
 	{MenuCode: "file:update", Route: "/admin/v1/system/file/move", Method: "POST"},
 	{MenuCode: "file:delete", Route: "/admin/v1/system/file/delete", Method: "POST"},
 	{MenuCode: "file:delete", Route: "/admin/v1/system/file/batch-delete", Method: "POST"},

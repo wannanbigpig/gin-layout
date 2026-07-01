@@ -132,16 +132,22 @@ func fileUploadStatusName(status string) string {
 }
 
 type FileFolderResources struct {
-	ID          uint                   `json:"id"`
-	ParentID    uint                   `json:"parent_id"`
-	Name        string                 `json:"name"`
-	LogicalPath string                 `json:"logical_path"`
-	Sort        int                    `json:"sort"`
-	FileCount   int64                  `json:"file_count"`
-	TotalSize   int64                  `json:"total_size"`
-	CreatedAt   utils.FormatDate       `json:"created_at"`
-	UpdatedAt   utils.FormatDate       `json:"updated_at"`
-	Children    []*FileFolderResources `json:"children,omitempty"`
+	ID               uint                   `json:"id"`
+	ParentID         uint                   `json:"parent_id"`
+	Name             string                 `json:"name"`
+	LogicalPath      string                 `json:"logical_path"`
+	Sort             int                    `json:"sort"`
+	FileCount        int64                  `json:"file_count"`
+	TotalSize        int64                  `json:"total_size"`
+	CreatedBy        uint                   `json:"created_by"`
+	UpdatedBy        uint                   `json:"updated_by"`
+	CreatorName      string                 `json:"creator_name"`
+	CreatorUsername  string                 `json:"creator_username"`
+	UploaderName     string                 `json:"uploader_name"`
+	UploaderUsername string                 `json:"uploader_username"`
+	CreatedAt        utils.FormatDate       `json:"created_at"`
+	UpdatedAt        utils.FormatDate       `json:"updated_at"`
+	Children         []*FileFolderResources `json:"children,omitempty"`
 }
 
 type FileFolderTransformer struct {

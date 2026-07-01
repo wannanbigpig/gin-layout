@@ -28,6 +28,8 @@ export const ErrorCode = {
     LocalStorageMultipartUnsupported: 11011,
     FileTooLarge: 11012,
     FileMimeTypeNotAllowed: 11013,
+    FileNameExists: 11014,
+    FileNameInvalid: 11015,
     UserPasswordWrong: 20001,
     UserExists: 20002,
     PhoneNumberExists: 20003,

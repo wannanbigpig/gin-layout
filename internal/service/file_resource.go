@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 
 	"gorm.io/gorm"
@@ -192,6 +193,72 @@ func (s *FileResourceService) Detail(id uint) (any, error) {
 		s.fillSingleUploaderName(data)
 	}
 	return result, nil
+}
+
+// UpdateFile 更新文件展示名称，不移动或重命名底层存储对象。
+func (s *FileResourceService) UpdateFile(params *form.FileUpdate) (any, error) {
+	name, err := normalizeFileDisplayName(params.OriginName)
+	if err != nil {
+		return nil, err
+	}
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	var updated model.UploadFiles
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+		var uploadFile model.UploadFiles
+		if err := tx.First(&uploadFile, params.ID).Error; err != nil {
+			return e.NewBusinessError(e.NotFound)
+		}
+		if err := ensureFileNameUnique(tx, uploadFile.ID, uploadFile.FolderID, name); err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"origin_name":  name,
+			"display_name": name,
+			"ext":          strings.TrimPrefix(filepath.Ext(name), "."),
+		}
+		if err := tx.Model(&uploadFile).Updates(updates).Error; err != nil {
+			if isUploadNameDuplicateErr(err) {
+				return e.NewBusinessError(e.FileNameExists)
+			}
+			return err
+		}
+		if err := tx.First(&updated, uploadFile.ID).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := resources.NewFileResourceTransformer().ToStruct(&updated)
+	if result != nil {
+		s.fillSingleUploaderName(result)
+	}
+	return result, nil
+}
+
+func normalizeFileDisplayName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || name == "." || name == ".." {
+		return "", e.NewBusinessError(e.FileNameInvalid)
+	}
+	return name, nil
+}
+
+func ensureFileNameUnique(tx *gorm.DB, currentID, folderID uint, name string) error {
+	var count int64
+	if err := tx.Model(&model.UploadFiles{}).
+		Where("folder_id = ? AND origin_name = ? AND deleted_at = 0 AND id <> ?", folderID, name, currentID).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return e.NewBusinessError(e.FileNameExists)
+	}
+	return nil
 }
 
 // Delete 软删除文件记录。存在业务引用时拒绝删除，避免留下悬空引用。
