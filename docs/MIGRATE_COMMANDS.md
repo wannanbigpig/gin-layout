@@ -17,6 +17,8 @@
 go run main.go -c ./config.yaml command migrate ...
 ```
 
+除查看帮助等纯说明场景外，仓库文档中的迁移示例默认都显式带上 `-c ./config.yaml`，避免配置文件查找路径因当前工作目录或临时二进制位置不同而产生歧义。
+
 这样做的原因：
 
 - 不依赖仓库根目录额外放一个 `migrate` 二进制
@@ -51,7 +53,7 @@ YYYYMMDDHHMMSS_desc.down.sql
 ## 命令总览
 
 ```bash
-go run main.go command migrate
+go run main.go -c ./config.yaml command migrate
 go run main.go -c ./config.yaml command migrate create <name>
 go run main.go -c ./config.yaml command migrate check
 go run main.go -c ./config.yaml command migrate up [N]
@@ -64,7 +66,7 @@ go run main.go -c ./config.yaml command migrate version
 
 说明：
 
-- `go run main.go command migrate` 默认等价于 `go run main.go command migrate up`
+- `go run main.go -c ./config.yaml command migrate` 默认等价于 `go run main.go -c ./config.yaml command migrate up`
 
 公共参数：
 

@@ -11,7 +11,7 @@
 </div>
 
 <div align="center">
-  内置 JWT 认证、RBAC 权限、请求/登录日志、文件上传、readiness 探针、参数校验、请求语言国际化、声明式路由和 CLI 初始化命令。
+  内置 JWT 双 Token 认证、RBAC 权限、请求/登录日志、文件上传、任务中心、系统通知、readiness 探针、参数校验、请求语言国际化、声明式路由和 CLI 命令体系。
 </div>
 
 <br />
@@ -41,11 +41,13 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| Auth | 内置 JWT 登录、Token 校验、自动刷新、黑名单 |
+| Auth | 内置 JWT 双 Token 登录、Access Token 校验、Refresh Token Cookie 刷新、黑名单 |
 | RBAC | 管理员、角色、部门、菜单、API 权限管理 |
 | Route Metadata | 声明式路由树统一生成 Gin 路由和 API 元数据 |
 | Logs | 内置登录日志、请求日志、统一响应结构 |
 | File Access | 文件上传与公开 / 私有文件访问 |
+| Task Center | 内置异步任务、定时任务定义、运行记录、重试与运营配置 |
+| Realtime | 系统通知、WebSocket 临时票据与实时消息连接 |
 | I18n | 基于 `Accept-Language` 返回错误文案与菜单标题（支持 `zh-CN` / `en-US`） |
 | Health Probes | 提供 `/ping` 与 `/health/readiness`，便于存活检测与依赖就绪检查 |
 | Tooling | 提供 CLI 初始化、路由同步、权限重建、迁移配套能力 |
@@ -80,8 +82,8 @@ go mod download
 推荐使用项目命令：
 
 ```bash
-go run main.go command migrate        # 默认等价于 migrate up
-go run main.go command migrate check
+go run main.go -c ./config.yaml command migrate        # 默认等价于 migrate up
+go run main.go -c ./config.yaml command migrate check
 ```
 
 迁移执行完成后会写入一套默认基础数据，其中包含超级管理员账号 `super_admin / 123456`。仅建议用于本地初始化，首次登录后请立即修改密码。
@@ -106,12 +108,17 @@ app:
   language: zh_CN
   trusted_proxies:
     - 127.0.0.1
-  watch_config: true
+  watch_config: false
   # allow_degraded_startup: false
 
 jwt:
-  ttl: 7200
-  refresh_ttl: 3600
+  ttl: 1800
+  refresh_ttl: 0
+  refresh_token_ttl: 604800
+  refresh_cookie_name: refresh_token
+  refresh_cookie_path: /admin/v1/auth
+  refresh_cookie_same_site: Lax
+  refresh_cookie_secure: false
   secret_key: change-me-to-a-random-secret
 
 mysql:
@@ -148,25 +155,27 @@ queue:
 注意：
 
 - `jwt.secret_key` 为必填项，不能为空
+- `jwt.refresh_ttl` 已废弃，当前双 Token 方案实际使用 `jwt.refresh_token_ttl` 和 `jwt.refresh_cookie_*`
 - 如果只启动 API、不启用异步任务，可以把 `queue.enable` 设为 `false`
 - 如果 `queue.enable=true` 但不想复用 `redis.*`，请把 `queue.use_default_redis` 设为 `false`，并补齐 `queue.redis.*`
+- 文件存储驱动和敏感存储参数运行时保存在 `sys_config`（`storage.active_driver` / `storage.config`），后台通过 `/admin/v1/system/storage/*` 管理；`config.yaml` 主要负责基础依赖与进程级配置
 
 ### 5. 启动服务
 
 ```bash
-GO_ENV=development go run main.go service
+GO_ENV=development go run main.go -c ./config.yaml service
 ```
 
 需要显式指定监听地址或端口时：
 
 ```bash
-GO_ENV=development go run main.go service -H 127.0.0.1 -P 9001
+GO_ENV=development go run main.go -c ./config.yaml service -H 127.0.0.1 -P 9001
 ```
 
 如果启用了 `queue.enable=true`，还需要单独启动 worker：
 
 ```bash
-GO_ENV=development go run main.go worker
+GO_ENV=development go run main.go -c ./config.yaml worker
 ```
 
 本地开发如需热更新，项目已提供 Air 配置：
@@ -238,14 +247,15 @@ go run main.go service --help
 | 命令 | 说明 |
 | --- | --- |
 | `go run main.go version` | 输出当前版本号 |
-| `go run main.go service` | 启动 API 服务 |
-| `go run main.go service -H 0.0.0.0 -P 9001` | 显式指定监听地址与端口 |
-| `go run main.go worker` | 启动 Asynq 异步任务消费进程 |
-| `go run main.go cron` | 启动定时任务 |
+| `go run main.go -c ./config.yaml service` | 启动 API 服务 |
+| `go run main.go -c ./config.yaml service -H 0.0.0.0 -P 9001` | 显式指定监听地址与端口 |
+| `go run main.go -c ./config.yaml worker` | 启动 Asynq 异步任务消费进程 |
+| `go run main.go -c ./config.yaml cron` | 启动定时任务 |
 | `go run main.go command demo` | 运行示例命令 |
-| `go run main.go command api-route -y` | 扫描声明式路由树并重建 `api` 路由表 |
-| `go run main.go command rebuild-user-permissions -y` | 按数据库关系重建用户最终 API 权限 |
-| `go run main.go command init-system` | 清空当前配置数据库对象并重建系统数据 |
+| `go run main.go -c ./config.yaml command gen --from=gen/specs/product.yaml` | 从表结构或 YAML 生成 CRUD 代码 |
+| `go run main.go -c ./config.yaml command api-route -y` | 扫描声明式路由树并重建 `api` 路由表 |
+| `go run main.go -c ./config.yaml command rebuild-user-permissions -y` | 按数据库关系重建用户最终 API 权限 |
+| `go run main.go -c ./config.yaml command init-system` | 清空当前配置数据库对象并重建系统数据 |
 | `go run main.go -c ./config.yaml command task sync-definitions` | 非破坏性同步内置任务定义到 `task_definitions` |
 | `go run main.go -c ./config.yaml command task scan-async` | 扫描异步任务注册与任务定义镜像 |
 | `go run main.go -c ./config.yaml command task scan-cron` | 扫描定时任务定义与任务定义镜像 |
@@ -295,11 +305,12 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 | `app.base_url` | 文件访问 URL 前缀，用于生成公开文件地址 |
 | `app.trusted_proxies` | 受信任代理地址或网段，影响 `ClientIP()` 与日志 IP |
 | `jwt.secret_key` | 必填；生产环境不能使用弱占位值 |
-| `jwt.ttl` / `jwt.refresh_ttl` | Token 过期时间与自动刷新阈值 |
+| `jwt.ttl` / `jwt.refresh_token_ttl` / `jwt.refresh_cookie_*` | Access Token 生命周期、Refresh Token Cookie 生命周期与浏览器策略；`jwt.refresh_ttl` 已废弃 |
 | `mysql` | 数据库开关与连接信息 |
 | `redis` | 缓存、黑名单和分布式锁配置 |
 | `queue.use_default_redis` | `true` 复用 `redis.*`；`false` 时改用 `queue.redis.*` 独立连接 |
 | `queue` | Asynq 异步任务开关、队列命名空间、并发度、优先级和审计日志重试策略 |
+| `storage.active_driver` / `storage.config` | 运行时文件存储驱动与敏感配置，保存在 `sys_config`，由 `/admin/v1/system/storage/*` 管理 |
 | `logger` | 日志输出、切割和保留策略 |
 
 如果通过 Nginx、Ingress 或负载均衡转发请求，需要同步配置 `app.trusted_proxies`，否则客户端 IP 可能记录不准确。
@@ -307,9 +318,9 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 ### Worker 与 Cron
 
 - `service` 负责提供 HTTP API。
-- `worker` 负责消费 Asynq 异步任务。当前首版只接入请求审计日志异步落库。
-- `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会在当前请求链路同步落库。
-- `cron` 负责定时任务调度；代码内置任务会同步到 `task_definitions`，后台运营配置中的 `status` 会覆盖代码默认启停，下一次调度触发时生效。
+- `worker` 负责消费 Asynq 异步任务，当前内置了请求审计日志落库、请求日志导出、文件资源导出 3 类任务。
+- `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会在当前请求链路同步落库，但导出类异步能力也会随之不可用。
+- `cron` 负责定时任务调度；代码内置任务会同步到 `task_definitions`，后台运营配置中的 `status/cron_spec/allow_manual/allow_retry` 会作为运行时真相，并通过进程缓存和 `cron_task_states` 维护最近同步/执行状态。
 - 演示定时任务初始化默认关闭；`reset-system-data` 默认关闭，启用执行时会输出高风险告警。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
 
@@ -331,8 +342,7 @@ app:
 - `redis.*`
 - `app.base_url`
 - `app.cors_*`
-- `jwt.ttl`
-- `jwt.refresh_ttl`
+- `jwt.*`（`jwt.secret_key` 变更会被检测，但实际生效仍需重启）
 
 仅检测并提示“需要重启”：
 
@@ -357,7 +367,7 @@ app:
 2. 在 `internal/service/` 编写业务逻辑
 3. 在 `internal/validator/form/` 定义请求参数
 4. 在 `AdminRouteTree()` 中声明路由
-5. 需要更新 API 路由表时执行 `go run main.go command api-route`
+5. 需要更新 API 路由表时执行 `go run main.go -c ./config.yaml command api-route`
 
 ### 参数校验约定
 

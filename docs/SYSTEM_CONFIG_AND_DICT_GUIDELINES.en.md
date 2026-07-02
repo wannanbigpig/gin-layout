@@ -34,7 +34,7 @@ Backend `sys_config` integration must guarantee:
 
 - The service layer keeps business fallbacks and does not treat config values as trusted input.
 - Validators remain responsible for request parameter legality and are not replaced by config-table values.
-- Sensitive configs must not leak through generic detail, value, request-log, or change-diff paths.
+- Sensitive configs must not leak through generic list, `PublicValue`, request-log, or change-diff paths. `detail` may return the raw value only for authenticated admin edit backfill, and callers must not blindly re-display it.
 - Protected built-in configs must not allow stable fields such as key, value type, or group code to be changed.
 - When config changes affect runtime behavior, it must be clear whether cache refresh or process restart is required.
 
@@ -70,6 +70,8 @@ Recommended display dictionaries:
 - `task_kind`: task kind labels.
 - `task_source`: task source labels.
 - `task_run_status`: task run status labels.
+- `task_record_success_mode`: task success-detail policy labels.
+- `task_detail_record_mode`: task detail-record mode labels.
 
 When backend code provides dictionary options, it is only responsible for display data output. Even if dictionary items are disabled, deleted, or edited incorrectly, backend core APIs must still enforce legality through validators, model constants, and service logic.
 
@@ -93,7 +95,8 @@ Backend code may reuse dictionary data for display, but dictionary edits must no
 - Keep config reads in services or helpers. Controllers should not assemble business rules directly.
 - Core enums must be explicitly expressed in form validators and model constants.
 - Audit diffs may use label mappings for readability, but diff fields and security masking rules must be controlled by code.
-- Sensitive config detail and list responses return only a masked placeholder. When an update receives the unchanged masked placeholder, backend code must keep the original value instead of writing the placeholder as the real config value.
+- Sensitive config list responses and the `value` endpoint return only a masked placeholder. The `detail` endpoint returns the raw value for admin edit backfill. When an update receives the unchanged masked placeholder, backend code must keep the original value instead of writing the placeholder as the real config value.
+- Runtime file-storage settings such as `storage.active_driver` and `storage.config` are still stored in `sys_config`, but they should be managed through the dedicated `/admin/v1/system/storage/*` endpoints: the driver is hidden but non-sensitive, the JSON payload is hidden and sensitive, saves must refresh the `sys_config` cache, and secret reveals go through `/admin/v1/system/storage/secret`.
 - Menu-title i18n updates use Replace semantics: for the same `menu_id`, locale rows omitted from the current request are deleted and only submitted locales remain.
 - i18n updates for system config names, dictionary type names, and dictionary item labels use PATCH semantics: only submitted locales are inserted or updated, and omitted locales keep their existing values.
 - API documentation must explicitly state whether an entity uses Replace or PATCH semantics. "Supports i18n updates" is not specific enough.

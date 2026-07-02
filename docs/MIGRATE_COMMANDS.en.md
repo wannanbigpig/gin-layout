@@ -17,6 +17,8 @@ Use:
 go run main.go -c ./config.yaml command migrate ...
 ```
 
+Except for pure help examples, the docs intentionally keep `-c ./config.yaml` in migration commands so config resolution stays explicit regardless of the current working directory or temporary binary path.
+
 This keeps migration operations:
 
 - independent from an extra root-level `migrate` binary
@@ -52,7 +54,7 @@ Default timezone: `UTC`
 ## Command Overview
 
 ```bash
-go run main.go command migrate
+go run main.go -c ./config.yaml command migrate
 go run main.go -c ./config.yaml command migrate create <name>
 go run main.go -c ./config.yaml command migrate check
 go run main.go -c ./config.yaml command migrate up [N]
@@ -65,7 +67,7 @@ go run main.go -c ./config.yaml command migrate version
 
 Notes:
 
-- `go run main.go command migrate` defaults to `go run main.go command migrate up`
+- `go run main.go -c ./config.yaml command migrate` defaults to `go run main.go -c ./config.yaml command migrate up`
 
 Shared flags:
 

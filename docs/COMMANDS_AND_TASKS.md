@@ -18,12 +18,12 @@
 
 - `service`
   - 提供 HTTP API
-  - 处理登录、权限、菜单、上传、日志等业务
+  - 处理登录、权限、菜单、上传、日志、系统通知、任务中心等业务
   - 某些场景下会往队列里发布异步任务
 
 - `worker`
   - 消费异步任务
-  - 当前已经接入请求审计日志异步落库
+  - 当前已经接入请求审计日志异步落库、请求日志导出、文件资源导出
 
 - `cron`
   - 负责周期性调度
@@ -61,7 +61,7 @@ go run main.go command -h
 ### 2. 启动 API 服务
 
 ```bash
-go run main.go service
+go run main.go -c ./config.yaml service
 ```
 
 用途：
@@ -79,7 +79,7 @@ go run main.go service
 ### 3. 启动异步任务消费进程
 
 ```bash
-go run main.go worker
+go run main.go -c ./config.yaml worker
 ```
 
 入口文件：
@@ -95,11 +95,13 @@ go run main.go worker
 当前已接入任务：
 
 - `audit:request_log.write`
+- `export:request-log`
+- `export:file-list`
 
 ### 4. 启动定时任务调度器
 
 ```bash
-go run main.go cron
+go run main.go -c ./config.yaml cron
 ```
 
 入口文件：
@@ -122,9 +124,9 @@ go run main.go cron
 ### 5. 运行一次性命令
 
 ```bash
-go run main.go command api-route
-go run main.go command rebuild-user-permissions
-go run main.go command init-system
+go run main.go -c ./config.yaml command api-route
+go run main.go -c ./config.yaml command rebuild-user-permissions
+go run main.go -c ./config.yaml command init-system
 go run main.go -c ./config.yaml command task sync-definitions
 go run main.go -c ./config.yaml command migrate up
 ```
@@ -145,6 +147,8 @@ go run main.go -c ./config.yaml command migrate up
   - `-y` 只跳过普通确认，自动化执行必须额外传 `--backup-confirmed --confirm-database <mysql.database>`
 - `demo`
   - 示例命令
+- `gen`
+  - 从 MySQL 表结构或 YAML spec 生成 CRUD 代码，可选联动前端文件与菜单初始化
 - `migrate`
   - 迁移管理子命令，支持 `create/check/up/down/goto/force/version`
   - 详细说明见 [docs/MIGRATE_COMMANDS.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.md)
@@ -163,6 +167,15 @@ go run main.go -c ./config.yaml command migrate up
 go run main.go version
 ```
 
+任务中心相关管理接口位于：
+
+- `/admin/v1/task/*`
+  - 任务定义列表、手动触发、更新记录策略、更新运营配置
+- `/admin/v1/task/run/*`
+  - 执行记录列表、详情、事件、统计、趋势、取消、重试
+- `/admin/v1/task/cron/state`
+  - 查看定时任务最近同步与执行状态
+
 ## 常见启动组合
 
 ### 1. 只启动 API
@@ -173,7 +186,7 @@ go run main.go version
 - 不依赖异步任务的场景
 
 ```bash
-go run main.go service
+go run main.go -c ./config.yaml service
 ```
 
 ### 2. 启动 API + Worker
@@ -184,8 +197,8 @@ go run main.go service
 - 已启用 Redis
 
 ```bash
-go run main.go service
-go run main.go worker
+go run main.go -c ./config.yaml service
+go run main.go -c ./config.yaml worker
 ```
 
 ### 3. 启动 API + Worker + Cron
@@ -195,9 +208,9 @@ go run main.go worker
 - 同时需要接口服务、异步消费和定时调度
 
 ```bash
-go run main.go service
-go run main.go worker
-go run main.go cron
+go run main.go -c ./config.yaml service
+go run main.go -c ./config.yaml worker
+go run main.go -c ./config.yaml cron
 ```
 
 ## 定时任务使用方式
@@ -238,6 +251,21 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 - `handler` 只来自代码注册表；`status/cron_spec` 属于 DB 运营配置
 - 高风险任务可以显式启用；运行缓存异常时默认跳过执行
 - 不需要每次手写 `AddJob`、`Chain`、`Recover`
+
+### 当前内置任务定义
+
+当前内置任务定义集中在 [internal/cron/registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go)：
+
+| Code | Kind | Queue / Cron | 默认状态 | 说明 |
+| --- | --- | --- | --- | --- |
+| `audit:request_log.write` | `async` | `audit` | 启用 | 请求审计日志异步落库 |
+| `export:request-log` | `async` | `export` | 启用 | 请求日志导出为 CSV |
+| `export:file-list` | `async` | `export` | 启用 | 文件资源列表导出为 CSV |
+| `cron:demo` | `cron` | `0/5 * * * * *` | 受 `task.cron_demo_enabled` 控制 | 开发演示任务 |
+| `cron:reset-system-data` | `cron` | `0 0 2 * * *` | 默认禁用 | 高风险系统重建任务，仅 `app.enable_reset_system_cron=true` 时默认启用 |
+| `cron:file-access-flush` | `cron` | `0 * * * * *` | 启用 | 将文件访问时间从 Redis 批量落库 |
+| `cron:clean-expired-files` | `cron` | `0 0 3 * * *` | 启用 | 清理过期临时导出/上传文件 |
+| `cron:clean-audit-logs` | `cron` | `0 0 4 * * *` | 启用 | 清理超过保留天数的请求日志与登录日志 |
 
 ### 可用方法
 

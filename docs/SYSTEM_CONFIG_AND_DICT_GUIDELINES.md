@@ -34,7 +34,7 @@
 
 - service 层仍保留业务兜底，不能把配置值直接当作可信输入。
 - validator 仍负责接口入参合法性，不能依赖配置表替代校验。
-- 敏感配置不能通过 detail、value、request log、change diff 等通用链路泄露原值。
+- 敏感配置不能通过列表、`PublicValue`、request log、change diff 等通用链路泄露原值；`detail` 仅在具备后台权限的编辑回填场景返回真实值，调用方不得继续透传展示。
 - protected 配置禁止修改稳定字段，例如 key、value type、group code。
 - 配置变更影响运行态时，必须明确是否需要刷新缓存或重启进程。
 
@@ -70,6 +70,8 @@
 - `task_kind`：任务类型展示。
 - `task_source`：任务来源展示。
 - `task_run_status`：任务执行状态展示。
+- `task_record_success_mode`：任务成功明细记录策略展示。
+- `task_detail_record_mode`：任务明细记录模式展示。
 
 后端提供字典 options 时只承担展示数据输出职责。即使字典项被禁用、删除或误改，后端核心接口仍必须由 validator、model 常量和 service 逻辑保证合法性。
 
@@ -93,7 +95,8 @@
 - 配置读取应集中在 service/helper，controller 不直接拼装业务规则。
 - 核心枚举必须在 form validator 和 model 常量中显式表达。
 - 审计 diff 可以使用 label 映射提升可读性，但 diff 字段集合和安全脱敏规则必须由代码控制。
-- 敏感配置详情和列表只返回脱敏占位符；更新时收到未改动的脱敏占位符应保留原值，不能把占位符写成真实配置值。
+- 敏感配置的列表接口与 `value` 接口只返回脱敏占位符；`detail` 接口用于后台编辑回填时返回真实值。更新时收到未改动的脱敏占位符应保留原值，不能把占位符写成真实配置值。
+- `storage.active_driver` / `storage.config` 这类文件存储运行时配置虽然落在 `sys_config`，但应通过 `/admin/v1/system/storage/*` 专用接口管理：前者是隐藏的非敏感配置，后者是隐藏的敏感 JSON 配置；保存后需要刷新 `sys_config` 缓存，查看敏感字段走 `/admin/v1/system/storage/secret`。
 - 菜单标题 i18n 更新采用 Replace 语义：同一 `menu_id` 下，本次请求未提交的 locale 会被删除，仅保留本次提交的 locale。
 - 系统配置名称、字典类型名称、字典项 label 的 i18n 更新采用 PATCH 语义：只新增/更新请求中出现的 locale，未传 locale 保留旧值。
 - 接口文档必须显式说明当前实体使用的是 Replace 还是 PATCH，不能笼统写成“支持 i18n 更新”。

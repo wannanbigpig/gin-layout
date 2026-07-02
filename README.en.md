@@ -11,7 +11,7 @@
 </div>
 
 <div align="center">
-  Built with JWT auth, RBAC, request/login logging, file upload, readiness probes, validation, request-locale i18n, declarative routing, and CLI initialization commands.
+  Built with JWT dual-token auth, RBAC, request/login logging, file upload, a task center, system notifications, readiness probes, validation, request-locale i18n, declarative routing, and CLI commands.
 </div>
 
 <br />
@@ -41,11 +41,13 @@ Most admin projects start with the same goal: get login, permissions, menus, upl
 
 | Capability | Description |
 | --- | --- |
-| Auth | JWT login, token verification, auto refresh, and blacklist support |
+| Auth | JWT dual-token login, access-token verification, refresh-token cookie refresh, and blacklist support |
 | RBAC | Admin, role, department, menu, and API permission management |
 | Route Metadata | Declarative route tree generates both Gin routes and API metadata |
 | Logs | Built-in login logs, request logs, and unified response structure |
 | File Access | File upload and public / private file access |
+| Task Center | Built-in async jobs, cron task definitions, run records, retries, and operation settings |
+| Realtime | System notifications, WebSocket temporary tickets, and real-time message connections |
 | I18n | Error messages and menu titles are resolved by `Accept-Language` (`zh-CN` / `en-US`) |
 | Health Probes | Built-in `/ping` and `/health/readiness` for liveness and dependency-readiness checks |
 | Tooling | CLI commands for initialization, route sync, permission rebuild, and migrations |
@@ -80,8 +82,8 @@ go mod download
 Recommended project commands:
 
 ```bash
-go run main.go command migrate        # defaults to migrate up
-go run main.go command migrate check
+go run main.go -c ./config.yaml command migrate        # defaults to migrate up
+go run main.go -c ./config.yaml command migrate check
 ```
 
 After migrations finish, a default baseline dataset is inserted, including the super admin account `super_admin / 123456`. It is only recommended for local initialization. Change the password immediately after the first login.
@@ -107,12 +109,17 @@ app:
   language: zh_CN
   trusted_proxies:
     - 127.0.0.1
-  watch_config: true
+  watch_config: false
   # allow_degraded_startup: false
 
 jwt:
-  ttl: 7200
-  refresh_ttl: 3600
+  ttl: 1800
+  refresh_ttl: 0
+  refresh_token_ttl: 604800
+  refresh_cookie_name: refresh_token
+  refresh_cookie_path: /admin/v1/auth
+  refresh_cookie_same_site: Lax
+  refresh_cookie_secure: false
   secret_key: change-me-to-a-random-secret
 
 mysql:
@@ -149,25 +156,27 @@ queue:
 Notes:
 
 - `jwt.secret_key` is required and cannot be empty
+- `jwt.refresh_ttl` is deprecated; the current dual-token flow uses `jwt.refresh_token_ttl` and `jwt.refresh_cookie_*`
 - If you only run the API and do not need async jobs, set `queue.enable` to `false`
 - If `queue.enable=true` but you do not want to reuse `redis.*`, set `queue.use_default_redis` to `false` and fill in `queue.redis.*`
+- The active storage driver and sensitive storage settings are persisted in `sys_config` (`storage.active_driver` / `storage.config`) and managed through `/admin/v1/system/storage/*`; `config.yaml` mainly covers process-level dependencies and runtime knobs
 
 ### 5. Start Service
 
 ```bash
-GO_ENV=development go run main.go service
+GO_ENV=development go run main.go -c ./config.yaml service
 ```
 
 To explicitly set the listen host or port:
 
 ```bash
-GO_ENV=development go run main.go service -H 127.0.0.1 -P 9001
+GO_ENV=development go run main.go -c ./config.yaml service -H 127.0.0.1 -P 9001
 ```
 
 If `queue.enable=true`, start the worker in a separate process as well:
 
 ```bash
-GO_ENV=development go run main.go worker
+GO_ENV=development go run main.go -c ./config.yaml worker
 ```
 
 ### 6. Verify
@@ -218,14 +227,15 @@ Common commands:
 | Command | Description |
 | --- | --- |
 | `go run main.go version` | Print the current version |
-| `go run main.go service` | Start the API service |
-| `go run main.go service -H 0.0.0.0 -P 9001` | Explicitly set the listen host and port |
-| `go run main.go worker` | Start the Asynq async worker |
-| `go run main.go cron` | Start scheduled jobs |
+| `go run main.go -c ./config.yaml service` | Start the API service |
+| `go run main.go -c ./config.yaml service -H 0.0.0.0 -P 9001` | Explicitly set the listen host and port |
+| `go run main.go -c ./config.yaml worker` | Start the Asynq async worker |
+| `go run main.go -c ./config.yaml cron` | Start scheduled jobs |
 | `go run main.go command demo` | Run the demo command |
-| `go run main.go command api-route` | Scan the declarative route tree and rebuild the `api` route table |
-| `go run main.go command rebuild-user-permissions` | Rebuild final user API permissions from database relationships |
-| `go run main.go command init-system` | Drop objects in the configured database and rebuild system data |
+| `go run main.go -c ./config.yaml command gen --from=gen/specs/product.yaml` | Generate CRUD code from a table or YAML spec |
+| `go run main.go -c ./config.yaml command api-route` | Scan the declarative route tree and rebuild the `api` route table |
+| `go run main.go -c ./config.yaml command rebuild-user-permissions` | Rebuild final user API permissions from database relationships |
+| `go run main.go -c ./config.yaml command init-system` | Drop objects in the configured database and rebuild system data |
 | `go run main.go -c ./config.yaml command task sync-definitions` | Non-destructively sync built-in task definitions into `task_definitions` |
 | `go run main.go -c ./config.yaml command task scan-async` | Scan async task registration against the task-definition mirror |
 | `go run main.go -c ./config.yaml command task scan-cron` | Scan cron task definitions against the task-definition mirror |
@@ -275,11 +285,12 @@ Config lookup order:
 | `app.base_url` | URL prefix used to generate public file access URLs |
 | `app.trusted_proxies` | Trusted proxy addresses or CIDRs that affect `ClientIP()` and log IPs |
 | `jwt.secret_key` | Required; do not use weak placeholder values in production |
-| `jwt.ttl` / `jwt.refresh_ttl` | Token expiration and auto-refresh threshold |
+| `jwt.ttl` / `jwt.refresh_token_ttl` / `jwt.refresh_cookie_*` | Access-token lifetime, refresh-token cookie lifetime, and browser cookie policy; `jwt.refresh_ttl` is deprecated |
 | `mysql` | Database enable flag and connection settings |
 | `redis` | Cache, blacklist, and distributed lock settings |
 | `queue.use_default_redis` | `true` reuses `redis.*`; `false` uses the independent `queue.redis.*` connection |
 | `queue` | Asynq enable flag, queue concurrency, priorities, and audit-log retry settings |
+| `storage.active_driver` / `storage.config` | Runtime file-storage driver and sensitive storage config in `sys_config`, managed through `/admin/v1/system/storage/*` |
 | `logger` | Log output, rotation, and retention strategy |
 
 If requests pass through Nginx, Ingress, or a load balancer, keep `app.trusted_proxies` aligned or client IP logging may be inaccurate.
@@ -287,9 +298,9 @@ If requests pass through Nginx, Ingress, or a load balancer, keep `app.trusted_p
 ### Worker And Cron
 
 - `service` serves the HTTP API.
-- `worker` consumes Asynq jobs. The current first phase only moves request audit-log persistence to Asynq.
-- When `queue.enable=false`, you do not need to start `worker`; request audit logs are persisted synchronously in the current request flow.
-- `cron` owns scheduled jobs. Built-in task definitions are synced into `task_definitions`, and the admin operation `status` overrides code defaults on the next scheduled trigger.
+- `worker` consumes Asynq jobs. The current built-ins cover request-audit persistence, request-log export, and file-list export.
+- When `queue.enable=false`, you do not need to start `worker`; request audit logs are persisted synchronously, but export-related async capabilities are also unavailable.
+- `cron` owns scheduled jobs. Built-in task definitions are synced into `task_definitions`, and runtime truth comes from operational fields such as `status`, `cron_spec`, `allow_manual`, and `allow_retry`, with recent sync/run state tracked through in-process cache plus `cron_task_states`.
 - The demo cron task is disabled by default after initialization. `reset-system-data` is also disabled by default and logs a high-risk warning when it is enabled for execution.
 - Do not register the same recurring business task in both `cron` and the async worker flow, or it will run twice.
 
@@ -311,8 +322,7 @@ Hot-reload supported:
 - `redis.*`
 - `app.base_url`
 - `app.cors_*`
-- `jwt.ttl`
-- `jwt.refresh_ttl`
+- `jwt.*` (`jwt.secret_key` changes are detected, but still require restart to take effect)
 
 Detected but requires restart:
 
@@ -337,7 +347,7 @@ Notes:
 2. Write the business logic in `internal/service/`
 3. Define request params in `internal/validator/form/`
 4. Declare the route in `AdminRouteTree()`
-5. Run `go run main.go command api-route` if the API route table needs to be refreshed
+5. Run `go run main.go -c ./config.yaml command api-route` if the API route table needs to be refreshed
 
 ### Validation Conventions
 

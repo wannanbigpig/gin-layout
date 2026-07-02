@@ -18,12 +18,12 @@ The project currently splits runtime responsibilities into 3 process types:
 
 - `service`
   - serves the HTTP API
-  - handles login, permissions, menus, uploads, logs, and business requests
+  - handles login, permissions, menus, uploads, logs, system notifications, the task center, and business requests
   - can publish async jobs in some flows
 
 - `worker`
   - consumes async jobs
-  - currently handles async request-audit persistence
+  - currently handles async request-audit persistence, request-log export, and file-list export
 
 - `cron`
   - handles recurring schedules
@@ -61,7 +61,7 @@ go run main.go command -h
 ### 2. Start the API Service
 
 ```bash
-go run main.go service
+go run main.go -c ./config.yaml service
 ```
 
 Used for:
@@ -79,7 +79,7 @@ Common scenarios:
 ### 3. Start the Async Worker
 
 ```bash
-go run main.go worker
+go run main.go -c ./config.yaml worker
 ```
 
 Entry file:
@@ -95,11 +95,13 @@ Used for:
 Currently registered:
 
 - `audit:request_log.write`
+- `export:request-log`
+- `export:file-list`
 
 ### 4. Start the Scheduler
 
 ```bash
-go run main.go cron
+go run main.go -c ./config.yaml cron
 ```
 
 Entry file:
@@ -122,9 +124,9 @@ Task definition boundary:
 ### 5. Run One-Off Commands
 
 ```bash
-go run main.go command api-route
-go run main.go command rebuild-user-permissions
-go run main.go command init-system
+go run main.go -c ./config.yaml command api-route
+go run main.go -c ./config.yaml command rebuild-user-permissions
+go run main.go -c ./config.yaml command init-system
 go run main.go -c ./config.yaml command task sync-definitions
 go run main.go -c ./config.yaml command migrate up
 ```
@@ -145,6 +147,8 @@ Supported subcommands:
   - `-y` only skips the ordinary prompt; automation must also pass `--backup-confirmed --confirm-database <mysql.database>`
 - `demo`
   - example command
+- `gen`
+  - generates CRUD code from MySQL schema or a YAML spec, with optional frontend files and menu seed data
 - `migrate`
   - migration management subcommands: `create/check/up/down/goto/force/version`
   - full guide: [docs/MIGRATE_COMMANDS.en.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.en.md)
@@ -163,6 +167,15 @@ Supported subcommands:
 go run main.go version
 ```
 
+Task-center admin APIs live at:
+
+- `/admin/v1/task/*`
+  - task definition list, manual trigger, record-policy update, operation-config update
+- `/admin/v1/task/run/*`
+  - run list, detail, events, stats, trend, cancel, retry
+- `/admin/v1/task/cron/state`
+  - recent cron sync and execution state
+
 ## Common Startup Combinations
 
 ### 1. API Only
@@ -173,7 +186,7 @@ Useful when:
 - your scenario does not depend on async jobs
 
 ```bash
-go run main.go service
+go run main.go -c ./config.yaml service
 ```
 
 ### 2. API + Worker
@@ -184,8 +197,8 @@ Useful when:
 - Redis is enabled
 
 ```bash
-go run main.go service
-go run main.go worker
+go run main.go -c ./config.yaml service
+go run main.go -c ./config.yaml worker
 ```
 
 ### 3. API + Worker + Cron
@@ -195,9 +208,9 @@ Useful when:
 - you need the API, async jobs, and recurring tasks at the same time
 
 ```bash
-go run main.go service
-go run main.go worker
-go run main.go cron
+go run main.go -c ./config.yaml service
+go run main.go -c ./config.yaml worker
+go run main.go -c ./config.yaml cron
 ```
 
 ## Scheduled Jobs
@@ -238,6 +251,21 @@ Why this is simpler:
 - `handler` comes only from the code registry; `status/cron_spec` are DB-owned operational settings
 - high-risk jobs can be explicitly enabled, and they are skipped when the runtime cache is stale or unhealthy
 - no need to repeat `AddJob`, `Chain`, and `Recover` manually
+
+### Current Built-In Task Definitions
+
+Built-in task definitions are centralized in [internal/cron/registry.go](/Users/liuml/data/go/src/go-layout/internal/cron/registry.go):
+
+| Code | Kind | Queue / Cron | Default status | Purpose |
+| --- | --- | --- | --- | --- |
+| `audit:request_log.write` | `async` | `audit` | enabled | persist request audit logs asynchronously |
+| `export:request-log` | `async` | `export` | enabled | export request logs to CSV |
+| `export:file-list` | `async` | `export` | enabled | export file resources to CSV |
+| `cron:demo` | `cron` | `0/5 * * * * *` | controlled by `task.cron_demo_enabled` | development demo task |
+| `cron:reset-system-data` | `cron` | `0 0 2 * * *` | disabled by default | high-risk system reinitialization task; only defaults to enabled when `app.enable_reset_system_cron=true` |
+| `cron:file-access-flush` | `cron` | `0 * * * * *` | enabled | flush file access timestamps from Redis to DB |
+| `cron:clean-expired-files` | `cron` | `0 0 3 * * *` | enabled | clean expired temporary export/upload files |
+| `cron:clean-audit-logs` | `cron` | `0 0 4 * * *` | enabled | clean request/login logs past retention |
 
 ### Available Methods
 
