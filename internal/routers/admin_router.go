@@ -380,8 +380,8 @@ func taskGroup(deps *ControllerDeps) RouteGroupDef {
 		Routes: []RouteDef{
 			GET("list", "任务定义列表", AuthModeAuth, deps.TaskCenter.TaskList),
 			POST("trigger", "手动触发任务", AuthModeAuth, deps.TaskCenter.Trigger),
-			PATCH("record-policy", "更新任务记录策略", AuthModeAuth, deps.TaskCenter.RecordPolicy),
-			PATCH("operation-config", "更新任务运营配置", AuthModeAuth, deps.TaskCenter.OperationConfig),
+			POST("record-policy", "更新任务记录策略", AuthModeAuth, deps.TaskCenter.RecordPolicy),
+			POST("operation-config", "更新任务运营配置", AuthModeAuth, deps.TaskCenter.OperationConfig),
 		},
 		Children: []RouteGroupDef{
 			{

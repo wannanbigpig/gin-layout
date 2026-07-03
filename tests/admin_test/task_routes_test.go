@@ -93,6 +93,8 @@ func TestTaskCenterRoutesRequireLogin(t *testing.T) {
 		body  string
 	}{
 		{name: "手动触发任务需要登录", route: "/admin/v1/task/trigger", body: `{"task_code":"demo:send"}`},
+		{name: "更新任务记录策略需要登录", route: "/admin/v1/task/record-policy", body: `{"task_code":"demo:send","record_success_mode":"all","record_detail_on_manual":1,"record_detail_on_failure":1}`},
+		{name: "更新任务运营配置需要登录", route: "/admin/v1/task/operation-config", body: `{"task_code":"demo:send","status":1,"allow_manual":1,"allow_retry":1}`},
 		{name: "重试任务需要登录", route: "/admin/v1/task/run/retry", body: `{"run_id":1}`},
 		{name: "取消任务需要登录", route: "/admin/v1/task/run/cancel", body: `{"run_id":1}`},
 	}
@@ -115,6 +117,18 @@ func TestTaskCenterOperateRouteValidation(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, triggerResp.Code)
 	triggerResult := decodeResult(t, triggerResp)
 	assert.Equal(t, e.InvalidParameter, triggerResult.Code)
+
+	recordPolicyBody := `{}`
+	recordPolicyResp := postRequest("/admin/v1/task/record-policy", &recordPolicyBody)
+	assert.Equal(t, http.StatusBadRequest, recordPolicyResp.Code)
+	recordPolicyResult := decodeResult(t, recordPolicyResp)
+	assert.Equal(t, e.InvalidParameter, recordPolicyResult.Code)
+
+	operationConfigBody := `{}`
+	operationConfigResp := postRequest("/admin/v1/task/operation-config", &operationConfigBody)
+	assert.Equal(t, http.StatusBadRequest, operationConfigResp.Code)
+	operationConfigResult := decodeResult(t, operationConfigResp)
+	assert.Equal(t, e.InvalidParameter, operationConfigResult.Code)
 
 	retryBody := `{}`
 	retryResp := postRequest("/admin/v1/task/run/retry", &retryBody)
