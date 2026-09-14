@@ -28,8 +28,7 @@ func WouldCauseCycle(id, parentPid uint, parentPids string) bool {
 	}
 	// 检测循环引用
 	idStr := fmt.Sprintf("%d", id)
-	pidsSlice := strings.Split(parentPids, ",")
-	for _, pid := range pidsSlice {
+	for pid := range strings.SplitSeq(parentPids, ",") {
 		if pid == idStr {
 			return true
 		}

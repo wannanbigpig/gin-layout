@@ -213,7 +213,9 @@ curl http://127.0.0.1:9001/health/readiness
 
 ### 声明式路由优先
 
-后台路由维护在一棵声明式路由树中，目前入口位于 `internal/routers/admin_router.go` 的 `AdminRouteTree()`。Gin 路由注册和 API 元数据初始化都从这棵树生成，避免“代码路由”和“权限路由”长期分叉。
+后台路由维护在一棵声明式路由树中，入口位于 `internal/routers/admin_router.go` 的 `AdminRouteTree()`。`internal/routers/catalog.go` 会一次性编译完整路径、分组、安全策略和 Handler 链，Gin 注册、API 元数据同步与 OpenAPI 都复用该 Catalog，避免多套递归逻辑长期分叉。
+
+安全策略声明在路由组上，子路由默认继承。`api.is_auth` 仍保留为 `0/1/2` 兼容投影并由 `api-route` 同步，不允许在接口权限编辑页修改；新增路由时应选择 `SecurityPublic`、`SecurityRefreshCookie`、`SecurityWebSocketTicket`、`SecurityAccessToken` 或 `SecurityAccessTokenPermission`。
 
 ### 数据库关系是权限真相
 
@@ -366,7 +368,7 @@ app:
 1. 在 `internal/controller/` 编写控制器
 2. 在 `internal/service/` 编写业务逻辑
 3. 在 `internal/validator/form/` 定义请求参数
-4. 在 `AdminRouteTree()` 中声明路由
+4. 在 `AdminRouteTree()` 的合适安全策略分组中声明路由
 5. 需要更新 API 路由表时执行 `go run main.go -c ./config.yaml command api-route`
 
 ### 参数校验约定
@@ -382,7 +384,7 @@ go test ./...
 go test ./tests/admin_test
 ```
 
-测试会优先使用项目根目录 `config.yaml`。如果当前环境的 MySQL 或 Redis 不可用，会自动回退到示例配置运行可脱离外部依赖的测试。
+`tests` 下的接口集成测试只使用项目根目录 `config.yaml`，并要求其中启用且可连接真实 MySQL；配置缺失、MySQL 不可用或迁移表缺失时直接失败，不会回退示例配置或跳过数据库流程。建议使用可重建的专用测试库，详见 `tests/README.md`。
 
 ## 部署说明
 

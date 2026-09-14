@@ -23,6 +23,14 @@ func TestRoleListWithAuthorization(t *testing.T) {
 	assert.Equal(t, e.SUCCESS, result.Code)
 }
 
+func TestRoleOptionsWithAuthorization(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/role/options", &url.Values{"keyword": {"超级"}})
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, resp).Code)
+}
+
 func TestRoleListRequiresLogin(t *testing.T) {
 	resp := anonymousGetRequest("/admin/v1/role/list", &url.Values{"page": {"1"}, "per_page": {"5"}})
 

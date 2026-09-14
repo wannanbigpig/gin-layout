@@ -14,12 +14,12 @@ import (
 
 const testResourcePrefix = "test-auto-"
 
-// requireWritableDB 在需要真实数据库写入时跳过测试。
+// requireWritableDB 断言配置文件中的真实数据库可写。
 func requireWritableDB(t *testing.T) {
 	t.Helper()
 	requireMySQL(t)
 	if _, err := model.GetDB(); err != nil {
-		t.Skip("数据库连接不可用，跳过真实写入测试")
+		t.Fatalf("配置文件中的真实数据库不可用: %v", err)
 	}
 }
 

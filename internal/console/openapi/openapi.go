@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 )
 
@@ -41,20 +40,22 @@ func init() {
 
 // endpoint 表示路由树中的一个 API 端点（仅文档生成所需的元数据）。
 type endpoint struct {
-	Path    string              // 完整路径，含 admin/v1 等前缀
-	Method  string              // HTTP 方法（小写）
-	Summary string              // 路由标题
-	Desc    string              // 路由描述
-	Tag     string              // 路由分组标签
-	Auth    global.ApiAuthMode  // 认证模式
+	Path     string                 // 完整路径，含 admin/v1 等前缀
+	Method   string                 // HTTP 方法（小写）
+	Summary  string                 // 路由标题
+	Desc     string                 // 路由描述
+	Tag      string                 // 路由分组标签
+	Auth     routers.AuthMode       // 兼容的 0/1/2 认证模式
+	Security routers.SecurityPolicy // 实际凭证与权限策略
 }
 
 // runGenOpenAPI 执行 OpenAPI 文档生成。
 func runGenOpenAPI() error {
-	tree := routers.AdminRouteTree(nil)
-
-	endpoints := make([]endpoint, 0, 128)
-	walkGroup(&endpoints, tree, "", "")
+	catalog, err := routers.CompileRouteTree(routers.AdminRouteTreeWithOptions(nil, routers.BuildOptions{Debug: false}))
+	if err != nil {
+		return fmt.Errorf("compile AdminRouteTree: %w", err)
+	}
+	endpoints := collectEndpoints(catalog)
 
 	if len(endpoints) == 0 {
 		return fmt.Errorf("no routes collected from AdminRouteTree")
@@ -84,30 +85,17 @@ func runGenOpenAPI() error {
 	return nil
 }
 
-// walkGroup 递归遍历路由组，收集端点元数据。
-func walkGroup(endpoints *[]endpoint, group routers.RouteGroupDef, basePath, inheritedTag string) {
-	fullPrefix := joinPath(basePath, group.Prefix)
-
-	tag := inheritedTag
-	if group.GroupCode != "" {
-		tag = group.GroupCode
-	}
-
-	for _, route := range group.Routes {
-		fullPath := joinPath(fullPrefix, route.Path)
-		*endpoints = append(*endpoints, endpoint{
-			Path:    fullPath,
-			Method:  strings.ToLower(route.Method),
-			Summary: route.Title,
-			Desc:    strings.TrimSpace(route.Desc),
-			Tag:     resolveTag(tag, fullPath),
-			Auth:    route.Auth,
+func collectEndpoints(catalog *routers.Catalog) []endpoint {
+	routes := catalog.Routes()
+	endpoints := make([]endpoint, 0, len(routes))
+	for _, route := range routes {
+		endpoints = append(endpoints, endpoint{
+			Path: route.Path, Method: strings.ToLower(route.Method), Summary: route.Title,
+			Desc: strings.TrimSpace(route.Desc), Tag: resolveTag(route.GroupCode, route.Path),
+			Auth: route.Auth, Security: route.Security,
 		})
 	}
-
-	for _, child := range group.Children {
-		walkGroup(endpoints, child, fullPrefix, tag)
-	}
+	return endpoints
 }
 
 // resolveTag 在分组未声明 GroupCode 时，回退到路径段。
@@ -122,21 +110,6 @@ func resolveTag(tag, fullPath string) string {
 		return seg
 	}
 	return "default"
-}
-
-// joinPath 拼接路径段，自动去除多余斜杠。
-func joinPath(parts ...string) string {
-	segments := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.Trim(part, "/")
-		if trimmed != "" {
-			segments = append(segments, trimmed)
-		}
-	}
-	if len(segments) == 0 {
-		return "/"
-	}
-	return "/" + strings.Join(segments, "/")
 }
 
 // buildYAML 根据端点列表构造 OpenAPI 3.0 YAML 字符串。
@@ -216,6 +189,20 @@ func writeComponents(b *strings.Builder) {
 	b.WriteString("      bearerFormat: JWT\n")
 	b.WriteString("      description: ")
 	b.WriteString(quote("通过 Authorization: Bearer <token> 携带访问令牌"))
+	b.WriteString("\n")
+	b.WriteString("    RefreshCookie:\n")
+	b.WriteString("      type: apiKey\n")
+	b.WriteString("      in: cookie\n")
+	b.WriteString("      name: refresh_token\n")
+	b.WriteString("      description: ")
+	b.WriteString(quote("通过 HttpOnly refresh_token Cookie 完成会话刷新或退出"))
+	b.WriteString("\n")
+	b.WriteString("    WebSocketTicket:\n")
+	b.WriteString("      type: apiKey\n")
+	b.WriteString("      in: query\n")
+	b.WriteString("      name: ticket\n")
+	b.WriteString("      description: ")
+	b.WriteString(quote("通过一次性 ticket 建立 WebSocket 连接"))
 	b.WriteString("\n")
 	b.WriteString("  schemas:\n")
 	b.WriteString("    Response:\n")
@@ -325,12 +312,23 @@ func writeOperation(b *strings.Builder, ep endpoint, originalPath string) {
 		}
 	}
 
-	if ep.Auth.RequiresLogin() {
+	switch ep.Security {
+	case routers.SecurityAccessToken, routers.SecurityAccessTokenPermission:
 		b.WriteString(indent)
 		b.WriteString("  security:\n")
 		b.WriteString(indent)
 		b.WriteString("    - BearerAuth: []\n")
-	} else {
+	case routers.SecurityRefreshCookie:
+		b.WriteString(indent)
+		b.WriteString("  security:\n")
+		b.WriteString(indent)
+		b.WriteString("    - RefreshCookie: []\n")
+	case routers.SecurityWebSocketTicket:
+		b.WriteString(indent)
+		b.WriteString("  security:\n")
+		b.WriteString(indent)
+		b.WriteString("    - WebSocketTicket: []\n")
+	default:
 		b.WriteString(indent)
 		b.WriteString("  security: []\n")
 	}
@@ -338,6 +336,10 @@ func writeOperation(b *strings.Builder, ep endpoint, originalPath string) {
 	b.WriteString(indent)
 	b.WriteString("  x-auth-mode: ")
 	b.WriteString(quote(authLabel(ep.Auth)))
+	b.WriteString("\n")
+	b.WriteString(indent)
+	b.WriteString("  x-security-policy: ")
+	b.WriteString(quote(ep.Security.String()))
 	b.WriteString("\n")
 
 	b.WriteString(indent)
@@ -391,13 +393,13 @@ func operationID(method, path string) string {
 }
 
 // authLabel 将认证模式转为 OpenAPI 扩展字段中的可读标签。
-func authLabel(m global.ApiAuthMode) string {
+func authLabel(m routers.AuthMode) string {
 	switch m {
-	case global.ApiAuthModeNone:
+	case routers.AuthModeNone:
 		return "none"
-	case global.ApiAuthModeLogin:
+	case routers.AuthModeLogin:
 		return "login"
-	case global.ApiAuthModeAuth:
+	case routers.AuthModeAuth:
 		return "auth"
 	default:
 		return "unknown"

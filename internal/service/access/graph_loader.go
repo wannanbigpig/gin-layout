@@ -439,7 +439,7 @@ func addAncestorIDs(pids string, add func(uint)) {
 	if pids == "" || pids == "0" {
 		return
 	}
-	for _, pid := range strings.Split(pids, ",") {
+	for pid := range strings.SplitSeq(pids, ",") {
 		pid = strings.TrimSpace(pid)
 		if pid == "" || pid == "0" {
 			continue

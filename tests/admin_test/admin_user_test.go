@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
@@ -67,6 +68,14 @@ func TestAdminUserListWithAuthorization(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.Code)
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.SUCCESS, result.Code)
+}
+
+func TestAdminUserOptionsWithAuthorization(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/admin-user/options", &url.Values{"keyword": {"super"}})
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, resp).Code)
 }
 
 func TestAdminUserListRequiresLogin(t *testing.T) {
@@ -150,6 +159,23 @@ func TestAdminUserWriteFlow(t *testing.T) {
 	detailResp := getRequest("/admin/v1/admin-user/detail", &url.Values{"id": {strconv.FormatUint(uint64(user.ID), 10)}})
 	detailResult := decodeResult(t, detailResp)
 	assert.Equal(t, e.SUCCESS, detailResult.Code)
+
+	fullPhoneResp := getRequest("/admin/v1/admin-user/get-full-phone", &url.Values{"id": {strconv.FormatUint(uint64(user.ID), 10)}})
+	assert.Equal(t, http.StatusOK, fullPhoneResp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, fullPhoneResp).Code)
+
+	fullEmailResp := getRequest("/admin/v1/admin-user/get-full-email", &url.Values{"id": {strconv.FormatUint(uint64(user.ID), 10)}})
+	assert.Equal(t, http.StatusOK, fullEmailResp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, fullEmailResp).Code)
+
+	roleID := firstActiveRoleID(t)
+	bindRolePayload := mustJSONBody(t, map[string]any{"user_id": user.ID, "role_ids": []uint{roleID}})
+	bindRoleResp := postRequest("/admin/v1/admin-user/bind-role", &bindRolePayload)
+	assert.Equal(t, http.StatusOK, bindRoleResp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, bindRoleResp).Code)
+	boundRoleIDs, err := model.NewAdminUserRoleMap().RoleIdsByUid(user.ID)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []uint{roleID}, boundRoleIDs)
 
 	updateBody := map[string]any{
 		"id":       user.ID,

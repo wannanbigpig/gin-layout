@@ -66,6 +66,14 @@ func TestExportRecordListRouteWithAuthorization(t *testing.T) {
 	assert.Equal(t, e.SUCCESS, result.Code)
 }
 
+func TestExportRecordDetailNotFound(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/system/export/detail", &url.Values{"id": {"4294967295"}})
+	assert.Equal(t, http.StatusNotFound, resp.Code)
+	assert.Equal(t, e.NotFound, decodeResult(t, resp).Code)
+}
+
 func TestRequestLogMaskConfigRoutesWithAuthorization(t *testing.T) {
 	resp := getRequest("/admin/v1/log/request/mask-config", nil)
 	assert.Equal(t, http.StatusOK, resp.Code)

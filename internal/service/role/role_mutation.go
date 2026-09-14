@@ -5,8 +5,9 @@ import (
 	"errors"
 	"strings"
 
+	"uuid"
+
 	mysqlDriver "github.com/go-sql-driver/mysql"
-	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
 
@@ -143,7 +144,7 @@ func isRoleCodeDuplicateErr(err error) bool {
 
 // generateRoleCode 生成角色唯一编码，格式：role_{uuid}。
 func (s *RoleService) generateRoleCode() string {
-	return "role_" + uuid.NewString()
+	return "role_" + uuid.New().String()
 }
 
 // updateRoleMenu 更新角色的菜单关联关系。

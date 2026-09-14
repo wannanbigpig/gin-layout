@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"uuid"
+
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/data"

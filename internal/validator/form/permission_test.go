@@ -29,6 +29,22 @@ func TestUpdatePermissionAllowsThreeStateIsAuth(t *testing.T) {
 	}
 }
 
+func TestUpdatePermissionAllowsOmittedIsAuth(t *testing.T) {
+	if err := validatorx.InitValidatorTrans("zh"); err != nil {
+		t.Fatalf("init validator: %v", err)
+	}
+	body := `{"id":1,"name":"route-authz","description":"test","sort":100}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = req
+
+	payload := NewUpdateApiForm()
+	if err := ctx.ShouldBind(payload); err != nil {
+		t.Fatalf("expected omitted is_auth to pass validation, got %v", err)
+	}
+}
+
 func TestListPermissionAllowsThreeStateIsAuth(t *testing.T) {
 	if err := validatorx.InitValidatorTrans("zh"); err != nil {
 		t.Fatalf("init validator: %v", err)

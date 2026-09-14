@@ -18,24 +18,8 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
 
-type stubRouteChecker struct {
-	requiresAuth bool
-}
-
-func (s stubRouteChecker) CheckoutRouteIsAuth(string, string) bool {
-	return s.requiresAuth
-}
-
-func TestAdminAuthHandlerWithDepsAllowsPublicRouteWhenDenied(t *testing.T) {
+func TestAdminLoginHandlerAllowsAuthenticatedRequestWithoutPermissionCheck(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	enforcer := buildTestEnforcer(t)
-	deps := permissionDeps{
-		loadEnforcer: func() (*casbinx.CasbinEnforcer, error) {
-			return &casbinx.CasbinEnforcer{Enforcer: enforcer}, nil
-		},
-		routeChecker: stubRouteChecker{requiresAuth: false},
-	}
 
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -45,13 +29,13 @@ func TestAdminAuthHandlerWithDepsAllowsPublicRouteWhenDenied(t *testing.T) {
 		})
 		c.Next()
 	})
-	router.Use(AdminAuthHandlerWithDeps(deps))
-	router.GET("/public", func(c *gin.Context) {
+	router.Use(AdminLoginHandler())
+	router.GET("/login-only", func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
 
 	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/public", nil)
+	req := httptest.NewRequest(http.MethodGet, "/login-only", nil)
 	router.ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
@@ -62,14 +46,13 @@ func TestAdminAuthHandlerWithDepsAllowsPublicRouteWhenDenied(t *testing.T) {
 	}
 }
 
-func TestAdminAuthHandlerWithDepsReturnsServerErrWhenEnforcerLoadFails(t *testing.T) {
+func TestAdminPermissionHandlerWithDepsReturnsServerErrWhenEnforcerLoadFails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	deps := permissionDeps{
 		loadEnforcer: func() (*casbinx.CasbinEnforcer, error) {
 			return nil, errors.New("casbin unavailable")
 		},
-		routeChecker: stubRouteChecker{requiresAuth: true},
 	}
 
 	router := gin.New()
@@ -80,7 +63,7 @@ func TestAdminAuthHandlerWithDepsReturnsServerErrWhenEnforcerLoadFails(t *testin
 		})
 		c.Next()
 	})
-	router.Use(AdminAuthHandlerWithDeps(deps))
+	router.Use(AdminPermissionHandlerWithDeps(deps))
 	router.GET("/protected", func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
@@ -102,7 +85,7 @@ func TestAdminAuthHandlerWithDepsReturnsServerErrWhenEnforcerLoadFails(t *testin
 	}
 }
 
-func TestAdminAuthHandlerWithDepsReturnsAuthorizationMessageWhenDenied(t *testing.T) {
+func TestAdminPermissionHandlerWithDepsReturnsAuthorizationMessageWhenDenied(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	enforcer := buildTestEnforcer(t)
@@ -110,7 +93,6 @@ func TestAdminAuthHandlerWithDepsReturnsAuthorizationMessageWhenDenied(t *testin
 		loadEnforcer: func() (*casbinx.CasbinEnforcer, error) {
 			return &casbinx.CasbinEnforcer{Enforcer: enforcer}, nil
 		},
-		routeChecker: stubRouteChecker{requiresAuth: true},
 	}
 
 	router := gin.New()
@@ -121,7 +103,7 @@ func TestAdminAuthHandlerWithDepsReturnsAuthorizationMessageWhenDenied(t *testin
 		})
 		c.Next()
 	})
-	router.Use(AdminAuthHandlerWithDeps(deps))
+	router.Use(AdminPermissionHandlerWithDeps(deps))
 	router.GET("/protected", func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})

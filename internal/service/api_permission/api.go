@@ -1,6 +1,9 @@
 package api_permission
 
 import (
+	"errors"
+	"fmt"
+
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -47,17 +50,21 @@ func (s *ApiService) Options(keyword string, isAuth *int8) []resources.ApiOption
 // Update 更新 API 权限。
 func (s *ApiService) Update(params *form.UpdatePermission) error {
 	apiModel := model.NewApi()
-	exists, err := apiModel.ExistsById(params.Id)
-	if err != nil {
+	if err := apiModel.GetById(params.Id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.NotFound)
+		}
 		return err
 	}
-	if !exists {
+	if apiModel.ID == 0 {
 		return e.NewBusinessError(e.NotFound)
+	}
+	if err := validateAuthModeUpdate(apiModel.IsAuth, params.IsAuth); err != nil {
+		return err
 	}
 	data := map[string]any{
 		"name":        params.Name,
 		"description": params.Description,
-		"is_auth":     params.IsAuth,
 		"sort":        params.Sort,
 	}
 	db, err := apiModel.GetDB()
@@ -73,7 +80,14 @@ func (s *ApiService) Update(params *form.UpdatePermission) error {
 	if err := access.NewApiRouteCacheService().RefreshCache(); err != nil {
 		return err
 	}
-	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByAPIs([]uint{params.Id})
+	return nil
+}
+
+func validateAuthModeUpdate(current uint8, requested *int8) error {
+	if requested == nil || uint8(*requested) == current {
+		return nil
+	}
+	return e.NewBusinessError(e.InvalidParameter, fmt.Sprintf("is_auth 由路由声明生成，当前值为 %d，不允许通过更新接口修改", current))
 }
 
 // ListPage 分页查询 API 权限列表。

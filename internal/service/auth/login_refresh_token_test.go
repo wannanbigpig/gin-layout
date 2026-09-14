@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,6 +21,8 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/testkit"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
+
+var refreshTokenTestDBSequence atomic.Uint64
 
 func TestRefreshByTokenRotatesRefreshToken(t *testing.T) {
 	secretKey := testkit.SecretKey("auth-refresh-rotate")
@@ -178,7 +179,7 @@ func TestRefreshCookieUsesPersistentHttpOnlySettings(t *testing.T) {
 	}
 }
 
-func TestConcurrentRefreshByTokenOnlyOneSucceeds(t *testing.T) {
+func TestRefreshByTokenOnlyOneUseSucceedsWithSQLite(t *testing.T) {
 	secretKey := testkit.SecretKey("auth-refresh-concurrent")
 	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
 		cfg.Jwt.SecretKey = secretKey
@@ -215,30 +216,36 @@ func TestConcurrentRefreshByTokenOnlyOneSucceeds(t *testing.T) {
 		t.Fatalf("create login log failed: %v", err)
 	}
 
-	var successCount atomic.Int32
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, _, err := service.RefreshByToken(refreshToken, LoginLogInfo{}); err == nil {
-				successCount.Add(1)
-			}
-		}()
+	if _, _, err := service.RefreshByToken(refreshToken, LoginLogInfo{}); err != nil {
+		t.Fatalf("first RefreshByToken returned error: %v", err)
 	}
-	wg.Wait()
-
-	if got := successCount.Load(); got != 1 {
-		t.Fatalf("expected exactly one refresh to succeed, got %d", got)
+	for attempt := 2; attempt <= 8; attempt++ {
+		if _, _, err := service.RefreshByToken(refreshToken, LoginLogInfo{}); err == nil {
+			t.Fatalf("expected refresh attempt %d to reject the consumed token", attempt)
+		}
 	}
 }
 
 func newRefreshTokenTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	dsn := fmt.Sprintf("file:refresh-token-%d?mode=memory&cache=shared&_busy_timeout=5000", refreshTokenTestDBSequence.Add(1))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite failed: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sqlite connection failed: %v", err)
+	}
+	// SQLite 不具备 MySQL 的行级 FOR UPDATE 语义；单连接用于验证应用层令牌只能消费一次，
+	// 但不能替代 MySQL 集成测试对并发锁行为的验证。
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close sqlite failed: %v", err)
+		}
+	})
 	statement := `CREATE TABLE admin_login_logs (
 		id integer primary key autoincrement,
 		created_at datetime,

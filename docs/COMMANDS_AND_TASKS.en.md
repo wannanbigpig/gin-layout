@@ -139,6 +139,7 @@ Supported subcommands:
 
 - `api-route`
   - scans the declarative route tree and rebuilds the `api` route table
+  - `api.is_auth` is a compatibility projection of route security policies and is updated only by this sync path; API permission editing only maintains name, description, and sort
 - `rebuild-user-permissions`
   - rebuilds final user API permissions from database relationships
 - `init-system`

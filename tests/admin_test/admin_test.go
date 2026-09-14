@@ -9,15 +9,13 @@ import (
 	"net/url"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 
-	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
 	"github.com/wannanbigpig/gin-layout/tests"
 )
@@ -35,31 +33,52 @@ func TestMain(m *testing.M) {
 		_, _ = os.Stderr.WriteString("初始化测试路由失败: " + err.Error() + "\n")
 		os.Exit(1)
 	}
-	now := time.Now().UTC()
-	expiresAt := now.Add(time.Duration(c.Config.Jwt.TTL) * time.Second)
-	claims := token.AdminCustomClaims{
-		AdminUserInfo: token.AdminUserInfo{
-			UserID:       1,
-			Nickname:     "super_admin",
-			IsSuperAdmin: 1,
-		},
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-			Issuer:    global.Issuer,
-			Subject:   global.PcAdminSubject,
-			IssuedAt:  jwt.NewNumericDate(now),
-			NotBefore: jwt.NewNumericDate(now),
-			ID:        uuid.NewString(),
-		},
+	db, err := model.GetDB()
+	if err != nil {
+		_, _ = os.Stderr.WriteString("获取真实 MySQL 连接失败: " + err.Error() + "\n")
+		os.Exit(1)
 	}
+	adminUser := model.NewAdminUsers()
+	if err := db.Where("id = ? AND deleted_at = 0", global.SuperAdminId).First(adminUser).Error; err != nil {
+		_, _ = os.Stderr.WriteString("测试库缺少 ID=1 超级管理员，请先初始化系统数据: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+	if adminUser.IsSuperAdmin != global.Yes {
+		_, _ = os.Stderr.WriteString("测试库 ID=1 用户不是超级管理员，请修复测试库初始数据\n")
+		os.Exit(1)
+	}
+	claims := token.NewAdminCustomClaims(adminUser)
 	accessToken, err := token.Generate(claims)
 	if err != nil {
 		_, _ = os.Stderr.WriteString("创建管理员Token失败: " + err.Error() + "\n")
 		os.Exit(1)
 	}
 	authorization = "Bearer " + accessToken
-	mysqlEnabled = c.Config.Mysql.Enable
-	os.Exit(m.Run())
+	mysqlEnabled = true
+
+	testSession := &model.AdminLoginLogs{
+		UID:          adminUser.ID,
+		Username:     adminUser.Username,
+		JwtID:        claims.ID,
+		UserAgent:    "go-layout-interface-test",
+		LoginStatus:  model.LoginStatusSuccess,
+		Type:         model.LoginTypeLogin,
+		IsRevoked:    model.IsRevokedNo,
+		TokenExpires: &utils.FormatDate{Time: claims.ExpiresAt.Time},
+	}
+	if err := db.Create(testSession).Error; err != nil {
+		_, _ = os.Stderr.WriteString("创建接口测试认证会话失败: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+
+	exitCode := m.Run()
+	if err := db.Unscoped().Delete(&model.AdminLoginLogs{}, testSession.ID).Error; err != nil {
+		_, _ = os.Stderr.WriteString("清理接口测试认证会话失败: " + err.Error() + "\n")
+		if exitCode == 0 {
+			exitCode = 1
+		}
+	}
+	os.Exit(exitCode)
 }
 
 func postRequest(route string, body *string) *httptest.ResponseRecorder {
@@ -123,10 +142,10 @@ func decodeResult(t *testing.T, recorder *httptest.ResponseRecorder) *response.R
 	return result
 }
 
-// requireMySQL 在需要真实数据库链路时跳过测试。
+// requireMySQL 断言接口测试正在使用配置文件中的真实 MySQL。
 func requireMySQL(t *testing.T) {
 	t.Helper()
 	if !mysqlEnabled {
-		t.Skip("当前测试配置未启用 MySQL，跳过需要真实数据库链路的接口流程测试")
+		t.Fatal("接口测试必须在项目根 config.yaml 中启用真实 MySQL")
 	}
 }

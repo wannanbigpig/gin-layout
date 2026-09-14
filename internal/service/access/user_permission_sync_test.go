@@ -104,6 +104,7 @@ func TestFilterUserRolesByEnabledSetDropsDisabledRoles(t *testing.T) {
 	if !reflect.DeepEqual(got[11], []uint{4}) {
 		t.Fatalf("unexpected roles for user 11: %v", got[11])
 	}
+	sort.Slice(allRoleIDs, func(i, j int) bool { return allRoleIDs[i] < allRoleIDs[j] })
 	if !reflect.DeepEqual(allRoleIDs, []uint{2, 4}) {
 		t.Fatalf("unexpected all role ids: %v", allRoleIDs)
 	}

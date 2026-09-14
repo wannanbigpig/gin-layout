@@ -1,4 +1,7 @@
-.PHONY: dev-up dev-down dev-logs dev-init-bucket dev-service dev-worker
+.PHONY: dev-up dev-down dev-logs dev-init-bucket dev-service dev-worker test-coverage
+
+COVERAGE_FILE ?= /tmp/go-layout-coverage.out
+COVERAGE_MIN ?= 60.0
 
 dev-up:
 	docker-compose -f docker-compose.dev.yml up -d
@@ -27,3 +30,9 @@ dev-service:
 
 dev-worker:
 	air -c .air.worker.toml
+
+test-coverage:
+	go test ./... -coverpkg=./... -coverprofile="$(COVERAGE_FILE)" -count=1
+	@coverage=$$(go tool cover -func="$(COVERAGE_FILE)" | awk '/^total:/ {gsub(/%/, "", $$3); print $$3}'); \
+	echo "total statement coverage: $${coverage}% (minimum $(COVERAGE_MIN)%)"; \
+	awk -v coverage="$${coverage}" -v minimum="$(COVERAGE_MIN)" 'BEGIN { if (coverage + 0 < minimum + 0) exit 1 }'

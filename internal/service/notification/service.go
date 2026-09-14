@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"uuid"
+
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 

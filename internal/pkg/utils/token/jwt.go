@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"uuid"
+
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 
 	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/global"

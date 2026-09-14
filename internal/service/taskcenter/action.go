@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"uuid"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -217,7 +218,7 @@ func (s *TaskCenterService) triggerAsyncTask(ctx context.Context, definition *mo
 	}
 	taskID := strings.TrimSpace(params.TaskID)
 	if taskID == "" {
-		taskID = "manual:" + uuid.NewString()
+		taskID = "manual:" + uuid.New().String()
 	}
 
 	payload := map[string]any{}
@@ -288,7 +289,7 @@ func (s *TaskCenterService) triggerCronTask(ctx context.Context, definition *mod
 
 	taskID := strings.TrimSpace(params.TaskID)
 	if taskID == "" {
-		taskID = "manual:" + uuid.NewString()
+		taskID = "manual:" + uuid.New().String()
 	}
 
 	payload := map[string]any{}
@@ -517,7 +518,7 @@ func enqueueRetryRunAfterChainCheck(ctx context.Context, db *gorm.DB, recorder R
 		return nil, 0, "", e.NewBusinessError(e.InvalidParameter, reason)
 	}
 	retrySeq := summary.MaxSeq + 1
-	taskID := fmt.Sprintf("retry:%d:%d:%s", rootRunID, retrySeq, uuid.NewString())
+	taskID := fmt.Sprintf("retry:%d:%d:%s", rootRunID, retrySeq, uuid.New().String())
 	retryRun, err := recorder.Enqueue(ctx, RunStart{
 		TaskCode:       runModel.TaskCode,
 		Kind:           runModel.Kind,

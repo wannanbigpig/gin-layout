@@ -139,6 +139,7 @@ go run main.go -c ./config.yaml command migrate up
 
 - `api-route`
   - 扫描声明式路由树并重建 `api` 路由表
+  - `api.is_auth` 是安全策略的兼容投影，只能由该同步链路更新；接口权限编辑仅维护名称、描述和排序
 - `rebuild-user-permissions`
   - 按数据库关系重建用户最终 API 权限
 - `init-system`

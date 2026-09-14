@@ -77,11 +77,7 @@ func (qb *QueryBuilder) Build() (string, []any) {
 	if len(qb.conditions) == 0 {
 		return "", nil
 	}
-	cond := qb.conditions[0]
-	for i := 1; i < len(qb.conditions); i++ {
-		cond += " AND " + qb.conditions[i]
-	}
-	return cond, qb.args
+	return strings.Join(qb.conditions, " AND "), qb.args
 }
 
 func hasValue(value any) bool {

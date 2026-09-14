@@ -5,8 +5,9 @@ import (
 	"errors"
 	"time"
 
+	"uuid"
+
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -41,7 +42,7 @@ func submitAsyncExport(api controller.Api, c *gin.Context, req asyncExportReques
 	}
 	req.payload["trigger_user_id"] = uid
 
-	taskID := req.taskCode + ":" + uuid.NewString()
+	taskID := req.taskCode + ":" + uuid.New().String()
 	rawPayload, _ := json.Marshal(req.payload)
 
 	recorder := taskcenter.NewRunRecorder()

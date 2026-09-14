@@ -98,8 +98,7 @@ func fileTypeOrMultiValidator(fl validator.FieldLevel) bool {
 		"ppt": true, "archive": true, "text": true, "audio": true,
 		"video": true, "other": true,
 	}
-	parts := strings.Split(value, ",")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(value, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" || !allowed[part] {
 			return false

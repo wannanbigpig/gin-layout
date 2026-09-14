@@ -29,6 +29,16 @@ func TestTaskCenterListRoutesWithAuthorization(t *testing.T) {
 			query: &url.Values{"page": {"1"}, "per_page": {"5"}},
 		},
 		{
+			name:  "任务执行统计",
+			route: "/admin/v1/task/run/stats",
+			query: nil,
+		},
+		{
+			name:  "任务执行统计趋势",
+			route: "/admin/v1/task/run/stats/trend",
+			query: nil,
+		},
+		{
 			name:  "定时任务最近状态列表",
 			route: "/admin/v1/task/cron/state",
 			query: &url.Values{"page": {"1"}, "per_page": {"5"}},
@@ -43,6 +53,14 @@ func TestTaskCenterListRoutesWithAuthorization(t *testing.T) {
 			assert.Equal(t, e.SUCCESS, result.Code)
 		})
 	}
+}
+
+func TestTaskRunEventsValidatesRequiredRunID(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/task/run/events", nil)
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+	assert.Equal(t, e.InvalidParameter, decodeResult(t, resp).Code)
 }
 
 func TestTaskCenterRunDetailNotFound(t *testing.T) {

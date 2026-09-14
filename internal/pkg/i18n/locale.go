@@ -35,14 +35,14 @@ func ParseAcceptLanguage(headerValue string) string {
 		return DefaultLocale
 	}
 
-	items := strings.Split(headerValue, ",")
-	for _, item := range items {
+	for item := range strings.SplitSeq(headerValue, ",") {
 		segment := strings.TrimSpace(item)
 		if segment == "" {
 			continue
 		}
 
-		tag := strings.TrimSpace(strings.Split(segment, ";")[0])
+		tag, _, _ := strings.Cut(segment, ";")
+		tag = strings.TrimSpace(tag)
 		if tag == "" {
 			continue
 		}

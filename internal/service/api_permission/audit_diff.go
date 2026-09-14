@@ -11,15 +11,6 @@ var apiPermissionDiffRules = []auditdiff.FieldRule{
 	{Field: "id", Label: "接口ID"},
 	{Field: "name", Label: "接口名称"},
 	{Field: "description", Label: "描述"},
-	{
-		Field: "is_auth",
-		Label: "鉴权模式",
-		ValueLabels: map[string]string{
-			"0": "无需登录",
-			"1": "需要登录",
-			"2": "需要登录且鉴权",
-		},
-	},
 	{Field: "sort", Label: "排序"},
 }
 
@@ -52,7 +43,6 @@ func (s *ApiService) snapshotAPIPermissionByID(id uint) (map[string]any, error) 
 		"id":          apiModel.ID,
 		"name":        apiModel.Name,
 		"description": apiModel.Description,
-		"is_auth":     apiModel.IsAuth,
 		"sort":        apiModel.Sort,
 	}, nil
 }

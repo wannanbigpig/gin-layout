@@ -5,7 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"uuid"
+
 	"github.com/mojocn/base64Captcha"
 
 	"github.com/wannanbigpig/gin-layout/config"

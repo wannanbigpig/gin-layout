@@ -49,6 +49,14 @@ func TestPermissionListWithAuthorization(t *testing.T) {
 	assert.Equal(t, e.SUCCESS, result.Code)
 }
 
+func TestPermissionOptionsWithAuthorization(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/permission/options", &url.Values{"keyword": {"菜单"}})
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, resp).Code)
+}
+
 func TestPermissionUpdateValidationWithAuthorization(t *testing.T) {
 	requireMySQL(t)
 

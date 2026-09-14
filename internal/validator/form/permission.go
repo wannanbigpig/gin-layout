@@ -1,14 +1,14 @@
 package form
 
 type apiBasePayload struct {
-	Name        string `form:"name" json:"name" binding:"required,max=60"`              // 权限名称
-	Description string `form:"description" json:"description" binding:"omitempty"`      // 描述
-	IsAuth      *int8  `form:"is_auth" json:"is_auth" binding:"required,api_auth_mode"` // 接口鉴权模式
-	Sort        int32  `form:"sort" json:"sort" binding:"required"`                     // 排序
+	Name        string `form:"name" json:"name" binding:"required,max=60"`         // 权限名称
+	Description string `form:"description" json:"description" binding:"omitempty"` // 描述
+	Sort        int32  `form:"sort" json:"sort" binding:"required"`                // 排序
 }
 
 type CreatePermission struct {
 	apiBasePayload
+	IsAuth   *int8  `form:"is_auth" json:"is_auth" binding:"required,api_auth_mode"`                                              // 接口鉴权模式
 	Method   string `form:"method" json:"method" binding:"omitempty,oneof=GET POST PUT DELETE OPTIONS HEAD PATCH" label:"接口请求方法"` // 接口请求方法
 	Route    string `form:"route" json:"route" binding:"omitempty"`                                                               // 接口路由
 	Func     string `form:"func" json:"func" binding:"omitempty"`                                                                 // 接口方法
@@ -20,7 +20,8 @@ func NewCreateApiForm() *CreatePermission {
 }
 
 type UpdatePermission struct {
-	Id uint `form:"id" json:"id" binding:"required"` // id
+	Id     uint  `form:"id" json:"id" binding:"required"`                          // id
+	IsAuth *int8 `form:"is_auth" json:"is_auth" binding:"omitempty,api_auth_mode"` // 路由声明生成；仅兼容旧客户端传同值
 	apiBasePayload
 }
 

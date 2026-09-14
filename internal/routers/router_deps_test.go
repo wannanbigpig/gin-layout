@@ -106,12 +106,12 @@ func TestRouterIntegration(t *testing.T) {
 
 	// 使用简化路由树进行测试
 	testTree := RouteGroupDef{
-		Prefix: "test",
+		Prefix:   "test",
+		Security: SecurityPublic,
 		Routes: []RouteDef{
 			{
 				Method: http.MethodGet,
 				Path:   "ping",
-				Auth:   AuthModeNone,
 				Handlers: []gin.HandlerFunc{
 					func(c *gin.Context) {
 						c.String(http.StatusOK, "pong")

@@ -35,7 +35,7 @@ var (
 	storageUnavailableSince atomic.Int64
 
 	// auditSampleCounter 用于低风险只读请求的 1/N 采样。
-	auditSampleCounter uint64
+	auditSampleCounter atomic.Uint64
 )
 
 type auditQueueDeps struct {
@@ -91,7 +91,7 @@ func setAuditQueueDepsForTesting(deps auditQueueDeps) func() {
 	queueUnavailableLogged.Store(false)
 	storageUnavailable.Store(false)
 	storageUnavailableSince.Store(0)
-	atomic.StoreUint64(&auditSampleCounter, 0)
+	auditSampleCounter.Store(0)
 
 	return func() {
 		activeDeps.Store(&previous)
@@ -242,7 +242,7 @@ func shouldDropBySampling(snapshot *audit.AuditLogSnapshot) bool {
 		return false
 	}
 	// 用原子计数保证多协程下分布均匀；保留 N、2N、3N ... 计数对应的快照。
-	n := atomic.AddUint64(&auditSampleCounter, 1)
+	n := auditSampleCounter.Add(1)
 	return n%uint64(keepEvery) != 0
 }
 
@@ -312,5 +312,5 @@ func reportAuditPersistenceResult(kind string, snapshot *audit.AuditLogSnapshot,
 
 // resetSampleCounterForTesting 在单元测试间重置采样计数器，避免测试间的计数串扰。
 func resetSampleCounterForTesting() {
-	atomic.StoreUint64(&auditSampleCounter, 0)
+	auditSampleCounter.Store(0)
 }

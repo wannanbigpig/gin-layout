@@ -3,7 +3,8 @@ package dept
 import (
 	"fmt"
 
-	"github.com/google/uuid"
+	"uuid"
+
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -132,7 +133,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 
 // generateDeptCode 生成部门唯一编码，格式：dept_{uuid}。
 func (s *DeptService) generateDeptCode() string {
-	return "dept_" + uuid.NewString()
+	return "dept_" + uuid.New().String()
 }
 
 // executeDeleteTransaction 执行部门删除事务。

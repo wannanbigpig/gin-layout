@@ -20,8 +20,9 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"go.uber.org/zap"
 
+	"uuid"
+
 	mysqlDriver "github.com/go-sql-driver/mysql"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/filestorage"
@@ -719,7 +720,7 @@ func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, 
 		etag := firstNonEmpty(params.ETag, object.ETag)
 		fileUUID := params.UUID
 		if fileUUID == "" {
-			fileUUID = strings.ReplaceAll(uuid.NewString(), "-", "")
+			fileUUID = strings.ReplaceAll(uuid.New().String(), "-", "")
 		}
 
 		fileType, err := resolveUploadFileType(params.FileType, mimeType)
@@ -947,7 +948,7 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		return nil, err
 	}
 	hash := hex.EncodeToString(hasher.Sum(nil))
-	fileUUID := strings.ReplaceAll(uuid.NewString(), "-", "")
+	fileUUID := strings.ReplaceAll(uuid.New().String(), "-", "")
 	ext := filepath.Ext(input.OriginName)
 	objectKey := buildUploadObjectKey(fileUUID + ext)
 	bucket := bucketForDriver(activeDriver, cfg, input.IsPublic)
@@ -1293,7 +1294,7 @@ func updateLogicalPathSnapshots(tx *gorm.DB, folderID uint, oldPath, newPath str
 
 func buildUploadObjectKey(filename string) string {
 	ext := filepath.Ext(filename)
-	return "uploads/" + time.Now().Format("20060102") + "/" + strings.ReplaceAll(uuid.NewString(), "-", "") + ext
+	return "uploads/" + time.Now().Format("20060102") + "/" + strings.ReplaceAll(uuid.New().String(), "-", "") + ext
 }
 
 // MultipartInit 分片上传初始化。
@@ -1523,7 +1524,7 @@ func (s *FileResourceService) MultipartCompleteWithContext(ctx context.Context, 
 		size := session.Size
 		hash := session.Hash
 		mimeType := session.MimeType
-		fileUUID := strings.ReplaceAll(uuid.NewString(), "-", "")
+		fileUUID := strings.ReplaceAll(uuid.New().String(), "-", "")
 
 		fileType, err := resolveUploadFileType(params.FileType, mimeType)
 		if err != nil {

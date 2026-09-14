@@ -11,7 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/google/uuid"
+	"uuid"
+
 	"github.com/h2non/filetype"
 )
 

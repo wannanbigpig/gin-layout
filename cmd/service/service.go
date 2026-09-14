@@ -25,12 +25,16 @@ import (
 )
 
 const (
-	defaultHost             = "0.0.0.0"
-	defaultPort             = 9001
-	gracefulShutdownTimout  = 10 * time.Second
-	auditDrainTimeout       = 5 * time.Second
-	loginLogDrainTimeout    = 3 * time.Second
-	realtimeShutdownTimeout = 5 * time.Second
+	defaultHost                = "0.0.0.0"
+	defaultPort                = 9001
+	gracefulShutdownTimout     = 10 * time.Second
+	auditDrainTimeout          = 5 * time.Second
+	loginLogDrainTimeout       = 3 * time.Second
+	realtimeShutdownTimeout    = 5 * time.Second
+	defaultReadHeaderTimeout   = 5 * time.Second
+	defaultIdleTimeout         = 120 * time.Second
+	defaultMaxHeaderBytes      = 1 << 20
+	defaultMaxHeaderValueCount = http.DefaultMaxHeaderValueCount
 )
 
 var (
@@ -70,10 +74,7 @@ func run() error {
 		return fmt.Errorf("build router failed: %w", err)
 	}
 	address := fmt.Sprintf("%s:%d", host, port)
-	server := &http.Server{
-		Addr:    address,
-		Handler: engine,
-	}
+	server := newHTTPServer(address, engine)
 
 	errChan := make(chan error, 1)
 	go func() {
@@ -85,6 +86,17 @@ func run() error {
 	}()
 
 	return waitForShutdown(server, errChan)
+}
+
+func newHTTPServer(address string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:                address,
+		Handler:             handler,
+		ReadHeaderTimeout:   defaultReadHeaderTimeout,
+		IdleTimeout:         defaultIdleTimeout,
+		MaxHeaderBytes:      defaultMaxHeaderBytes,
+		MaxHeaderValueCount: defaultMaxHeaderValueCount,
+	}
 }
 
 func waitForShutdown(server *http.Server, errChan <-chan error) error {

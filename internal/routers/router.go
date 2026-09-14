@@ -2,7 +2,6 @@ package routers
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -18,21 +17,28 @@ import (
 
 // SetRouters 创建 Gin 引擎并注册全部应用路由。
 func SetRouters() (*gin.Engine, error) {
-	return SetRoutersWithTree(AppRouteTree())
+	return SetRoutersWithTree(AppRouteTreeWithOptions(currentBuildOptions()))
 }
 
 // SetRoutersWithTree 使用指定路由树创建 Gin 引擎并注册路由。
 func SetRoutersWithTree(routeTree RouteGroupDef) (*gin.Engine, error) {
-	// 启动时校验路由树
-	if err := ValidateRouteTree(routeTree); err != nil {
+	catalog, err := CompileRouteTree(routeTree)
+	if err != nil {
 		return nil, fmt.Errorf("route tree validation failed: %w", err)
 	}
+	return SetRoutersWithCatalog(catalog)
+}
 
+// SetRoutersWithCatalog 使用已编译 Catalog 创建 Gin 引擎，供需要复用元数据的调用方使用。
+func SetRoutersWithCatalog(catalog *Catalog) (*gin.Engine, error) {
+	if catalog == nil {
+		return nil, fmt.Errorf("route catalog is nil")
+	}
 	engine, err := createEngine()
 	if err != nil {
 		return nil, err
 	}
-	RegisterRoutes(engine, routeTree)
+	RegisterCatalog(engine, catalog)
 
 	// 统一处理 404
 	engine.NoRoute(func(c *gin.Context) {
@@ -44,44 +50,34 @@ func SetRoutersWithTree(routeTree RouteGroupDef) (*gin.Engine, error) {
 
 // createEngine 创建 gin 引擎并设置相关中间件
 func createEngine() (*gin.Engine, error) {
-	var engine *gin.Engine
 	cfg := config.GetConfig()
 	globalRateLimit := buildGlobalRateLimitConfig(cfg)
 
 	// 启动时校验 CORS 配置
 	middleware.ValidateCORSConfig(cfg)
 
-	if cfg != nil && cfg.Debug {
-		// 开发调试模式
+	debug := cfg != nil && cfg.Debug
+	var engine *gin.Engine
+	if debug {
+		gin.SetMode(gin.DebugMode)
 		engine = gin.New()
-		engine.Use(
-			middleware.CorsHandler(),
-			middleware.SecurityHeadersHandler(),          // HTTP 安全响应头
-			middleware.RateLimitHandler(globalRateLimit), // 全局 IP 级速率限制
-			loginRateLimitHandler(),                      // 登录接口专项速率限制
-			middleware.RequestCostHandler(),              // 请求耗时统计
-			middleware.RequestLocaleHandler(),
-			middleware.ParseTokenHandler(), // 全局token解析（所有路由都走）
-			gin.Logger(),
-			middleware.CustomRecovery(),
-			middleware.CustomLogger(),
-		)
-
 	} else {
-		// 生产模式
 		engine = ReleaseRouter()
-		engine.Use(
-			middleware.CorsHandler(),
-			middleware.SecurityHeadersHandler(),          // HTTP 安全响应头
-			middleware.RateLimitHandler(globalRateLimit), // 全局 IP 级速率限制
-			loginRateLimitHandler(),                      // 登录接口专项速率限制
-			middleware.RequestCostHandler(),              // 请求耗时统计
-			middleware.RequestLocaleHandler(),
-			middleware.ParseTokenHandler(), // 全局token解析（所有路由都走）
-			middleware.CustomRecovery(),
-			middleware.CustomLogger(),
-		)
 	}
+	middlewares := []gin.HandlerFunc{
+		middleware.CorsHandler(),
+		middleware.SecurityHeadersHandler(),
+		middleware.RateLimitHandler(globalRateLimit),
+		loginRateLimitHandler(),
+		middleware.RequestCostHandler(),
+		middleware.RequestLocaleHandler(),
+		middleware.ParseTokenHandler(),
+	}
+	if debug {
+		middlewares = append(middlewares, gin.Logger())
+	}
+	middlewares = append(middlewares, middleware.CustomRecovery(), middleware.CustomLogger())
+	engine.Use(middlewares...)
 	// 配置受信任代理，决定是否信任 X-Forwarded-For / X-Real-IP 等代理头。
 	trustedProxies := []string(nil)
 	if cfg != nil {
@@ -134,24 +130,32 @@ func loginRateLimitHandler() gin.HandlerFunc {
 func ReleaseRouter() *gin.Engine {
 	// 切换到生产模式
 	gin.SetMode(gin.ReleaseMode)
-	// 禁用 gin 输出接口访问日志
-	gin.DefaultWriter = io.Discard
 
 	engine := gin.New()
 
 	return engine
 }
 
+func currentBuildOptions() BuildOptions {
+	cfg := config.GetConfig()
+	return BuildOptions{Debug: cfg != nil && cfg.Debug}
+}
+
 // AppRouteTree 返回应用完整路由树。
 func AppRouteTree() RouteGroupDef {
+	return AppRouteTreeWithOptions(currentBuildOptions())
+}
+
+// AppRouteTreeWithOptions 使用显式构建参数返回应用完整路由树。
+func AppRouteTreeWithOptions(options BuildOptions) RouteGroupDef {
 	return RouteGroupDef{
+		Security: SecurityPublic,
 		Routes: []RouteDef{
 			{
 				Method: http.MethodGet,
 				Path:   "ping",
 				Title:  "ping",
 				Desc:   "服务心跳检测接口",
-				Auth:   AuthModeNone,
 				Handlers: []gin.HandlerFunc{func(c *gin.Context) {
 					c.String(http.StatusOK, "pong")
 				}},
@@ -161,7 +165,6 @@ func AppRouteTree() RouteGroupDef {
 				Path:   "health/readiness",
 				Title:  "readiness",
 				Desc:   "服务依赖就绪状态",
-				Auth:   AuthModeNone,
 				Handlers: []gin.HandlerFunc{func(c *gin.Context) {
 					status := buildReadinessStatus()
 					httpCode := http.StatusOK
@@ -172,7 +175,7 @@ func AppRouteTree() RouteGroupDef {
 				}},
 			},
 		},
-		Children: []RouteGroupDef{AdminRouteTree(nil)},
+		Children: []RouteGroupDef{AdminRouteTreeWithOptions(nil, options)},
 	}
 }
 

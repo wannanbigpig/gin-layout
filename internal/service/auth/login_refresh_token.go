@@ -7,9 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"uuid"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	"github.com/mssola/useragent"
 	"gorm.io/gorm"
 
@@ -75,7 +76,7 @@ func (s *LoginService) generateRefreshToken(user *model.AdminUser) (string, Refr
 	expiresAt := now.Add(time.Duration(refreshTTL) * time.Second)
 	claims := RefreshClaims{
 		UserID:   user.ID,
-		TokenID:  uuid.NewString(),
+		TokenID:  uuid.New().String(),
 		Username: user.Username,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
@@ -83,7 +84,7 @@ func (s *LoginService) generateRefreshToken(user *model.AdminUser) (string, Refr
 			IssuedAt:  jwt.NewNumericDate(now),
 			Subject:   global.PcAdminRefreshSubject,
 			NotBefore: jwt.NewNumericDate(now),
-			ID:        uuid.NewString(),
+			ID:        uuid.New().String(),
 		},
 	}
 	refreshToken, err := tokenutil.Generate(claims)

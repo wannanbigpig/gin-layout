@@ -2,6 +2,8 @@ package query_builder
 
 import "testing"
 
+var queryBuilderConditionSink string
+
 func TestQueryBuilderBuildsExpectedCondition(t *testing.T) {
 	status := int8(1)
 	pid := uint(3)
@@ -34,5 +36,15 @@ func TestQueryBuilderSkipsEmptyValues(t *testing.T) {
 	}
 	if args != nil {
 		t.Fatalf("expected nil args, got %#v", args)
+	}
+}
+
+func TestQueryBuilderBuildSingleConditionDoesNotAllocate(t *testing.T) {
+	query := New().AddCondition("status = ?", 1)
+	allocs := testing.AllocsPerRun(1000, func() {
+		queryBuilderConditionSink, _ = query.Build()
+	})
+	if allocs != 0 {
+		t.Fatalf("single condition Build allocated %.0f times, want 0", allocs)
 	}
 }

@@ -41,9 +41,9 @@ func TestApiRouteCacheServiceGetRouteInfoSingleflightDeduplicates(t *testing.T) 
 			Redis: autoload.RedisConfig{Enable: false},
 		}
 	}
-	var loadCalls int32
+	var loadCalls atomic.Int32
 	service.loadRouteInfo = func(route string, method string) (*ApiRouteInfo, error) {
-		atomic.AddInt32(&loadCalls, 1)
+		loadCalls.Add(1)
 		time.Sleep(30 * time.Millisecond)
 		return &ApiRouteInfo{IsAuth: 1, Name: "demo"}, nil
 	}
@@ -76,7 +76,7 @@ func TestApiRouteCacheServiceGetRouteInfoSingleflightDeduplicates(t *testing.T) 
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}
-	if got := atomic.LoadInt32(&loadCalls); got != 1 {
+	if got := loadCalls.Load(); got != 1 {
 		t.Fatalf("expected loadRouteInfo to be called once, got %d", got)
 	}
 

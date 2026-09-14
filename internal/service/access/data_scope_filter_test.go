@@ -149,14 +149,14 @@ func TestDataScopeFilterBuildSingleflightSharedAcrossInstances(t *testing.T) {
 		computeScopeForSingleflight = previousCompute
 	}()
 
-	var calls int32
+	var calls atomic.Int32
 	started := make(chan struct{})
 	release := make(chan struct{})
 	computeScopeForSingleflight = func(_ *DataScopeFilter, _ context.Context, uid uint) (*scopeResult, error) {
 		if uid != 42 {
 			t.Fatalf("unexpected uid: %d", uid)
 		}
-		if atomic.AddInt32(&calls, 1) == 1 {
+		if calls.Add(1) == 1 {
 			close(started)
 			<-release
 		}
@@ -186,7 +186,7 @@ func TestDataScopeFilterBuildSingleflightSharedAcrossInstances(t *testing.T) {
 	wg.Wait()
 	close(results)
 
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("expected one shared compute call, got %d", got)
 	}
 	for cond := range results {

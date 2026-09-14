@@ -11,53 +11,43 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
-	accesssvc "github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 )
-
-type routeAuthChecker interface {
-	CheckoutRouteIsAuth(route string, method string) bool
-}
 
 type permissionDeps struct {
 	// loadEnforcer 加载 Casbin enforcer。
 	loadEnforcer func() (*casbinx.CasbinEnforcer, error)
-	// routeChecker 判断路由是否需要权限拦截。
-	routeChecker routeAuthChecker
 }
 
 func newDefaultPermissionDeps() permissionDeps {
 	return permissionDeps{
 		loadEnforcer: casbinx.GetEnforcer,
-		routeChecker: accesssvc.NewApiRouteCacheService(),
 	}
 }
 
-// AdminAuthHandler 依赖 ParseTokenHandler 预先写入用户上下文。
-func AdminAuthHandler() gin.HandlerFunc {
-	return AdminAuthHandlerWithDeps(newDefaultPermissionDeps())
+// AdminLoginHandler 校验管理员登录态，依赖 ParseTokenHandler 预先写入用户上下文。
+func AdminLoginHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if requireAdminLogin(c) == nil {
+			return
+		}
+		c.Next()
+	}
 }
 
-// AdminAuthHandlerWithDeps 支持注入依赖，便于测试隔离。
-func AdminAuthHandlerWithDeps(deps permissionDeps) gin.HandlerFunc {
+// AdminPermissionHandler 校验管理员接口权限，应挂载在 AdminLoginHandler 之后。
+func AdminPermissionHandler() gin.HandlerFunc {
+	return AdminPermissionHandlerWithDeps(newDefaultPermissionDeps())
+}
+
+// AdminPermissionHandlerWithDeps 支持注入依赖，便于测试隔离。
+func AdminPermissionHandlerWithDeps(deps permissionDeps) gin.HandlerFunc {
 	if deps.loadEnforcer == nil {
 		deps.loadEnforcer = casbinx.GetEnforcer
 	}
-	if deps.routeChecker == nil {
-		deps.routeChecker = accesssvc.NewApiRouteCacheService()
-	}
 	return func(c *gin.Context) {
-		uid := c.GetUint(global.ContextKeyUID)
-		if uid == 0 {
-			response.FailCode(c, e.NotLogin)
-			c.Abort()
-			return
-		}
-
-		principal := auth.GetAuthPrincipal(c)
+		principal := requireAdminLogin(c)
 		if principal == nil {
-			response.FailCodeByKey(c, e.NotLogin, e.MsgKeyAuthSessionExpired)
-			c.Abort()
 			return
 		}
 
@@ -81,6 +71,22 @@ func AdminAuthHandlerWithDeps(deps permissionDeps) gin.HandlerFunc {
 	}
 }
 
+func requireAdminLogin(c *gin.Context) *auth.AuthPrincipal {
+	if c.GetUint(global.ContextKeyUID) == 0 {
+		response.FailCode(c, e.NotLogin)
+		c.Abort()
+		return nil
+	}
+
+	principal := auth.GetAuthPrincipal(c)
+	if principal == nil {
+		response.FailCodeByKey(c, e.NotLogin, e.MsgKeyAuthSessionExpired)
+		c.Abort()
+		return nil
+	}
+	return principal
+}
+
 // isSuperAdmin 判断是否为超级管理员
 func isSuperAdmin(principal *auth.AuthPrincipal) bool {
 	return principal != nil && (principal.IsSuperAdmin == global.Yes || principal.UserID == global.SuperAdminId)
@@ -92,7 +98,7 @@ func checkPermission(c *gin.Context, userID uint, deps permissionDeps) error {
 	if err != nil {
 		return err
 	}
-	return enforcePermission(enforcer, c, userID, deps)
+	return enforcePermission(enforcer, c, userID)
 }
 
 func loadEnforcer(deps permissionDeps) (*casbinx.CasbinEnforcer, error) {
@@ -104,7 +110,7 @@ func loadEnforcer(deps permissionDeps) (*casbinx.CasbinEnforcer, error) {
 	return enforcer, nil
 }
 
-func enforcePermission(enforcer *casbinx.CasbinEnforcer, c *gin.Context, userID uint, deps permissionDeps) error {
+func enforcePermission(enforcer *casbinx.CasbinEnforcer, c *gin.Context, userID uint) error {
 	userKey := fmt.Sprintf("%s%s%d", global.CasbinAdminUserPrefix, global.CasbinSeparator, userID)
 	path := c.Request.URL.Path
 	method := c.Request.Method
@@ -116,9 +122,7 @@ func enforcePermission(enforcer *casbinx.CasbinEnforcer, c *gin.Context, userID 
 	}
 
 	if !ok {
-		if deps.routeChecker.CheckoutRouteIsAuth(path, method) {
-			return e.NewBusinessErrorWithKey(e.AuthorizationErr, e.MsgKeyAuthAPIOperationDenied)
-		}
+		return e.NewBusinessErrorWithKey(e.AuthorizationErr, e.MsgKeyAuthAPIOperationDenied)
 	}
 
 	return nil

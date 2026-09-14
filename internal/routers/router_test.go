@@ -31,6 +31,95 @@ func TestSetRoutersRegistersApiMetadata(t *testing.T) {
 	}
 }
 
+func TestAdminRouteTreeSeparatesPublicAuthenticatedAndPermissionRoutes(t *testing.T) {
+	tree := AdminRouteTree(nil)
+	if len(tree.Children) != 2 {
+		t.Fatalf("expected public and authenticated route groups, got %d", len(tree.Children))
+	}
+
+	public := tree.Children[0]
+	assertRouteGroupAuthMode(t, public, AuthModeNone)
+	assertRouteGroupExcludesPaths(t, public,
+		"/auth/refresh",
+		"/auth/logout",
+		"/common/ws",
+	)
+
+	authenticated := tree.Children[1]
+	if len(authenticated.Children) != 2 {
+		t.Fatalf("expected no-permission and permission route groups, got %d", len(authenticated.Children))
+	}
+
+	noPermission := authenticated.Children[0]
+	assertRouteGroupContainsPaths(t, noPermission,
+		"/auth/refresh",
+		"/auth/logout",
+		"/common/ws",
+	)
+	if len(noPermission.Children) != 3 {
+		t.Fatalf("expected session credential, websocket ticket and access-token route groups, got %d", len(noPermission.Children))
+	}
+	assertRouteGroupAuthMode(t, noPermission.Children[2], AuthModeLogin)
+	assertRouteGroupAuthMode(t, authenticated.Children[1], AuthModeAuth)
+}
+
+func assertRouteGroupContainsPaths(t *testing.T, group RouteGroupDef, expected ...string) {
+	t.Helper()
+	paths := collectRouteGroupPaths(group)
+	for _, path := range expected {
+		if !paths[path] {
+			t.Errorf("expected route group to contain path %s", path)
+		}
+	}
+}
+
+func assertRouteGroupExcludesPaths(t *testing.T, group RouteGroupDef, excluded ...string) {
+	t.Helper()
+	paths := collectRouteGroupPaths(group)
+	for _, path := range excluded {
+		if paths[path] {
+			t.Errorf("expected route group to exclude path %s", path)
+		}
+	}
+}
+
+func collectRouteGroupPaths(group RouteGroupDef) map[string]bool {
+	routes := CollectRouteMeta(group)
+	paths := make(map[string]bool, len(routes))
+	for _, route := range routes {
+		paths[route.Path] = true
+	}
+	return paths
+}
+
+func assertRouteGroupAuthMode(t *testing.T, group RouteGroupDef, expected AuthMode) {
+	t.Helper()
+
+	if group.Security == SecurityInherit {
+		switch expected {
+		case AuthModeLogin:
+			group.Security = SecurityAccessToken
+		case AuthModeAuth:
+			group.Security = SecurityAccessTokenPermission
+		default:
+			group.Security = SecurityPublic
+		}
+	}
+	catalog, err := CompileRouteTree(group)
+	if err != nil {
+		t.Fatalf("compile route group: %v", err)
+	}
+	routes := catalog.Routes()
+	if len(routes) == 0 {
+		t.Errorf("expected route group for auth mode %d to contain routes", expected)
+	}
+	for _, route := range routes {
+		if route.Auth != expected {
+			t.Errorf("route %s %s has auth mode %d, expected %d", route.Method, route.Path, route.Auth, expected)
+		}
+	}
+}
+
 func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	routes := CollectRouteMeta(AppRouteTree())
 
@@ -110,8 +199,18 @@ func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	}
 
 	notificationWSCode := utils.MD5(http.MethodGet + "_/admin/v1/common/ws")
-	if route, ok := routes[notificationWSCode]; !ok || route.Auth != AuthModeNone {
+	if route, ok := routes[notificationWSCode]; !ok || route.Auth != AuthModeNone || route.GroupCode != "common_ws" {
 		t.Fatalf("missing or invalid notification ws route: %#v", route)
+	}
+
+	refreshCode := utils.MD5(http.MethodPost + "_/admin/v1/auth/refresh")
+	if route, ok := routes[refreshCode]; !ok || route.Auth != AuthModeNone || route.GroupCode != "auth_public" {
+		t.Fatalf("missing or invalid refresh route: %#v", route)
+	}
+
+	logoutCode := utils.MD5(http.MethodPost + "_/admin/v1/auth/logout")
+	if route, ok := routes[logoutCode]; !ok || route.Auth != AuthModeNone || route.GroupCode != "auth_public" {
+		t.Fatalf("missing or invalid logout route: %#v", route)
 	}
 }
 

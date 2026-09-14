@@ -711,7 +711,7 @@ func requireSystemModuleTables(t *testing.T) {
 	t.Helper()
 	db, err := model.GetDB()
 	if err != nil {
-		t.Skipf("数据库不可用，跳过 system 成功路径测试: %v", err)
+		t.Fatalf("配置文件中的真实数据库不可用: %v", err)
 	}
 	requiredTables := []string{
 		"sys_config",
@@ -723,7 +723,7 @@ func requireSystemModuleTables(t *testing.T) {
 	}
 	for _, table := range requiredTables {
 		if !db.Migrator().HasTable(table) {
-			t.Skipf("测试库缺少表 %s，跳过 system 成功路径测试", table)
+			t.Fatalf("配置文件中的真实数据库缺少表 %s，请先执行 migrate up 或 init-system", table)
 		}
 	}
 }

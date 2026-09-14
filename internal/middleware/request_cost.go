@@ -3,8 +3,9 @@ package middleware
 import (
 	"time"
 
+	"uuid"
+
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
 )

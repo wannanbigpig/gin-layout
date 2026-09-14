@@ -26,9 +26,7 @@ func init() {
 }
 
 const (
-	defaultSort      = 100
-	defaultIsAuth    = 0
-	defaultGroupCode = "other"
+	defaultSort = 100
 )
 
 // InitApiRoutes 初始化API路由
@@ -44,14 +42,20 @@ func InitApiRoutes() error {
 	}
 
 	routeTree := routers.AppRouteTree()
-	engine, err := routers.SetRoutersWithTree(routeTree)
+	catalog, err := routers.CompileRouteTree(routeTree)
+	if err != nil {
+		return fmt.Errorf("编译路由失败: %w", err)
+	}
+	engine, err := routers.SetRoutersWithCatalog(catalog)
 	if err != nil {
 		return fmt.Errorf("初始化路由失败: %w", err)
 	}
-	apiMap := routers.CollectRouteMeta(routeTree)
 
 	// 构建API数据
-	apiData := buildApiData(engine.Routes(), apiMap)
+	apiData, err := buildApiData(engine.Routes(), catalog.MetaMap())
+	if err != nil {
+		return fmt.Errorf("构建 API 路由数据失败: %w", err)
+	}
 
 	// 保存API数据
 	if err := saveApiData(apiData); err != nil {
@@ -75,42 +79,35 @@ func RebuildUserPermissions() error {
 }
 
 // buildApiData 构建API数据
-func buildApiData(routes []gin.RouteInfo, apiMap routers.RouteMetaMap) []map[string]any {
+func buildApiData(routes []gin.RouteInfo, apiMap routers.RouteMetaMap) ([]map[string]any, error) {
 	date := time.Now().Format(time.DateTime)
 	apiData := make([]map[string]any, 0, len(routes))
 
 	for _, route := range routes {
 		code := utils.MD5(route.Method + "_" + route.Path)
-		name := route.Path
-		isAuth := defaultIsAuth
-		desc := ""
-		groupCode := defaultGroupCode
-
-		if val, ok := apiMap[code]; ok {
-			name = val.Title
-			isAuth = int(val.Auth)
-			desc = val.Desc
-			groupCode = val.GroupCode
+		meta, ok := apiMap[code]
+		if !ok {
+			return nil, fmt.Errorf("missing route metadata for %s %s", route.Method, route.Path)
 		}
 
 		apiData = append(apiData, map[string]any{
 			"code":         code,
-			"name":         name,
+			"name":         meta.Title,
 			"route":        route.Path,
 			"method":       route.Method,
 			"func":         extractHandlerName(route.Handler),
 			"func_path":    route.Handler,
-			"is_auth":      isAuth,
-			"description":  desc,
+			"is_auth":      int(meta.Auth),
+			"description":  meta.Desc,
 			"sort":         defaultSort,
 			"is_effective": 1,
 			"created_at":   date,
 			"updated_at":   date,
-			"group_code":   groupCode,
+			"group_code":   meta.GroupCode,
 		})
 	}
 
-	return apiData
+	return apiData, nil
 }
 
 // extractHandlerName 提取处理器名称

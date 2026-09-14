@@ -1,191 +1,52 @@
 # tests/admin_test 索引
 
-这份索引用于解决两个问题：
+管理端路由以 `internal/routers/admin_router.go` 为真相。当前非 Release 模式有 `128` 个 `/admin/v1` 接口，Release 模式不含 `GET /admin/v1/demo`，共 `127` 个。
 
-1. 当前后台接口哪些已经在 `tests/admin_test` 里被覆盖到了
-2. 某个接口该去哪个测试文件里找
+## 全路由覆盖机制
 
-## 当前结论
+`route_coverage_test.go` 从 `routers.AppRouteTree()` 动态收集路由：
 
-- `internal/routers/admin_router.go` 中共定义 **68 个接口**
-- 所有 68 个接口都至少有一处测试引用
-- 但覆盖深度并不完全一致
-  - 64 个接口有成功路径测试（含完整 CRUD 流程）
-  - 4 个接口仅有未登录拦截 / 参数校验测试
+- `121` 个受保护接口全部执行匿名请求并断言 `401`。
+- 所有受保护 GET 和写接口再使用真实认证进入参数或业务层；写接口使用不会污染业务数据的校验载荷，少数无必填字段接口使用隔离条件。
+- `7` 个公开管理端接口维护显式状态场景；新增公开接口没有场景时测试失败。
 
-结论：
+这保证每个声明接口都有真实请求入口，但不把鉴权覆盖等同于业务成功。业务写接口继续按领域补充成功、校验和状态流。
 
-- **接口覆盖有了**
-- **覆盖深度不均匀**
+`route_scenarios_test.go` 对全部 `128` 个路由进行第二层约束：`90` 个业务流程、`24` 个契约边界、`14` 个外部依赖场景。分类必须与路由树一一对应，新增、删除或重复分类都会失败；契约和外部依赖分类也是后续补齐成功流程的明确清单。
 
-## 目录规则
+## 分组与测试文件
 
-当前目录按"领域"拆分，同一资源的读写测试放在同一个文件里：
+| 路由分组 | 数量 | 主要测试文件 | 业务覆盖重点 |
+| --- | ---: | --- | --- |
+| other / login / auth_public / common_ws | 7 | `public_routes_test.go`、`auth_routes_test.go`、`common_routes_test.go` | demo、文件公开访问、验证码、登录/刷新/登出、WS ticket |
+| dashboard | 3 | `dashboard_test.go` | overview、statistics、monitor 成功路径 |
+| common / auth / session | 5 | `common_routes_test.go`、`auth_routes_test.go`、`session_test.go` | 上传校验、token、真实会话列表和撤销 |
+| adminUser | 13 | `admin_user_test.go` | 详情、options、CRUD、资料和角色绑定 |
+| permission | 3 | `permission_routes_test.go` | 列表、options、更新校验 |
+| menu | 6 | `menu_test.go` | 完整 CRUD、权限同步、i18n Replace 语义 |
+| role | 6 | `role_test.go` | options、完整 CRUD 和菜单授权 |
+| department | 6 | `department_test.go` | 完整 CRUD 和角色绑定 |
+| product | 5 | `product_test.go` | 使用真实部门前置的完整 CRUD |
+| sysConfig | 7 | `system_routes_test.go` | 完整 CRUD、缓存刷新、可见性和 i18n PATCH 语义 |
+| sysDict | 10 | `system_routes_test.go` | 类型/字典项完整 CRUD、options 和 i18n PATCH 语义 |
+| file | 27 | `file_resource_test.go` | 目录生命周期、列表/回收站/引用、上传和对象状态接口校验 |
+| export | 2 | `log_routes_test.go` | 列表和详情 NotFound |
+| notification | 5 | `notification_test.go` | 指定用户发送、列表、未读数、单条/全部已读 |
+| storage | 4 | `storage_test.go`、`system_routes_test.go` | 配置读取/保存、本地存储连通性、敏感字段校验 |
+| log | 7 | `log_routes_test.go` | 请求/登录日志列表、详情边界、导出、脱敏配置 |
+| task | 12 | `task_routes_test.go` | 定义/执行/统计/趋势/cron 查询和操作参数校验 |
 
-- `public_routes_test.go` — 公开接口
-- `auth_routes_test.go` — 登录、验证码、token 校验、登出
-- `common_routes_test.go` — 通用接口（上传等）
-- `admin_user_test.go` — 管理员相关接口（含读测试、鉴权测试、写流程测试）
-- `permission_routes_test.go` — API 权限接口
-- `menu_test.go` — 菜单相关接口（含读测试、鉴权测试、写流程测试）
-- `role_test.go` — 角色相关接口（含读测试、鉴权测试、写流程测试）
-- `department_test.go` — 部门相关接口（含读测试、鉴权测试、写流程测试）
-- `system_routes_test.go` — 系统参数 / 字典接口
-- `log_routes_test.go` — 请求日志 / 登录日志接口
-- `task_routes_test.go` — 任务中心组接口
-- `test_helpers_test.go` — 测试辅助函数（环境判断、测试资源命名/查找/清理/兜底数据创建）
+合计 `128` 个管理端接口。
 
-## MySQL 集成测试
+## MySQL 与前置数据
 
-- `/tests/...` 是接口集成测试，写流程依赖真实 MySQL 和已初始化的系统数据。
-- 本地未启用或无法连接 MySQL 时，`requireMySQL` / `requireWritableDB` 会跳过数据库链路用例。
-- CI 通过 `.github/workflows/go.yml` 启动 MySQL service，生成测试专用 `config.yaml`，执行 `go run main.go -c ./config.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test` 后运行 `go test ./tests/...`。
+- `TestMain` 使用项目根 `config.yaml` 初始化真实 MySQL；配置缺失、MySQL 未启用或不可连接时整个测试包失败。
+- 默认认证主体是数据库中的 `ID=1` 超级管理员；测试库必须先完成 migration 和系统初始数据。
+- product 流程会读取一个真实部门作为前置；session、notification、folder 流程创建专属记录并在结束时清理。
+- 所有写入数据使用唯一名称或 marker，测试不能依赖运行顺序。
 
-## 接口到文件映射
+## 外部依赖边界
 
-### 公开接口
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/demo` | `public_routes_test.go` | 成功路径 |
-| `GET /admin/v1/file/:uuid` | `public_routes_test.go` | Not-found |
-| `POST /admin/v1/login` | `auth_routes_test.go` | 参数校验（验证码错误） |
-| `GET /admin/v1/login-captcha` | `auth_routes_test.go` | 成功路径 |
-
-### 通用 / 认证接口
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `POST /admin/v1/common/upload` | `common_routes_test.go` | 未登录拦截 |
-| `POST /admin/v1/auth/logout` | `auth_routes_test.go` | 成功路径（DB token 撤销）+ 未登录拦截 |
-| `GET /admin/v1/auth/check-token` | `auth_routes_test.go` | 成功路径 |
-
-### 管理员接口
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/admin-user/get` | `admin_user_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/admin-user/user-menu-info` | `admin_user_test.go` | 成功路径 |
-| `POST /admin/v1/admin-user/update-profile` | `admin_user_test.go` | 参数校验 |
-| `GET /admin/v1/admin-user/list` | `admin_user_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/admin-user/detail` | `admin_user_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/admin-user/get-full-phone` | `admin_user_test.go` | 未登录拦截 |
-| `GET /admin/v1/admin-user/get-full-email` | `admin_user_test.go` | 未登录拦截 |
-| `POST /admin/v1/admin-user/create` | `admin_user_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/admin-user/update` | `admin_user_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/admin-user/delete` | `admin_user_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/admin-user/bind-role` | `admin_user_test.go` | 未登录拦截 |
-
-### 权限接口
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/permission/list` | `permission_routes_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/permission/update` | `permission_routes_test.go` | 未登录拦截 + 参数校验 |
-
-### 菜单接口
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/menu/list` | `menu_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/menu/detail` | `menu_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/menu/create` | `menu_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/menu/update` | `menu_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/menu/delete` | `menu_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/menu/update-all-menu-permissions` | `menu_test.go` | 成功路径 + 未登录拦截 |
-
-### 角色接口
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/role/list` | `role_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/role/detail` | `role_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/role/create` | `role_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/role/update` | `role_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/role/delete` | `role_test.go` | 成功路径 + 未登录拦截 |
-
-### 部门接口
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/department/list` | `department_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/department/detail` | `department_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/department/create` | `department_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/department/update` | `department_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/department/delete` | `department_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/department/bind-role` | `department_test.go` | 成功路径 + 未登录拦截 |
-
-### 系统参数
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/system/config/list` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `GET /admin/v1/system/config/detail` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `GET /admin/v1/system/config/value` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/config/create` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/config/update` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/config/delete` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/config/refresh` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-
-### 系统字典
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/system/dict/type/list` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `GET /admin/v1/system/dict/type/detail` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/dict/type/create` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/dict/type/update` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/dict/type/delete` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `GET /admin/v1/system/dict/item/list` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/dict/item/create` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/dict/item/update` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `POST /admin/v1/system/dict/item/delete` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-| `GET /admin/v1/system/dict/options` | `system_routes_test.go` | 成功路径 + 未登录拦截（成功路径依赖 `sys_*` 表已迁移） |
-
-### 日志接口
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/log/request/list` | `log_routes_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/log/request/detail` | `log_routes_test.go` | 未登录拦截 |
-| `GET /admin/v1/log/request/export` | `log_routes_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/log/request/mask-config` | `log_routes_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/log/request/mask-config` | `log_routes_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/log/login/list` | `log_routes_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/log/login/detail` | `log_routes_test.go` | 未登录拦截 |
-
-### 任务中心
-
-| 接口 | 测试文件 | 当前覆盖 |
-| --- | --- | --- |
-| `GET /admin/v1/task/list` | `task_routes_test.go` | 成功路径 + 未登录拦截 |
-| `POST /admin/v1/task/trigger` | `task_routes_test.go` | 未登录拦截 + 参数校验 |
-| `GET /admin/v1/task/run/list` | `task_routes_test.go` | 成功路径 + 未登录拦截 |
-| `GET /admin/v1/task/run/detail` | `task_routes_test.go` | Not-found + 未登录拦截 |
-| `POST /admin/v1/task/run/retry` | `task_routes_test.go` | 未登录拦截 + 参数校验 |
-| `POST /admin/v1/task/run/cancel` | `task_routes_test.go` | 未登录拦截 + 参数校验 |
-| `GET /admin/v1/task/cron/state` | `task_routes_test.go` | 成功路径 + 未登录拦截 |
-
-## 覆盖统计
-
-| 覆盖等级 | 接口数 | 说明 |
-| --- | --- | --- |
-| 成功路径 + CRUD 流程 | 50 | admin-user / menu / role / department / system 等有完整 write flow |
-| 成功路径（仅读） | 14 | 列表、详情、导出等只读操作 |
-| 未登录拦截（仅有） | 4 | 仅覆盖了鉴权，无成功路径 |
-
-## 当前仍然偏弱的接口
-
-这些接口仅有未登录拦截或参数校验测试，后续增强应优先补成功路径：
-
-**其他模块**
-- `POST /admin/v1/common/upload` — 仅有未登录拦截
-- `POST /admin/v1/admin-user/bind-role` — 仅有未登录拦截
-- `GET /admin/v1/admin-user/get-full-phone` — 仅有未登录拦截
-- `GET /admin/v1/admin-user/get-full-email` — 仅有未登录拦截
-
-**覆盖较浅但暂可接受的接口**
-- `POST /admin/v1/admin-user/update-profile` — 仅有参数校验（无成功路径）
-- `POST /admin/v1/permission/update` — 仅有未登录拦截 + 参数校验
-- `GET /admin/v1/log/request/detail` — 仅有未登录拦截
-- `GET /admin/v1/log/login/detail` — 仅有未登录拦截
+- Redis 启用时测试 WS ticket 到 Upgrade 校验；禁用时必须返回 `ServiceDependencyNotReady`。
+- queue 未在测试 Router 初始化时，导出接口允许返回 `ServiceDependencyNotReady`；可用时验证提交成功。
+- storage 使用 local driver 做连通性测试；OSS 直传和分片接口只做认证/参数契约，避免操作配置中的真实 Bucket。
