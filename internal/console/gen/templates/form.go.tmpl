@@ -1,5 +1,16 @@
 package form
 
+{{- if or .HasJSON .HasDateTime}}
+import (
+	{{- if .HasJSON}}
+	"gorm.io/datatypes"
+	{{- end}}
+	{{- if .HasDateTime}}
+	"{{.GoModule}}/internal/pkg/utils"
+	{{- end}}
+)
+{{end}}
+
 // {{.ModelName}}List {{.MenuTitle}}列表查询参数。
 type {{.ModelName}}List struct {
 	Paginate

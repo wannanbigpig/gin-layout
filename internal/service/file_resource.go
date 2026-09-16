@@ -106,7 +106,7 @@ func NewFileResourceServiceWithDeps(deps FileResourceServiceDeps) *FileResourceS
 }
 
 // List 分页查询文件资源列表。
-func (s *FileResourceService) List(params *form.FileResourceList) *resources.Collection {
+func (s *FileResourceService) List(params *form.FileResourceList) (*resources.Collection, error) {
 	query := query_builder.New().
 		AddLike("origin_name", params.OriginName).
 		AddLike("uuid", params.UUID).
@@ -153,11 +153,11 @@ func (s *FileResourceService) List(params *form.FileResourceList) *resources.Col
 	total, collection, err := s.listUploadFiles(params, condition, args)
 	if err != nil {
 		log.Logger.Error("查询文件资源列表失败", zap.Error(err))
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 	result := transformer.ToCollection(params.Page, params.PerPage, total, collection)
 	s.fillUploaderNames(result)
-	return result
+	return result, nil
 }
 
 func normalizeFileTypeFilter(value string) []string {
@@ -390,7 +390,7 @@ func (s *FileResourceService) Restore(id uint) error {
 		if err := tx.Unscoped().Where("id = ? AND deleted_at <> 0", id).First(&uploadFile).Error; err != nil {
 			return e.NewBusinessError(e.NotFound)
 		}
-		if err := restoreFolderAncestors(tx, uploadFile.FolderID); err != nil {
+		if err := restoreFolderAncestorsForFolders(tx, []uint{uploadFile.FolderID}); err != nil {
 			return err
 		}
 		result := tx.Unscoped().Model(&model.UploadFiles{}).Where("id = ? AND deleted_at <> 0", id).Updates(map[string]any{
@@ -515,7 +515,7 @@ func (s *FileResourceService) BatchDestroy(ids []uint) (*FileBatchDestroyResult,
 	return result, nil
 }
 
-func (s *FileResourceService) References(params *form.FileReferenceList) *resources.Collection {
+func (s *FileResourceService) References(params *form.FileReferenceList) (*resources.Collection, error) {
 	return NewFileReferenceService(s.db).List(params)
 }
 
@@ -566,10 +566,6 @@ func buildFileBatchDestroyFailure(id uint, err error) *FileBatchDestroyFailure {
 	}
 
 	return failure
-}
-
-func restoreFolderAncestors(tx *gorm.DB, folderID uint) error {
-	return restoreFolderAncestorsForFolders(tx, []uint{folderID})
 }
 
 func restoreFolderAncestorsForFolders(tx *gorm.DB, folderIDs []uint) error {

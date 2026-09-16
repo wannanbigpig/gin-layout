@@ -44,7 +44,11 @@ func (api FileResourceController) List(c *gin.Context) {
 		return
 	}
 
-	result := service.NewFileResourceService().List(params)
+	result, err := service.NewFileResourceService().List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 
@@ -155,7 +159,11 @@ func (api FileResourceController) TrashList(c *gin.Context) {
 	}
 	deleted := uint8(1)
 	params.IsDeleted = &deleted
-	result := service.NewFileResourceService().List(params)
+	result, err := service.NewFileResourceService().List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 
@@ -213,7 +221,11 @@ func (api FileResourceController) References(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	result := service.NewFileResourceService().References(params)
+	result, err := service.NewFileResourceService().References(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

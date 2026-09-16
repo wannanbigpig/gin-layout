@@ -279,7 +279,7 @@ func (s *ExportCenterService) ReassignTaskRun(ctx context.Context, oldTaskRunID,
 	return result.RowsAffected > 0, nil
 }
 
-func (s *ExportCenterService) List(params *form.ExportRecordList) *resources.Collection {
+func (s *ExportCenterService) List(params *form.ExportRecordList) (*resources.Collection, error) {
 	query := query_builder.New().
 		AddEq("scene", strings.TrimSpace(params.Scene)).
 		AddEq("status", strings.TrimSpace(params.Status)).
@@ -315,7 +315,7 @@ func (s *ExportCenterService) List(params *form.ExportRecordList) *resources.Col
 	transformer := resources.NewExportRecordTransformer()
 	if s.db != nil {
 		if err := ensureExportRecordTable(s.db); err != nil {
-			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+			return nil, err
 		}
 	}
 	if s.db != nil {
@@ -324,8 +324,11 @@ func (s *ExportCenterService) List(params *form.ExportRecordList) *resources.Col
 		if condition != "" {
 			db = db.Where(condition, args...)
 		}
-		if err := db.Count(&total).Error; err != nil || total == 0 {
-			return transformer.ToCollection(params.Page, params.PerPage, total, nil)
+		if err := db.Count(&total).Error; err != nil {
+			return nil, err
+		}
+		if total == 0 {
+			return transformer.ToCollection(params.Page, params.PerPage, total, nil), nil
 		}
 
 		rows := make([]*model.SysExportRecord, 0, params.PerPage)
@@ -334,24 +337,27 @@ func (s *ExportCenterService) List(params *form.ExportRecordList) *resources.Col
 			queryDB = queryDB.Where(condition, args...)
 		}
 		if err := queryDB.Scopes(recordModel.Paginate(params.Page, params.PerPage)).Find(&rows).Error; err != nil {
-			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+			return nil, err
 		}
 		s.decorateExportRetryState(context.Background(), s.db, rows)
-		return transformer.ToCollection(params.Page, params.PerPage, total, rows)
+		return transformer.ToCollection(params.Page, params.PerPage, total, rows), nil
 	}
 
 	db, err := model.GetDB()
-	if err != nil || !exportRecordsTableReady(db) {
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !exportRecordsTableReady(db) {
+		return nil, ErrExportRecordTableMissing
 	}
 
 	recordModel.SetDB(db)
 	total, collection, err := model.ListPageE(recordModel, params.Page, params.PerPage, condition, args, listOptionalParams)
 	if err != nil {
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 	s.decorateExportRetryState(context.Background(), db, collection)
-	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 func (s *ExportCenterService) Detail(id uint) (any, error) {

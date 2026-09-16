@@ -133,15 +133,11 @@ func (b *TaskBuilder) AllowOverlap() *TaskBuilder {
 // Register 把声明过的任务统一注册到 cron 实例中。
 func (s *Scheduler) Register(crontab *cron.Cron) error {
 	for _, task := range s.tasks {
-		if _, err := s.registerTask(crontab, task); err != nil {
+		if _, err := registerScheduledTask(crontab, s.logger, s.taskContext(), task); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func (s *Scheduler) registerTask(crontab *cron.Cron, task *scheduledTask) (cron.EntryID, error) {
-	return registerScheduledTask(crontab, s.logger, s.taskContext(), task)
 }
 
 func registerScheduledTask(crontab *cron.Cron, logger *cronLogger, ctx context.Context, task *scheduledTask) (cron.EntryID, error) {

@@ -1,16 +1,22 @@
 package {{.ModuleSnake}}
 
 import (
+	{{- if .HasDataScope}}
 	"context"
+	{{- end}}
 
+	{{- if .HasDataScope}}
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	{{- end}}
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
+	{{- if .HasDataScope}}
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
+	{{- end}}
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -28,9 +34,10 @@ func New{{.ServiceName}}() *{{.ServiceName}} {
 const {{.VarName}}OptionsLimit = 200
 
 // List 分页查询列表（接入数据权限）。
-func (s *{{.ServiceName}}) List(params *form.{{.ModelName}}List) interface{} {
+func (s *{{.ServiceName}}) List(params *form.{{.ModelName}}List) (interface{}, error) {
 	condition, args := s.buildListCondition(params)
 
+	{{- if .HasDataScope}}
 	// 接入数据权限过滤
 	dataScopeCond, dataScopeArgs := s.buildDataScopeCondition()
 	if dataScopeCond != "" {
@@ -41,6 +48,7 @@ func (s *{{.ServiceName}}) List(params *form.{{.ModelName}}List) interface{} {
 		}
 		args = append(args, dataScopeArgs...)
 	}
+	{{- end}}
 
 	{{.VarName}}Model := model.New{{.ModelName}}()
 	total, collection, err := model.ListPageE(
@@ -52,10 +60,10 @@ func (s *{{.ServiceName}}) List(params *form.{{.ModelName}}List) interface{} {
 		model.ListOptionalParams{OrderBy: "id desc"},
 	)
 	if err != nil {
-		return resources.ToRawCollection(params.Page, params.PerPage, 0, make([]*model.{{.ModelName}}, 0))
+		return nil, err
 	}
 
-	return resources.ToRawCollection(params.Page, params.PerPage, total, collection)
+	return resources.ToRawCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 func (s *{{.ServiceName}}) buildListCondition(params *form.{{.ModelName}}List) (string, []any) {
@@ -70,6 +78,7 @@ func (s *{{.ServiceName}}) buildListCondition(params *form.{{.ModelName}}List) (
 	return qb.Build()
 }
 
+{{- if .HasDataScope}}
 // buildDataScopeCondition 构建数据权限过滤条件。
 func (s *{{.ServiceName}}) buildDataScopeCondition() (string, []any) {
 	uid := s.GetAdminUserId()
@@ -82,21 +91,24 @@ func (s *{{.ServiceName}}) buildDataScopeCondition() (string, []any) {
 	filter := access.NewDataScopeFilter()
 	return filter.Build(s.context(), input, "dept_id", "created_by")
 }
+{{- end}}
 
+{{- if .HasOptions}}
 // Options 选择器：按关键词模糊搜索，供下拉选择器使用。
-func (s *{{.ServiceName}}) Options(keyword string) []resources.{{.ModelName}}OptionResources {
+func (s *{{.ServiceName}}) Options(keyword string) ([]resources.{{.ModelName}}OptionResources, error) {
 	conditionStr, args := query_builder.New().
-		AddKeywordLike(keyword, {{range $i, $f := .ListFields}}{{if $i}}, {{end}}"{{$f.ColumnName}}"{{end}}).
+		AddKeywordLike(keyword, "{{.OptionField.ColumnName}}").
 		Build()
 	_, collection, err := model.ListPageE(model.New{{.ModelName}}(), 1, {{.VarName}}OptionsLimit, conditionStr, args, model.ListOptionalParams{
-		SelectFields: []string{"id", "name"},
+		SelectFields: []string{"id", "{{.OptionField.ColumnName}}"},
 		OrderBy:      "id desc",
 	})
 	if err != nil {
-		return []resources.{{.ModelName}}OptionResources{}
+		return nil, err
 	}
-	return resources.To{{.ModelName}}Options(collection)
+	return resources.To{{.ModelName}}Options(collection), nil
 }
+{{- end}}
 
 // Create 新增记录。
 func (s *{{.ServiceName}}) Create(params *form.Create{{.ModelName}}) error {
@@ -106,14 +118,18 @@ func (s *{{.ServiceName}}) Create(params *form.Create{{.ModelName}}) error {
 	{{$.VarName}}.{{.Name}} = params.{{.Name}}
 {{- end}}
 {{- end}}
+	{{- if .HasCreatedBy}}
 	// 写入创建者
 	{{.VarName}}.CreatedBy = s.GetAdminUserId()
+	{{- end}}
+	{{- if .HasDeptID}}
 	// 写入部门
 	deptID := s.getUserDeptId()
 	if deptID == 0 {
 		return e.NewBusinessError(e.DepartmentNotFound)
 	}
 	{{.VarName}}.DeptId = deptID
+	{{- end}}
 
 	if err := {{.VarName}}.Create(); err != nil {
 		return e.NewBusinessError(e.FAILURE)
@@ -171,15 +187,18 @@ func (s *{{.ServiceName}}) buildDetailCondition(id uint) (string, []any) {
 	condition := "id = ?"
 	args := []any{id}
 
+	{{- if .HasDataScope}}
 	dataScopeCond, dataScopeArgs := s.buildDataScopeCondition()
 	if dataScopeCond != "" {
 		condition = "(" + condition + ") AND " + dataScopeCond
 		args = append(args, dataScopeArgs...)
 	}
+	{{- end}}
 
 	return condition, args
 }
 
+{{- if .HasDeptID}}
 // getUserDeptId 获取当前用户的部门 ID。
 func (s *{{.ServiceName}}) getUserDeptId() uint {
 	uid := s.GetAdminUserId()
@@ -192,7 +211,9 @@ func (s *{{.ServiceName}}) getUserDeptId() uint {
 	}
 	return deptIDs[0]
 }
+{{- end}}
 
+{{- if .HasDataScope}}
 func (s *{{.ServiceName}}) isSuperAdmin() bool {
 	if ctx := s.GetCtx(); ctx != nil {
 		if principal := auth.GetAuthPrincipal(ctx); principal != nil {
@@ -208,3 +229,4 @@ func (s *{{.ServiceName}}) context() context.Context {
 	}
 	return context.Background()
 }
+{{- end}}

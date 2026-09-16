@@ -59,7 +59,7 @@ func TestEnqueueAuditLogDelegatesToPublisher(t *testing.T) {
 	respRecorder := createResponseRecorder(ctx)
 	respRecorder.body.WriteString(`{"code":0,"msg":"ok","data":{}}`)
 
-	logRequest(ctx, respRecorder)
+	finalizeRequestLogging(ctx, respRecorder)
 	if !called {
 		t.Fatal("expected enqueue to be called")
 	}

@@ -26,7 +26,11 @@ func (api RoleController) List(c *gin.Context) {
 		return
 	}
 
-	result := role.NewRoleService().List(params)
+	result, err := role.NewRoleService().List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

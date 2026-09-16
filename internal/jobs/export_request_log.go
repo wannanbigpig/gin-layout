@@ -72,7 +72,7 @@ func handleExportRequestLog(ctx context.Context, payload ExportRequestLogPayload
 	progressStarted := false
 	// fileName 在主 goroutine 内完成生成，作为 OriginName 传给 CreateFromReader，避免
 	// 与 StreamExportCSV 返回值产生跨 goroutine 共享写。
-	fileName := resolveRequestLogExportFileName()
+	fileName := "request_logs_" + time.Now().Format("20060102150405") + ".csv"
 
 	// writer 协程：流式生成 CSV，结束时通过 CloseWithError 将错误传递给 reader 端，
 	// 这样下游 CreateFromReader 在读取过程中能立刻拿到原始错误而不是 io.EOF。
@@ -203,11 +203,4 @@ func recordExportRequestLogResultWithDB(ctx context.Context, db *gorm.DB, taskRu
 		Message:   "export file generated",
 		Meta:      string(meta),
 	}).Error
-}
-
-// resolveRequestLogExportFileName 在主 goroutine 中生成最终文件名。
-// 与 StreamExportCSV 内部生成的命名规则保持一致，但在主 goroutine 内决定，避免
-// 跨 goroutine 共享 fileName 字段引入数据竞争。
-func resolveRequestLogExportFileName() string {
-	return "request_logs_" + time.Now().Format("20060102150405") + ".csv"
 }

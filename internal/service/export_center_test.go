@@ -48,11 +48,14 @@ func TestExportCenterServiceCreateListDetailAndSuccess(t *testing.T) {
 		t.Fatalf("mark success failed: %v", err)
 	}
 
-	list := svc.List(&form.ExportRecordList{
+	list, err := svc.List(&form.ExportRecordList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 		Scene:    model.ExportSceneRequestLog,
 		Status:   model.TaskRunStatusSuccess,
 	})
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
 	if list.Total != 1 || len(list.Data) != 1 {
 		t.Fatalf("unexpected list result: %#v", list)
 	}
@@ -216,10 +219,13 @@ func TestExportCenterServiceListExposesQueuedStageAndTaskCode(t *testing.T) {
 		t.Fatalf("create record failed: %v", err)
 	}
 
-	list := svc.List(&form.ExportRecordList{
+	list, err := svc.List(&form.ExportRecordList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 		Scene:    model.ExportSceneFileList,
 	})
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
 	if list.Total != 1 || len(list.Data) != 1 {
 		t.Fatalf("unexpected list result: %#v", list)
 	}
@@ -276,19 +282,25 @@ func TestExportCenterServiceReassignTaskRunKeepsSameRecord(t *testing.T) {
 	}
 
 	oldID := uint(101)
-	listOld := svc.List(&form.ExportRecordList{
+	listOld, err := svc.List(&form.ExportRecordList{
 		Paginate:  form.Paginate{Page: 1, PerPage: 10},
 		TaskRunID: &oldID,
 	})
+	if err != nil {
+		t.Fatalf("list old task failed: %v", err)
+	}
 	if listOld.Total != 0 || len(listOld.Data) != 0 {
 		t.Fatalf("expected old task_run_id 101 to have no export record after reassign, got %#v", listOld)
 	}
 
 	newID := uint(202)
-	listNew := svc.List(&form.ExportRecordList{
+	listNew, err := svc.List(&form.ExportRecordList{
 		Paginate:  form.Paginate{Page: 1, PerPage: 10},
 		TaskRunID: &newID,
 	})
+	if err != nil {
+		t.Fatalf("list new task failed: %v", err)
+	}
 	if listNew.Total != 1 || len(listNew.Data) != 1 {
 		t.Fatalf("expected one record on new task_run_id 202, got %#v", listNew)
 	}

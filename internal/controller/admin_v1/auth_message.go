@@ -140,6 +140,8 @@ func (api SysMessageController) GetWsTicket(c *gin.Context) {
 // WS 建立通用实时推送连接，仅支持 ticket 校验方式。
 // 鉴权失败时直接返回 HTTP 401，避免 WebSocket 客户端拿到 200+JSON 后无法判断错误来源。
 func (api SysMessageController) WS(c *gin.Context) {
+	finishAudit := middleware.BeginWebSocketAudit()
+	defer finishAudit()
 	var principal *auth.AuthPrincipal
 	var ok bool
 

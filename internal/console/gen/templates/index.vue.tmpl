@@ -53,7 +53,7 @@
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next, jumper"
         @size-change="handleSearch"
-        @current-change="handleSearch"
+        @current-change="fetchData"
       />
     </el-card>
 
@@ -111,17 +111,21 @@ const queryParams = reactive<{{.ModelName}}ListParams>({
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
-const formData = reactive<{{.ModelName}}CreateParams>({
+const editingID = ref<number | null>(null)
+const createEmptyForm = (): {{.ModelName}}CreateParams => ({
 {{- range .FormFields}}
 {{- if .IsForm}}
-{{- if eq .GoType "string"}}
+{{- if eq (tsType .GoType) "string"}}
   {{.JsonTag}}: '',
-{{- else if or (eq .GoType "uint8") (eq .GoType "uint") (eq .GoType "int") (eq .GoType "int64") (eq .GoType "uint64")}}
+{{- else if eq (tsType .GoType) "number"}}
   {{.JsonTag}}: 0,
+{{- else}}
+  {{.JsonTag}}: undefined,
 {{- end}}
 {{- end}}
 {{- end}}
 })
+const formData = reactive(createEmptyForm())
 
 const rules: FormRules = {
 {{- range .FormFields}}
@@ -135,8 +139,8 @@ const fetchData = async () => {
   loading.value = true
   try {
     const res = await get{{.ModelName}}List(queryParams)
-    tableData.value = res.data.data
-    total.value = res.data.total
+    tableData.value = res.list
+    total.value = res.total
   } finally {
     loading.value = false
   }
@@ -157,13 +161,21 @@ const handleReset = () => {
 }
 
 const handleAdd = () => {
+  editingID.value = null
+  Object.assign(formData, createEmptyForm())
+  formRef.value?.clearValidate()
   dialogTitle.value = '新增{{.MenuTitle}}'
   dialogVisible.value = true
 }
 
 const handleEdit = (row: {{.ModelName}}) => {
-  dialogTitle.value = '编辑{{.MenuTitle}}'
-  Object.assign(formData, row)
+  editingID.value = row.id
+	dialogTitle.value = '编辑{{.MenuTitle}}'
+  const defaults = createEmptyForm()
+  for (const key of Object.keys(defaults) as (keyof {{.ModelName}}CreateParams)[]) {
+    Object.assign(formData, { [key]: row[key as keyof {{.ModelName}}] ?? defaults[key] })
+  }
+  formRef.value?.clearValidate()
   dialogVisible.value = true
 }
 
@@ -176,8 +188,8 @@ const handleDelete = async (row: {{.ModelName}}) => {
 
 const handleSubmit = async () => {
   await formRef.value?.validate()
-  if ((formData as any).id) {
-    await update{{.ModelName}}(formData as any)
+  if (editingID.value !== null) {
+    await update{{.ModelName}}({ ...formData, id: editingID.value })
     ElMessage.success('更新成功')
   } else {
     await create{{.ModelName}}(formData)

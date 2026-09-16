@@ -10,13 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 )
 
 const (
 	defaultOutputPath = "docs/openapi.yaml"
 	docTitle          = "go-layout API"
-	docVersion        = "1.0.0"
 	docDescription    = "由 `go-layout command gen-openapi` 基于声明式路由树自动生成。"
 )
 
@@ -123,7 +123,7 @@ func buildYAML(endpoints []endpoint) string {
 	b.WriteString(quote(docTitle))
 	b.WriteString("\n")
 	b.WriteString("  version: ")
-	b.WriteString(quote(docVersion))
+	b.WriteString(quote(global.Version))
 	b.WriteString("\n")
 	b.WriteString("  description: ")
 	b.WriteString(quote(docDescription))

@@ -76,3 +76,42 @@ func TestApplyLoginFailStateResetsExpiredLock(t *testing.T) {
 		t.Fatal("expected no lock while fail count below threshold")
 	}
 }
+
+func TestLoginAllowedPreservesFailuresUntilThresholdAndClearsExpiredLock(t *testing.T) {
+	db := newSessionTestDB(t)
+	if err := db.Exec(`CREATE TABLE login_security_state (id integer primary key autoincrement, username text unique, fail_count integer default 0, lock_until datetime, last_failed_at datetime, created_at datetime, updated_at datetime)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	s := NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db})
+	for i := 1; i <= defaultLoginMaxFailures; i++ {
+		if err := s.CheckLoginAllowed("admin"); err != nil {
+			t.Fatalf("attempt %d denied: %v", i, err)
+		}
+		if err := s.incrementLoginFailState("admin"); err != nil {
+			t.Fatal(err)
+		}
+		var state model.LoginSecurityState
+		if err := db.First(&state).Error; err != nil {
+			t.Fatal(err)
+		}
+		if state.FailCount != uint(i) {
+			t.Fatalf("fail count=%d want %d", state.FailCount, i)
+		}
+	}
+	if err := s.CheckLoginAllowed("admin"); err == nil {
+		t.Fatal("expected lock after consecutive failures")
+	}
+	if err := db.Table("login_security_state").Where("username = ?", "admin").Update("lock_until", time.Now().Add(-time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckLoginAllowed("admin"); err != nil {
+		t.Fatal(err)
+	}
+	var state model.LoginSecurityState
+	if err := db.First(&state).Error; err != nil {
+		t.Fatal(err)
+	}
+	if state.FailCount != 0 || state.LockUntil != nil {
+		t.Fatalf("expired lock not cleared: %#v", state)
+	}
+}

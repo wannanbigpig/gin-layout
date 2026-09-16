@@ -14,15 +14,11 @@ type adminAccessTokenClaims struct {
 	jwt.RegisteredClaims
 }
 
-func newAdminAccessTokenClaims(claims token.AdminCustomClaims) adminAccessTokenClaims {
-	return adminAccessTokenClaims{
+func (s *LoginService) generateAccessToken(claims token.AdminCustomClaims) (string, error) {
+	return token.Generate(adminAccessTokenClaims{
 		UserID:           claims.UserID,
 		Username:         claims.Username,
 		IsSuperAdmin:     claims.IsSuperAdmin,
 		RegisteredClaims: claims.RegisteredClaims,
-	}
-}
-
-func (s *LoginService) generateAccessToken(claims token.AdminCustomClaims) (string, error) {
-	return token.Generate(newAdminAccessTokenClaims(claims))
+	})
 }

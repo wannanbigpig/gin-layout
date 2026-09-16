@@ -21,7 +21,7 @@ import (
 const defaultSessionRevokeReason = "管理员强制下线"
 
 // ListSessions 分页查询在线会话列表。
-func (s *LoginService) ListSessions(params *form.SessionList) *resources.Collection {
+func (s *LoginService) ListSessions(params *form.SessionList) (*resources.Collection, error) {
 	query := query_builder.New().
 		AddEq("login_status", model.LoginStatusSuccess).
 		AddLike("username", params.Username).
@@ -61,9 +61,9 @@ func (s *LoginService) ListSessions(params *form.SessionList) *resources.Collect
 	total, collection, err := model.ListPageE(loginLog, params.Page, params.PerPage, condition, args, listOptionalParams)
 	if err != nil {
 		log.Logger.Error("查询在线会话列表失败", zap.Error(err))
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
-	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 // RevokeSession 撤销指定在线会话。
@@ -84,7 +84,14 @@ func (s *LoginService) RevokeSession(ctx context.Context, id uint, reason string
 		return err
 	}
 
-	remainingTime := time.Until(loginLog.TokenExpires.Time)
+	remainingTime := time.Duration(0)
+	if loginLog.TokenExpires != nil {
+		remainingTime = time.Until(loginLog.TokenExpires.Time)
+	}
+	if remainingTime <= 0 {
+		s.kickSession(loginLog.UID, loginLog.JwtID, SessionControlCodeKicked, revokeReason)
+		return nil
+	}
 	if err := s.writeTokenToBlacklistFn(loginLog.JwtID, remainingTime); err != nil {
 		log.Logger.Warn("Redis 黑名单写入失败，保留数据库撤销状态作为兜底",
 			zap.Error(err),
@@ -115,7 +122,10 @@ func (s *LoginService) loadRevocableSession(id uint) (*model.AdminLoginLogs, err
 	if loginLog.IsRevoked != model.IsRevokedNo {
 		return nil, e.NewBusinessError(e.InvalidParameter, "会话已撤销")
 	}
-	if loginLog.TokenExpires == nil || !loginLog.TokenExpires.Time.After(time.Now()) {
+	now := time.Now()
+	accessAlive := loginLog.TokenExpires != nil && loginLog.TokenExpires.Time.After(now)
+	refreshAlive := loginLog.RefreshExpires != nil && loginLog.RefreshExpires.Time.After(now)
+	if !accessAlive && !refreshAlive {
 		return nil, e.NewBusinessError(e.InvalidParameter, "会话已过期")
 	}
 	if loginLog.JwtID == "" {

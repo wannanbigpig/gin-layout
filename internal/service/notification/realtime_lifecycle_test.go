@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -58,9 +59,18 @@ func TestShutdownRealtimeDispatcherSendsCloseFrame(t *testing.T) {
 	defaultHub = &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
 	defer func() { defaultHub = previousHub }()
 
-	_ = defaultHub.register(&wsClient{userID: 11, conn: serverConn})
+	client := &wsClient{userID: 11, conn: serverConn}
+	if err := defaultHub.register(client); err != nil {
+		t.Fatal(err)
+	}
 
 	ShutdownRealtimeDispatcher()
+	ShutdownRealtimeDispatcher()
+	defaultHub.unregister(client)
+	defaultHub.unregister(client)
+	if defaultHub.totalConns != 0 || len(defaultHub.clients) != 0 {
+		t.Fatalf("shutdown/unregister left invalid connection state: count=%d clients=%d", defaultHub.totalConns, len(defaultHub.clients))
+	}
 
 	_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
 	if _, _, err := clientConn.ReadMessage(); !websocket.IsCloseError(err, websocket.CloseGoingAway) {
@@ -70,7 +80,7 @@ func TestShutdownRealtimeDispatcherSendsCloseFrame(t *testing.T) {
 
 func TestHubChannelSubscriberCountOnlyCountsMatchingSubscriptions(t *testing.T) {
 	h := &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
-	monitorClient := &wsClient{userID: 1}
+	monitorClient := &wsClient{userID: 1, claims: &token.AdminCustomClaims{UserID: 1}}
 	otherClient := &wsClient{userID: 2}
 	monitorClient.SubscribeChannel("monitor")
 	otherClient.SubscribeChannel("other")
@@ -344,4 +354,27 @@ func readRealtimeRedisArray(reader *bufio.Reader) ([]string, error) {
 		args = append(args, string(buf[:size]))
 	}
 	return args, nil
+}
+
+func TestShutdownRealtimeDispatcherRejectsLateRegistration(t *testing.T) {
+	previousHub := defaultHub
+	defaultHub = &hub{clients: make(map[uint]map[*wsClient]struct{}), maxConnsPerUser: wsMaxConnsPerUser, maxConnsTotal: wsMaxConnsTotal}
+	defer func() { defaultHub = previousHub }()
+
+	// 模拟请求已升级，但 register 的执行晚于停服快照。
+	registerAllowed := make(chan struct{})
+	registered := make(chan error, 1)
+	h := defaultHub
+	go func() {
+		<-registerAllowed
+		registered <- h.register(&wsClient{userID: 11})
+	}()
+	ShutdownRealtimeDispatcher()
+	close(registerAllowed)
+	if err := <-registered; err == nil {
+		t.Fatal("late registration must be rejected after shutdown")
+	}
+	if h.totalConns != 0 || len(h.clients) != 0 {
+		t.Fatalf("rejected registration modified connection state: count=%d clients=%d", h.totalConns, len(h.clients))
+	}
 }

@@ -91,7 +91,7 @@ func validateAuthModeUpdate(current uint8, requested *int8) error {
 }
 
 // ListPage 分页查询 API 权限列表。
-func (s *ApiService) ListPage(params *form.ListPermission) *resources.Collection {
+func (s *ApiService) ListPage(params *form.ListPermission) (*resources.Collection, error) {
 	condition, args := s.buildListCondition(params)
 
 	apiModel := model.NewApi()
@@ -106,10 +106,10 @@ func (s *ApiService) ListPage(params *form.ListPermission) *resources.Collection
 		},
 	)
 	if err != nil {
-		return resources.NewApiTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 
-	return resources.NewApiTransformer().ToCollection(params.Page, params.PerPage, total, collection)
+	return resources.NewApiTransformer().ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 // buildListCondition 构建 API 权限列表查询条件。
@@ -120,17 +120,10 @@ func (s *ApiService) buildListCondition(params *form.ListPermission) (string, []
 	}
 
 	qb.AddLike("name", params.Name).
-		AddEq("method", emptyToNil(params.Method)).
+		AddEq("method", params.Method).
 		AddLike("route", params.Route).
 		AddEq("is_auth", params.IsAuth).
 		AddEq("is_effective", params.IsEffective)
 
 	return qb.Build()
-}
-
-func emptyToNil(value string) any {
-	if value == "" {
-		return nil
-	}
-	return value
 }

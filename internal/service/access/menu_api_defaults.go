@@ -268,9 +268,13 @@ func cloneMenuAPIBindings(source []defaultMenuAPIBinding) []defaultMenuAPIBindin
 
 // Sync 将默认菜单接口映射同步到数据库，补齐新增默认关系并删除过期默认关系。
 func (s *MenuAPIDefaultsService) Sync(tx ...*gorm.DB) error {
-	db, err := defaultMenuAPIDB(FirstTx(tx))
-	if err != nil {
-		return err
+	db := FirstTx(tx)
+	if db == nil {
+		var err error
+		db, err = model.NewMenuApiMap().GetDB()
+		if err != nil {
+			return err
+		}
 	}
 
 	if FirstTx(tx) != nil {
@@ -296,13 +300,6 @@ func (s *MenuAPIDefaultsService) syncWithDB(db *gorm.DB) error {
 		return fmt.Errorf("reconcile default menu/api mappings: %w", err)
 	}
 	return nil
-}
-
-func defaultMenuAPIDB(tx *gorm.DB) (*gorm.DB, error) {
-	if tx != nil {
-		return tx, nil
-	}
-	return model.NewMenuApiMap().GetDB()
 }
 
 func collectMenuAPIBindingKeys(bindings []defaultMenuAPIBinding) (menuCodes []string, routes []string, methods []string) {

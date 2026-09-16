@@ -72,7 +72,7 @@ func buildExportRecordBaseResources(data *model.SysExportRecord) ExportRecordBas
 	sceneName := exportSceneDisplayName(data.Scene)
 	taskCode := exportSceneTaskCode(data.Scene)
 	statusName := exportStatusDisplayName(data.Status)
-	hasFile := exportRecordHasFile(data)
+	hasFile := data.FileID > 0 || strings.TrimSpace(data.FileUUID) != ""
 	stage, stageName := exportRecordStage(data.Status, hasFile)
 	downloadURL := exportRecordDownloadURL(data)
 	return ExportRecordBaseResources{
@@ -172,13 +172,6 @@ func exportRecordStage(status string, hasFile bool) (string, string) {
 	default:
 		return "", ""
 	}
-}
-
-func exportRecordHasFile(data *model.SysExportRecord) bool {
-	if data == nil {
-		return false
-	}
-	return data.FileID > 0 || strings.TrimSpace(data.FileUUID) != ""
 }
 
 func exportRecordDownloadURL(data *model.SysExportRecord) string {

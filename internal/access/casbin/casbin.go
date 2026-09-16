@@ -2,6 +2,7 @@ package casbinx
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/casbin/casbin/v3"
@@ -13,11 +14,19 @@ import (
 // CasbinEnforcer 封装共享 Enforcer 与事务态 Enforcer 的切换逻辑。
 type CasbinEnforcer struct {
 	*casbin.Enforcer
-	errInit error
-	model   model.Model
-	tx      *gorm.DB
+	errInit     error
+	model       model.Model
+	tx          *gorm.DB
+	policyState *sharedPolicyState
 	// txEnforcerCache 缓存同一事务内构建的 Enforcer，避免重复创建。
 	txEnforcerCache map[*gorm.DB]*casbin.Enforcer
+}
+
+// sharedPolicyState 在策略重新加载期间保护内存快照。
+// 最新一次加载失败后拒绝继续使用旧快照，避免过期的允许规则继续授权。
+type sharedPolicyState struct {
+	mu        sync.RWMutex
+	reloadErr error
 }
 
 var (
@@ -59,20 +68,41 @@ func ReloadPolicy() error {
 	if err != nil {
 		return err
 	}
-	return enforcer.LoadPolicy()
+	return enforcer.reloadPolicy()
+}
+
+func (e *CasbinEnforcer) reloadPolicy() error {
+	if e.policyState == nil {
+		e.policyState = &sharedPolicyState{}
+	}
+	e.policyState.mu.Lock()
+	defer e.policyState.mu.Unlock()
+
+	err := e.Enforcer.LoadPolicy()
+	e.policyState.reloadErr = err
+	return err
+}
+
+// Enforce 串行化策略读取与重载；最新一次重载失败时按 fail-closed 拒绝请求。
+func (e *CasbinEnforcer) Enforce(rvals ...interface{}) (bool, error) {
+	if e.policyState == nil {
+		return e.Enforcer.Enforce(rvals...)
+	}
+	e.policyState.mu.RLock()
+	defer e.policyState.mu.RUnlock()
+	if e.policyState.reloadErr != nil {
+		return false, fmt.Errorf("casbin policy unavailable after reload failure: %w", e.policyState.reloadErr)
+	}
+	return e.Enforcer.Enforce(rvals...)
 }
 
 // SetDB 返回一个绑定到指定事务的新 CasbinEnforcer。
 func (e *CasbinEnforcer) SetDB(tx *gorm.DB) *CasbinEnforcer {
 	return &CasbinEnforcer{
-		Enforcer: e.Enforcer,
-		errInit:  e.errInit,
-		model:    e.model,
-		tx:       tx,
+		Enforcer:    e.Enforcer,
+		errInit:     e.errInit,
+		model:       e.model,
+		tx:          tx,
+		policyState: e.policyState,
 	}
-}
-
-// RegisterCustomFunctions 注册自定义函数
-func (e *CasbinEnforcer) registerCustomFunctions() {
-	// 注册自定义函数
 }

@@ -17,9 +17,10 @@ const (
 )
 
 type AliyunOSSDriver struct {
-	client       *oss.Client
-	bucket       string
-	publicDomain string
+	client        *oss.Client
+	signingClient *oss.Client
+	bucket        string
+	publicDomain  string
 }
 
 func NewAliyunOSSDriver(config AliyunOSSConfig) *AliyunOSSDriver {
@@ -28,10 +29,15 @@ func NewAliyunOSSDriver(config AliyunOSSConfig) *AliyunOSSDriver {
 		WithRegion(config.Region).
 		WithEndpoint(endpoint).
 		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(config.AccessKeyID, config.AccessKeySecret))
+	signingCfg := oss.LoadDefaultConfig().
+		WithRegion(config.Region).
+		WithEndpoint(config.Endpoint).
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(config.AccessKeyID, config.AccessKeySecret))
 	return &AliyunOSSDriver{
-		client:       oss.NewClient(cfg),
-		bucket:       config.Bucket,
-		publicDomain: strings.TrimRight(config.PublicDomain, "/"),
+		client:        oss.NewClient(cfg),
+		signingClient: oss.NewClient(signingCfg),
+		bucket:        config.Bucket,
+		publicDomain:  strings.TrimRight(config.PublicDomain, "/"),
 	}
 }
 
@@ -92,7 +98,7 @@ func (d *AliyunOSSDriver) URL(bucket, objectKey string, isPublic bool) string {
 }
 
 func (d *AliyunOSSDriver) SignedURL(ctx context.Context, bucket, objectKey string, ttl time.Duration) (string, error) {
-	out, err := d.client.Presign(ctx, &oss.GetObjectRequest{Bucket: oss.Ptr(firstNonEmpty(bucket, d.bucket)), Key: oss.Ptr(objectKey)}, func(options *oss.PresignOptions) {
+	out, err := d.signingClient.Presign(ctx, &oss.GetObjectRequest{Bucket: oss.Ptr(firstNonEmpty(bucket, d.bucket)), Key: oss.Ptr(objectKey)}, func(options *oss.PresignOptions) {
 		options.Expires = ttl
 	})
 	if err != nil {
@@ -107,7 +113,7 @@ func (d *AliyunOSSDriver) SignedImageThumbnailURL(ctx context.Context, bucket, o
 		Key:     oss.Ptr(objectKey),
 		Process: oss.Ptr(aliyunOSSThumbnailProcess),
 	}
-	out, err := d.client.Presign(ctx, request, func(options *oss.PresignOptions) {
+	out, err := d.signingClient.Presign(ctx, request, func(options *oss.PresignOptions) {
 		options.Expires = ttl
 	})
 	if err != nil {
@@ -124,7 +130,7 @@ func (d *AliyunOSSDriver) PresignPutObject(ctx context.Context, bucket, objectKe
 	if contentType != "" {
 		request.ContentType = oss.Ptr(contentType)
 	}
-	result, err := d.client.Presign(ctx, request, func(opts *oss.PresignOptions) {
+	result, err := d.signingClient.Presign(ctx, request, func(opts *oss.PresignOptions) {
 		opts.Expires = ttl
 	})
 	if err != nil {
@@ -156,7 +162,7 @@ func (d *AliyunOSSDriver) PresignMultipartPart(ctx context.Context, input Multip
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
-	result, err := d.client.Presign(ctx, &oss.UploadPartRequest{
+	result, err := d.signingClient.Presign(ctx, &oss.UploadPartRequest{
 		Bucket:     oss.Ptr(bucket),
 		Key:        oss.Ptr(input.ObjectKey),
 		UploadId:   oss.Ptr(input.UploadID),

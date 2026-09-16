@@ -41,8 +41,12 @@ func (s *RoleService) Options(keyword string) []resources.RoleOptionResources {
 }
 
 // List 分页查询角色列表。
-func (s *RoleService) List(params *form.RoleList) interface{} {
-	condition, args := s.buildListCondition(params)
+func (s *RoleService) List(params *form.RoleList) (interface{}, error) {
+	condition, args := query_builder.New().
+		AddLike("name", params.Name).
+		AddLike("code", params.Code).
+		AddEq("status", params.Status).
+		Build()
 
 	roleModel := model.NewRole()
 	total, collection, err := model.ListPageE(
@@ -54,18 +58,10 @@ func (s *RoleService) List(params *form.RoleList) interface{} {
 		model.ListOptionalParams{OrderBy: "sort desc, id desc"},
 	)
 	if err != nil {
-		return resources.ToRawCollection(params.Page, params.PerPage, 0, make([]*model.Role, 0))
+		return nil, err
 	}
 
-	return resources.ToRawCollection(params.Page, params.PerPage, total, collection)
-}
-
-func (s *RoleService) buildListCondition(params *form.RoleList) (string, []any) {
-	return query_builder.New().
-		AddLike("name", params.Name).
-		AddLike("code", params.Code).
-		AddEq("status", params.Status).
-		Build()
+	return resources.ToRawCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 // Create 新增角色。

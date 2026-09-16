@@ -65,7 +65,7 @@ func TestUpdateRejectsImmutableCodeBeforeDBLookup(t *testing.T) {
 	}
 }
 
-func TestUpdateRoleDataScopeDeptKeepsOnlyExistingActiveDepartments(t *testing.T) {
+func TestUpdateRoleDataScopeDeptRejectsMissingOrDeletedDepartments(t *testing.T) {
 	db := newRoleSQLiteDB(t)
 	activeDept := model.Department{Name: "active"}
 	deletedDept := model.Department{
@@ -88,16 +88,26 @@ func TestUpdateRoleDataScopeDeptKeepsOnlyExistingActiveDepartments(t *testing.T)
 	}
 
 	err := NewRoleService().updateRoleDataScopeDept(7, access.DataScopeCustom, []uint{activeDept.ID, deletedDept.ID, 1000}, db)
-	if err != nil {
-		t.Fatalf("update role data scope dept failed: %v", err)
+	var businessErr *e.BusinessError
+	if !errors.As(err, &businessErr) || businessErr.GetCode() != e.DepartmentNotFound {
+		t.Fatalf("expected department not found, got %T: %v", err, err)
 	}
 
 	var got []uint
 	if err := db.Model(&model.RoleDataScopeDept{}).Where("role_id = ?", 7).Order("dept_id").Pluck("dept_id", &got).Error; err != nil {
 		t.Fatalf("query mappings failed: %v", err)
 	}
-	if len(got) != 1 || got[0] != activeDept.ID {
-		t.Fatalf("expected only active department mapping, got %v", got)
+	if len(got) != 2 || got[0] != deletedDept.ID || got[1] != 999 {
+		t.Fatalf("expected mappings unchanged after validation failure, got %v", got)
+	}
+}
+
+func TestUpdateRoleDataScopeDeptRejectsEmptyCustomScope(t *testing.T) {
+	db := newRoleSQLiteDB(t)
+	err := NewRoleService().updateRoleDataScopeDept(7, access.DataScopeCustom, nil, db)
+	var businessErr *e.BusinessError
+	if !errors.As(err, &businessErr) || businessErr.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected invalid parameter, got %T: %v", err, err)
 	}
 }
 

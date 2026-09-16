@@ -1,6 +1,9 @@
 package resources
 
 import (
+	{{- if .HasJSON}}
+	"gorm.io/datatypes"
+	{{- end}}
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
@@ -52,6 +55,7 @@ func New{{.ModelName}}Transformer() {{.ModelName}}Transformer {
 	}
 }
 
+{{- if .HasOptions}}
 // {{.ModelName}}OptionResources 选择器选项，仅暴露下拉所需的最小字段。
 type {{.ModelName}}OptionResources struct {
 	ID   uint   `json:"id"`
@@ -67,8 +71,9 @@ func To{{.ModelName}}Options(items []*model.{{.ModelName}}) []{{.ModelName}}Opti
 		}
 		options = append(options, {{.ModelName}}OptionResources{
 			ID:   item.ID,
-			Name: item.Name,
+			Name: item.{{.OptionField.Name}},
 		})
 	}
 	return options
 }
+{{- end}}

@@ -8,6 +8,7 @@ import (
 	genconsole "github.com/wannanbigpig/gin-layout/internal/console/gen"
 	initconsole "github.com/wannanbigpig/gin-layout/internal/console/init"
 	migrateconsole "github.com/wannanbigpig/gin-layout/internal/console/migrate"
+	openapiconsole "github.com/wannanbigpig/gin-layout/internal/console/openapi"
 	"github.com/wannanbigpig/gin-layout/internal/console/system_init"
 	taskconsole "github.com/wannanbigpig/gin-layout/internal/console/task"
 )
@@ -34,4 +35,5 @@ func registerSubCommands() {
 	Cmd.AddCommand(migrateconsole.Cmd)                                                                                 // 迁移管理: go-layout command migrate up / down / create / check
 	Cmd.AddCommand(bootstrapx.WrapCommand(taskconsole.Cmd, bootstrapx.Requirements{Data: true}))                       // 任务扫描: go-layout command task scan-async
 	Cmd.AddCommand(genconsole.Cmd)                                                                                     // 代码生成: go-layout command gen --from=gen/specs/product.yaml
+	Cmd.AddCommand(openapiconsole.Cmd)                                                                                 // OpenAPI 文档: go-layout command gen-openapi
 }

@@ -37,10 +37,3 @@ func (q *logListQuery) addCreatedAtRange(startTime, endTime string) *logListQuer
 	}
 	return q
 }
-
-func uintFilterValue(value uint) any {
-	if value == 0 {
-		return nil
-	}
-	return value
-}

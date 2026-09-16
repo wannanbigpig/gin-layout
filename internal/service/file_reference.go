@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -99,7 +100,7 @@ func (s *FileReferenceService) HasActiveReferences(fileID uint) (bool, error) {
 	return count > 0, nil
 }
 
-func (s *FileReferenceService) List(params *form.FileReferenceList) *resources.Collection {
+func (s *FileReferenceService) List(params *form.FileReferenceList) (*resources.Collection, error) {
 	query := buildFileReferenceListQuery(params)
 	condition, args := query.Build()
 	modelRef := model.NewUploadFileReference()
@@ -107,15 +108,18 @@ func (s *FileReferenceService) List(params *form.FileReferenceList) *resources.C
 		modelRef.SetDB(s.db)
 	}
 	db, err := s.dbOrDefault()
-	if err != nil || !db.Migrator().HasTable(&model.UploadFileReference{}) {
-		return resources.NewFileReferenceTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !db.Migrator().HasTable(&model.UploadFileReference{}) {
+		return nil, fmt.Errorf("table %s is unavailable", modelRef.TableName())
 	}
 	transformer := resources.NewFileReferenceTransformer()
 	total, rows, err := model.ListPageE(modelRef, params.Page, params.PerPage, condition, args, model.ListOptionalParams{OrderBy: "created_at DESC, id DESC"})
 	if err != nil {
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
-	return transformer.ToCollection(params.Page, params.PerPage, total, rows)
+	return transformer.ToCollection(params.Page, params.PerPage, total, rows), nil
 }
 
 func buildFileReferenceListQuery(params *form.FileReferenceList) *query_builder.QueryBuilder {

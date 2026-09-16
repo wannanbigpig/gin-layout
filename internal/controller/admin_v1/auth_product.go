@@ -31,7 +31,11 @@ func (api ProductController) List(ctx *gin.Context) {
 		return
 	}
 
-	data := api.newProductService(ctx).List(params)
+	data, err := api.newProductService(ctx).List(params)
+	if err != nil {
+		api.Err(ctx, err)
+		return
+	}
 	api.Success(ctx, data)
 }
 

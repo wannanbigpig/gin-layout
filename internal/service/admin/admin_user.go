@@ -63,6 +63,7 @@ var revokeUserTokensFunc = func(tx *gorm.DB, userID uint, revokedCode uint8, rev
 
 type adminDataScopeFilter interface {
 	Build(ctx context.Context, input access.DataScopeInput, deptCol, ownerCol string) (string, []any)
+	ResolveDepartmentScope(ctx context.Context, input access.DataScopeInput) (bool, []uint, error)
 }
 
 var newAdminDataScopeFilter = func() adminDataScopeFilter {
@@ -105,6 +106,14 @@ func (s *AdminUserService) GetUserInfo(id uint) (*resources.AdminUserResources, 
 	}
 
 	return resources.NewAdminUserTransformer().ToStruct(adminUsersModel), nil
+}
+
+// GetManagedUserInfo 在当前操作人的数据权限内获取管理员详情。
+func (s *AdminUserService) GetManagedUserInfo(id uint) (*resources.AdminUserResources, error) {
+	if err := s.requireUserInDataScope(id); err != nil {
+		return nil, err
+	}
+	return s.GetUserInfo(id)
 }
 
 // GetUserMenuInfo 获取用户权限信息。
@@ -164,7 +173,7 @@ func (s *AdminUserService) getUserMenuInfoWithModels(id uint, locale string, adm
 }
 
 // List 返回管理员分页列表。
-func (s *AdminUserService) List(params *form.AdminUserList) *resources.Collection {
+func (s *AdminUserService) List(params *form.AdminUserList) (*resources.Collection, error) {
 	conditionStr, args := s.buildListCondition(params)
 
 	// 接入数据权限过滤
@@ -182,36 +191,128 @@ func (s *AdminUserService) List(params *form.AdminUserList) *resources.Collectio
 	total, collection, err := model.ListPageE(adminUserModel, params.Page, params.PerPage, conditionStr, args, s.adminUserListOptions())
 	if err != nil {
 		log.Logger.Error("查询管理员列表失败", zap.Error(err))
-		return resources.NewAdminUserTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
-	return resources.NewAdminUserTransformer().ToCollection(params.Page, params.PerPage, total, collection)
+	return resources.NewAdminUserTransformer().ToCollection(params.Page, params.PerPage, total, collection), nil
+}
+
+// adminUserListOptions 返回管理员列表查询选项。
+// 列表页仅使用部门 id/name/pid，避免 Preload 全字段带来额外 IO。
+func (s *AdminUserService) adminUserListOptions() model.ListOptionalParams {
+	return model.ListOptionalParams{
+		OrderBy: "created_at desc, id desc",
+		Preload: map[string]func(db *gorm.DB) *gorm.DB{
+			"Department": func(db *gorm.DB) *gorm.DB {
+				return db.Select("id", "name", "pid")
+			},
+		},
+	}
+}
+
+// buildListCondition 构建管理员列表查询条件。
+func (s *AdminUserService) buildListCondition(params *form.AdminUserList) (string, []any) {
+	var userID any
+	if params.ID > 0 {
+		userID = params.ID
+	}
+	query := query_builder.New().
+		AddLike("username", params.UserName).
+		AddEq("id", userID).
+		AddLike("nickname", params.NickName).
+		AddLike("email", params.Email).
+		AddLike("full_phone_number", params.PhoneNumber).
+		AddEq("status", params.Status)
+	if params.DeptId > 0 {
+		query.AddCondition(
+			"EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND admin_user_department_map.dept_id = ?)",
+			params.DeptId,
+		)
+	}
+	return query.Build()
 }
 
 // buildDataScopeCondition 构建数据权限过滤条件。
 // 管理员和部门是多对多关系（通过 admin_user_department_map 表），使用 EXISTS 子查询过滤。
 func (s *AdminUserService) buildDataScopeCondition() (string, []any) {
-	uid := s.GetAdminUserId()
-
-	// 从上下文获取 AuthPrincipal 判断是否超管
-	isSuperAdmin := false
-	if ctx := s.GetCtx(); ctx != nil {
-		if principal := auth.GetAuthPrincipal(ctx); principal != nil {
-			isSuperAdmin = principal.IsSuperAdmin == global.Yes
-		}
-	}
-
-	input := access.DataScopeInput{
-		UID:          uid,
-		IsSuperAdmin: isSuperAdmin,
-	}
-
 	filter := newAdminDataScopeFilter()
-	cond, filterArgs := filter.Build(s.context(), input, "admin_user_department_map.dept_id", "admin_user.id")
+	cond, filterArgs := filter.Build(s.context(), s.dataScopeInput(), "admin_user_department_map.dept_id", "admin_user.id")
 	if cond == "" {
 		return "", nil
 	}
 
 	return wrapAdminUserDeptScopeCondition(cond), filterArgs
+}
+
+func (s *AdminUserService) dataScopeInput() access.DataScopeInput {
+	uid := s.GetAdminUserId()
+	isSuperAdmin := uid == global.SuperAdminId
+	if ctx := s.GetCtx(); ctx != nil {
+		if principal := auth.GetAuthPrincipal(ctx); principal != nil {
+			isSuperAdmin = principal.IsSuperAdmin == global.Yes
+		}
+	}
+	return access.DataScopeInput{UID: uid, IsSuperAdmin: isSuperAdmin}
+}
+
+// requireDepartmentsInDataScope 确保写入的部门都属于当前操作人的合并数据范围。
+func (s *AdminUserService) requireDepartmentsInDataScope(deptIDs []uint) error {
+	deptIDs = access.UniqueUintSlice(deptIDs)
+	if len(deptIDs) == 0 {
+		return nil
+	}
+
+	scopeAll, allowedDeptIDs, err := newAdminDataScopeFilter().ResolveDepartmentScope(s.context(), s.dataScopeInput())
+	if err != nil {
+		return err
+	}
+	if scopeAll {
+		return nil
+	}
+
+	allowed := make(map[uint]struct{}, len(allowedDeptIDs))
+	for _, deptID := range allowedDeptIDs {
+		allowed[deptID] = struct{}{}
+	}
+	for _, deptID := range deptIDs {
+		if _, ok := allowed[deptID]; !ok {
+			return e.NewBusinessError(e.AuthorizationErr)
+		}
+	}
+	return nil
+}
+
+// requireUserInDataScope 确保目标用户属于当前操作人可管理的数据范围。
+func (s *AdminUserService) requireUserInDataScope(id uint) error {
+	condition, args := s.buildDataScopeCondition()
+	if condition == "" {
+		return nil
+	}
+	db, err := model.NewAdminUsers().GetDB()
+	if err != nil {
+		return err
+	}
+	allowed, err := adminUserInDataScope(db, id, condition, args)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return e.NewBusinessError(e.AuthorizationErr)
+	}
+	return nil
+}
+
+func adminUserInDataScope(db *gorm.DB, id uint, condition string, args []any) (bool, error) {
+	var allowed bool
+	query := db.Table(model.NewAdminUsers().TableName()).
+		Select("1").
+		Where("admin_user.id = ? AND admin_user.deleted_at = 0", id)
+	if condition != "" {
+		query = query.Where(condition, args...)
+	}
+	if err := query.Limit(1).Scan(&allowed).Error; err != nil {
+		return false, err
+	}
+	return allowed, nil
 }
 
 func wrapAdminUserDeptScopeCondition(cond string) string {
@@ -248,48 +349,6 @@ func (s *AdminUserService) Options(keyword string) []resources.AdminUserOptionRe
 		return []resources.AdminUserOptionResources{}
 	}
 	return resources.ToAdminUserOptions(collection)
-}
-
-// adminUserListOptions 返回管理员列表查询选项。
-// 列表页仅使用部门 id/name/pid，避免 Preload 全字段带来额外 IO。
-func (s *AdminUserService) adminUserListOptions() model.ListOptionalParams {
-	return model.ListOptionalParams{
-		OrderBy: "created_at desc, id desc",
-		Preload: map[string]func(db *gorm.DB) *gorm.DB{
-			"Department": func(db *gorm.DB) *gorm.DB {
-				return db.Select("id", "name", "pid")
-			},
-		},
-	}
-}
-
-// buildListCondition 构建管理员列表查询条件。
-func (s *AdminUserService) buildListCondition(params *form.AdminUserList) (string, []any) {
-	qb := query_builder.New().
-		AddLike("username", params.UserName).
-		AddEq("id", zeroToNil(params.ID)).
-		AddLike("nickname", params.NickName).
-		AddLike("email", params.Email).
-		AddLike("full_phone_number", params.PhoneNumber).
-		AddEq("status", params.Status)
-
-	// 部门筛选：使用 EXISTS 子查询关联用户 - 部门映射表
-	if params.DeptId > 0 {
-		qb.AddCondition(
-			"EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND admin_user_department_map.dept_id = ?)",
-			params.DeptId,
-		)
-	}
-
-	return qb.Build()
-}
-
-// zeroToNil 将 0 转换为 nil，用于查询条件构建时排除空值筛选。
-func zeroToNil(value uint) any {
-	if value == 0 {
-		return nil
-	}
-	return value
 }
 
 // userMenuQuery 构建用户菜单查询条件。

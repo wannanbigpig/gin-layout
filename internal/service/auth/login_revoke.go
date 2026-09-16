@@ -25,8 +25,8 @@ func (s *LoginService) isTokenRevokedInLog(jwtId string) bool {
 	loginLog := model.NewAdminLoginLogs()
 	err := loginLog.FindByJwtId(jwtId)
 	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			logRevokeError("检查token撤销状态失败", zap.Error(err), zap.String("jwt_id", jwtId))
+		if !errors.Is(err, gorm.ErrRecordNotFound) && log.Logger != nil {
+			log.Logger.Error("检查token撤销状态失败", zap.Error(err), zap.String("jwt_id", jwtId))
 		}
 		return false
 	}
@@ -76,11 +76,4 @@ func (s *LoginService) markLoginLogRowsRevoked(ctx context.Context, ids []uint, 
 	}
 	loginLog.SetDB(db)
 	return loginLog.UpdateRevokedStatusByIds(ids, revokedCode, revokedReason, revokedAt)
-}
-
-func logRevokeError(message string, fields ...zap.Field) {
-	if log.Logger == nil {
-		return
-	}
-	log.Logger.Error(message, fields...)
 }

@@ -25,7 +25,11 @@ func (api SessionController) List(c *gin.Context) {
 		return
 	}
 
-	result := auth.NewLoginService().ListSessions(params)
+	result, err := auth.NewLoginService().ListSessions(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

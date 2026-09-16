@@ -1,6 +1,7 @@
 package dept
 
 import (
+	"context"
 	"fmt"
 
 	"uuid"
@@ -128,6 +129,9 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 	}); err != nil {
 		return nil, err
 	}
+	if params.Id == 0 || dept.Pids != originPids {
+		access.NewDataScopeFilter().InvalidateAllCache(context.Background())
+	}
 	return dept, nil
 }
 
@@ -188,5 +192,6 @@ func (s *DeptService) executeDeleteTransaction(dept *model.Department, id uint) 
 	if err != nil {
 		return e.NewBusinessError(e.DepartmentCannotDelete)
 	}
+	access.NewDataScopeFilter().InvalidateAllCache(context.Background())
 	return nil
 }

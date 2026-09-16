@@ -13,30 +13,30 @@ import (
 )
 
 // ListPage 分页查询菜单列表
-func (s *MenuService) ListPage(params *form.ListMenu) *resources.Collection {
+func (s *MenuService) ListPage(params *form.ListMenu) (*resources.Collection, error) {
 	condition, args := s.buildListCondition(params, false)
 	menu := model.NewMenu()
 	total, collection, err := model.ListPageE(menu, params.Page, params.PerPage, condition, args)
 	if err != nil {
-		return resources.NewMenuTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
-	return resources.NewMenuTransformer().ToCollectionWithTitles(params.Page, params.PerPage, total, collection, nil)
+	return resources.NewMenuTransformer().ToCollectionWithTitles(params.Page, params.PerPage, total, collection, nil), nil
 }
 
 // List 查询菜单树形列表
-func (s *MenuService) List(params *form.ListMenu, locale string) any {
+func (s *MenuService) List(params *form.ListMenu, locale string) (any, error) {
 	condition, args := s.buildListCondition(params, true)
 	menus, err := model.ListE(model.NewMenu(), condition, args, model.ListOptionalParams{
 		OrderBy: "sort desc, id desc",
 	})
 	if err != nil {
-		return resources.BuildMenuTree(nil, 0, nil)
+		return nil, err
 	}
 	localeTitles, err := s.loadLocalizedTitles(menus, locale)
 	if err != nil {
-		return resources.BuildMenuTree(menus, 0, nil)
+		return nil, err
 	}
-	return resources.BuildMenuTree(menus, 0, localeTitles)
+	return resources.BuildMenuTree(menus, 0, localeTitles), nil
 }
 
 // Delete 删除菜单

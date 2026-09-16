@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 )
 
@@ -16,6 +17,7 @@ func TestBuildYAMLRendersCredentialSecuritySchemes(t *testing.T) {
 	}
 	yaml := buildYAML(endpoints)
 	for _, expected := range []string{
+		"version: \"" + global.Version + "\"",
 		"RefreshCookie:\n      type: apiKey",
 		"WebSocketTicket:\n      type: apiKey",
 		"\"/public\":\n    get:",

@@ -23,6 +23,8 @@ var (
 
 type redisSlot struct {
 	client *redis.Client
+	// disabled 区分显式禁用与尚未初始化，阻止旧配置触发惰性重建。
+	disabled bool
 }
 
 const redisProbeTimeout = 2 * time.Second
@@ -34,14 +36,14 @@ var redisRuntimeProbe = func(client *redis.Client) error {
 }
 
 func ensureRedisInitialized(cfg *c.Conf) error {
-	if currentRedis() != nil {
+	if currentRedis() != nil || redisDisabled() {
 		return nil
 	}
 
 	redisMu.Lock()
 	defer redisMu.Unlock()
 
-	if currentRedis() != nil {
+	if currentRedis() != nil || redisDisabled() {
 		return nil
 	}
 
@@ -73,7 +75,7 @@ func reloadRedis(cfg *c.Conf) error {
 	}
 	old := currentRedis()
 	redisDb = next
-	redisValue.Store(redisSlot{client: next})
+	redisValue.Store(redisSlot{client: next, disabled: cfg == nil || !cfg.Redis.Enable})
 	redisInitError = nil
 	if next != nil {
 		redisHealth.SeedReady()
@@ -117,6 +119,9 @@ func openRedis(cfg *c.Conf) (*redis.Client, error) {
 
 // RedisClient 返回 Redis 客户端和初始化错误
 func RedisClient() *redis.Client {
+	if redisDisabled() {
+		return nil
+	}
 	if client := currentRedis(); client != nil {
 		return client
 	}
@@ -191,3 +196,8 @@ func redisUnavailableError() error {
 
 // ErrRedisUnavailable 表示 Redis 客户端当前不可用。
 var ErrRedisUnavailable = errors.New("redis client is unavailable")
+
+func redisDisabled() bool {
+	slot, ok := redisValue.Load().(redisSlot)
+	return ok && slot.disabled
+}

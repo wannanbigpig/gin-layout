@@ -10,13 +10,13 @@ import (
 // ReadTableSchemaFromDB 从 MySQL INFORMATION_SCHEMA 读取表结构。
 func ReadTableSchemaFromDB(db *gorm.DB, tableName string) (*TableSchema, error) {
 	var columns []struct {
-		ColumnName    string `gorm:"column:COLUMN_NAME"`
-		ColumnType    string `gorm:"column:COLUMN_TYPE"`
-		ColumnComment string `gorm:"column:COLUMN_COMMENT"`
-		IsNullable    string `gorm:"column:IS_NULLABLE"`
-		ColumnKey     string `gorm:"column:COLUMN_KEY"`
+		ColumnName    string  `gorm:"column:COLUMN_NAME"`
+		ColumnType    string  `gorm:"column:COLUMN_TYPE"`
+		ColumnComment string  `gorm:"column:COLUMN_COMMENT"`
+		IsNullable    string  `gorm:"column:IS_NULLABLE"`
+		ColumnKey     string  `gorm:"column:COLUMN_KEY"`
 		ColumnDefault *string `gorm:"column:COLUMN_DEFAULT"`
-		Extra         string `gorm:"column:EXTRA"`
+		Extra         string  `gorm:"column:EXTRA"`
 	}
 
 	// 查询列信息
@@ -110,13 +110,9 @@ func ReadTableSchemaFromDB(db *gorm.DB, tableName string) (*TableSchema, error) 
 
 // extractEnumValues 从列类型中提取枚举值。
 func extractEnumValues(colType string) string {
-	ct := strings.ToLower(colType)
-	if !strings.Contains(ct, "tinyint") {
-		return ""
-	}
-
-	// 常见的 0/1 状态字段
-	if strings.Contains(ct, "tinyint") {
+	ct := strings.ToLower(strings.TrimSpace(colType))
+	// MySQL 常用 tinyint(1) 表示布尔值；普通 tinyint 不能假定只有 0/1。
+	if strings.HasPrefix(ct, "tinyint(1)") {
 		return "0 1"
 	}
 	return ""

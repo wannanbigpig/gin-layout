@@ -7,13 +7,13 @@ import (
 
 // TableSchema 描述一张表的完整结构。
 type TableSchema struct {
-	TableName   string        `yaml:"table_name"`
-	Module      string        `yaml:"module"`
-	Comment     string        `yaml:"comment"`
-	MenuPID     uint          `yaml:"menu_pid"`
-	MenuTitle   string        `yaml:"menu_title"`
-	MenuTitleI18n string      `yaml:"menu_title_i18n"`
-	Fields      []FieldSchema `yaml:"fields"`
+	TableName     string        `yaml:"table_name"`
+	Module        string        `yaml:"module"`
+	Comment       string        `yaml:"comment"`
+	MenuPID       uint          `yaml:"menu_pid"`
+	MenuTitle     string        `yaml:"menu_title"`
+	MenuTitleI18n string        `yaml:"menu_title_i18n"`
+	Fields        []FieldSchema `yaml:"fields"`
 }
 
 // FieldSchema 描述一个字段的结构。
@@ -35,25 +35,30 @@ type FieldSchema struct {
 // TemplateData 传递给模板的完整数据结构。
 type TemplateData struct {
 	// 命名
-	TableName     string // 数据库表名，如 product
-	ModuleSnake   string // 模块蛇形名，如 product
-	ModelName     string // Go 模型名，如 Product
-	ServiceName   string // 服务名，如 ProductService
+	TableName      string // 数据库表名，如 product
+	ModuleSnake    string // 模块蛇形名，如 product
+	ModelName      string // Go 模型名，如 Product
+	ServiceName    string // 服务名，如 ProductService
 	ControllerName string // 控制器名，如 ProductController
-	ResourceName  string // 资源名，如 ProductResources
-	VarName       string // 局部变量名，如 product
-	ComponentKey  string // 组件 key，如 product:index
-	MenuTitle     string // 菜单标题
-	MenuTitleI18n string // 菜单标题 i18n JSON
-	MenuPID       uint   // 父菜单 ID
+	ResourceName   string // 资源名，如 ProductResources
+	VarName        string // 局部变量名，如 product
+	ComponentKey   string // 组件 key，如 product:index
+	MenuTitle      string // 菜单标题
+	MenuTitleI18n  string // 菜单标题 i18n JSON
+	MenuPID        uint   // 父菜单 ID
 
 	// 字段
-	Fields      []FieldData
-	ListFields  []FieldData // 可搜索字段
-	FormFields  []FieldData // 表单字段（排除 id/created_at/updated_at/deleted_at）
-	HasStatus   bool
-	HasDeptID   bool
+	Fields       []FieldData
+	ListFields   []FieldData // 可搜索字段
+	FormFields   []FieldData // 表单字段（排除 id/created_at/updated_at/deleted_at）
+	OptionField  FieldData   // 选择器展示字段
+	HasOptions   bool
+	HasStatus    bool
+	HasDeptID    bool
 	HasCreatedBy bool
+	HasDataScope bool
+	HasJSON      bool
+	HasDateTime  bool
 
 	// 包路径
 	GoModule string // Go 模块名，如 github.com/wannanbigpig/gin-layout
@@ -63,6 +68,7 @@ type TemplateData struct {
 type FieldData struct {
 	Name         string // Go 字段名，如 Name
 	ColumnName   string // 数据库列名，如 name
+	ColumnType   string // 数据库列类型，如 varchar(255)
 	GoType       string // Go 类型，如 string
 	JsonTag      string // json tag，如 name
 	GormTag      string // gorm tag
@@ -73,6 +79,9 @@ type FieldData struct {
 	FormType     string // 前端控件类型，如 el-input
 	EnumValues   string // 枚举值，如 "0 1"
 	MaxLength    int    // 最大长度
+	IsNullable   bool   // 是否允许 NULL
+	DefaultVal   string // 默认值
+	IsIndex      bool   // 是否生成普通索引
 }
 
 // buildTemplateData 从 TableSchema 构建 TemplateData。
@@ -93,6 +102,9 @@ func buildTemplateData(schema *TableSchema, goModule string) *TemplateData {
 	}
 
 	for _, f := range schema.Fields {
+		if isBaseColumn(f.ColumnName) {
+			continue
+		}
 		fd := buildFieldData(f)
 		data.Fields = append(data.Fields, fd)
 
@@ -111,9 +123,34 @@ func buildTemplateData(schema *TableSchema, goModule string) *TemplateData {
 		if f.ColumnName == "created_by" {
 			data.HasCreatedBy = true
 		}
+		if f.GoType == "datatypes.JSON" {
+			data.HasJSON = true
+		}
+		if f.GoType == "utils.FormatDate" {
+			data.HasDateTime = true
+		}
+	}
+	data.HasDataScope = data.HasDeptID && data.HasCreatedBy
+	for _, preferred := range []string{"name", "title", "code"} {
+		for _, field := range data.Fields {
+			if field.ColumnName == preferred && field.GoType == "string" {
+				data.OptionField = field
+				data.HasOptions = true
+				return data
+			}
+		}
 	}
 
 	return data
+}
+
+func isBaseColumn(column string) bool {
+	switch column {
+	case "id", "created_at", "updated_at", "deleted_at":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildFieldData 从 FieldSchema 构建 FieldData。
@@ -121,19 +158,23 @@ func buildFieldData(f FieldSchema) FieldData {
 	fd := FieldData{
 		Name:       f.Name,
 		ColumnName: f.ColumnName,
+		ColumnType: f.ColumnType,
 		GoType:     f.GoType,
 		JsonTag:    f.ColumnName,
 		Comment:    f.Comment,
 		MaxLength:  f.MaxLength,
 		EnumValues: f.EnumValues,
+		IsNullable: f.IsNullable,
+		DefaultVal: f.DefaultVal,
+		IsIndex:    f.IsIndex,
 	}
 
 	// 判断是否可搜索
 	searchableColumns := map[string]bool{
-		"name":   true,
-		"title":  true,
-		"code":   true,
-		"status": true,
+		"name":    true,
+		"title":   true,
+		"code":    true,
+		"status":  true,
 		"keyword": true,
 	}
 	fd.IsSearchable = searchableColumns[f.ColumnName] || strings.HasSuffix(f.ColumnName, "_name")
@@ -178,7 +219,8 @@ func buildBindingTag(f FieldSchema) string {
 		parts = append(parts, fmt.Sprintf("max=%d", f.MaxLength))
 	case strings.Contains(goType, "uint") || strings.Contains(goType, "int"):
 		parts = append(parts, "gte=0")
-	case f.EnumValues != "":
+	}
+	if f.EnumValues != "" {
 		parts = append(parts, "oneof="+f.EnumValues)
 	}
 

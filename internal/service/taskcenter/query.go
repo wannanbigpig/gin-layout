@@ -44,7 +44,7 @@ func NewTaskCenterServiceWithDeps(deps TaskCenterServiceDeps) *TaskCenterService
 }
 
 // ListTaskDefinitions 分页查询任务定义列表。
-func (s *TaskCenterService) ListTaskDefinitions(params *form.TaskDefinitionList) *resources.Collection {
+func (s *TaskCenterService) ListTaskDefinitions(params *form.TaskDefinitionList) (*resources.Collection, error) {
 	query := newListQuery().
 		addLike("code", params.Code).
 		addLike("name", params.Name).
@@ -85,13 +85,13 @@ func (s *TaskCenterService) ListTaskDefinitions(params *form.TaskDefinitionList)
 	total, collection, err := model.ListPageE(definitionModel, params.Page, params.PerPage, condition, args, listOptionalParams)
 	if err != nil {
 		log.Logger.Error("查询任务定义列表失败", zap.Error(err))
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
-	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 // ListTaskRuns 分页查询任务执行记录列表。
-func (s *TaskCenterService) ListTaskRuns(params *form.TaskRunList) *resources.Collection {
+func (s *TaskCenterService) ListTaskRuns(params *form.TaskRunList) (*resources.Collection, error) {
 	query := newListQuery().
 		addLike("task_code", params.TaskCode).
 		addEq("kind", params.Kind).
@@ -138,10 +138,10 @@ func (s *TaskCenterService) ListTaskRuns(params *form.TaskRunList) *resources.Co
 		}
 		if err := db.Count(&total).Error; err != nil {
 			log.Logger.Error("查询任务执行记录列表失败", zap.Error(err))
-			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+			return nil, err
 		}
 		if total == 0 {
-			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+			return transformer.ToCollection(params.Page, params.PerPage, 0, nil), nil
 		}
 		collection := make([]*model.TaskRun, 0, params.PerPage)
 		queryDB := s.db.Model(&model.TaskRun{}).Select(listOptionalParams.SelectFields).Order(listOptionalParams.OrderBy)
@@ -150,21 +150,21 @@ func (s *TaskCenterService) ListTaskRuns(params *form.TaskRunList) *resources.Co
 		}
 		if err := queryDB.Scopes(runModel.Paginate(params.Page, params.PerPage)).Find(&collection).Error; err != nil {
 			log.Logger.Error("查询任务执行记录列表失败", zap.Error(err))
-			return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+			return nil, err
 		}
 		s.fillTaskRunTriggerAccounts(context.Background(), collection)
 		s.decorateTaskRunRetryState(context.Background(), collection)
-		return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+		return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 	}
 
 	total, collection, err := model.ListPageE(runModel, params.Page, params.PerPage, condition, args, listOptionalParams)
 	if err != nil {
 		log.Logger.Error("查询任务执行记录列表失败", zap.Error(err))
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 	s.fillTaskRunTriggerAccounts(context.Background(), collection)
 	s.decorateTaskRunRetryState(context.Background(), collection)
-	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 // TaskRunDetail 获取任务执行记录详情。
@@ -297,7 +297,7 @@ func (s *TaskCenterService) TaskRunAuditSnapshot(id uint) (*TaskRunAuditSnapshot
 }
 
 // ListCronTaskStates 分页查询定时任务最近状态列表。
-func (s *TaskCenterService) ListCronTaskStates(params *form.CronTaskStateList) *resources.Collection {
+func (s *TaskCenterService) ListCronTaskStates(params *form.CronTaskStateList) (*resources.Collection, error) {
 	query := newListQuery().
 		addLike("task_code", params.TaskCode).
 		addEq("last_status", params.LastStatus)
@@ -333,9 +333,9 @@ func (s *TaskCenterService) ListCronTaskStates(params *form.CronTaskStateList) *
 	total, collection, err := model.ListPageE(stateModel, params.Page, params.PerPage, condition, args, listOptionalParams)
 	if err != nil {
 		log.Logger.Error("查询定时任务最近状态列表失败", zap.Error(err))
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
-	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 // TaskRunStats 查询任务执行全量统计汇总。
@@ -383,10 +383,16 @@ func (s *TaskCenterService) TaskRunStats(params *form.TaskRunStatsQuery) (*resou
 	if result.TotalCount > 0 {
 		successRate = float64(result.SuccessCount) * 100 / float64(result.TotalCount)
 	}
+	taskCode, kind, source := "", "", ""
+	if statsFilter.params != nil {
+		taskCode = statsFilter.params.TaskCode
+		kind = statsFilter.params.Kind
+		source = statsFilter.params.Source
+	}
 	return &resources.TaskRunStatsResources{
-		TaskCode:            statsFilter.taskCode(),
-		Kind:                statsFilter.kind(),
-		Source:              statsFilter.source(),
+		TaskCode:            taskCode,
+		Kind:                kind,
+		Source:              source,
 		TotalCount:          result.TotalCount,
 		SuccessCount:        result.SuccessCount,
 		FailedCount:         result.FailedCount,
@@ -411,7 +417,10 @@ func (s *TaskCenterService) TaskRunStatsTrend(params *form.TaskRunStatsQuery) ([
 	if err != nil {
 		return nil, err
 	}
-	windowSize := statsFilter.trendWindowSize()
+	windowSize := model.TaskRunStatsWindowHour
+	if statsFilter.end.Sub(statsFilter.start) > 24*time.Hour {
+		windowSize = model.TaskRunStatsWindowDay
+	}
 	var rows []taskRunTrendRow
 	err = statsFilter.Apply(db.Model(&model.TaskRunStat{})).
 		Select([]string{
@@ -600,10 +609,16 @@ func newStatsFilter(params *form.TaskRunStatsQuery, now time.Time) (*statsFilter
 }
 
 func (f *statsFilter) Apply(db *gorm.DB) *gorm.DB {
+	taskCode, kind, source := "", "", ""
+	if f.params != nil {
+		taskCode = f.params.TaskCode
+		kind = f.params.Kind
+		source = f.params.Source
+	}
 	query := newListQuery().
-		addLike("task_code", f.taskCode()).
-		addEq("kind", f.kind()).
-		addEq("source", f.source())
+		addLike("task_code", taskCode).
+		addEq("kind", kind).
+		addEq("source", source)
 	query.QueryBuilder.AddCondition("window_start >= ?", f.start)
 	query.QueryBuilder.AddCondition("window_start <= ?", f.end)
 	condition, args := query.Build()
@@ -613,44 +628,21 @@ func (f *statsFilter) Apply(db *gorm.DB) *gorm.DB {
 	return db
 }
 
-func (f *statsFilter) trendWindowSize() string {
-	if f == nil || f.end.Sub(f.start) > 24*time.Hour {
-		return model.TaskRunStatsWindowDay
-	}
-	return model.TaskRunStatsWindowHour
-}
-
-func (f *statsFilter) taskCode() string {
-	if f == nil || f.params == nil {
-		return ""
-	}
-	return f.params.TaskCode
-}
-
-func (f *statsFilter) kind() string {
-	if f == nil || f.params == nil {
-		return ""
-	}
-	return f.params.Kind
-}
-
-func (f *statsFilter) source() string {
-	if f == nil || f.params == nil {
-		return ""
-	}
-	return f.params.Source
-}
-
 func normalizeTaskRunStatsRange(params *form.TaskRunStatsQuery, now time.Time) (time.Time, time.Time, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
 
-	start, hasStart, err := parseOptionalStatsTime(statsStartTime(params), "开始时间")
+	startValue, endValue := "", ""
+	if params != nil {
+		startValue = params.StartTime
+		endValue = params.EndTime
+	}
+	start, hasStart, err := parseOptionalStatsTime(startValue, "开始时间")
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	end, hasEnd, err := parseOptionalStatsTime(statsEndTime(params), "结束时间")
+	end, hasEnd, err := parseOptionalStatsTime(endValue, "结束时间")
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
@@ -683,18 +675,4 @@ func parseOptionalStatsTime(value string, label string) (time.Time, bool, error)
 		return time.Time{}, false, e.NewBusinessError(e.InvalidParameter, "任务统计"+label+"格式不正确")
 	}
 	return parsed, true, nil
-}
-
-func statsStartTime(params *form.TaskRunStatsQuery) string {
-	if params == nil {
-		return ""
-	}
-	return params.StartTime
-}
-
-func statsEndTime(params *form.TaskRunStatsQuery) string {
-	if params == nil {
-		return ""
-	}
-	return params.EndTime
 }

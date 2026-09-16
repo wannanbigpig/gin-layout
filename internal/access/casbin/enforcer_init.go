@@ -67,34 +67,54 @@ func ReloadEnforcer() error {
 }
 
 func initEnforcerLocked() error {
-	modelPath, err := getModelPath()
+	next, err := buildEnforcer(data.MysqlDB())
 	if err != nil {
 		casbinManager.errInit = err
 		return err
 	}
+	casbinManager = next
+	return nil
+}
+
+// PrepareEnforcerReload 在候选数据库上加载策略，失败时保留当前权限实例。
+func PrepareEnforcerReload(db *gorm.DB) (func(), error) {
+	next := &CasbinEnforcer{}
+	if db != nil {
+		var err error
+		next, err = buildEnforcer(db)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return func() {
+		managerMu.Lock()
+		casbinManager = next
+		managerMu.Unlock()
+	}, nil
+}
+
+func buildEnforcer(db *gorm.DB) (*CasbinEnforcer, error) {
+	modelPath, err := getModelPath()
+	if err != nil {
+		return nil, err
+	}
 
 	m, err := casbinmodel.NewModelFromFile(modelPath)
 	if err != nil {
-		casbinManager.errInit = fmt.Errorf("加载模型失败: %w", err)
-		return casbinManager.errInit
+		return nil, fmt.Errorf("加载模型失败: %w", err)
 	}
 
-	db := data.MysqlDB()
 	if db == nil {
-		casbinManager.errInit = errors.New("mysql not initialized")
-		return casbinManager.errInit
+		return nil, errors.New("mysql not initialized")
 	}
 
 	enforcer, err := newEnforcerFromDB(m, db)
 	if err != nil {
-		casbinManager.errInit = fmt.Errorf("创建 Enforcer 失败: %w", err)
-		return casbinManager.errInit
+		return nil, fmt.Errorf("创建 Enforcer 失败: %w", err)
 	}
-	next := &CasbinEnforcer{
-		Enforcer: enforcer,
-		model:    m,
-	}
-	next.registerCustomFunctions()
-	casbinManager = next
-	return nil
+	return &CasbinEnforcer{
+		Enforcer:    enforcer,
+		model:       m,
+		policyState: &sharedPolicyState{},
+	}, nil
 }

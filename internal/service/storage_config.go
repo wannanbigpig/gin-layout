@@ -56,7 +56,9 @@ func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) 
 	}
 	applyLocalStorageDefaults(&settings)
 	if maskSensitive {
-		maskStorageSettings(&settings)
+		if strings.TrimSpace(settings.Config.AliyunOSS.AccessKeySecret) != "" {
+			settings.Config.AliyunOSS.AccessKeySecret = filestorage.MaskPlaceholder
+		}
 	}
 	return settings, nil
 }
@@ -259,12 +261,9 @@ func upsertStorageSysConfig(tx *gorm.DB, key, value, valueType string, sensitive
 	return model.NewSysConfigI18n().UpsertConfigNames(configModel.ID, names, tx)
 }
 
-func maskStorageSettings(settings *StorageSettings) {
-	settings.Config.AliyunOSS.AccessKeySecret = maskIfNotEmpty(settings.Config.AliyunOSS.AccessKeySecret)
-}
-
 func mergeSensitiveStorageConfig(next *filestorage.Config, current filestorage.Config) {
-	if shouldKeepSecret(next.AliyunOSS.AccessKeySecret) {
+	secret := strings.TrimSpace(next.AliyunOSS.AccessKeySecret)
+	if secret == "" || secret == filestorage.MaskPlaceholder {
 		next.AliyunOSS.AccessKeySecret = current.AliyunOSS.AccessKeySecret
 	}
 }
@@ -287,18 +286,6 @@ func applyLocalStorageDefaults(settings *StorageSettings) {
 	if strings.TrimSpace(settings.Config.Local.PrivateBasePath) == "" {
 		settings.Config.Local.PrivateBasePath = filepath.Join(basePath, "private")
 	}
-}
-
-func maskIfNotEmpty(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return ""
-	}
-	return filestorage.MaskPlaceholder
-}
-
-func shouldKeepSecret(value string) bool {
-	value = strings.TrimSpace(value)
-	return value == "" || value == filestorage.MaskPlaceholder
 }
 
 func firstNonEmpty(values ...string) string {

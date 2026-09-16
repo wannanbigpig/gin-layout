@@ -2,14 +2,17 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/wannanbigpig/gin-layout/config/autoload"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 )
 
 func setupRateLimitRouter(cfg RateLimitConfig) *gin.Engine {
@@ -20,6 +23,31 @@ func setupRateLimitRouter(cfg RateLimitConfig) *gin.Engine {
 		c.String(http.StatusOK, "ok")
 	})
 	return r
+}
+
+func TestRateLimitUsesResponseEnvelope(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(global.ContextKeyRequestID, "limited-request")
+		c.Set(global.ContextKeyRequestStartTime, time.Now())
+	})
+	r.Use(RateLimitHandlerWithContext(ctx, RateLimitConfig{Enabled: true, RPS: 0.01, Burst: 1}))
+	r.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/test", nil))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/test", nil))
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	for _, field := range []string{"code", "msg", "data", "cost", "request_id"} {
+		assert.Contains(t, body, field)
+	}
+	assert.Equal(t, "limited-request", body["request_id"])
+	assert.Equal(t, "Too Many Requests", body["msg"])
 }
 
 func TestRateLimit_Disabled(t *testing.T) {

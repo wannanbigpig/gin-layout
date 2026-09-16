@@ -1,8 +1,18 @@
 package model
 
+{{- if or .HasStatus .HasJSON .HasDateTime}}
 import (
+	{{- if .HasJSON}}
+	"gorm.io/datatypes"
+	{{- end}}
+	{{- if .HasStatus}}
 	"github.com/wannanbigpig/gin-layout/internal/model/modelDict"
+	{{- end}}
+	{{- if .HasDateTime}}
+	"{{.GoModule}}/internal/pkg/utils"
+	{{- end}}
 )
+{{end}}
 
 {{if .HasStatus}}// {{.ModelName}}StatusDict 状态字典
 var {{.ModelName}}StatusDict modelDict.Dict = map[uint8]string{

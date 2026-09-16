@@ -27,18 +27,32 @@ func NewSysConfigService() *SysConfigService {
 	return &SysConfigService{}
 }
 
-func (s *SysConfigService) List(params *form.SysConfigList, locale string) *resources.Collection {
-	condition, args := s.buildListCondition(params)
+func (s *SysConfigService) List(params *form.SysConfigList, locale string) (*resources.Collection, error) {
+	query := query_builder.New().
+		AddLike("config_key", params.ConfigKey).
+		AddEq("group_code", params.GroupCode).
+		AddEq("value_type", params.ValueType).
+		AddEq("manage_tab", params.ManageTab).
+		AddEq("status", params.Status)
+	if params.IsVisible != nil {
+		query.AddEq("is_visible", params.IsVisible)
+	} else if params.IncludeHidden == nil || *params.IncludeHidden == 0 {
+		query.AddEq("is_visible", uint8(1))
+	}
+	if keyword := strings.TrimSpace(params.ConfigName); keyword != "" {
+		query.AddCondition("id IN (SELECT config_id FROM sys_config_i18n WHERE config_name like ?)", "%"+keyword+"%")
+	}
+	condition, args := query.Build()
 	configModel := model.NewSysConfig()
 	total, collection, err := model.ListPageE(configModel, params.Page, params.PerPage, condition, args, model.ListOptionalParams{
 		OrderBy: "sort desc, id desc",
 	})
 	if err != nil {
-		return resources.NewSysConfigTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 	s.maskSensitiveValues(collection)
 	s.fillLocalizedNames(collection, locale)
-	return resources.NewSysConfigTransformer().ToCollection(params.Page, params.PerPage, total, collection)
+	return resources.NewSysConfigTransformer().ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 func (s *SysConfigService) Detail(id uint, locale string) (any, error) {
@@ -76,12 +90,18 @@ func (s *SysConfigService) Value(key string) (ConfigCacheItem, error) {
 	if key == "" {
 		return ConfigCacheItem{}, e.NewBusinessError(e.InvalidParameter)
 	}
-	if !cacheLoaded() {
+	runtimeCache.RLock()
+	cacheReady := runtimeCache.loaded
+	runtimeCache.RUnlock()
+	if !cacheReady {
 		if err := s.RefreshCache(); err != nil {
 			return ConfigCacheItem{}, err
 		}
 	}
-	if item, ok := getCachedValue(key); ok {
+	runtimeCache.RLock()
+	item, ok := runtimeCache.items[key]
+	runtimeCache.RUnlock()
+	if ok {
 		return item, nil
 	}
 	return ConfigCacheItem{}, e.NewBusinessError(e.NotFound)
@@ -170,9 +190,17 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	config.ValueType = params.ValueType
 	config.GroupCode = params.GroupCode
 	config.IsSensitive = valueOrDefault(params.IsSensitive, config.IsSensitive)
-	config.IsVisible = valueOrDefault(params.IsVisible, defaultVisible(config.IsVisible, id))
+	defaultIsVisible := config.IsVisible
+	if id == 0 && defaultIsVisible == 0 {
+		defaultIsVisible = 1
+	}
+	config.IsVisible = valueOrDefault(params.IsVisible, defaultIsVisible)
 	config.ManageTab = params.ManageTab
-	config.Status = valueOrDefault(params.Status, defaultStatus(config.Status, id))
+	defaultConfigStatus := config.Status
+	if id == 0 && defaultConfigStatus == 0 {
+		defaultConfigStatus = 1
+	}
+	config.Status = valueOrDefault(params.Status, defaultConfigStatus)
 	config.Sort = params.Sort
 	config.Remark = params.Remark
 
@@ -182,7 +210,13 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	}
 	if err := access.RunInTransaction(db, func(tx *gorm.DB) error {
 		config.SetDB(tx)
-		if saveErr := config.Save(); saveErr != nil {
+		var saveErr error
+		if id == 0 {
+			saveErr = service.CreateWithExplicitFields(tx, config, map[string]any{"status": config.Status, "is_visible": config.IsVisible})
+		} else {
+			saveErr = config.Save()
+		}
+		if saveErr != nil {
 			return saveErr
 		}
 		return model.NewSysConfigI18n().UpsertConfigNames(config.ID, params.ConfigNameI18n, tx)
@@ -197,24 +231,6 @@ func resolveMutationConfigValue(existing *model.SysConfig, incoming string) stri
 		return existing.ConfigValue
 	}
 	return incoming
-}
-
-func (s *SysConfigService) buildListCondition(params *form.SysConfigList) (string, []any) {
-	qb := query_builder.New().
-		AddLike("config_key", params.ConfigKey).
-		AddEq("group_code", params.GroupCode).
-		AddEq("value_type", params.ValueType).
-		AddEq("manage_tab", params.ManageTab).
-		AddEq("status", params.Status)
-	if params.IsVisible != nil {
-		qb.AddEq("is_visible", params.IsVisible)
-	} else if params.IncludeHidden == nil || *params.IncludeHidden == 0 {
-		qb.AddEq("is_visible", uint8(1))
-	}
-	if keyword := strings.TrimSpace(params.ConfigName); keyword != "" {
-		qb.AddCondition("id IN (SELECT config_id FROM sys_config_i18n WHERE config_name like ?)", "%"+keyword+"%")
-	}
-	return qb.Build()
 }
 
 func (s *SysConfigService) fillLocalizedNames(configs []*model.SysConfig, locale string) {
@@ -279,18 +295,4 @@ func valueOrDefault(value *uint8, fallback uint8) uint8 {
 		return fallback
 	}
 	return *value
-}
-
-func defaultVisible(current uint8, id uint) uint8 {
-	if id == 0 && current == 0 {
-		return 1
-	}
-	return current
-}
-
-func defaultStatus(current uint8, id uint) uint8 {
-	if id == 0 && current == 0 {
-		return 1
-	}
-	return current
 }

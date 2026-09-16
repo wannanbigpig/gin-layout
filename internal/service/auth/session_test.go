@@ -109,3 +109,29 @@ func newSessionTestDB(t *testing.T) *gorm.DB {
 	}
 	return db
 }
+
+func TestRevokeRefreshAliveSessionWithExpiredOrMissingAccessExpiry(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		db := newSessionTestDB(t)
+		access := &utils.FormatDate{Time: time.Now().Add(-time.Minute)}
+		if missing {
+			access = nil
+		}
+		refresh := &utils.FormatDate{Time: time.Now().Add(time.Hour)}
+		entry := model.AdminLoginLogs{UID: 20, JwtID: "refresh-alive", LoginStatus: model.LoginStatusSuccess, TokenExpires: access, RefreshExpires: refresh}
+		if err := db.Create(&entry).Error; err != nil {
+			t.Fatal(err)
+		}
+		s := NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db, WriteTokenToBlacklist: func(string, time.Duration) error { t.Fatal("expired access must not write redis"); return nil }})
+		if err := s.RevokeSession(context.Background(), entry.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+		var got model.AdminLoginLogs
+		if err := db.First(&got, entry.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if got.IsRevoked != model.IsRevokedYes {
+			t.Fatal("refresh-alive session was not revoked")
+		}
+	}
+}

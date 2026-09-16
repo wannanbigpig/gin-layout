@@ -17,7 +17,7 @@ func ResponseError(c *gin.Context, err error) {
 	if errors.As(err, &errs) {
 		handleValidationError(c, errs)
 	} else {
-		handleBindingError(c, err)
+		r.Resp().FailCode(c, errcode.InvalidParameter)
 	}
 }
 
@@ -43,10 +43,6 @@ func translateFieldError(fieldErr validator.FieldError, primary, fallback ut.Tra
 		}
 	}
 	return fieldErr.Error()
-}
-
-func handleBindingError(c *gin.Context, _ error) {
-	r.Resp().FailCode(c, errcode.InvalidParameter)
 }
 
 // CheckParams 检查请求参数。

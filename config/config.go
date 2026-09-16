@@ -34,6 +34,7 @@ var (
 	configValue atomic.Value
 
 	reloadHandlersMu sync.RWMutex
+	reloadMu         sync.Mutex
 	reloadHandlers   []ConfigReloadHandler
 )
 
@@ -41,7 +42,17 @@ var (
 type ConfigReloadHandler struct {
 	Name     string
 	Priority int
-	Handle   func(oldConfig, newConfig *Conf, diff ConfigDiff) error
+	// Prepare 只能构建候选资源；全部处理器成功后才调用 Commit。
+	Prepare func(oldConfig, newConfig *Conf, diff ConfigDiff) (ConfigReloadChange, error)
+	// Handle 保留给无资源切换的校验回调；资源处理器应使用 Prepare。
+	Handle func(oldConfig, newConfig *Conf, diff ConfigDiff) error
+}
+
+// ConfigReloadChange 将可能失败的准备过程与不会失败的实例切换分离。
+type ConfigReloadChange struct {
+	Commit   func()
+	Abort    func()
+	Finalize func()
 }
 
 // ConfigDiff 描述配置变更摘要。

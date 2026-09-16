@@ -1,8 +1,6 @@
 package global
 
 const (
-	// Version is the current gin-layout version.
-	Version = "0.9.2"
 	// PerPage is the default per page size
 	PerPage = 10
 	// MaxPerPage 是每页条数上限，防止超大 LIMIT 拖库
@@ -18,3 +16,6 @@ const (
 	// ERROR is the value of error
 	ERROR = "ERROR"
 )
+
+// Version 是默认版本号；Release 构建可通过 -ldflags 注入 Git Tag。
+var Version = "0.9.2"

@@ -21,7 +21,15 @@ func (s *LoginService) buildLoginLog(uid uint, username, jwtId, accessToken, ref
 	loginLog.UID = uid
 	loginLog.Username = username
 	loginLog.JwtID = jwtId
-	s.encryptAndSetToken(loginLog, accessToken, refreshToken, uid)
+	encryptKey := s.currentConfig().Jwt.SecretKey
+	if accessToken != "" {
+		loginLog.AccessToken = s.encryptToken(encryptKey, accessToken, "access_token", uid)
+		loginLog.TokenHash = s.calculateTokenHash(accessToken)
+	}
+	if refreshToken != "" {
+		loginLog.RefreshToken = s.encryptToken(encryptKey, refreshToken, "refresh_token", uid)
+		loginLog.RefreshTokenHash = s.calculateTokenHash(refreshToken)
+	}
 	loginLog.IP = logInfo.IP
 	loginLog.UserAgent = logInfo.UserAgent
 	loginLog.OS = logInfo.OS
@@ -34,19 +42,6 @@ func (s *LoginService) buildLoginLog(uid uint, username, jwtId, accessToken, ref
 		loginLog.TokenExpires = &(utils.FormatDate{Time: expiresAt})
 	}
 	return loginLog
-}
-
-// encryptAndSetToken 加密并设置 token 到登录日志。
-func (s *LoginService) encryptAndSetToken(loginLog *model.AdminLoginLogs, accessToken, refreshToken string, uid uint) {
-	encryptKey := s.currentConfig().Jwt.SecretKey
-	if accessToken != "" {
-		loginLog.AccessToken = s.encryptToken(encryptKey, accessToken, "access_token", uid)
-		loginLog.TokenHash = s.calculateTokenHash(accessToken)
-	}
-	if refreshToken != "" {
-		loginLog.RefreshToken = s.encryptToken(encryptKey, refreshToken, "refresh_token", uid)
-		loginLog.RefreshTokenHash = s.calculateTokenHash(refreshToken)
-	}
 }
 
 // encryptToken 加密 token。
@@ -90,13 +85,6 @@ func (s *LoginService) RecordLoginFailLog(username, failReason string, logInfo L
 func (s *LoginService) calculateTokenHash(accessToken string) string {
 	hashBytes := sha256.Sum256([]byte(accessToken))
 	return hex.EncodeToString(hashBytes[:])
-}
-
-func logLoginAsyncError(message string, fields ...zap.Field) {
-	if log.Logger == nil {
-		return
-	}
-	log.Logger.Error(message, fields...)
 }
 
 func (s *LoginService) LogLoginFailureHandleError(username string, err error) {

@@ -93,22 +93,37 @@ func runInitSystem(in io.Reader, out io.Writer) error {
 }
 
 func printDangerousResetWarning(out io.Writer, cfg *config.Conf) {
+	appEnvValue, baseURLValue, mysqlHostValue, mysqlUsernameValue, mysqlTablePrefixValue := "", "", "", "", ""
+	var mysqlPortValue uint16
+	if cfg != nil {
+		appEnvValue = cfg.AppEnv
+		baseURLValue = cfg.BaseURL
+		mysqlHostValue = cfg.Mysql.Host
+		mysqlPortValue = cfg.Mysql.Port
+		mysqlUsernameValue = cfg.Mysql.Username
+		mysqlTablePrefixValue = cfg.Mysql.TablePrefix
+	}
+	mysqlTablePrefixDisplay := mysqlTablePrefixValue
+	if strings.TrimSpace(mysqlTablePrefixDisplay) == "" {
+		mysqlTablePrefixDisplay = "(empty)"
+	}
+
 	fmt.Fprintln(out, colorRed("============================================================", true))
 	fmt.Fprintln(out, colorRed("危险操作：init-system 会删除当前配置数据库中的所有对象和数据，然后重新执行 migrations。", true))
 	fmt.Fprintln(out, colorRed("请确认目标库无误，并且已经完成可恢复的数据备份。", true))
 	fmt.Fprintln(out, colorRed("============================================================", true))
 	fmt.Fprintln(out, "当前配置：")
-	fmt.Fprintf(out, "  app_env: %s\n", valueOrUnknown(appEnv(cfg)))
+	fmt.Fprintf(out, "  app_env: %s\n", valueOrUnknown(appEnvValue))
 	fmt.Fprintf(out, "  debug: %v\n", cfg != nil && cfg.Debug)
-	fmt.Fprintf(out, "  base_url: %s\n", valueOrUnknown(baseURL(cfg)))
+	fmt.Fprintf(out, "  base_url: %s\n", valueOrUnknown(baseURLValue))
 	fmt.Fprintln(out, "当前 MySQL：")
 	fmt.Fprintf(out, "  enable: %v\n", cfg != nil && cfg.Mysql.Enable)
-	fmt.Fprintf(out, "  host: %s\n", valueOrUnknown(mysqlHost(cfg)))
-	fmt.Fprintf(out, "  port: %d\n", mysqlPort(cfg))
+	fmt.Fprintf(out, "  host: %s\n", valueOrUnknown(mysqlHostValue))
+	fmt.Fprintf(out, "  port: %d\n", mysqlPortValue)
 	fmt.Fprintf(out, "  database: %s\n", valueOrUnknown(mysqlDatabase(cfg)))
-	fmt.Fprintf(out, "  username: %s\n", valueOrUnknown(mysqlUsername(cfg)))
+	fmt.Fprintf(out, "  username: %s\n", valueOrUnknown(mysqlUsernameValue))
 	fmt.Fprintf(out, "  password: (hidden)\n")
-	fmt.Fprintf(out, "  table_prefix: %s\n", valueOrEmpty(mysqlTablePrefix(cfg)))
+	fmt.Fprintf(out, "  table_prefix: %s\n", mysqlTablePrefixDisplay)
 	fmt.Fprintln(out)
 }
 
@@ -176,34 +191,6 @@ func colorRed(message string, bold bool) string {
 	return ansiRed + message + ansiReset
 }
 
-func appEnv(cfg *config.Conf) string {
-	if cfg == nil {
-		return ""
-	}
-	return cfg.AppEnv
-}
-
-func baseURL(cfg *config.Conf) string {
-	if cfg == nil {
-		return ""
-	}
-	return cfg.BaseURL
-}
-
-func mysqlHost(cfg *config.Conf) string {
-	if cfg == nil {
-		return ""
-	}
-	return cfg.Mysql.Host
-}
-
-func mysqlPort(cfg *config.Conf) uint16 {
-	if cfg == nil {
-		return 0
-	}
-	return cfg.Mysql.Port
-}
-
 func mysqlDatabase(cfg *config.Conf) string {
 	if cfg == nil {
 		return ""
@@ -211,30 +198,9 @@ func mysqlDatabase(cfg *config.Conf) string {
 	return cfg.Mysql.Database
 }
 
-func mysqlUsername(cfg *config.Conf) string {
-	if cfg == nil {
-		return ""
-	}
-	return cfg.Mysql.Username
-}
-
-func mysqlTablePrefix(cfg *config.Conf) string {
-	if cfg == nil {
-		return ""
-	}
-	return cfg.Mysql.TablePrefix
-}
-
 func valueOrUnknown(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return "(unknown)"
-	}
-	return value
-}
-
-func valueOrEmpty(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return "(empty)"
 	}
 	return value
 }

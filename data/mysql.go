@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	driver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -32,6 +34,8 @@ var (
 
 type mysqlSlot struct {
 	db *gorm.DB
+	// disabled 区分显式禁用与尚未初始化，阻止旧配置触发惰性重建。
+	disabled bool
 }
 
 const mysqlProbeTimeout = 2 * time.Second
@@ -68,48 +72,31 @@ func GenerateDSN(cfg *c.Conf) string {
 		return ""
 	}
 
-	// 特殊字符处理
-	username := strings.Replace(url.QueryEscape(cfg.Mysql.Username), "%", "%25", -1)
-	password := strings.Replace(url.QueryEscape(cfg.Mysql.Password), "%", "%25", -1)
-
-	// IPv6处理
-	host := cfg.Mysql.Host
-	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
-		host = "[" + host + "]"
-	}
-
-	// 强制关键参数
-	charset := "utf8mb4"
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
-		username,
-		password,
-		host,
-		cfg.Mysql.Port,
-		cfg.Mysql.Database,
-	)
-
-	// 参数显式排序
-	params := url.Values{
-		"charset":      []string{charset},
-		"parseTime":    []string{"true"},
-		"loc":          []string{"Local"},
-		"timeout":      []string{"5s"},
-		"readTimeout":  []string{"30s"},
-		"writeTimeout": []string{"60s"},
-	}
-
-	return dsn + "?" + params.Encode()
+	// 使用驱动自身的 DSN 编码；凭据不是 URL query，不能预先 QueryEscape。
+	dsn := driver.NewConfig()
+	dsn.User = cfg.Mysql.Username
+	dsn.Passwd = cfg.Mysql.Password
+	dsn.Net = "tcp"
+	dsn.Addr = net.JoinHostPort(strings.Trim(cfg.Mysql.Host, "[]"), strconv.Itoa(int(cfg.Mysql.Port)))
+	dsn.DBName = cfg.Mysql.Database
+	dsn.Params = map[string]string{"charset": "utf8mb4"}
+	dsn.ParseTime = true
+	dsn.Loc = time.Local
+	dsn.Timeout = 5 * time.Second
+	dsn.ReadTimeout = 30 * time.Second
+	dsn.WriteTimeout = 60 * time.Second
+	return dsn.FormatDSN()
 }
 
 func ensureMysqlInitialized(cfg *c.Conf) error {
-	if currentMysql() != nil {
+	if currentMysql() != nil || mysqlDisabled() {
 		return nil
 	}
 
 	mysqlMu.Lock()
 	defer mysqlMu.Unlock()
 
-	if currentMysql() != nil {
+	if currentMysql() != nil || mysqlDisabled() {
 		return nil
 	}
 
@@ -143,7 +130,7 @@ func reloadMysql(cfg *c.Conf) error {
 	old := currentMysql()
 	oldSQLDB := getSQLDB(old)
 	mysqlDB = next
-	mysqlValue.Store(mysqlSlot{db: next})
+	mysqlValue.Store(mysqlSlot{db: next, disabled: cfg == nil || !cfg.Mysql.Enable})
 	mysqlInitError = nil
 	if next != nil {
 		mysqlHealth.SeedReady()
@@ -185,6 +172,8 @@ func openMysql(cfg *c.Conf) (*gorm.DB, error) {
 		},
 		Logger:                 logConfig,
 		SkipDefaultTransaction: true,
+		// 由下方显式 Ping 统一负责失败关闭，避免自动 Ping 丢失候选连接。
+		DisableAutomaticPing: true,
 	}
 
 	// Open database connection
@@ -213,6 +202,9 @@ func openMysql(cfg *c.Conf) (*gorm.DB, error) {
 
 // MysqlDB 返回当前生效的 MySQL 连接实例。
 func MysqlDB() *gorm.DB {
+	if mysqlDisabled() {
+		return nil
+	}
 	if db := currentMysql(); db != nil {
 		return db
 	}
@@ -303,3 +295,8 @@ func mysqlUnavailableError() error {
 
 // ErrDBUnavailable 表示 MySQL 连接当前不可用。
 var ErrDBUnavailable = errors.New("mysql connection is unavailable")
+
+func mysqlDisabled() bool {
+	slot, ok := mysqlValue.Load().(mysqlSlot)
+	return ok && slot.disabled
+}

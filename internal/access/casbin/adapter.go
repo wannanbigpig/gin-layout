@@ -7,13 +7,9 @@ import (
 	"gorm.io/gorm"
 )
 
-func newAdapter(db *gorm.DB) (*gormadapter.Adapter, error) {
-	gormadapter.TurnOffAutoMigrate(db)
-	return gormadapter.NewAdapterByDB(db)
-}
-
 func newEnforcerFromDB(m model.Model, db *gorm.DB) (*casbin.Enforcer, error) {
-	adapter, err := newAdapter(db)
+	gormadapter.TurnOffAutoMigrate(db)
+	adapter, err := gormadapter.NewAdapterByDB(db)
 	if err != nil {
 		return nil, err
 	}

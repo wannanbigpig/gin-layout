@@ -25,7 +25,12 @@ func (api SysConfigController) List(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	api.Success(c, sys_config.NewSysConfigService().List(params, middleware.LocaleFromContext(c)))
+	result, err := sys_config.NewSysConfigService().List(params, middleware.LocaleFromContext(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
 }
 
 func (api SysConfigController) Detail(c *gin.Context) {

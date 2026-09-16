@@ -15,11 +15,14 @@ import (
 
 // collectUserPolicies 根据数据库关系展开单个用户的最终接口权限。
 func (s *UserPermissionSyncService) collectUserPolicies(userID uint, tx ...*gorm.DB) ([][]string, error) {
-	userInfo, err := s.userInfo(userID, tx...)
-	if err != nil {
+	userInfo := model.NewAdminUsers()
+	if t := FirstTx(tx); t != nil {
+		userInfo.SetDB(t)
+	}
+	if err := userInfo.GetById(userID); err != nil {
 		return nil, err
 	}
-	if !isSyncableUser(userInfo) {
+	if userInfo.ID == 0 || userInfo.Status != model.AdminUserStatusEnabled || userInfo.ID == global.SuperAdminId {
 		return nil, nil
 	}
 
@@ -33,7 +36,24 @@ func (s *UserPermissionSyncService) collectUserPolicies(userID uint, tx ...*gorm
 		return nil, err
 	}
 
-	return s.menuAPIPolicies(menuIDs, tx...)
+	if len(menuIDs) == 0 {
+		return nil, nil
+	}
+	menuApiMapModel := model.NewMenuApiMap()
+	if t := FirstTx(tx); t != nil {
+		menuApiMapModel.SetDB(t)
+	}
+	permissions, err := menuApiMapModel.ApiPermissionsByMenuIds(menuIDs)
+	if err != nil {
+		return nil, err
+	}
+	policies := make([][]string, 0, len(permissions))
+	for _, permission := range permissions {
+		if permission.Route != "" && permission.Method != "" {
+			policies = append(policies, []string{permission.Route, permission.Method})
+		}
+	}
+	return policies, nil
 }
 
 // -------------------- 批量用户权限同步链路 --------------------
@@ -45,54 +65,12 @@ func (s *UserPermissionSyncService) collectPoliciesForUsers(userIDs []uint, tx *
 		return result, nil
 	}
 
-	activeUserIDs, err := s.collectActiveUserIDs(uniqueIDs, result, tx)
-	if err != nil || len(activeUserIDs) == 0 {
-		return result, err
-	}
-
-	userRoleMap, err := s.userBaseRoleMap(activeUserIDs, tx)
-	if err != nil || len(userRoleMap) == 0 {
-		return result, err
-	}
-
-	userExpandedRoles, allRoleIDs := expandUserRoles(userRoleMap)
-	if len(allRoleIDs) == 0 {
-		return result, nil
-	}
-	enabledRoles, err := s.enabledRoleSet(allRoleIDs, tx)
-	if err != nil {
-		return nil, err
-	}
-	userExpandedRoles, allRoleIDs = filterUserRolesByEnabledSet(userExpandedRoles, enabledRoles)
-	if len(allRoleIDs) == 0 {
-		return result, nil
-	}
-
-	roleMenuMap, err := s.roleMenuMap(allRoleIDs, tx)
-	if err != nil || len(roleMenuMap) == 0 {
-		return result, err
-	}
-
-	enabledMenus, menuPolicies, err := s.collectMenuPermissionData(roleMenuMap.AllMenuIDs(), tx)
-	if err != nil {
-		return nil, err
-	}
-
-	for userID, roleIDs := range userExpandedRoles {
-		result[userID] = buildUserPolicies(roleIDs, roleMenuMap, enabledMenus, menuPolicies)
-	}
-
-	return result, nil
-}
-
-func (s *UserPermissionSyncService) collectActiveUserIDs(userIDs []uint, result map[uint][][]string, tx *gorm.DB) ([]uint, error) {
 	userModel := model.NewAdminUsers()
 	userModel.SetDB(tx)
-	users, err := userModel.SyncUserRows(userIDs)
+	users, err := userModel.SyncUserRows(uniqueIDs)
 	if err != nil {
 		return nil, err
 	}
-
 	activeUserIDs := make([]uint, 0, len(users))
 	for _, user := range users {
 		if user.Status != model.AdminUserStatusEnabled || user.ID == global.SuperAdminId || user.IsSuperAdmin == global.Yes {
@@ -101,19 +79,104 @@ func (s *UserPermissionSyncService) collectActiveUserIDs(userIDs []uint, result 
 		}
 		activeUserIDs = append(activeUserIDs, user.ID)
 	}
-	return activeUserIDs, nil
-}
+	if len(activeUserIDs) == 0 {
+		return result, nil
+	}
 
-func (s *UserPermissionSyncService) collectMenuPermissionData(menuIDs []uint, tx *gorm.DB) (map[uint]struct{}, map[uint][][]string, error) {
-	enabledMenus, err := s.enabledMenuSet(menuIDs, tx)
+	userRoleMap := make(map[uint][]uint, len(activeUserIDs))
+	roleMapModel := model.NewAdminUserRoleMap()
+	roleMapModel.SetDB(tx)
+	directRoles, err := roleMapModel.UserRoleMapByUids(activeUserIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	menuPolicies, err := s.menuPolicyMap(menuIDs, tx)
+	for userID, roleIDs := range directRoles {
+		userRoleMap[userID] = append(userRoleMap[userID], roleIDs...)
+	}
+	deptMapModel := model.NewAdminUserDeptMap()
+	deptMapModel.SetDB(tx)
+	userDepts, deptIDs, err := deptMapModel.UserDeptMapByUids(activeUserIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return enabledMenus, menuPolicies, nil
+	if len(deptIDs) > 0 {
+		deptRoleMapModel := model.NewDeptRoleMap()
+		deptRoleMapModel.SetDB(tx)
+		deptRoleMap, err := deptRoleMapModel.DeptRoleMapByDeptIds(deptIDs)
+		if err != nil {
+			return nil, err
+		}
+		for userID, userDeptIDs := range userDepts {
+			for _, deptID := range userDeptIDs {
+				userRoleMap[userID] = append(userRoleMap[userID], deptRoleMap[deptID]...)
+			}
+			userRoleMap[userID] = UniqueUintSlice(userRoleMap[userID])
+		}
+	}
+	if len(userRoleMap) == 0 {
+		return result, nil
+	}
+
+	userExpandedRoles, allRoleIDs := expandUserRoles(userRoleMap)
+	if len(allRoleIDs) == 0 {
+		return result, nil
+	}
+	roleModel := model.NewRole()
+	roleModel.SetDB(tx)
+	enabledRoleIDs, err := roleModel.EnabledIdsByIds(allRoleIDs)
+	if err != nil {
+		return nil, err
+	}
+	enabledRoles := make(map[uint]struct{}, len(enabledRoleIDs))
+	for _, roleID := range enabledRoleIDs {
+		enabledRoles[roleID] = struct{}{}
+	}
+	userExpandedRoles, allRoleIDs = filterUserRolesByEnabledSet(userExpandedRoles, enabledRoles)
+	if len(allRoleIDs) == 0 {
+		return result, nil
+	}
+
+	roleMenuMapModel := model.NewRoleMenuMap()
+	roleMenuMapModel.SetDB(tx)
+	roleMenus, err := roleMenuMapModel.RoleMenuMapByRoleIds(allRoleIDs)
+	if err != nil || len(roleMenus) == 0 {
+		return result, err
+	}
+	roleMenuMap := roleMenuIDMap(roleMenus)
+
+	menuIDs := make([]uint, 0)
+	for _, roleMenuIDs := range roleMenuMap {
+		menuIDs = append(menuIDs, roleMenuIDs...)
+	}
+	menuIDs = UniqueUintSlice(menuIDs)
+	menuModel := model.NewMenu()
+	menuModel.SetDB(tx)
+	enabledMenuIDs, err := menuModel.EnabledIdsByIds(menuIDs)
+	if err != nil {
+		return nil, err
+	}
+	enabledMenus := make(map[uint]struct{}, len(enabledMenuIDs))
+	for _, menuID := range enabledMenuIDs {
+		enabledMenus[menuID] = struct{}{}
+	}
+	menuApiMapModel := model.NewMenuApiMap()
+	menuApiMapModel.SetDB(tx)
+	rows, err := menuApiMapModel.MenuApiPermissionsByMenuIds(menuIDs)
+	if err != nil {
+		return nil, err
+	}
+	menuPolicies := make(map[uint][][]string, len(menuIDs))
+	for _, row := range rows {
+		if row.Route != "" && row.Method != "" {
+			menuPolicies[row.MenuId] = append(menuPolicies[row.MenuId], []string{row.Route, row.Method})
+		}
+	}
+
+	for userID, roleIDs := range userExpandedRoles {
+		result[userID] = buildUserPolicies(roleIDs, roleMenuMap, enabledMenus, menuPolicies)
+	}
+
+	return result, nil
 }
 
 func (s *UserPermissionSyncService) userRoleIDs(userID uint, tx ...*gorm.DB) ([]uint, error) {
@@ -184,57 +247,27 @@ func (s *UserPermissionSyncService) expandMenuIDsWithParents(menuIDs []uint, tx 
 		return nil, err
 	}
 
-	menuSet := buildAncestorSet(menuIDs, func(add func(uint)) {
-		for _, menu := range menus {
-			addAncestorIDs(menu.Pids, add)
+	idSet := make(map[uint]struct{}, len(menuIDs))
+	for _, menuID := range menuIDs {
+		idSet[menuID] = struct{}{}
+	}
+	for _, menu := range menus {
+		for pid := range strings.SplitSeq(menu.Pids, ",") {
+			pid = strings.TrimSpace(pid)
+			if pid == "" || pid == "0" {
+				continue
+			}
+			if parsed, err := strconv.ParseUint(pid, 10, 64); err == nil {
+				idSet[uint(parsed)] = struct{}{}
+			}
 		}
-	})
-
-	return menuModel.EnabledIdsByIds(menuSet)
-}
-
-func (s *UserPermissionSyncService) menuAPIPolicies(menuIDs []uint, tx ...*gorm.DB) ([][]string, error) {
-	if len(menuIDs) == 0 {
-		return nil, nil
 	}
 
-	menuApiMapModel := model.NewMenuApiMap()
-	if t := FirstTx(tx); t != nil {
-		menuApiMapModel.SetDB(t)
+	expandedMenuIDs := make([]uint, 0, len(idSet))
+	for menuID := range idSet {
+		expandedMenuIDs = append(expandedMenuIDs, menuID)
 	}
-
-	permissions, err := menuApiMapModel.ApiPermissionsByMenuIds(menuIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	policies := make([][]string, 0, len(permissions))
-	for _, permission := range permissions {
-		if permission.Route == "" || permission.Method == "" {
-			continue
-		}
-		policies = append(policies, []string{permission.Route, permission.Method})
-	}
-	return policies, nil
-}
-
-func (s *UserPermissionSyncService) allUserIDs(tx ...*gorm.DB) ([]uint, error) {
-	userModel := model.NewAdminUsers()
-	if t := FirstTx(tx); t != nil {
-		userModel.SetDB(t)
-	}
-	return userModel.AllIds()
-}
-
-func (s *UserPermissionSyncService) userInfo(userID uint, tx ...*gorm.DB) (*model.AdminUser, error) {
-	user := model.NewAdminUsers()
-	if FirstTx(tx) != nil {
-		user.SetDB(FirstTx(tx))
-	}
-	if err := user.GetById(userID); err != nil {
-		return nil, err
-	}
-	return user, nil
+	return menuModel.EnabledIdsByIds(expandedMenuIDs)
 }
 
 // UserKey 生成管理员用户对应的 Casbin subject。
@@ -245,217 +278,6 @@ func (s *UserPermissionSyncService) UserKey(userID uint) string {
 // -------------------- 角色 / 菜单聚合上下文 --------------------
 
 type roleMenuIDMap map[uint][]uint
-
-func (m roleMenuIDMap) AllMenuIDs() []uint {
-	menuIDs := make([]uint, 0)
-	for _, values := range m {
-		menuIDs = append(menuIDs, values...)
-	}
-	return UniqueUintSlice(menuIDs)
-}
-
-func (s *UserPermissionSyncService) userBaseRoleMap(userIDs []uint, tx *gorm.DB) (map[uint][]uint, error) {
-	userRoleMap := make(map[uint][]uint, len(userIDs))
-	if len(userIDs) == 0 {
-		return userRoleMap, nil
-	}
-
-	if err := s.appendDirectRoles(userRoleMap, userIDs, tx); err != nil {
-		return nil, err
-	}
-
-	userDepts, deptIDs, err := s.userDepartmentMap(userIDs, tx)
-	if err != nil || len(deptIDs) == 0 {
-		return userRoleMap, err
-	}
-
-	deptRoleMap, err := s.departmentRoleMap(deptIDs, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	for userID, deptIDs := range userDepts {
-		for _, deptID := range deptIDs {
-			userRoleMap[userID] = append(userRoleMap[userID], deptRoleMap[deptID]...)
-		}
-		userRoleMap[userID] = UniqueUintSlice(userRoleMap[userID])
-	}
-
-	if err := s.keepEnabledRoles(userRoleMap, tx); err != nil {
-		return nil, err
-	}
-
-	return userRoleMap, nil
-}
-
-func (s *UserPermissionSyncService) keepEnabledRoles(userRoleMap map[uint][]uint, tx *gorm.DB) error {
-	allRoleIDs := make([]uint, 0)
-	for _, roleIDs := range userRoleMap {
-		allRoleIDs = append(allRoleIDs, roleIDs...)
-	}
-	allRoleIDs = UniqueUintSlice(allRoleIDs)
-	if len(allRoleIDs) == 0 {
-		return nil
-	}
-
-	roleModel := model.NewRole()
-	roleModel.SetDB(tx)
-	enabledRoleIDs, err := roleModel.EnabledIdsByIds(allRoleIDs)
-	if err != nil {
-		return err
-	}
-	enabledSet := make(map[uint]struct{}, len(enabledRoleIDs))
-	for _, roleID := range enabledRoleIDs {
-		enabledSet[roleID] = struct{}{}
-	}
-
-	for userID, roleIDs := range userRoleMap {
-		filtered := make([]uint, 0, len(roleIDs))
-		for _, roleID := range roleIDs {
-			if _, ok := enabledSet[roleID]; ok {
-				filtered = append(filtered, roleID)
-			}
-		}
-		userRoleMap[userID] = UniqueUintSlice(filtered)
-	}
-	return nil
-}
-
-func (s *UserPermissionSyncService) appendDirectRoles(userRoleMap map[uint][]uint, userIDs []uint, tx *gorm.DB) error {
-	roleMapModel := model.NewAdminUserRoleMap()
-	roleMapModel.SetDB(tx)
-	directMap, err := roleMapModel.UserRoleMapByUids(userIDs)
-	if err != nil {
-		return err
-	}
-	for uid, roleIDs := range directMap {
-		userRoleMap[uid] = append(userRoleMap[uid], roleIDs...)
-	}
-	return nil
-}
-
-func (s *UserPermissionSyncService) userDepartmentMap(userIDs []uint, tx *gorm.DB) (map[uint][]uint, []uint, error) {
-	deptMapModel := model.NewAdminUserDeptMap()
-	deptMapModel.SetDB(tx)
-	return deptMapModel.UserDeptMapByUids(userIDs)
-}
-
-func (s *UserPermissionSyncService) departmentRoleMap(deptIDs []uint, tx *gorm.DB) (map[uint][]uint, error) {
-	deptRoleMapModel := model.NewDeptRoleMap()
-	deptRoleMapModel.SetDB(tx)
-	return deptRoleMapModel.DeptRoleMapByDeptIds(deptIDs)
-}
-
-func (s *UserPermissionSyncService) roleMenuMap(roleIDs []uint, tx *gorm.DB) (roleMenuIDMap, error) {
-	roleMenuMapModel := model.NewRoleMenuMap()
-	roleMenuMapModel.SetDB(tx)
-	m, err := roleMenuMapModel.RoleMenuMapByRoleIds(roleIDs)
-	if err != nil {
-		return nil, err
-	}
-	return roleMenuIDMap(m), nil
-}
-
-func (s *UserPermissionSyncService) enabledRoleSet(roleIDs []uint, tx *gorm.DB) (map[uint]struct{}, error) {
-	roleIDs = UniqueUintSlice(roleIDs)
-	result := make(map[uint]struct{}, len(roleIDs))
-	if len(roleIDs) == 0 {
-		return result, nil
-	}
-
-	roleModel := model.NewRole()
-	roleModel.SetDB(tx)
-	enabledRoleIDs, err := roleModel.EnabledIdsByIds(roleIDs)
-	if err != nil {
-		return nil, err
-	}
-	for _, roleID := range enabledRoleIDs {
-		result[roleID] = struct{}{}
-	}
-	return result, nil
-}
-
-func (s *UserPermissionSyncService) enabledMenuSet(menuIDs []uint, tx *gorm.DB) (map[uint]struct{}, error) {
-	menuIDs = UniqueUintSlice(menuIDs)
-	result := make(map[uint]struct{}, len(menuIDs))
-	if len(menuIDs) == 0 {
-		return result, nil
-	}
-
-	menuModel := model.NewMenu()
-	menuModel.SetDB(tx)
-	enabledMenuIDs, err := menuModel.EnabledIdsByIds(menuIDs)
-	if err != nil {
-		return nil, err
-	}
-	for _, menuID := range enabledMenuIDs {
-		result[menuID] = struct{}{}
-	}
-	return result, nil
-}
-
-func (s *UserPermissionSyncService) menuPolicyMap(menuIDs []uint, tx *gorm.DB) (map[uint][][]string, error) {
-	menuIDs = UniqueUintSlice(menuIDs)
-	result := make(map[uint][][]string, len(menuIDs))
-	if len(menuIDs) == 0 {
-		return result, nil
-	}
-
-	menuApiMapModel := model.NewMenuApiMap()
-	menuApiMapModel.SetDB(tx)
-	rows, err := menuApiMapModel.MenuApiPermissionsByMenuIds(menuIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, row := range rows {
-		if row.Route == "" || row.Method == "" {
-			continue
-		}
-		result[row.MenuId] = append(result[row.MenuId], []string{row.Route, row.Method})
-	}
-	return result, nil
-}
-
-// -------------------- 树关系与去重工具 --------------------
-
-func buildAncestorSet(baseIDs []uint, collect func(add func(uint))) []uint {
-	idSet := make(map[uint]struct{}, len(baseIDs))
-	for _, id := range baseIDs {
-		idSet[id] = struct{}{}
-	}
-	collect(func(id uint) {
-		idSet[id] = struct{}{}
-	})
-
-	result := make([]uint, 0, len(idSet))
-	for id := range idSet {
-		result = append(result, id)
-	}
-	return result
-}
-
-func addAncestorIDs(pids string, add func(uint)) {
-	if pids == "" || pids == "0" {
-		return
-	}
-	for pid := range strings.SplitSeq(pids, ",") {
-		pid = strings.TrimSpace(pid)
-		if pid == "" || pid == "0" {
-			continue
-		}
-		if parsed, err := strconv.ParseUint(pid, 10, 64); err == nil {
-			add(uint(parsed))
-		}
-	}
-}
-
-func isSyncableUser(userInfo *model.AdminUser) bool {
-	return userInfo != nil &&
-		userInfo.ID != 0 &&
-		userInfo.Status == model.AdminUserStatusEnabled &&
-		userInfo.ID != global.SuperAdminId
-}
 
 func expandUserRoles(userRoleMap map[uint][]uint) (map[uint][]uint, []uint) {
 	userExpandedRoles := make(map[uint][]uint, len(userRoleMap))
@@ -484,11 +306,6 @@ func filterUserRolesByEnabledSet(userRoles map[uint][]uint, enabled map[uint]str
 }
 
 func buildUserPolicies(roleIDs []uint, roleMenuMap roleMenuIDMap, enabledMenus map[uint]struct{}, menuPolicies map[uint][][]string) [][]string {
-	menuSet := collectEnabledMenuSet(roleIDs, roleMenuMap, enabledMenus)
-	return dedupePolicies(menuSet, menuPolicies)
-}
-
-func collectEnabledMenuSet(roleIDs []uint, roleMenuMap roleMenuIDMap, enabledMenus map[uint]struct{}) map[uint]struct{} {
 	menuSet := make(map[uint]struct{})
 	for _, roleID := range roleIDs {
 		for _, menuID := range roleMenuMap[roleID] {
@@ -497,10 +314,6 @@ func collectEnabledMenuSet(roleIDs []uint, roleMenuMap roleMenuIDMap, enabledMen
 			}
 		}
 	}
-	return menuSet
-}
-
-func dedupePolicies(menuSet map[uint]struct{}, menuPolicies map[uint][][]string) [][]string {
 	policies := make([][]string, 0, len(menuSet)*5)
 	seenPolicy := make(map[string]struct{})
 	for menuID := range menuSet {

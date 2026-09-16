@@ -24,16 +24,22 @@ func NewSysDictService() *SysDictService {
 	return &SysDictService{}
 }
 
-func (s *SysDictService) TypeList(params *form.SysDictTypeList, locale string) *resources.Collection {
-	condition, args := s.buildTypeCondition(params)
+func (s *SysDictService) TypeList(params *form.SysDictTypeList, locale string) (*resources.Collection, error) {
+	query := query_builder.New().
+		AddLike("type_code", params.TypeCode).
+		AddEq("status", params.Status)
+	if keyword := strings.TrimSpace(params.TypeName); keyword != "" {
+		query.AddCondition("id IN (SELECT dict_type_id FROM sys_dict_type_i18n WHERE type_name like ?)", "%"+keyword+"%")
+	}
+	condition, args := query.Build()
 	total, collection, err := model.ListPageE(model.NewSysDictType(), params.Page, params.PerPage, condition, args, model.ListOptionalParams{
 		OrderBy: "sort desc, id desc",
 	})
 	if err != nil {
-		return resources.NewSysDictTypeTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 	s.fillLocalizedTypeNames(collection, locale)
-	return resources.NewSysDictTypeTransformer().ToCollection(params.Page, params.PerPage, total, collection)
+	return resources.NewSysDictTypeTransformer().ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 func (s *SysDictService) TypeDetail(id uint, locale string) (any, error) {
@@ -65,16 +71,23 @@ func (s *SysDictService) DeleteType(id uint) error {
 	return err
 }
 
-func (s *SysDictService) ItemList(params *form.SysDictItemList, locale string) *resources.Collection {
-	condition, args := s.buildItemCondition(params)
+func (s *SysDictService) ItemList(params *form.SysDictItemList, locale string) (*resources.Collection, error) {
+	query := query_builder.New().
+		AddEq("type_code", params.TypeCode).
+		AddLike("value", params.Value).
+		AddEq("status", params.Status)
+	if keyword := strings.TrimSpace(params.Label); keyword != "" {
+		query.AddCondition("id IN (SELECT dict_item_id FROM sys_dict_item_i18n WHERE label like ?)", "%"+keyword+"%")
+	}
+	condition, args := query.Build()
 	total, collection, err := model.ListPageE(model.NewSysDictItem(), params.Page, params.PerPage, condition, args, model.ListOptionalParams{
 		OrderBy: "sort desc, id asc",
 	})
 	if err != nil {
-		return resources.NewSysDictItemTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 	s.fillLocalizedItemLabels(collection, locale)
-	return resources.NewSysDictItemTransformer().ToCollection(params.Page, params.PerPage, total, collection)
+	return resources.NewSysDictItemTransformer().ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 func (s *SysDictService) CreateItem(params *form.CreateSysDictItem) error {
@@ -149,7 +162,13 @@ func (s *SysDictService) applyTypeMutation(id uint, typeCode string, params *for
 	}
 	return access.RunInTransaction(db, func(tx *gorm.DB) error {
 		dictType.SetDB(tx)
-		if saveErr := dictType.Save(); saveErr != nil {
+		var saveErr error
+		if id == 0 {
+			saveErr = service.CreateWithExplicitFields(tx, dictType, map[string]any{"status": dictType.Status})
+		} else {
+			saveErr = dictType.Save()
+		}
+		if saveErr != nil {
 			return saveErr
 		}
 		return model.NewSysDictTypeI18n().UpsertTypeNames(dictType.ID, params.TypeNameI18n, tx)
@@ -207,7 +226,13 @@ func (s *SysDictService) applyItemMutation(id uint, params *form.SysDictItemPayl
 				return err
 			}
 		}
-		if err := item.Save(); err != nil {
+		var err error
+		if id == 0 {
+			err = service.CreateWithExplicitFields(tx, item, map[string]any{"status": item.Status})
+		} else {
+			err = item.Save()
+		}
+		if err != nil {
 			return err
 		}
 		return model.NewSysDictItemI18n().UpsertLabels(item.ID, params.LabelI18n, tx)
@@ -237,27 +262,6 @@ func (s *SysDictService) ensureEnabledType(typeCode string) error {
 		return e.NewBusinessError(e.NotFound)
 	}
 	return nil
-}
-
-func (s *SysDictService) buildTypeCondition(params *form.SysDictTypeList) (string, []any) {
-	qb := query_builder.New().
-		AddLike("type_code", params.TypeCode).
-		AddEq("status", params.Status)
-	if keyword := strings.TrimSpace(params.TypeName); keyword != "" {
-		qb.AddCondition("id IN (SELECT dict_type_id FROM sys_dict_type_i18n WHERE type_name like ?)", "%"+keyword+"%")
-	}
-	return qb.Build()
-}
-
-func (s *SysDictService) buildItemCondition(params *form.SysDictItemList) (string, []any) {
-	qb := query_builder.New().
-		AddEq("type_code", params.TypeCode).
-		AddLike("value", params.Value).
-		AddEq("status", params.Status)
-	if keyword := strings.TrimSpace(params.Label); keyword != "" {
-		qb.AddCondition("id IN (SELECT dict_item_id FROM sys_dict_item_i18n WHERE label like ?)", "%"+keyword+"%")
-	}
-	return qb.Build()
 }
 
 func (s *SysDictService) fillLocalizedTypeNames(items []*model.SysDictType, locale string) {

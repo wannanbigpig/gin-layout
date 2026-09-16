@@ -114,9 +114,16 @@ type menuEditContext struct {
 // 5. 验证 API 列表
 // 6. 事务保存：带行锁验证唯一字段、菜单数据、级联更新子菜单、更新子菜单数量、同步菜单权限
 func (s *MenuService) applyMenuMutation(params *menuMutation) (*model.Menu, error) {
-	menu, editContext, err := s.prepareMutationContext(params)
-	if err != nil {
-		return nil, err
+	menu := model.NewMenu()
+	editContext := &menuEditContext{originPids: menuRootPid}
+	if params.Id > 0 {
+		if err := menu.GetById(params.Id); err != nil || menu.ID == 0 {
+			return nil, e.NewBusinessError(e.MenuNotFound)
+		}
+		editContext.originPids = menu.Pids
+		editContext.originPid = menu.Pid
+		editContext.originFullPath = menu.FullPath
+		editContext.excludeId = params.Id
 	}
 
 	// 1) 规范化标题输入
@@ -133,11 +140,35 @@ func (s *MenuService) applyMenuMutation(params *menuMutation) (*model.Menu, erro
 	}
 
 	// 4) 填充字段
-	s.assignMenuFields(menu, params)
+	menu.Icon = params.Icon
+	menu.Pid = params.Pid
+	menu.Code = params.Code
+	menu.Path = params.Path
+	menu.Name = params.Name
+	menu.ComponentKey = params.ComponentKey
+	menu.Status = params.Status
+	menu.Redirect = params.Redirect
+	menu.AnimateEnter = params.AnimateEnter
+	menu.AnimateLeave = params.AnimateLeave
+	menu.AnimateDuration = params.AnimateDuration
+	menu.IsShow = params.IsShow
+	menu.IsAuth = params.IsAuth
+	menu.IsNewWindow = params.IsNewWindow
+	menu.Sort = params.Sort
+	menu.Type = params.Type
+	menu.Description = params.Description
+	menu.IsExternalLinks = params.IsExternalLinks
+	if params.Type == model.BUTTON {
+		menu.FullPath = ""
+	}
 
 	// 5) 规范化关联 API 列表（仅保留有效且去重后的 ID）
-	if err := s.normalizeMenuAPIList(params); err != nil {
-		return nil, err
+	if len(params.ApiList) > 0 {
+		apis, err := model.NewApi().FindByIds(params.ApiList)
+		if err != nil {
+			return nil, err
+		}
+		params.ApiList = lo.Map(apis, func(api model.Api, _ int) uint { return api.ID })
 	}
 
 	// 6) 持久化及事务后处理（唯一性校验在事务内执行，使用行锁防止并发冲突）
@@ -145,50 +176,6 @@ func (s *MenuService) applyMenuMutation(params *menuMutation) (*model.Menu, erro
 		return nil, err
 	}
 	return menu, nil
-}
-
-// prepareMutationContext 根据新增/更新场景初始化菜单模型与编辑上下文。
-func (s *MenuService) prepareMutationContext(params *menuMutation) (*model.Menu, *menuEditContext, error) {
-	menu := model.NewMenu()
-	editContext := newMenuEditContext()
-	if params.Id == 0 {
-		return menu, editContext, nil
-	}
-
-	// 更新场景：加载原菜单，供唯一性校验与子树级联更新使用。
-	if err := menu.GetById(params.Id); err != nil || menu.ID == 0 {
-		return nil, nil, e.NewBusinessError(e.MenuNotFound)
-	}
-	editContext.originPids = menu.Pids
-	editContext.originPid = menu.Pid
-	editContext.originFullPath = menu.FullPath
-	editContext.excludeId = params.Id
-	return menu, editContext, nil
-}
-
-func newMenuEditContext() *menuEditContext {
-	return &menuEditContext{
-		originPids:     menuRootPid,
-		originPid:      0,
-		originFullPath: "",
-		excludeId:      0,
-	}
-}
-
-// normalizeMenuAPIList 校验 API ID 是否存在，并仅保留有效去重结果。
-func (s *MenuService) normalizeMenuAPIList(params *menuMutation) error {
-	if len(params.ApiList) == 0 {
-		return nil
-	}
-
-	apis, err := model.NewApi().FindByIds(params.ApiList)
-	if err != nil {
-		return err
-	}
-	params.ApiList = lo.Map(apis, func(api model.Api, _ int) uint {
-		return api.ID
-	})
-	return nil
 }
 
 // normalizeMenuTitles 规范化菜单标题输入，要求中英至少一种语言非空。
@@ -289,32 +276,6 @@ func (s *MenuService) buildFullPath(path, parentPath string, menuType uint8) str
 	return parentPath + path
 }
 
-// assignMenuFields 填充菜单模型字段。
-func (s *MenuService) assignMenuFields(menu *model.Menu, params *menuMutation) {
-	menu.Icon = params.Icon
-	menu.Pid = params.Pid
-	menu.Code = params.Code
-	menu.Path = params.Path
-	menu.Name = params.Name
-	menu.ComponentKey = params.ComponentKey
-	menu.Status = params.Status
-	menu.Redirect = params.Redirect
-	menu.AnimateEnter = params.AnimateEnter
-	menu.AnimateLeave = params.AnimateLeave
-	menu.AnimateDuration = params.AnimateDuration
-	menu.IsShow = params.IsShow
-	menu.IsAuth = params.IsAuth
-	menu.IsNewWindow = params.IsNewWindow
-	menu.Sort = params.Sort
-	menu.Type = params.Type
-	menu.Description = params.Description
-	menu.IsExternalLinks = params.IsExternalLinks
-	// 按钮类型无 full_path
-	if params.Type == model.BUTTON {
-		menu.FullPath = ""
-	}
-}
-
 // validateUniqueFields 验证菜单唯一字段：code、name、full_path。
 // 使用行锁（FOR UPDATE）防止并发事务同时通过校验导致重复数据。
 // 必须在事务内调用，tx 为当前事务的数据库连接。
@@ -371,13 +332,15 @@ func (s *MenuService) executeEditTransaction(menu *model.Menu, params *menuMutat
 		return err
 	}
 
-	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+	coordinator := access.NewPermissionSyncCoordinator()
+	err = coordinator.RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
 		// 带行锁验证唯一字段，防止并发插入导致重复数据
 		if err := s.validateUniqueFields(tx, menu, params, editContext.excludeId); err != nil {
 			return err
 		}
 		// 保存菜单数据
-		if err := s.persistMenu(menu, tx); err != nil {
+		menu.SetDB(tx)
+		if err := menu.Save(); err != nil {
 			if businessErr := menuUniqueConstraintBusinessError(err); businessErr != nil {
 				return businessErr
 			}
@@ -393,14 +356,13 @@ func (s *MenuService) executeEditTransaction(menu *model.Menu, params *menuMutat
 		if err := s.updateParentChildrenNum(menu, editContext, tx); err != nil {
 			return err
 		}
-		// 更新菜单关联的 API 权限
-		return s.updateMenuPermissions(menu, params.ApiList, tx)
+		// 更新菜单关联的 API 权限，并在同一事务内同步受影响用户策略。
+		if err := s.updateMenuPermissions(menu, params.ApiList, tx); err != nil {
+			return err
+		}
+		return coordinator.SyncUsersAffectedByMenus([]uint{menu.ID}, tx)
 	})
-	if err != nil {
-		return err
-	}
-	// 同步受影响用户的权限缓存
-	return access.NewPermissionSyncCoordinator().SyncUsersAffectedByMenus([]uint{menu.ID})
+	return err
 }
 
 func menuUniqueConstraintBusinessError(err error) error {
@@ -433,12 +395,6 @@ func menuUniqueConstraintBusinessError(err error) error {
 	default:
 		return nil
 	}
-}
-
-// persistMenu 持久化菜单数据。
-func (s *MenuService) persistMenu(menu *model.Menu, tx *gorm.DB) error {
-	menu.SetDB(tx)
-	return menu.Save()
 }
 
 // updateParentChildrenNum 在父节点变更后刷新原父与新父的 children_num。
@@ -477,20 +433,13 @@ func (s *MenuService) updateChildrenLevels(menu *model.Menu, originPids string, 
 		return nil
 	}
 
-	// 按 pid 分组，便于递归重建
-	childrenByPID := s.groupDescendantsByPID(descendants)
-	return s.rebuildMenuDescendants(tx, menu, childrenByPID)
-}
-
-// groupDescendantsByPID 按父节点分组子菜单。
-// 这里必须使用索引取址，避免 range 临时变量取址导致所有指针指向同一对象。
-func (s *MenuService) groupDescendantsByPID(descendants []model.Menu) map[uint][]*model.Menu {
+	// 按 pid 分组，便于递归重建。使用索引取址，避免 range 临时变量地址复用。
 	childrenByPID := make(map[uint][]*model.Menu, len(descendants))
 	for i := range descendants {
 		child := &descendants[i]
 		childrenByPID[child.Pid] = append(childrenByPID[child.Pid], child)
 	}
-	return childrenByPID
+	return s.rebuildMenuDescendants(tx, menu, childrenByPID)
 }
 
 // rebuildMenuDescendants 递归重建子代菜单的层级信息。

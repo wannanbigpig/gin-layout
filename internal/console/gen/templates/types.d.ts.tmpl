@@ -35,10 +35,9 @@ export interface {{.ModelName}}ListParams {
 /** {{.MenuTitle}}列表响应 */
 export interface {{.ModelName}}ListResult {
   total: number
-  per_page: number
-  current_page: number
-  last_page: number
-  data: {{.ModelName}}[]
+  page: number
+  pageSize: number
+  list: {{.ModelName}}[]
 }
 
 /** {{.MenuTitle}}详情 */
@@ -63,8 +62,10 @@ export interface {{.ModelName}}UpdateParams {
 {{- end}}
 }
 
+{{- if .HasOptions}}
 /** {{.MenuTitle}}选项 */
 export interface {{.ModelName}}OptionItem {
   id: number
   name: string
 }
+{{- end}}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	"github.com/wannanbigpig/gin-layout/internal/model"
-	"github.com/wannanbigpig/gin-layout/internal/service/audit"
 )
 
 const (
@@ -71,12 +70,7 @@ func finalizeRequestLogging(c *gin.Context, recorder *responseRecorder) {
 		return
 	}
 
-	publishRequestAuditLog(c, snapshot)
-}
-
-// logRequest 兼容旧调用入口，统一委托到收尾阶段。
-func logRequest(c *gin.Context, recorder *responseRecorder) {
-	finalizeRequestLogging(c, recorder)
+	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }
 
 // shouldSkipRequestLogging 判定是否跳过本次请求的日志记录。
@@ -98,11 +92,6 @@ func shouldSkipRequestLogging(c *gin.Context, recorder *responseRecorder) bool {
 
 	// 404 请求不记录日志（避免过多无效请求干扰日志分析）
 	return recorder.statusCode == http.StatusNotFound
-}
-
-// publishRequestAuditLog 投递已构建的请求审计快照。
-func publishRequestAuditLog(c *gin.Context, snapshot *audit.AuditLogSnapshot) {
-	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }
 
 // LogWebSocketConnection 记录一次 WebSocket 连接的审计日志。

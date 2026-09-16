@@ -157,13 +157,13 @@ func (s *ResetService) reinitializeSystemData() error {
 	}
 	log.Logger.Info("同步内置任务定义完成")
 
-	if err := initAPIRoutes(); err != nil {
+	if err := InitApiRoutes(); err != nil {
 		log.Logger.Error("初始化API路由失败", zap.Error(err))
 		return fmt.Errorf("初始化API路由失败: %w", err)
 	}
 	log.Logger.Info("初始化API路由完成")
 
-	if err := rebuildUserPermissions(); err != nil {
+	if err := RebuildUserPermissions(); err != nil {
 		log.Logger.Error("重建用户最终 API 权限失败", zap.Error(err))
 		return fmt.Errorf("重建用户最终 API 权限失败: %w", err)
 	}
@@ -270,12 +270,4 @@ func (s *ResetService) buildDatabaseURL() string {
 		cfg.Port,
 		cfg.Database,
 	)
-}
-
-func initAPIRoutes() error {
-	return InitApiRoutes()
-}
-
-func rebuildUserPermissions() error {
-	return RebuildUserPermissions()
 }

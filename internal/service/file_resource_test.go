@@ -922,10 +922,13 @@ func TestFileResourceListTrimsMultiFileTypes(t *testing.T) {
 		t.Fatalf("create upload files failed: %v", err)
 	}
 
-	result := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 		FileType: "pdf, word",
 	})
+	if err != nil {
+		t.Fatalf("list files failed: %v", err)
+	}
 	if result.Total != 2 || len(result.Data) != 2 {
 		t.Fatalf("expected two pdf/word files, total=%d len=%d data=%#v", result.Total, len(result.Data), result.Data)
 	}
@@ -938,10 +941,13 @@ func TestFileResourceListAllowsOtherFileType(t *testing.T) {
 		t.Fatalf("create other file failed: %v", err)
 	}
 
-	result := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 		FileType: "other",
 	})
+	if err != nil {
+		t.Fatalf("list files failed: %v", err)
+	}
 	if result.Total != 1 || len(result.Data) != 1 {
 		t.Fatalf("expected one other file, total=%d len=%d data=%#v", result.Total, len(result.Data), result.Data)
 	}
@@ -1435,9 +1441,12 @@ func TestFileResourceListFolderIDNilReturnsAllFiles(t *testing.T) {
 		t.Fatalf("create upload files failed: %v", err)
 	}
 
-	result := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 	})
+	if err != nil {
+		t.Fatalf("list files failed: %v", err)
+	}
 	if result.Total != 3 || len(result.Data) != 3 {
 		t.Fatalf("expected nil FolderID to return all files, total=%d len=%d", result.Total, len(result.Data))
 	}
@@ -1461,11 +1470,14 @@ func TestFileResourceListFolderIDZeroReturnsOnlyRootFiles(t *testing.T) {
 	}
 
 	zero := uint(0)
-	result := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
 		Paginate:         form.Paginate{Page: 1, PerPage: 10},
 		FolderID:         &zero,
 		IncludeSubfolder: global.No,
 	})
+	if err != nil {
+		t.Fatalf("list files failed: %v", err)
+	}
 	if result.Total != 1 || len(result.Data) != 1 {
 		t.Fatalf("expected only root files, total=%d len=%d", result.Total, len(result.Data))
 	}
@@ -1506,11 +1518,14 @@ func TestFileResourceListFolderIDExactMatchExcludesSubfolders(t *testing.T) {
 	}
 
 	folderID := parent.ID
-	result := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
 		Paginate:         form.Paginate{Page: 1, PerPage: 10},
 		FolderID:         &folderID,
 		IncludeSubfolder: global.No,
 	})
+	if err != nil {
+		t.Fatalf("list files failed: %v", err)
+	}
 	if result.Total != 1 || len(result.Data) != 1 {
 		t.Fatalf("expected exact-match to return only parent's own files, total=%d len=%d", result.Total, len(result.Data))
 	}
@@ -1565,11 +1580,14 @@ func TestFileResourceListFolderIDIncludeSubfolderJoinsDescendants(t *testing.T) 
 	}
 
 	folderID := parent.ID
-	result := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
 		Paginate:         form.Paginate{Page: 1, PerPage: 10},
 		FolderID:         &folderID,
 		IncludeSubfolder: global.Yes,
 	})
+	if err != nil {
+		t.Fatalf("list files failed: %v", err)
+	}
 	if result.Total != 3 || len(result.Data) != 3 {
 		t.Fatalf("expected include-subfolder to return parent+child+grand files, total=%d len=%d", result.Total, len(result.Data))
 	}
@@ -2653,9 +2671,12 @@ func TestFileResourceListExcludesFilesInHiddenFolderByDefault(t *testing.T) {
 	}
 
 	// 默认排除隐藏目录下的文件
-	result := service.List(&form.FileResourceList{
+	result, err := service.List(&form.FileResourceList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 	})
+	if err != nil {
+		t.Fatalf("list files failed: %v", err)
+	}
 	if result.Total != 1 {
 		t.Fatalf("expected 1 file (excluding hidden folder), got %d", result.Total)
 	}
@@ -2689,10 +2710,13 @@ func TestFileResourceListIncludesHiddenFolderFilesWhenRequested(t *testing.T) {
 	}
 
 	includeHidden := uint8(1)
-	result := service.List(&form.FileResourceList{
+	result, err := service.List(&form.FileResourceList{
 		Paginate:      form.Paginate{Page: 1, PerPage: 10},
 		IncludeHidden: &includeHidden,
 	})
+	if err != nil {
+		t.Fatalf("list files failed: %v", err)
+	}
 	if result.Total != 1 {
 		t.Fatalf("expected 1 file (include_hidden=1), got %d", result.Total)
 	}

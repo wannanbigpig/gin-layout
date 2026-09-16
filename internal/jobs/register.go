@@ -27,7 +27,8 @@ func RegisterAllWithDeps(registry queue.Registry, deps AuditLogHandlerDeps) {
 		return
 	}
 	registerAuditLogJob(registry, deps)
-	registerExportJobs(registry)
+	queue.RegisterJSON(registry, TypeExportRequestLog, handleExportRequestLog)
+	queue.RegisterJSON(registry, TypeExportFileList, handleExportFileList)
 }
 
 func registerAuditLogJob(registry queue.Registry, deps AuditLogHandlerDeps) {
@@ -46,9 +47,4 @@ func registerAuditLogJob(registry queue.Registry, deps AuditLogHandlerDeps) {
 		}
 		return nil
 	})
-}
-
-func registerExportJobs(registry queue.Registry) {
-	queue.RegisterJSON(registry, TypeExportRequestLog, handleExportRequestLog)
-	queue.RegisterJSON(registry, TypeExportFileList, handleExportFileList)
 }

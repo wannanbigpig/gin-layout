@@ -92,6 +92,26 @@ func ReloadLogger(cfg *config.Conf) error {
 	return nil
 }
 
+// PrepareLoggerReload 构建候选日志输出，但不提前替换或关闭当前输出。
+func PrepareLoggerReload(cfg *config.Conf) (config.ConfigReloadChange, error) {
+	bundle, err := buildCoreBundle(cfg)
+	if err != nil {
+		return config.ConfigReloadChange{}, err
+	}
+	var oldCore zapcore.Core
+	var oldCloser io.Closer
+	return config.ConfigReloadChange{
+		Commit: func() { oldCore, oldCloser = swapLoggerCore(bundle.core, bundle.closer) },
+		Abort:  func() { _ = bundle.core.Sync(); closeLoggerWriter(bundle.closer) },
+		Finalize: func() {
+			if oldCore != nil {
+				_ = oldCore.Sync()
+			}
+			closeLoggerWriter(oldCloser)
+		},
+	}, nil
+}
+
 func current() *zap.Logger {
 	return Logger
 }

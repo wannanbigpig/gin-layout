@@ -33,7 +33,10 @@ func recordDailyRequestStat(db *gorm.DB, snapshot *AuditLogSnapshot, now time.Ti
 	}
 
 	statDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	durationMs := durationUsToMs(snapshot.ExecutionTimeUs)
+	durationMs := uint64(0)
+	if snapshot.ExecutionTimeUs > 0 {
+		durationMs = uint64(snapshot.ExecutionTimeUs / 1000)
+	}
 	httpStatusDistribution := map[string]uint64{}
 	bizStatusDistribution := map[string]uint64{}
 	if snapshot.ResponseStatus > 0 {
@@ -73,13 +76,6 @@ func recordDailyRequestStat(db *gorm.DB, snapshot *AuditLogSnapshot, now time.Ti
 		Columns:   []clause.Column{{Name: "date"}},
 		DoUpdates: clause.Assignments(updates),
 	}).Create(stat).Error
-}
-
-func durationUsToMs(durationUs int64) uint64 {
-	if durationUs <= 0 {
-		return 0
-	}
-	return uint64(durationUs / 1000)
 }
 
 func assignDurationBucket(stat *model.DailyRequestStats, durationMs uint64) {

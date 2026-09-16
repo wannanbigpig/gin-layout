@@ -33,7 +33,11 @@ func (api ApiController) List(c *gin.Context) {
 		return
 	}
 
-	result := api_permission.NewApiService().ListPage(params)
+	result, err := api_permission.NewApiService().ListPage(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

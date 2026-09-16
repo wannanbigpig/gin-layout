@@ -1,6 +1,8 @@
 package gen
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,11 +88,6 @@ func (g *Generator) renderAndWrite(tmplName, outputPath string, data any) error 
 		return nil
 	}
 
-	if g.dryRun {
-		fmt.Printf("[DRY-RUN] %s\n", outputPath)
-		return nil
-	}
-
 	// 读取模板
 	tmplPath := filepath.Join(g.projectRoot, "internal", "console", "gen", "templates", tmplName)
 	tmplContent, err := os.ReadFile(tmplPath)
@@ -103,21 +100,23 @@ func (g *Generator) renderAndWrite(tmplName, outputPath string, data any) error 
 	if err != nil {
 		return fmt.Errorf("parse template %s: %w", tmplName, err)
 	}
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, data); err != nil {
+		return fmt.Errorf("execute template: %w", err)
+	}
+
+	if g.dryRun {
+		fmt.Printf("[DRY-RUN] %s\n", outputPath)
+		return nil
+	}
 
 	// 创建输出目录
 	if err := os.MkdirAll(filepath.Dir(fullOutputPath), 0o755); err != nil {
 		return fmt.Errorf("create dir: %w", err)
 	}
 
-	// 渲染
-	f, err := os.Create(fullOutputPath)
-	if err != nil {
-		return fmt.Errorf("create file: %w", err)
-	}
-	defer f.Close()
-
-	if err := tmpl.Execute(f, data); err != nil {
-		return fmt.Errorf("execute template: %w", err)
+	if err := os.WriteFile(fullOutputPath, rendered.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("write file: %w", err)
 	}
 
 	fmt.Printf("[OK] %s\n", outputPath)
@@ -179,7 +178,7 @@ func (g *Generator) printRouteSnippet(data *TemplateData) {
 	fmt.Println("\n========== 路由片段 ==========")
 	fmt.Println("// 将以下代码添加到 internal/routers/admin_router.go")
 	fmt.Println(buf.String())
-	fmt.Println("// 将以下行添加到 adminAuthGroup 的 Children 中:")
+	fmt.Println("// 将以下行添加到 adminPermissionGroup 的 Children 中:")
 	fmt.Printf("// %sGroup(deps),\n", data.ModuleSnake)
 	fmt.Println("================================")
 }
@@ -209,39 +208,72 @@ func (g *Generator) printMenuData(data *TemplateData) {
 	if data.MenuTitleI18n != "" {
 		fmt.Printf("// 菜单标题 i18n: %s\n", data.MenuTitleI18n)
 	}
-	fmt.Println()
-	fmt.Printf("-- 菜单记录 (Type=2)\n")
-	fmt.Printf("INSERT INTO `menu` (`pid`, `type`, `title`, `title_i18n`, `path`, `component_key`, `sort`, `is_auth`, `is_show`, `is_cache`) VALUES\n")
-	titleI18n := data.MenuTitleI18n
-	if titleI18n == "" {
-		titleI18n = fmt.Sprintf(`{"zh-CN":"%s","en-US":"%s"}`, data.MenuTitle, toPascalCase(data.ModuleSnake))
-	}
-	fmt.Printf("(%d, 2, '%s', '%s', '/%s', '%s', 0, 1, 1, 0);\n",
-		data.MenuPID, data.MenuTitle, titleI18n, data.ModuleSnake, data.ComponentKey)
-	fmt.Println()
-	fmt.Printf("-- 按钮记录 (Type=3)\n")
-	for _, btn := range []struct {
-		code  string
-		title string
-	}{
-		{data.ModuleSnake + ":list", data.MenuTitle + "列表"},
-		{data.ModuleSnake + ":create", "新增" + data.MenuTitle},
-		{data.ModuleSnake + ":update", "编辑" + data.MenuTitle},
-		{data.ModuleSnake + ":delete", "删除" + data.MenuTitle},
-	} {
-		fmt.Printf("INSERT INTO `menu` (`pid`, `type`, `title`, `code`, `sort`, `is_auth`) VALUES\n")
-		fmt.Printf("((SELECT id FROM (SELECT id FROM `menu` WHERE `component_key` = '%s' AND `type` = 2 LIMIT 1) AS tmp), 3, '%s', '%s', 0, 1);\n",
-			data.ComponentKey, btn.title, btn.code)
-	}
+	fmt.Println(renderMenuSQL(data))
 	fmt.Println("================================")
+}
+
+// renderMenuSQL 生成与当前 menu/menu_i18n 表结构一致的初始化 SQL。
+func renderMenuSQL(data *TemplateData) string {
+	quote := func(value string) string {
+		return strings.ReplaceAll(value, "'", "''")
+	}
+	titles := map[string]string{
+		"zh-CN": data.MenuTitle,
+		"en-US": toPascalCase(data.ModuleSnake),
+	}
+	if data.MenuTitleI18n != "" {
+		var configured map[string]string
+		if json.Unmarshal([]byte(data.MenuTitleI18n), &configured) == nil {
+			for locale, title := range configured {
+				if strings.TrimSpace(title) != "" {
+					titles[locale] = title
+				}
+			}
+		}
+	}
+
+	var sql strings.Builder
+	fmt.Fprintf(&sql, "-- 菜单记录 (Type=2)\n")
+	fmt.Fprintf(&sql, "INSERT INTO `menu` (`pid`, `type`, `code`, `path`, `name`, `component_key`, `sort`, `is_auth`, `is_show`, `status`) VALUES\n")
+	fmt.Fprintf(&sql, "(%d, 2, '%s', '/%s', '%s', '%s', 0, 1, 1, 1);\n",
+		data.MenuPID, quote(data.ModuleSnake+":index"), quote(data.ModuleSnake), quote(data.ModelName), quote(data.ComponentKey))
+	fmt.Fprintln(&sql, "SET @generated_menu_id = LAST_INSERT_ID();")
+	fmt.Fprintln(&sql, "INSERT INTO `menu_i18n` (`menu_id`, `locale`, `title`, `created_at`, `updated_at`) VALUES")
+	fmt.Fprintf(&sql, "(@generated_menu_id, 'zh-CN', '%s', NOW(), NOW()),\n", quote(titles["zh-CN"]))
+	fmt.Fprintf(&sql, "(@generated_menu_id, 'en-US', '%s', NOW(), NOW());\n", quote(titles["en-US"]))
+
+	buttons := []struct {
+		code    string
+		zhTitle string
+		enTitle string
+	}{
+		{data.ModuleSnake + ":list", data.MenuTitle + "列表", "List " + titles["en-US"]},
+		{data.ModuleSnake + ":create", "新增" + data.MenuTitle, "Create " + titles["en-US"]},
+		{data.ModuleSnake + ":update", "编辑" + data.MenuTitle, "Update " + titles["en-US"]},
+		{data.ModuleSnake + ":delete", "删除" + data.MenuTitle, "Delete " + titles["en-US"]},
+	}
+	for _, button := range buttons {
+		fmt.Fprintln(&sql, "INSERT INTO `menu` (`pid`, `type`, `code`, `sort`, `is_auth`, `is_show`, `status`) VALUES")
+		fmt.Fprintf(&sql, "(@generated_menu_id, 3, '%s', 0, 1, 1, 1);\n", quote(button.code))
+		fmt.Fprintln(&sql, "SET @generated_button_id = LAST_INSERT_ID();")
+		fmt.Fprintln(&sql, "INSERT INTO `menu_i18n` (`menu_id`, `locale`, `title`, `created_at`, `updated_at`) VALUES")
+		fmt.Fprintf(&sql, "(@generated_button_id, 'zh-CN', '%s', NOW(), NOW()),\n", quote(button.zhTitle))
+		fmt.Fprintf(&sql, "(@generated_button_id, 'en-US', '%s', NOW(), NOW());\n", quote(button.enTitle))
+	}
+	return strings.TrimSpace(sql.String())
 }
 
 // printDefaultMenuAPIBinding 打印默认菜单 API 绑定。
 func (g *Generator) printDefaultMenuAPIBinding(data *TemplateData) {
 	fmt.Println("\n========== defaultMenuAPIBinding 片段 ==========")
 	fmt.Println("// 将以下绑定添加到 internal/service/access/menu_api_defaults.go 的 builtInDefaultMenuAPIBindings 中")
-	fmt.Printf("// %s:list → GET /admin/v1/%s/list, GET /admin/v1/%s/options, GET /admin/v1/%s/detail\n",
-		data.ModuleSnake, data.TableName, data.TableName, data.TableName)
+	if data.HasOptions {
+		fmt.Printf("// %s:list → GET /admin/v1/%s/list, GET /admin/v1/%s/options, GET /admin/v1/%s/detail\n",
+			data.ModuleSnake, data.TableName, data.TableName, data.TableName)
+	} else {
+		fmt.Printf("// %s:list → GET /admin/v1/%s/list, GET /admin/v1/%s/detail\n",
+			data.ModuleSnake, data.TableName, data.TableName)
+	}
 	fmt.Printf("// %s:create → POST /admin/v1/%s/create\n", data.ModuleSnake, data.TableName)
 	fmt.Printf("// %s:update → POST /admin/v1/%s/update\n", data.ModuleSnake, data.TableName)
 	fmt.Printf("// %s:delete → POST /admin/v1/%s/delete\n", data.ModuleSnake, data.TableName)
@@ -268,11 +300,6 @@ func (g *Generator) generateFrontend(data *TemplateData) error {
 			continue
 		}
 
-		if g.dryRun {
-			fmt.Printf("[DRY-RUN] frontend/%s\n", f.output)
-			continue
-		}
-
 		// 读取模板
 		tmplPath := filepath.Join(g.projectRoot, "internal", "console", "gen", "templates", f.template)
 		tmplContent, err := os.ReadFile(tmplPath)
@@ -283,7 +310,6 @@ func (g *Generator) generateFrontend(data *TemplateData) error {
 		// 准备前端模板数据
 		frontendData := struct {
 			*TemplateData
-			TsTypeMap map[string]string
 		}{
 			TemplateData: data,
 		}
@@ -299,23 +325,24 @@ func (g *Generator) generateFrontend(data *TemplateData) error {
 		if err != nil {
 			return err
 		}
+		var rendered bytes.Buffer
+		if err := tmpl.Execute(&rendered, frontendData); err != nil {
+			return err
+		}
+
+		if g.dryRun {
+			fmt.Printf("[DRY-RUN] frontend/%s\n", f.output)
+			continue
+		}
 
 		// 创建目录
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 			return err
 		}
 
-		// 写入
-		out, err := os.Create(fullPath)
-		if err != nil {
+		if err := os.WriteFile(fullPath, rendered.Bytes(), 0o644); err != nil {
 			return err
 		}
-
-		if err := tmpl.Execute(out, frontendData); err != nil {
-			out.Close()
-			return err
-		}
-		out.Close()
 
 		fmt.Printf("[OK] frontend/%s\n", f.output)
 	}

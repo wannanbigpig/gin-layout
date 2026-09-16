@@ -170,3 +170,48 @@ func newLoginRecordTestDB(t *testing.T, withLastLoginColumn bool) *gorm.DB {
 	}
 	return db
 }
+
+func TestSuccessfulSessionPersistsBeforeReturnWithoutServiceDBOverride(t *testing.T) {
+	db := newLoginRecordTestDB(t, true)
+	entry := model.NewAdminLoginLogs()
+	entry.SetDB(db)
+	entry.Username = "admin"
+	entry.JwtID = "immediate"
+	entry.LoginStatus = model.LoginStatusSuccess
+	s := NewLoginService()
+	if err := s.persistLoginLog(entry, false); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Table("admin_login_logs").Where("jwt_id = ?", "immediate").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("successful session must exist before return; count=%d", count)
+	}
+}
+
+func TestSuccessfulSessionInsertFailureRollsBackLastLogin(t *testing.T) {
+	db := newLoginRecordTestDB(t, true)
+	if err := db.Exec(`INSERT INTO admin_user(id, deleted_at, username, last_ip) VALUES (1, 0, 'admin', 'old')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`DROP TABLE admin_login_logs`).Error; err != nil {
+		t.Fatal(err)
+	}
+	entry := model.NewAdminLoginLogs()
+	entry.UID = 1
+	entry.IP = "new"
+	entry.LoginStatus = model.LoginStatusSuccess
+	s := NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db})
+	if err := s.persistLoginLog(entry, true); err == nil {
+		t.Fatal("must reject success when session insert fails")
+	}
+	var ip string
+	if err := db.Table("admin_user").Select("last_ip").Where("id = 1").Scan(&ip).Error; err != nil {
+		t.Fatal(err)
+	}
+	if ip != "old" {
+		t.Fatalf("last login was committed without session: %s", ip)
+	}
+}

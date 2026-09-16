@@ -1,6 +1,7 @@
 package sensitive
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -51,9 +52,17 @@ func GetMaskedRequestBody(bodyBytes []byte, contentType string) string {
 		return "[multipart/form-data: file upload, body not logged]"
 	case !isValidUTF8(bodyBytes):
 		return "[binary data: non-text content, body not logged]"
+	case strings.Contains(contentTypeLower, "application/x-www-form-urlencoded"):
+		if _, err := url.ParseQuery(string(bodyBytes)); err != nil {
+			return "[invalid form body: body not logged]"
+		}
+		return MaskQueryString(string(bodyBytes))
 	case !strings.Contains(contentTypeLower, "application/json"):
 		return maskString(string(bodyBytes))
 	default:
+		if !json.Valid(bodyBytes) {
+			return "[invalid or truncated JSON: body not logged]"
+		}
 		return maskJSONBytes(bodyBytes, getRequestBodyFields())
 	}
 }
@@ -94,14 +103,16 @@ func MaskQueryString(queryString string) string {
 
 func maskJSONBytes(bodyBytes []byte, sensitiveFields map[string]bool) string {
 	var data interface{}
-	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		return maskString(string(bodyBytes))
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber()
+	if err := decoder.Decode(&data); err != nil {
+		return "[invalid or truncated JSON: body not logged]"
 	}
 
 	maskedData := maskSensitiveDataWithFields(data, sensitiveFields)
 	maskedBytes, err := json.Marshal(maskedData)
 	if err != nil {
-		return maskString(string(bodyBytes))
+		return "[JSON masking failed: body not logged]"
 	}
 	return string(maskedBytes)
 }

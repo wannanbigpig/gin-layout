@@ -30,7 +30,7 @@ func NewUserPermissionSyncServiceWithDeps(deps UserPermissionSyncServiceDeps) *U
 		reloadPolicyFn: deps.ReloadPolicy,
 	}
 	if s.reloadPolicyFn == nil {
-		s.reloadPolicyFn = defaultReloadPolicy
+		s.reloadPolicyFn = casbinx.ReloadPolicy
 	}
 	return s
 }
@@ -62,7 +62,9 @@ func (s *UserPermissionSyncService) SyncUsers(userIDs []uint, tx ...*gorm.DB) er
 // SyncAllUsers 重建全部用户的最终接口权限并同步到 Casbin。
 func (s *UserPermissionSyncService) SyncAllUsers(tx ...*gorm.DB) error {
 	return s.withSyncTransaction(tx, func(execTx *gorm.DB) error {
-		userIDs, err := s.allUserIDs(execTx)
+		userModel := model.NewAdminUsers()
+		userModel.SetDB(execTx)
+		userIDs, err := userModel.AllIds()
 		if err != nil {
 			return err
 		}

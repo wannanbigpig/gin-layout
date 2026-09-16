@@ -7,10 +7,6 @@ import (
 	"gorm.io/gorm"
 )
 
-func defaultReloadPolicy() error {
-	return casbinx.ReloadPolicy()
-}
-
 // getPolicyEnforcer 返回已初始化的 Casbin 封装实例。
 func getPolicyEnforcer() (*casbinx.CasbinEnforcer, error) {
 	enforcer, err := casbinx.GetEnforcer()

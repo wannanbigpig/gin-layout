@@ -26,7 +26,11 @@ func (api TaskCenterController) TaskList(c *gin.Context) {
 		return
 	}
 
-	result := taskcenter.NewTaskCenterService().ListTaskDefinitions(params)
+	result, err := taskcenter.NewTaskCenterService().ListTaskDefinitions(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 
@@ -37,7 +41,11 @@ func (api TaskCenterController) RunList(c *gin.Context) {
 		return
 	}
 
-	result := taskcenter.NewTaskCenterService().ListTaskRuns(params)
+	result, err := taskcenter.NewTaskCenterService().ListTaskRuns(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 
@@ -108,7 +116,11 @@ func (api TaskCenterController) CronStateList(c *gin.Context) {
 		return
 	}
 
-	result := taskcenter.NewTaskCenterService().ListCronTaskStates(params)
+	result, err := taskcenter.NewTaskCenterService().ListCronTaskStates(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

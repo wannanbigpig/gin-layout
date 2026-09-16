@@ -192,7 +192,7 @@ func TestLogRequestSkipsPing(t *testing.T) {
 	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
 
 	respRecorder := createResponseRecorder(ctx)
-	logRequest(ctx, respRecorder)
+	finalizeRequestLogging(ctx, respRecorder)
 }
 
 func TestBuildRequestAuditLogSnapshotUsesPrincipal(t *testing.T) {
@@ -433,7 +433,7 @@ func TestFinalizeRequestLoggingSkipsWebSocketPath(t *testing.T) {
 	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
 
 	respRecorder := createResponseRecorder(ctx)
-	logRequest(ctx, respRecorder)
+	finalizeRequestLogging(ctx, respRecorder)
 	if called {
 		t.Fatal("expected middleware finalize to skip websocket path (handler records it)")
 	}

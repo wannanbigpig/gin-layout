@@ -153,9 +153,12 @@ func TestListTaskRunsFillsMissingTriggerAccountFromAdminUser(t *testing.T) {
 	insertTaskRun(t, db, 101, 1, "", now)
 	insertTaskRun(t, db, 102, 1, "recorded_admin", now.Add(time.Second))
 
-	result := NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db}).ListTaskRuns(&form.TaskRunList{
+	result, err := NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db}).ListTaskRuns(&form.TaskRunList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 	})
+	if err != nil {
+		t.Fatalf("list task runs failed: %v", err)
+	}
 	if result.Total != 2 || len(result.Data) != 2 {
 		t.Fatalf("expected 2 task runs, got %#v", result)
 	}

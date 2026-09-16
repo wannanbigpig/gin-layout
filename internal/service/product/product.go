@@ -27,8 +27,11 @@ func NewProductService() *ProductService {
 }
 
 // List 分页查询产品列表（接入数据权限）。
-func (s *ProductService) List(params *form.ProductList) interface{} {
-	condition, args := s.buildListCondition(params)
+func (s *ProductService) List(params *form.ProductList) (interface{}, error) {
+	condition, args := query_builder.New().
+		AddLike("name", params.Name).
+		AddEq("status", params.Status).
+		Build()
 
 	// 接入数据权限过滤
 	dataScopeCond, dataScopeArgs := s.buildDataScopeCondition()
@@ -57,17 +60,10 @@ func (s *ProductService) List(params *form.ProductList) interface{} {
 		listOptions,
 	)
 	if err != nil {
-		return resources.NewProductTransformer().ToCollection(params.Page, params.PerPage, 0, []*model.Product{})
+		return nil, err
 	}
 
-	return resources.NewProductTransformer().ToCollection(params.Page, params.PerPage, total, collection)
-}
-
-func (s *ProductService) buildListCondition(params *form.ProductList) (string, []any) {
-	return query_builder.New().
-		AddLike("name", params.Name).
-		AddEq("status", params.Status).
-		Build()
+	return resources.NewProductTransformer().ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 // buildDataScopeCondition 构建数据权限过滤条件。
@@ -113,7 +109,11 @@ func (s *ProductService) Create(params *form.CreateProduct) error {
 	product.CreatedBy = s.GetAdminUserId()
 	product.DeptId = deptID
 
-	if err := product.Create(); err != nil {
+	db, err := product.GetDB()
+	if err != nil {
+		return err
+	}
+	if err := service.CreateWithExplicitFields(db, product, map[string]any{"status": params.Status}); err != nil {
 		return e.NewBusinessError(e.FAILURE)
 	}
 	return nil
@@ -168,7 +168,11 @@ func (s *ProductService) Detail(id uint) (any, error) {
 	product := model.NewProduct()
 	// 查询产品时加上数据权限条件，确保只能查看有权限的数据
 	condition, args := s.buildDetailCondition(id)
-	if err := s.loadProductDetail(product, condition, args...); err != nil || product.ID == 0 {
+	db, err := product.GetDB(product)
+	if err != nil {
+		return nil, e.NewBusinessError(e.NotFound)
+	}
+	if err := db.Preload("Department").Where(condition, args...).First(product).Error; err != nil || product.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 
@@ -189,14 +193,6 @@ func (s *ProductService) buildDetailCondition(id uint) (string, []any) {
 	}
 
 	return condition, args
-}
-
-func (s *ProductService) loadProductDetail(product *model.Product, condition string, args ...any) error {
-	db, err := product.GetDB(product)
-	if err != nil {
-		return err
-	}
-	return db.Preload("Department").Where(condition, args...).First(product).Error
 }
 
 // getUserDeptId 获取当前用户的默认部门 ID（取第一个部门）。

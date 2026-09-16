@@ -318,7 +318,11 @@ func (r *recorder) Finish(ctx context.Context, run *model.TaskRun, input RunFini
 	return db.Transaction(func(tx *gorm.DB) error {
 		detail := resolveDetailDecision(tx, run, status)
 		run.DetailRecordMode = detail.Mode
-		result := tx.Model(&model.TaskRun{}).Where("id = ? AND status IN ?", run.ID, []string{model.TaskRunStatusRunning, model.TaskRunStatusPending}).Updates(map[string]any{
+		allowedStatuses := []string{model.TaskRunStatusRunning, model.TaskRunStatusPending}
+		if status == model.TaskRunStatusCanceled {
+			allowedStatuses = append(allowedStatuses, model.TaskRunStatusRetrying)
+		}
+		result := tx.Model(&model.TaskRun{}).Where("id = ? AND status IN ?", run.ID, allowedStatuses).Updates(map[string]any{
 			"status":             run.Status,
 			"error_message":      run.ErrorMessage,
 			"finished_at":        run.FinishedAt,

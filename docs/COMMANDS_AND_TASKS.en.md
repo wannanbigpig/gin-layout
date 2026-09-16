@@ -150,6 +150,9 @@ Supported subcommands:
   - example command
 - `gen`
   - generates CRUD code from MySQL schema or a YAML spec, with optional frontend files and menu seed data
+- `gen-openapi`
+  - generates OpenAPI 3.0 YAML from the declarative route Catalog
+  - paths, methods, groups, and authentication policies are authoritative; request and business response schemas are not route metadata yet, so generating a complete TypeScript client is not recommended
 - `migrate`
   - migration management subcommands: `create/check/up/down/goto/force/version`
   - full guide: [docs/MIGRATE_COMMANDS.en.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.en.md)
@@ -215,6 +218,8 @@ go run main.go -c ./config.yaml cron
 ```
 
 ## Scheduled Jobs
+
+When multiple `cron` processes are deployed, high-risk tasks use a Redis distributed lock. Ordinary tasks only have process-local `WithoutOverlapping` protection and may still run concurrently in different instances. Run a single `cron` instance until ordinary tasks are idempotent, and never register the same periodic job in both `cron` and `worker`.
 
 The current scheduling code is split into 3 files:
 

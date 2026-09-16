@@ -14,6 +14,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 )
 
@@ -71,7 +72,10 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	role.Description = params.Description
 	role.Status = params.Status
 	role.Sort = params.Sort
-	role.DataScope = normalizeDataScope(params.DataScope)
+	role.DataScope = params.DataScope
+	if role.DataScope == 0 {
+		role.DataScope = access.DataScopeDept
+	}
 
 	// 验证所有菜单 ID 是否存在，再按真实授权节点规则过滤。
 	menuList, err := model.VerifyExistingIDs(model.NewMenu(), params.MenuList)
@@ -94,7 +98,13 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	if err := coordinator.RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
 		role.SetDB(tx)
 
-		if err := role.Save(); err != nil {
+		var err error
+		if params.Id == 0 {
+			err = service.CreateWithExplicitFields(tx, role, map[string]any{"status": role.Status})
+		} else {
+			err = role.Save()
+		}
+		if err != nil {
 			if isRoleCodeDuplicateErr(err) {
 				return e.NewBusinessError(e.RoleExists)
 			}
@@ -120,13 +130,6 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	}
 	access.NewDataScopeFilter().InvalidateCache(context.Background(), affectedUserIDs...)
 	return nil
-}
-
-func normalizeDataScope(dataScope uint8) uint8 {
-	if dataScope == 0 {
-		return access.DataScopeDept
-	}
-	return dataScope
 }
 
 func isRoleCodeDuplicateErr(err error) bool {
@@ -271,10 +274,18 @@ func (s *RoleService) updateRoleDataScopeDept(roleId uint, dataScope uint8, dept
 	if dataScope != access.DataScopeCustom {
 		deptIds = nil
 	} else {
-		deptIds, err = existingDepartmentIDs(db, deptIds)
-		if err != nil {
-			return err
+		deptIds = access.UniqueUintSlice(deptIds)
+		if len(deptIds) == 0 {
+			return e.NewBusinessError(e.InvalidParameter)
 		}
+		existingDeptIDs, lookupErr := existingDepartmentIDs(db, deptIds)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if len(existingDeptIDs) != len(deptIds) {
+			return e.NewBusinessError(e.DepartmentNotFound)
+		}
+		deptIds = existingDeptIDs
 	}
 
 	// 计算差异：toDelete 需删除，toAdd 需新增

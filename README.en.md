@@ -21,7 +21,7 @@
   <img src="https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml/badge.svg" alt="codeql" />
   <img src="https://goreportcard.com/badge/github.com/wannanbigpig/gin-layout" alt="go report card" />
   <img src="https://img.shields.io/github/license/wannanbigpig/gin-layout" alt="license" />
-  <img src="https://img.shields.io/badge/Go-%3E%3D1.23-blue.svg" alt="go version" />
+  <img src="https://img.shields.io/badge/Go-%3E%3D1.27-blue.svg" alt="go version" />
 </div>
 
 <br />
@@ -65,7 +65,7 @@ Most admin projects start with the same goal: get login, permissions, menus, upl
 
 ### 1. Requirements
 
-- `Go >= 1.23`
+- `Go >= 1.27`
 - `MySQL >= 5.7`
 - `Redis >= 5.0` (optional)
 
@@ -201,6 +201,8 @@ Security policies are declared on route groups and inherited by child routes. `a
 
 The current permission model treats database relations as the source of truth, while Casbin performs final API authorization checks. The `rebuild-user-permissions` command rebuilds each user's final API permissions from user, department, role, menu, and API relationships stored in the database.
 
+Casbin's in-memory policy reload currently affects only the `service` process that handled the permission mutation. A single `service` instance is the default deployment boundary. Horizontal replicas must reload every instance or first add cross-instance policy-change broadcasting; Redis cache invalidation alone does not refresh another process's Casbin snapshot.
+
 ### Hot Reload Is Tiered
 
 The project supports config hot reload, but not every setting can be applied live. Supported resources are rebuilt when possible. If a rebuild fails, the previous live instance is kept so the service can continue running.
@@ -235,6 +237,7 @@ Common commands:
 | `go run main.go -c ./config.yaml cron` | Start scheduled jobs |
 | `go run main.go command demo` | Run the demo command |
 | `go run main.go -c ./config.yaml command gen --from=gen/specs/product.yaml` | Generate CRUD code from a table or YAML spec |
+| `go run main.go -c ./config.yaml command gen-openapi` | Generate `docs/openapi.yaml` from the declarative route Catalog |
 | `go run main.go -c ./config.yaml command api-route` | Scan the declarative route tree and rebuild the `api` route table |
 | `go run main.go -c ./config.yaml command rebuild-user-permissions` | Rebuild final user API permissions from database relationships |
 | `go run main.go -c ./config.yaml command init-system` | Drop objects in the configured database and rebuild system data |

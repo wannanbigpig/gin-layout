@@ -121,11 +121,14 @@ func waitForShutdown(server *http.Server, errChan <-chan error) error {
 		return fmt.Errorf("shutdown http server failed: %w", err)
 	}
 	notification.StopRealtimeSubscriber(realtimeShutdownTimeout)
+	dashboard.StopMonitorPush(gracefulShutdownTimout)
+	notification.ShutdownRealtimeDispatcher()
+	if !middleware.WaitWebSocketAudits(auditDrainTimeout) {
+		log.Logger.Warn("等待 WebSocket 断连审计超时")
+	}
 	middleware.StopAuditLogQueueDrain(auditDrainTimeout)
 	auth.StopLoginLogWorker(loginLogDrainTimeout)
 	sys_config.StopSysConfigCacheSyncSubscriber(gracefulShutdownTimout)
-	notification.ShutdownRealtimeDispatcher()
-	dashboard.StopMonitorPush(gracefulShutdownTimout)
 	if err := data.Shutdown(); err != nil {
 		return fmt.Errorf("shutdown data resources failed: %w", err)
 	}

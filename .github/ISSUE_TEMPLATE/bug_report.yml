@@ -1,0 +1,29 @@
+name: Bug report
+description: 报告可复现的缺陷
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题与影响
+      description: 说明实际行为、预期行为和影响范围。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本或 Commit
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 日志与最小证据
+      description: 请移除密钥、Token 和个人数据。

@@ -273,11 +273,6 @@ func SyncBuiltinDefinitionsWithReportIfAvailable(cfg *config.Conf) (TaskDefiniti
 	return report, err
 }
 
-func syncBuiltinDefinitions(db *gorm.DB, cfg *config.Conf) error {
-	_, err := syncBuiltinDefinitionsWithReport(db, cfg)
-	return err
-}
-
 func syncBuiltinDefinitionsWithReport(db *gorm.DB, cfg *config.Conf) (TaskDefinitionSyncReport, error) {
 	definitions := BuiltinTaskDefinitions(cfg)
 	report := TaskDefinitionSyncReport{Total: len(definitions)}

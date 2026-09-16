@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"golang.org/x/time/rate"
 )
 
@@ -88,10 +89,7 @@ func RateLimitHandlerWithContext(ctx context.Context, cfg RateLimitConfig) gin.H
 	return func(c *gin.Context) {
 		limiter := getVisitor(c.ClientIP())
 		if !limiter.Allow() {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"code":    http.StatusTooManyRequests,
-				"message": "Too Many Requests",
-			})
+			response.Resp().SetHttpCode(http.StatusTooManyRequests).Fail(c, http.StatusTooManyRequests, "Too Many Requests")
 			return
 		}
 		c.Next()

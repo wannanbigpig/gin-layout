@@ -728,7 +728,7 @@ func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, 
 			return err
 		}
 
-		created, existing, err := s.createUploadFileWithConflict(tx, session.FolderID, session.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+		created, existing, err := s.createUploadFileWithConflict(tx, session.FolderID, session.OriginName, hash, uid, session.IsPublic, func(resolved *uploadFileConflictResult) *model.UploadFiles {
 			originName := resolved.FinalName
 			uf := &model.UploadFiles{
 				UID:           uid,
@@ -1012,7 +1012,7 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		return nil, err
 	}
 
-	uploadFile, existing, err := s.createUploadFileWithConflict(db, input.FolderID, input.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+	uploadFile, existing, err := s.createUploadFileWithConflict(db, input.FolderID, input.OriginName, hash, input.UID, input.IsPublic, func(resolved *uploadFileConflictResult) *model.UploadFiles {
 		originName := resolved.FinalName
 		uf := &model.UploadFiles{
 			UID:           input.UID,
@@ -1145,7 +1145,7 @@ func (s *FileResourceService) uploadLocalOne(file *multipart.FileHeader, params 
 		cleanupStoredUpload(result.Path)
 	}
 
-	uploadFile, existing, err := s.createUploadFileWithConflict(db, params.FolderID, result.OriginName, result.Sha256, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+	uploadFile, existing, err := s.createUploadFileWithConflict(db, params.FolderID, result.OriginName, result.Sha256, uid, params.IsPublic, func(resolved *uploadFileConflictResult) *model.UploadFiles {
 		originName := resolved.FinalName
 		uf := &model.UploadFiles{
 			UID:           uid,
@@ -1277,7 +1277,7 @@ func updateLogicalPathSnapshots(tx *gorm.DB, folderID uint, oldPath, newPath str
 		return err
 	}
 	var children []model.UploadFileFolder
-	if err := tx.Where("logical_path LIKE ?", oldPath+"/%").Find(&children).Error; err != nil {
+	if err := tx.Where("logical_path LIKE ? ESCAPE '!'", escapeLikePattern(oldPath)+"/%").Find(&children).Error; err != nil {
 		return err
 	}
 	for _, child := range children {
@@ -1531,7 +1531,7 @@ func (s *FileResourceService) MultipartCompleteWithContext(ctx context.Context, 
 			return err
 		}
 
-		created, existing, err := s.createUploadFileWithConflict(tx, session.FolderID, session.OriginName, hash, func(resolved *uploadFileConflictResult) *model.UploadFiles {
+		created, existing, err := s.createUploadFileWithConflict(tx, session.FolderID, session.OriginName, hash, uid, session.IsPublic, func(resolved *uploadFileConflictResult) *model.UploadFiles {
 			originName := resolved.FinalName
 			uf := &model.UploadFiles{
 				UID:           uid,
@@ -1802,6 +1802,10 @@ func normalizeUploadMimeType(mimeType, ext string, inferFromExt bool) string {
 func isMimeCompatible(actual, expected string) bool {
 	actual = strings.ToLower(strings.TrimSpace(actual))
 	expected = strings.ToLower(strings.TrimSpace(expected))
+	if actual == "text/plain" && expected == "text/csv" {
+		// CSV 没有专用文件头，标准库会将其识别为纯文本。
+		return true
+	}
 	if actual == expected {
 		return true
 	}
@@ -2130,10 +2134,10 @@ type uploadFileConflictResult struct {
 // resolveUploadFileConflict 检查同目录下同名文件冲突。
 //
 // 规则：
-//  1. 同 folder_id + 同 origin_name + 同 hash → 跳过，返回已存在记录
-//  2. 同 folder_id + 同 origin_name + 不同 hash → 自动加序号后缀 (1), (2), ...
+//  1. 同 folder_id + 同 origin_name + 同 hash + 同上传者 + 同公开状态 → 跳过，返回已存在记录
+//  2. 同 folder_id + 同 origin_name，但内容或归属/公开状态不同 → 自动加序号后缀 (1), (2), ...
 //  3. 无冲突 → 返回原名称
-func (s *FileResourceService) resolveUploadFileConflict(tx *gorm.DB, folderID uint, originName string, hash string) (*uploadFileConflictResult, error) {
+func (s *FileResourceService) resolveUploadFileConflict(tx *gorm.DB, folderID uint, originName string, hash string, uid uint, isPublic uint8) (*uploadFileConflictResult, error) {
 	// 同目录、同名：单条查询替代两次顺序 SELECT，在 Go 层按 hash 判断走复用还是重命名。
 	var existing model.UploadFiles
 	err := tx.Where("folder_id = ? AND origin_name = ?", folderID, originName).First(&existing).Error
@@ -2143,20 +2147,20 @@ func (s *FileResourceService) resolveUploadFileConflict(tx *gorm.DB, folderID ui
 	if err != nil {
 		return nil, err
 	}
-	if existing.Hash == hash {
-		// 同 hash → 跳过，返回已存在记录
+	if existing.Hash == hash && existing.UID == uid && existing.IsPublic == isPublic {
+		// 逻辑记录只复用相同上传者及公开状态；物理对象可按自己的规则去重。
 		return &uploadFileConflictResult{Existing: &existing, FinalName: originName}, nil
 	}
-	// 不同 hash → 需要重命名，继续下方自动加序号逻辑
+	// 内容或归属/公开状态不同，保留独立逻辑记录并自动重命名。
 
 	// 自动加序号后缀：一次 LIKE 批量查询已有重命名，内存去重替代 N 次 DB 查询
 	ext := filepath.Ext(originName)
 	base := strings.TrimSuffix(originName, ext)
-	// 转义 LIKE 通配符，避免文件名含 % _ \ 时误匹配（统一用 \ 作为 escape）
+	// 转义 LIKE 通配符，使用 ! 避免依赖数据库的反斜杠转义模式。
 	likePattern := escapeLikePattern(base) + " (%)" + escapeLikePattern(ext)
 	var existingNames []string
 	if err := tx.Model(&model.UploadFiles{}).
-		Where("folder_id = ? AND origin_name LIKE ? ESCAPE '\\'", folderID, likePattern).
+		Where("folder_id = ? AND origin_name LIKE ? ESCAPE '!'", folderID, likePattern).
 		Pluck("origin_name", &existingNames).Error; err != nil {
 		return nil, err
 	}
@@ -2173,9 +2177,9 @@ func (s *FileResourceService) resolveUploadFileConflict(tx *gorm.DB, folderID ui
 	return nil, fmt.Errorf("unable to resolve name conflict for '%s' after %d attempts", originName, maxAutoRenameRetries)
 }
 
-// escapeLikePattern 转义 SQL LIKE 通配符 % _ \，配合 ESCAPE '\' 使用。
+// escapeLikePattern 转义 SQL LIKE 通配符及 !，配合 ESCAPE '!' 使用。
 func escapeLikePattern(s string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	replacer := strings.NewReplacer(`!`, `!!`, `%`, `!%`, `_`, `!_`)
 	return replacer.Replace(s)
 }
 
@@ -2197,11 +2201,13 @@ func (s *FileResourceService) createUploadFileWithConflict(
 	folderID uint,
 	originName string,
 	hash string,
+	uid uint,
+	isPublic uint8,
 	build uploadFileConflictBuilder,
 ) (file *model.UploadFiles, existing bool, err error) {
 	for attempt := 0; attempt < maxUploadConflictRetries; attempt++ {
 		txErr := access.RunInTransaction(db, func(tx *gorm.DB) error {
-			resolved, rErr := s.resolveUploadFileConflict(tx, folderID, originName, hash)
+			resolved, rErr := s.resolveUploadFileConflict(tx, folderID, originName, hash, uid, isPublic)
 			if rErr != nil {
 				return rErr
 			}

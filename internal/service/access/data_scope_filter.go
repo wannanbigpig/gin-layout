@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -58,6 +59,15 @@ var (
 	computeScopeForSingleflight = func(f *DataScopeFilter, ctx context.Context, uid uint) (*scopeResult, error) {
 		return f.computeScope(ctx, uid)
 	}
+	dataScopeCacheVersions = struct {
+		sync.RWMutex
+		global uint64
+		users  map[uint]uint64
+	}{
+		// 进程重启后不复用上一进程可能未来得及删除的权限快照。
+		global: uint64(time.Now().UnixNano()),
+		users:  make(map[uint]uint64),
+	}
 )
 
 // NewDataScopeFilter 创建数据权限过滤器。
@@ -71,36 +81,17 @@ func NewDataScopeFilter() *DataScopeFilter {
 // 超管短路：返回空条件（不加行级限制）。
 // 拿不到 scope 时返回恒假条件 1=0。
 func (f *DataScopeFilter) Build(ctx context.Context, input DataScopeInput, deptCol, ownerCol string) (string, []any) {
-	// 超管短路
 	if input.IsSuperAdmin {
 		return "", nil
 	}
 
-	// 尝试从缓存读取
-	result, err := f.getFromCache(ctx, input.UID)
+	result, err := f.resolveScope(ctx, input.UID)
 	if err != nil {
-		// 缓存未命中，使用 singleflight 防止并发回源
-		cacheKey := fmt.Sprintf("%s%d", dataScopeCachePrefix, input.UID)
-		v, sfErr, _ := dataScopeSingleflightGroup.Do(cacheKey, func() (interface{}, error) {
-			return computeScopeForSingleflight(f, ctx, input.UID)
-		})
-		if sfErr != nil {
-			log.Error("DataScopeFilter: compute scope failed, denying access",
-				zap.Uint("uid", input.UID),
-				zap.Error(sfErr))
-			return "1=0", nil
-		}
-		computed, ok := v.(*scopeResult)
-		if !ok {
-			log.Error("DataScopeFilter: invalid scope result type",
-				zap.Uint("uid", input.UID))
-			return "1=0", nil
-		}
-		result = computed
-		// 写入缓存（异步，不阻塞主流程）
-		go f.setToCache(context.Background(), input.UID, result)
+		log.Error("DataScopeFilter: resolve scope failed, denying access",
+			zap.Uint("uid", input.UID),
+			zap.Error(err))
+		return "1=0", nil
 	}
-
 	return buildScopeCondition(scopeConditionInput{
 		ScopeAll:    result.ScopeAll,
 		DeptIDs:     result.DeptIDs,
@@ -110,6 +101,55 @@ func (f *DataScopeFilter) Build(ctx context.Context, input DataScopeInput, deptC
 		DeptCol:     deptCol,
 		OwnerCol:    ownerCol,
 	})
+}
+
+// ResolveDepartmentScope 返回用户合并后的部门数据范围。
+// ScopeAll 为 true 时 DeptIDs 无需参与判断；解析失败时由调用方按 fail-closed 处理。
+func (f *DataScopeFilter) ResolveDepartmentScope(ctx context.Context, input DataScopeInput) (bool, []uint, error) {
+	if input.IsSuperAdmin {
+		return true, nil, nil
+	}
+
+	result, err := f.resolveScope(ctx, input.UID)
+	if err != nil {
+		return false, nil, err
+	}
+	return result.ScopeAll, append([]uint(nil), result.DeptIDs...), nil
+}
+
+func (f *DataScopeFilter) resolveScope(ctx context.Context, uid uint) (*scopeResult, error) {
+	// 权限变更可能与当前回源并发；版本变化时最多重试一次，
+	// 避免把变更前的计算结果写回并继续用于当前请求。
+	for attempt := 0; attempt < 2; attempt++ {
+		version := currentDataScopeCacheVersion(uid)
+		result, cacheErr := f.getFromCache(ctx, uid, version)
+		if cacheErr != nil {
+			cacheKey := fmt.Sprintf("%s%d:%d:%d", dataScopeCachePrefix, uid, version.Global, version.User)
+			v, sfErr, _ := dataScopeSingleflightGroup.Do(cacheKey, func() (interface{}, error) {
+				return computeScopeForSingleflight(f, ctx, uid)
+			})
+			if sfErr != nil {
+				return nil, fmt.Errorf("compute data scope for uid %d: %w", uid, sfErr)
+			}
+			computed, ok := v.(*scopeResult)
+			if !ok || computed == nil {
+				return nil, fmt.Errorf("invalid data scope result for uid %d", uid)
+			}
+			result = computed
+		}
+		if result == nil {
+			return nil, fmt.Errorf("empty data scope result for uid %d", uid)
+		}
+		if !version.isCurrent(uid) {
+			continue
+		}
+		if cacheErr != nil {
+			f.setToCache(ctx, uid, result, version)
+		}
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("data scope changed repeatedly for uid %d", uid)
 }
 
 // BuildFromSnapshot 从快照构建过滤条件，用于异步导出等脱离 HTTP 上下文的场景。
@@ -341,8 +381,27 @@ func collectDeptAndChildrenFromDB(db *gorm.DB, deptIDs []uint) ([]uint, error) {
 
 // cacheEntry 缓存条目。
 type cacheEntry struct {
-	Result   *scopeResult `json:"result"`
-	CachedAt time.Time    `json:"cached_at"`
+	Result   *scopeResult          `json:"result"`
+	Version  dataScopeCacheVersion `json:"version"`
+	CachedAt time.Time             `json:"cached_at"`
+}
+
+type dataScopeCacheVersion struct {
+	Global uint64 `json:"global"`
+	User   uint64 `json:"user"`
+}
+
+func currentDataScopeCacheVersion(uid uint) dataScopeCacheVersion {
+	dataScopeCacheVersions.RLock()
+	defer dataScopeCacheVersions.RUnlock()
+	return dataScopeCacheVersion{
+		Global: dataScopeCacheVersions.global,
+		User:   dataScopeCacheVersions.users[uid],
+	}
+}
+
+func (v dataScopeCacheVersion) isCurrent(uid uint) bool {
+	return v == currentDataScopeCacheVersion(uid)
 }
 
 // cacheKey 生成缓存 key。
@@ -351,7 +410,7 @@ func (f *DataScopeFilter) cacheKey(uid uint) string {
 }
 
 // getFromCache 从 Redis 读取缓存。
-func (f *DataScopeFilter) getFromCache(ctx context.Context, uid uint) (*scopeResult, error) {
+func (f *DataScopeFilter) getFromCache(ctx context.Context, uid uint, version dataScopeCacheVersion) (*scopeResult, error) {
 	client := data.RedisClient()
 	if client == nil {
 		return nil, fmt.Errorf("redis unavailable")
@@ -369,11 +428,17 @@ func (f *DataScopeFilter) getFromCache(ctx context.Context, uid uint) (*scopeRes
 	if err := json.Unmarshal([]byte(val), &entry); err != nil {
 		return nil, err
 	}
+	if entry.Version != version {
+		return nil, fmt.Errorf("stale cache version")
+	}
 	return entry.Result, nil
 }
 
 // setToCache 写入 Redis 缓存。
-func (f *DataScopeFilter) setToCache(ctx context.Context, uid uint, result *scopeResult) {
+func (f *DataScopeFilter) setToCache(ctx context.Context, uid uint, result *scopeResult, version dataScopeCacheVersion) {
+	if !version.isCurrent(uid) {
+		return
+	}
 	client := data.RedisClient()
 	if client == nil {
 		return
@@ -381,6 +446,7 @@ func (f *DataScopeFilter) setToCache(ctx context.Context, uid uint, result *scop
 
 	entry := cacheEntry{
 		Result:   result,
+		Version:  version,
 		CachedAt: time.Now(),
 	}
 	data, err := json.Marshal(entry)
@@ -399,6 +465,13 @@ func (f *DataScopeFilter) setToCache(ctx context.Context, uid uint, result *scop
 // InvalidateCache 使指定用户的数据权限缓存失效。
 // 应在以下场景调用：角色 data_scope/自定义部门、用户部门、用户角色、部门角色、部门树结构变化。
 func (f *DataScopeFilter) InvalidateCache(ctx context.Context, uids ...uint) {
+	uids = UniqueUintSlice(uids)
+	dataScopeCacheVersions.Lock()
+	for _, uid := range uids {
+		dataScopeCacheVersions.users[uid]++
+	}
+	dataScopeCacheVersions.Unlock()
+
 	client := data.RedisClient()
 	if client == nil || len(uids) == 0 {
 		return
@@ -411,5 +484,38 @@ func (f *DataScopeFilter) InvalidateCache(ctx context.Context, uids ...uint) {
 
 	if err := client.Del(ctx, keys...).Err(); err != nil {
 		log.Error("DataScopeFilter: invalidate cache failed", zap.Uints("uids", uids), zap.Error(err))
+	}
+}
+
+// InvalidateAllCache 使所有用户的数据权限缓存失效。
+// 部门树结构变化会影响多个祖先部门的子级范围，该场景优先保证正确性。
+func (f *DataScopeFilter) InvalidateAllCache(ctx context.Context) {
+	dataScopeCacheVersions.Lock()
+	dataScopeCacheVersions.global++
+	dataScopeCacheVersions.users = make(map[uint]uint64)
+	dataScopeCacheVersions.Unlock()
+
+	client := data.RedisClient()
+	if client == nil {
+		return
+	}
+
+	var cursor uint64
+	for {
+		keys, nextCursor, err := client.Scan(ctx, cursor, dataScopeCachePrefix+"*", 100).Result()
+		if err != nil {
+			log.Error("DataScopeFilter: scan cache keys failed", zap.Error(err))
+			return
+		}
+		if len(keys) > 0 {
+			if err := client.Del(ctx, keys...).Err(); err != nil {
+				log.Error("DataScopeFilter: invalidate all cache entries failed", zap.Error(err))
+				return
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			return
+		}
 	}
 }

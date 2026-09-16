@@ -123,8 +123,8 @@ func buildErrorDistribution(db *gorm.DB, start time.Time, end time.Time) ErrorDi
 			{Key: "http_5xx", Title: "HTTP 5xx"},
 			{Key: "biz_failure", Title: "业务失败"},
 		},
-		StatusCode:     buildErrorCodeStats(db, start, end),
-		BizStatusCodes: buildBizStatusCodeStats(db, start, end),
+		StatusCode:     buildErrorCodeStats(db, start, end, true),
+		BizStatusCodes: buildBizStatusCodeStats(db, start, end, true),
 	}
 	if db == nil {
 		return distribution
@@ -141,9 +141,7 @@ func buildErrorDistribution(db *gorm.DB, start time.Time, end time.Time) ErrorDi
 		logger.Warn("query daily_request_stats error distribution failed", zap.Error(err))
 	}
 
-	httpErrorTotal := int64(0)
 	for _, bucket := range distribution.StatusCode {
-		httpErrorTotal += bucket.Count
 		if bucket.StatusCode >= 400 && bucket.StatusCode < 500 {
 			distribution.Categories[0].Count += bucket.Count
 		}
@@ -157,11 +155,18 @@ func buildErrorDistribution(db *gorm.DB, start time.Time, end time.Time) ErrorDi
 	}
 	distribution.Categories[2].Count = bizFailureTotal
 	distribution.Total = counts.ErrorRequests
+	// 类别总量先按完整分布计算，展示列表仍只保留 Top10。
+	if len(distribution.StatusCode) > 10 {
+		distribution.StatusCode = distribution.StatusCode[:10]
+	}
+	if len(distribution.BizStatusCodes) > 10 {
+		distribution.BizStatusCodes = distribution.BizStatusCodes[:10]
+	}
 
 	return distribution
 }
 
-func buildBizStatusCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCodeBucket {
+func buildBizStatusCodeStats(db *gorm.DB, start time.Time, end time.Time, all ...bool) []ErrorCodeBucket {
 	if db == nil {
 		return nil
 	}
@@ -172,5 +177,5 @@ func buildBizStatusCodeStats(db *gorm.DB, start time.Time, end time.Time) []Erro
 		Scan(&rows).Error; err != nil {
 		return nil
 	}
-	return topErrorCodeBuckets(rows, false)
+	return topErrorCodeBuckets(rows, false, all...)
 }

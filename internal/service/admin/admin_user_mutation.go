@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 
 	"gorm.io/gorm"
@@ -40,6 +41,9 @@ func (s *AdminUserService) Create(params *form.CreateAdminUser) error {
 
 // Update 更新管理员用户。
 func (s *AdminUserService) Update(params *form.UpdateAdminUser) error {
+	if err := s.requireUserInDataScope(params.Id); err != nil {
+		return err
+	}
 	return s.saveAdminUserMutation(&adminUserEditParams{
 		Id:           params.Id,
 		Username:     params.Username,
@@ -63,6 +67,12 @@ func (s *AdminUserService) Update(params *form.UpdateAdminUser) error {
 // 4. 事务保存：用户数据、Token 撤销（密码变更/禁用时）、部门绑定
 // 5. 同步用户权限缓存
 func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) error {
+	if params.DeptIds != nil {
+		if err := s.requireDepartmentsInDataScope(*params.DeptIds); err != nil {
+			return err
+		}
+	}
+
 	mutationFailedCode := e.CreateUserFailed
 	excludeID := uint(0)
 	oldStatus := uint8(0)
@@ -79,10 +89,8 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 		oldIsSuperAdmin = adminUserModel.IsSuperAdmin
 	}
 	oldAvatar := adminUserModel.Avatar
-	if params.IsSuperAdmin != nil && (params.Id == 0 || oldIsSuperAdmin != *params.IsSuperAdmin) {
-		if !s.actorCanManageSuperAdmin() {
-			return e.NewBusinessError(e.AuthorizationErr)
-		}
+	if err := s.authorizeAdminUserMutation(adminUserModel, params); err != nil {
+		return err
 	}
 
 	var err error
@@ -170,7 +178,20 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 	if reloadErr != nil {
 		return reloadErr
 	}
+	if params.Id > 0 && params.DeptIds != nil {
+		access.NewDataScopeFilter().InvalidateCache(context.Background(), adminUserModel.ID)
+	}
 	return s.handleMutationError(revokeErr, mutationFailedCode)
+}
+
+// authorizeAdminUserMutation 保护已有超级管理员及超级身份授予，普通账号创建无需超级权限。
+func (s *AdminUserService) authorizeAdminUserMutation(target *model.AdminUser, params *adminUserEditParams) error {
+	protectedTarget := params.Id > 0 && (target.ID == global.SuperAdminId || target.IsSuperAdmin == global.Yes)
+	changesSuperAdmin := params.IsSuperAdmin != nil && target.IsSuperAdmin != *params.IsSuperAdmin
+	if (protectedTarget || changesSuperAdmin) && !s.actorCanManageSuperAdmin() {
+		return e.NewBusinessError(e.AuthorizationErr)
+	}
+	return nil
 }
 
 func (s *AdminUserService) actorCanManageSuperAdmin() bool {
@@ -449,6 +470,9 @@ func (s *AdminUserService) Delete(id uint) error {
 	if id == global.SuperAdminId {
 		return e.NewBusinessError(e.SuperAdminCannotDelete)
 	}
+	if err := s.requireUserInDataScope(id); err != nil {
+		return err
+	}
 
 	adminUserModel := model.NewAdminUsers()
 	adminUserDeptMap := model.NewAdminUserDeptMap()
@@ -500,5 +524,6 @@ func (s *AdminUserService) Delete(id uint) error {
 	if reloadErr != nil {
 		return reloadErr
 	}
+	access.NewDataScopeFilter().InvalidateCache(context.Background(), id)
 	return s.handleMutationError(revokeErr, e.DeleteUserFailed)
 }

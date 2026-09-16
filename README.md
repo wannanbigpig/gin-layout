@@ -21,7 +21,7 @@
   <img src="https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml/badge.svg" alt="codeql" />
   <img src="https://goreportcard.com/badge/github.com/wannanbigpig/gin-layout" alt="go report card" />
   <img src="https://img.shields.io/github/license/wannanbigpig/gin-layout" alt="license" />
-  <img src="https://img.shields.io/badge/Go-%3E%3D1.23-blue.svg" alt="go version" />
+  <img src="https://img.shields.io/badge/Go-%3E%3D1.27-blue.svg" alt="go version" />
 </div>
 
 <br />
@@ -65,7 +65,7 @@
 
 ### 1. 环境要求
 
-- `Go >= 1.23`
+- `Go >= 1.27`
 - `MySQL >= 5.7`
 - `Redis >= 5.0`（可选）
 
@@ -221,6 +221,8 @@ curl http://127.0.0.1:9001/health/readiness
 
 当前权限模型采用“数据库关系为真相，Casbin 负责最终接口判定”的方式。角色、部门、菜单和 API 的业务关系以数据库为准，`rebuild-user-permissions` 命令会按这些关系重建用户最终 API 权限。
 
+当前 Casbin 内存策略刷新只作用于执行权限变更的 `service` 进程。默认按单个 `service` 实例部署；如自行横向扩容，需在所有实例重载策略或先实现跨实例策略变更广播，不能假设 Redis 缓存失效会自动刷新其他进程的 Casbin 快照。
+
 ### 配置热更新是分级的
 
 项目支持配置热更新，但不是所有配置都会在运行中立即生效。支持热更新的资源会尝试重建；如果重建失败，会继续保留旧实例运行，避免把服务直接打挂。
@@ -255,6 +257,7 @@ go run main.go service --help
 | `go run main.go -c ./config.yaml cron` | 启动定时任务 |
 | `go run main.go command demo` | 运行示例命令 |
 | `go run main.go -c ./config.yaml command gen --from=gen/specs/product.yaml` | 从表结构或 YAML 生成 CRUD 代码 |
+| `go run main.go -c ./config.yaml command gen-openapi` | 从声明式路由 Catalog 生成 `docs/openapi.yaml` |
 | `go run main.go -c ./config.yaml command api-route -y` | 扫描声明式路由树并重建 `api` 路由表 |
 | `go run main.go -c ./config.yaml command rebuild-user-permissions -y` | 按数据库关系重建用户最终 API 权限 |
 | `go run main.go -c ./config.yaml command init-system` | 清空当前配置数据库对象并重建系统数据 |

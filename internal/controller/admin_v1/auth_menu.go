@@ -74,7 +74,11 @@ func (api MenuController) List(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	result := menu.NewMenuService().List(params, middleware.LocaleFromContext(c))
+	result, err := menu.NewMenuService().List(params, middleware.LocaleFromContext(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

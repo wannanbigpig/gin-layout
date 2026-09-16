@@ -140,7 +140,7 @@ func TestPermissionSyncCoordinatorRunAfterCommitReloadsOnce(t *testing.T) {
 	}
 }
 
-func TestPermissionSyncCoordinatorRunAfterCommitSwallowsReloadFailure(t *testing.T) {
+func TestPermissionSyncCoordinatorRunAfterCommitKeepsCommittedResultOnReloadFailure(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
@@ -161,7 +161,7 @@ func TestPermissionSyncCoordinatorRunAfterCommitSwallowsReloadFailure(t *testing
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("expected nil even when reload fails after commit, got %v", err)
+		t.Fatalf("expected committed write to remain successful when fail-closed reload reports an error, got %v", err)
 	}
 }
 

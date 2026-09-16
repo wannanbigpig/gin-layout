@@ -211,6 +211,8 @@ func ensureCorsDefaults(cfg *Conf) {
 }
 
 func reloadConfigFromWatcher() error {
+	reloadMu.Lock()
+	defer reloadMu.Unlock()
 	if err := V.ReadInConfig(); err != nil {
 		return fmt.Errorf("重新读取配置出错: %w", err)
 	}
@@ -234,16 +236,46 @@ func reloadConfigFromWatcher() error {
 	handlers := append([]ConfigReloadHandler(nil), reloadHandlers...)
 	reloadHandlersMu.RUnlock()
 
-	for _, handler := range handlers {
-		if handler.Handle == nil {
-			continue
+	return applyConfigReload(current, applied, diff, handlers)
+}
+
+func applyConfigReload(current, applied *Conf, diff ConfigDiff, handlers []ConfigReloadHandler) error {
+	changes := make([]ConfigReloadChange, 0, len(handlers))
+	committed := false
+	defer func() {
+		if !committed {
+			for i := len(changes) - 1; i >= 0; i-- {
+				if changes[i].Abort != nil {
+					changes[i].Abort()
+				}
+			}
 		}
-		if err := handler.Handle(current, applied, diff); err != nil {
-			return fmt.Errorf("配置热更新失败[%s]: %w", handler.Name, err)
+	}()
+	for _, handler := range handlers {
+		if handler.Prepare != nil {
+			change, err := handler.Prepare(current, applied, diff)
+			changes = append(changes, change)
+			if err != nil {
+				return fmt.Errorf("配置热更新失败[%s]: %w", handler.Name, err)
+			}
+		} else if handler.Handle != nil {
+			if err := handler.Handle(current, applied, diff); err != nil {
+				return fmt.Errorf("配置热更新失败[%s]: %w", handler.Name, err)
+			}
 		}
 	}
-
+	for _, change := range changes {
+		if change.Commit != nil {
+			change.Commit()
+		}
+	}
 	setActiveConfig(applied)
+	committed = true
+	for _, change := range changes {
+		if change.Finalize != nil {
+			change.Finalize()
+		}
+	}
 	return nil
 }
 

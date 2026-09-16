@@ -26,7 +26,11 @@ func (api DeptController) List(c *gin.Context) {
 		return
 	}
 
-	result := dept.NewDeptService().List(params)
+	result, err := dept.NewDeptService().List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

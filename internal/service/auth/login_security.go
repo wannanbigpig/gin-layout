@@ -63,6 +63,9 @@ func (s *LoginService) ensureLoginAllowed(username string) error {
 	}
 
 	state := model.NewLoginSecurityState()
+	if s.loginLogDB != nil {
+		state.SetDB(s.loginLogDB)
+	}
 	err := state.FindByUsername(username)
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) || isTableNotFoundErr(err) || e.IsDependencyNotReady(err) {
@@ -72,7 +75,10 @@ func (s *LoginService) ensureLoginAllowed(username string) error {
 	}
 
 	now := time.Now()
-	if state.LockUntil == nil || !state.LockUntil.Time.After(now) {
+	if state.LockUntil == nil {
+		return nil
+	}
+	if !state.LockUntil.Time.After(now) {
 		// 锁已过期后清空状态，避免残留失败计数影响后续判断。
 		if state.FailCount > 0 || state.LockUntil != nil {
 			if clearErr := s.clearLoginFailState(username); clearErr != nil {
@@ -100,6 +106,9 @@ func (s *LoginService) incrementLoginFailState(username string) error {
 	}
 
 	state := model.NewLoginSecurityState()
+	if s.loginLogDB != nil {
+		state.SetDB(s.loginLogDB)
+	}
 	lockMinutes := int(policy.LockDuration.Minutes())
 	if lockMinutes < 1 {
 		lockMinutes = defaultLoginLockMinutes
@@ -120,6 +129,9 @@ func (s *LoginService) clearLoginFailState(username string) error {
 		return nil
 	}
 	state := model.NewLoginSecurityState()
+	if s.loginLogDB != nil {
+		state.SetDB(s.loginLogDB)
+	}
 	db, err := state.GetDB()
 	if err != nil {
 		if e.IsDependencyNotReady(err) {

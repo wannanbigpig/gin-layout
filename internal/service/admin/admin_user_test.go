@@ -42,8 +42,11 @@ func TestAdminUserBuildListCondition(t *testing.T) {
 }
 
 type fakeAdminDataScopeFilter struct {
-	cond string
-	args []any
+	cond       string
+	args       []any
+	scopeAll   bool
+	deptIDs    []uint
+	resolveErr error
 }
 
 func (f fakeAdminDataScopeFilter) Build(_ context.Context, _ access.DataScopeInput, deptCol, ownerCol string) (string, []any) {
@@ -51,6 +54,10 @@ func (f fakeAdminDataScopeFilter) Build(_ context.Context, _ access.DataScopeInp
 		return f.cond, f.args
 	}
 	return "(" + deptCol + " IN (?) OR " + ownerCol + " = ?)", []any{[]uint{20}, uint(3)}
+}
+
+func (f fakeAdminDataScopeFilter) ResolveDepartmentScope(_ context.Context, _ access.DataScopeInput) (bool, []uint, error) {
+	return f.scopeAll, f.deptIDs, f.resolveErr
 }
 
 func TestAdminUserDataScopeConditionExecutesWithDepartmentMap(t *testing.T) {
@@ -93,12 +100,129 @@ func TestAdminUserDataScopeConditionExecutesWithDepartmentMap(t *testing.T) {
 	}
 }
 
+func TestAdminUserInDataScopeChecksTheTargetRow(t *testing.T) {
+	db := setupAdminUserDataScopeSQLiteDB(t)
+	condition := wrapAdminUserDeptScopeCondition("(admin_user_department_map.dept_id IN (?) OR admin_user.id = ?)")
+	args := []any{[]uint{20}, uint(3)}
+
+	tests := []struct {
+		name   string
+		userID uint
+		want   bool
+	}{
+		{name: "rejects user outside department and owner scope", userID: 1, want: false},
+		{name: "allows user in department scope", userID: 2, want: true},
+		{name: "allows owner scope without department mapping", userID: 3, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := adminUserInDataScope(db, tt.userID, condition, args)
+			if err != nil {
+				t.Fatalf("check target data scope failed: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("adminUserInDataScope(%d) = %v, want %v", tt.userID, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWrapAdminUserDeptScopeConditionKeepsOwnerOutsideExists(t *testing.T) {
 	condition := wrapAdminUserDeptScopeCondition("(admin_user_department_map.dept_id IN (?) OR admin_user.id = ?)")
 	expected := "(EXISTS (SELECT 1 FROM admin_user_department_map WHERE admin_user_department_map.uid = admin_user.id AND admin_user_department_map.dept_id IN (?)) OR admin_user.id = ?)"
 	if condition != expected {
 		t.Fatalf("unexpected wrapped condition: %s", condition)
 	}
+}
+
+func TestAdminUserRequireDepartmentsInDataScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    fakeAdminDataScopeFilter
+		deptIDs   []uint
+		wantCode  int
+		wantError error
+	}{
+		{
+			name:    "allows departments inside merged scope",
+			filter:  fakeAdminDataScopeFilter{deptIDs: []uint{10, 20}},
+			deptIDs: []uint{20, 20},
+		},
+		{
+			name:     "rejects any department outside merged scope",
+			filter:   fakeAdminDataScopeFilter{deptIDs: []uint{10, 20}},
+			deptIDs:  []uint{20, 30},
+			wantCode: e.AuthorizationErr,
+		},
+		{
+			name:    "allows all departments for scope all",
+			filter:  fakeAdminDataScopeFilter{scopeAll: true},
+			deptIDs: []uint{999},
+		},
+		{
+			name:      "returns scope resolution errors",
+			filter:    fakeAdminDataScopeFilter{resolveErr: errors.New("scope unavailable")},
+			deptIDs:   []uint{10},
+			wantError: errors.New("scope unavailable"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previous := newAdminDataScopeFilter
+			newAdminDataScopeFilter = func() adminDataScopeFilter { return tt.filter }
+			defer func() { newAdminDataScopeFilter = previous }()
+
+			service := NewAdminUserService()
+			service.SetAdminUserId(9)
+			err := service.requireDepartmentsInDataScope(tt.deptIDs)
+
+			if tt.wantError != nil {
+				if err == nil || err.Error() != tt.wantError.Error() {
+					t.Fatalf("expected error %v, got %v", tt.wantError, err)
+				}
+				return
+			}
+			if tt.wantCode != 0 {
+				var businessErr *e.BusinessError
+				if !errors.As(err, &businessErr) || businessErr.GetCode() != tt.wantCode {
+					t.Fatalf("expected business error code %d, got %v", tt.wantCode, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAdminUserRequireDepartmentsInDataScopeAllowsEmptyAssignmentWithoutResolving(t *testing.T) {
+	previous := newAdminDataScopeFilter
+	newAdminDataScopeFilter = func() adminDataScopeFilter {
+		return fakeAdminDataScopeFilter{resolveErr: errors.New("must not resolve empty assignment")}
+	}
+	defer func() { newAdminDataScopeFilter = previous }()
+
+	if err := NewAdminUserService().requireDepartmentsInDataScope(nil); err != nil {
+		t.Fatalf("empty department assignment should be allowed, got %v", err)
+	}
+}
+
+func TestAdminUserMutationRejectsDepartmentOutsideScopeBeforeWrite(t *testing.T) {
+	previous := newAdminDataScopeFilter
+	newAdminDataScopeFilter = func() adminDataScopeFilter {
+		return fakeAdminDataScopeFilter{deptIDs: []uint{10}}
+	}
+	defer func() { newAdminDataScopeFilter = previous }()
+
+	deptIDs := []uint{20}
+	service := NewAdminUserService()
+	service.SetAdminUserId(9)
+	err := service.saveAdminUserMutation(&adminUserEditParams{DeptIds: &deptIDs})
+
+	assertBusinessErrorMessage(t, err, e.AuthorizationErr, "暂无权限")
 }
 
 func setupAdminUserDataScopeSQLiteDB(t *testing.T) *gorm.DB {

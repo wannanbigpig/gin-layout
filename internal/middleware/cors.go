@@ -48,7 +48,11 @@ func CorsHandler() gin.HandlerFunc {
 					c.Header("Access-Control-Allow-Origin", allowOrigin)
 					c.Header("Access-Control-Allow-Methods", strings.Join(getAllowedMethods(cfg), ", "))
 					c.Header("Access-Control-Allow-Headers", getAllowedHeaders(c, cfg))
-					c.Header("Access-Control-Max-Age", fmt.Sprintf("%d", getMaxAge(cfg)))
+					maxAge := cfg.CorsMaxAge
+					if maxAge <= 0 {
+						maxAge = 43200
+					}
+					c.Header("Access-Control-Max-Age", fmt.Sprintf("%d", maxAge))
 					c.Header("Access-Control-Allow-Credentials", fmt.Sprintf("%t", cfg.CorsCredentials))
 				} else {
 					c.AbortWithStatus(403)
@@ -75,7 +79,8 @@ func CorsHandler() gin.HandlerFunc {
 }
 
 func resolveAllowOrigin(origin string, cfg *config.Conf) (string, bool) {
-	if !isOriginAllowed(origin, cfg) {
+	// HTTP CORS：无凭证时允许字面 "*"，沿用历史行为。
+	if !corsutil.IsOriginAllowed(origin, cfg.CorsOrigins, true) {
 		return "", false
 	}
 	if hasWildcardOrigin(cfg) && !cfg.CorsCredentials {
@@ -124,18 +129,6 @@ func getExposeHeaders(cfg *config.Conf) string {
 		return strings.Join(cfg.CorsExposeHeaders, ", ")
 	}
 	return "*"
-}
-
-func getMaxAge(cfg *config.Conf) int {
-	if cfg.CorsMaxAge > 0 {
-		return cfg.CorsMaxAge
-	}
-	return 43200
-}
-
-func isOriginAllowed(origin string, cfg *config.Conf) bool {
-	// HTTP CORS：无凭证时允许字面 "*"，沿用历史行为。
-	return corsutil.IsOriginAllowed(origin, cfg.CorsOrigins, true)
 }
 
 func hasWildcardOrigin(cfg *config.Conf) bool {

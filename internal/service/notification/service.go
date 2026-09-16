@@ -161,6 +161,11 @@ func (s *Service) Create(ctx context.Context, input CreateMessageInput) (*model.
 
 func (s *Service) NotifyExportResult(ctx context.Context, input ExportResultInput) (*model.SysMessage, error) {
 	title, content := buildExportMessageText(input.Scene, input.Status, input.ErrorMessage)
+	fileUUID := strings.TrimSpace(input.FileUUID)
+	downloadURL := ""
+	if fileUUID != "" {
+		downloadURL = "/admin/v1/file/" + fileUUID
+	}
 	return s.Create(ctx, CreateMessageInput{
 		UserID:   input.UserID,
 		Category: model.MessageCategoryExport,
@@ -174,9 +179,9 @@ func (s *Service) NotifyExportResult(ctx context.Context, input ExportResultInpu
 			"export_record_id": input.ExportRecordID,
 			"task_run_id":      input.TaskRunID,
 			"file_id":          input.FileID,
-			"file_uuid":        strings.TrimSpace(input.FileUUID),
+			"file_uuid":        fileUUID,
 			"file_name":        strings.TrimSpace(input.FileName),
-			"download_url":     buildExportDownloadURL(strings.TrimSpace(input.FileUUID)),
+			"download_url":     downloadURL,
 			"error_message":    strings.TrimSpace(input.ErrorMessage),
 		},
 	})
@@ -533,11 +538,4 @@ func exportSceneName(scene string) string {
 	default:
 		return "导出任务"
 	}
-}
-
-func buildExportDownloadURL(fileUUID string) string {
-	if strings.TrimSpace(fileUUID) == "" {
-		return ""
-	}
-	return "/admin/v1/file/" + strings.TrimSpace(fileUUID)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
+	casbinx "github.com/wannanbigpig/gin-layout/internal/access/casbin"
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/corsutil"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
@@ -71,12 +74,15 @@ type hub struct {
 	mu              sync.RWMutex
 	clients         map[uint]map[*wsClient]struct{}
 	totalConns      int
+	shuttingDown    bool
 	maxConnsPerUser int
 	maxConnsTotal   int
 }
 
 // wsOriginChecker 可在测试中替换为始终允许的实现。
 var wsOriginChecker = checkWebSocketOrigin
+
+var loadChannelEnforcer = casbinx.GetEnforcer
 
 var (
 	defaultHub = &hub{
@@ -226,7 +232,7 @@ func handleClientMessage(client *wsClient, message []byte) {
 }
 
 func BroadcastEvent(event Event) {
-	defaultHub.broadcast(event)
+	defaultHub.broadcastToUser(event.UserID, event)
 }
 
 func PublishEvent(ctx context.Context, event Event) error {
@@ -439,9 +445,26 @@ type GenericMessage struct {
 	Data interface{} `json:"data"`
 }
 
+// canAccessChannel 使用与 HTTP 监控接口相同的服务端权限，每次推送重新检查策略。
+func (c *wsClient) canAccessChannel(channel string) bool {
+	if channel != "monitor" || c.claims == nil || c.userID == 0 {
+		return false
+	}
+	if c.claims.IsSuperAdmin == global.Yes || c.userID == global.SuperAdminId {
+		return true
+	}
+	enforcer, err := loadChannelEnforcer()
+	if err != nil || enforcer == nil {
+		return false
+	}
+	userKey := fmt.Sprintf("%s%s%d", global.CasbinAdminUserPrefix, global.CasbinSeparator, c.userID)
+	allowed, err := enforcer.Enforce(userKey, "/admin/v1/dashboard/monitor", http.MethodGet)
+	return err == nil && allowed
+}
+
 // SubscribeChannel 客户端订阅指定频道。
 func (c *wsClient) SubscribeChannel(channel string) {
-	if channel == "" {
+	if !c.canAccessChannel(channel) {
 		return
 	}
 	c.subMu.Lock()
@@ -498,6 +521,10 @@ func (h *hub) broadcastToChannel(channel string, msg GenericMessage) {
 	h.mu.RUnlock()
 
 	for _, client := range list {
+		if !client.canAccessChannel(channel) {
+			client.UnsubscribeChannel(channel)
+			continue
+		}
 		if err := client.writeJSON(msg); err != nil {
 			h.unregister(client)
 		}
@@ -547,6 +574,10 @@ func (h *hub) broadcastToAll(msg GenericMessage) {
 func (h *hub) register(client *wsClient) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.shuttingDown {
+		return errors.New("server shutting down")
+	}
 
 	// 全局连接数限制
 	if h.totalConns >= h.maxConnsTotal {
@@ -599,10 +630,6 @@ func (h *hub) onlineCount() int {
 		count += len(clients)
 	}
 	return count
-}
-
-func (h *hub) broadcast(event Event) {
-	h.broadcastToUser(event.UserID, event)
 }
 
 func (h *hub) broadcastToUser(userID uint, event Event) {
@@ -738,8 +765,15 @@ func checkWebSocketOrigin(r *http.Request) bool {
 // ShutdownRealtimeDispatcher 主动关闭所有活跃的 WebSocket 连接，发送 Close 帧。
 func ShutdownRealtimeDispatcher() {
 	defaultHub.mu.Lock()
+	if defaultHub.shuttingDown {
+		defaultHub.mu.Unlock()
+		return
+	}
+	// 与 register 共用锁，覆盖 Upgrade 已 Hijack、尚未加入连接池的窗口。
+	defaultHub.shuttingDown = true
 	clients := defaultHub.clients
 	defaultHub.clients = make(map[uint]map[*wsClient]struct{})
+	defaultHub.totalConns = 0
 	defaultHub.mu.Unlock()
 
 	closeMsg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down")

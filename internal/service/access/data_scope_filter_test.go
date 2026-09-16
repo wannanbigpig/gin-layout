@@ -196,6 +196,36 @@ func TestDataScopeFilterBuildSingleflightSharedAcrossInstances(t *testing.T) {
 	}
 }
 
+func TestDataScopeFilterResolveDepartmentScopeUsesMergedScope(t *testing.T) {
+	previousCompute := computeScopeForSingleflight
+	defer func() {
+		computeScopeForSingleflight = previousCompute
+	}()
+
+	uid := uint(900004)
+	computeScopeForSingleflight = func(_ *DataScopeFilter, _ context.Context, gotUID uint) (*scopeResult, error) {
+		if gotUID != uid {
+			t.Fatalf("unexpected uid: %d", gotUID)
+		}
+		return &scopeResult{
+			DeptIDs:    []uint{10, 20},
+			HasDeptIDs: true,
+			OwnerUID:   uid,
+		}, nil
+	}
+
+	scopeAll, deptIDs, err := NewDataScopeFilter().ResolveDepartmentScope(context.Background(), DataScopeInput{UID: uid})
+	if err != nil {
+		t.Fatalf("resolve department scope failed: %v", err)
+	}
+	if scopeAll {
+		t.Fatal("expected restricted department scope")
+	}
+	if len(deptIDs) != 2 || deptIDs[0] != 10 || deptIDs[1] != 20 {
+		t.Fatalf("unexpected department scope: %v", deptIDs)
+	}
+}
+
 func TestDataScopeFilterCacheKey(t *testing.T) {
 	f := NewDataScopeFilter()
 	k1 := f.cacheKey(1)
@@ -206,6 +236,33 @@ func TestDataScopeFilterCacheKey(t *testing.T) {
 	expected := "data_scope:1"
 	if k1 != expected {
 		t.Fatalf("expected %q, got %q", expected, k1)
+	}
+}
+
+func TestDataScopeCacheInvalidationMakesCapturedVersionStale(t *testing.T) {
+	uid := uint(900001)
+	version := currentDataScopeCacheVersion(uid)
+	if !version.isCurrent(uid) {
+		t.Fatal("freshly captured data scope cache version should be current")
+	}
+
+	NewDataScopeFilter().InvalidateCache(context.Background(), uid)
+
+	if version.isCurrent(uid) {
+		t.Fatal("user cache invalidation must reject an in-flight stale cache write")
+	}
+}
+
+func TestDataScopeGlobalInvalidationMakesAllCapturedVersionsStale(t *testing.T) {
+	firstUID := uint(900002)
+	secondUID := uint(900003)
+	first := currentDataScopeCacheVersion(firstUID)
+	second := currentDataScopeCacheVersion(secondUID)
+
+	NewDataScopeFilter().InvalidateAllCache(context.Background())
+
+	if first.isCurrent(firstUID) || second.isCurrent(secondUID) {
+		t.Fatal("global cache invalidation must reject all in-flight stale cache writes")
 	}
 }
 

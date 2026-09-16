@@ -26,7 +26,11 @@ func (api AdminLoginLogController) List(c *gin.Context) {
 		return
 	}
 
-	result := audit.NewAdminLoginLogService().List(params)
+	result, err := audit.NewAdminLoginLogService().List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

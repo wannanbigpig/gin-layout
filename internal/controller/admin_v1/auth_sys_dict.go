@@ -24,7 +24,12 @@ func (api SysDictController) TypeList(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	api.Success(c, sys_dict.NewSysDictService().TypeList(params, middleware.LocaleFromContext(c)))
+	result, err := sys_dict.NewSysDictService().TypeList(params, middleware.LocaleFromContext(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
 }
 
 func (api SysDictController) TypeDetail(c *gin.Context) {
@@ -63,7 +68,12 @@ func (api SysDictController) ItemList(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	api.Success(c, sys_dict.NewSysDictService().ItemList(params, middleware.LocaleFromContext(c)))
+	result, err := sys_dict.NewSysDictService().ItemList(params, middleware.LocaleFromContext(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
 }
 
 func (api SysDictController) ItemCreate(c *gin.Context) {

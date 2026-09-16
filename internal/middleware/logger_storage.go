@@ -83,6 +83,10 @@ func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operation
 	isHighRisk := resolveAuditHighRisk(c, requestMeta.method)
 	changeDiff := resolveAuditChangeDiff(c)
 
+	responseStatus := http.StatusOK
+	if recorder != nil {
+		responseStatus = recorder.statusCode
+	}
 	return &auditsvc.AuditLogSnapshot{
 		RequestID:          requestMeta.requestID,
 		JwtID:              operatorMeta.jwtID,
@@ -103,7 +107,7 @@ func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operation
 		RequestQuery:       requestMeta.requestQuery,
 		RequestBody:        requestMeta.requestBody,
 		ChangeDiff:         changeDiff,
-		ResponseStatus:     resolveAuditResponseStatus(recorder),
+		ResponseStatus:     responseStatus,
 		ResponseBody:       responseBody,
 		ResponseHeader:     responseHeader,
 		ExecutionTimeUs:    requestMeta.executionTimeUs,
@@ -193,13 +197,6 @@ func calculateExecutionTimeMeta(c *gin.Context, requestKind string) (int64, stri
 		return requestLogExecutionTimeMaxUs, scope
 	}
 	return executionTimeUs, scope
-}
-
-func resolveAuditResponseStatus(recorder *responseRecorder) int {
-	if recorder == nil {
-		return http.StatusOK
-	}
-	return recorder.statusCode
 }
 
 func buildMaskedRequestBody(c *gin.Context) string {

@@ -150,6 +150,9 @@ go run main.go -c ./config.yaml command migrate up
   - 示例命令
 - `gen`
   - 从 MySQL 表结构或 YAML spec 生成 CRUD 代码，可选联动前端文件与菜单初始化
+- `gen-openapi`
+  - 从声明式路由 Catalog 生成 OpenAPI 3.0 YAML
+  - 当前准确描述路径、方法、分组和认证策略；请求参数与业务响应结构尚未进入路由元数据，因此暂不建议据此生成完整 TypeScript Client
 - `migrate`
   - 迁移管理子命令，支持 `create/check/up/down/goto/force/version`
   - 详细说明见 [docs/MIGRATE_COMMANDS.md](/Users/liuml/data/go/src/go-layout/docs/MIGRATE_COMMANDS.md)
@@ -215,6 +218,8 @@ go run main.go -c ./config.yaml cron
 ```
 
 ## 定时任务使用方式
+
+部署多个 `cron` 进程时，高风险任务会使用 Redis 分布式锁防止并发执行；普通任务只有进程内 `WithoutOverlapping` 保护，仍可能被不同实例同时触发。普通任务未具备幂等性前，应只运行一个 `cron` 实例；不要把同一周期任务同时注册到 `cron` 和 `worker`。
 
 当前定时任务代码分成 3 个文件：
 

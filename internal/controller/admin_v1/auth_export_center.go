@@ -28,7 +28,12 @@ func (api ExportCenterController) List(c *gin.Context) {
 	}
 	uid := api.GetCurrentUserID(c)
 	params.TriggerUserID = &uid
-	api.Success(c, service.NewExportCenterService().List(params))
+	result, err := service.NewExportCenterService().List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
 }
 
 // Detail 查询导出记录详情。

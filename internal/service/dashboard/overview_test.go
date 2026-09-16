@@ -179,14 +179,6 @@ func insertDailyRequestStatFull(t *testing.T, db *gorm.DB, statDate time.Time, v
 	}
 }
 
-func insertStreamRequestLog(t *testing.T, db *gorm.DB, createdAt time.Time, baseURL string, execMs float64, responseStatus int) {
-	t.Helper()
-	if err := db.Exec(`INSERT INTO request_logs (created_at, updated_at, base_url, request_kind, execution_time_scope, response_status, operation_status, execution_time_us) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
-		createdAt, createdAt, baseURL, "sse", "stream", responseStatus, int64(execMs*1000)).Error; err != nil {
-		t.Fatalf("insert sse request_log failed: %v", err)
-	}
-}
-
 func insertUploadFile(t *testing.T, db *gorm.DB, fileType string, size int64, deleted int) {
 	t.Helper()
 	now := time.Now()

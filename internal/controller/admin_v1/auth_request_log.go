@@ -30,7 +30,11 @@ func (api RequestLogController) List(c *gin.Context) {
 
 	svc := audit.NewRequestLogService()
 	svc.SetCtx(c)
-	result := svc.List(params)
+	result, err := svc.List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

@@ -27,7 +27,7 @@ func NewRequestLogService() *RequestLogService {
 }
 
 // List 分页查询请求日志列表
-func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collection {
+func (s *RequestLogService) List(params *form.RequestLogList) (*resources.Collection, error) {
 	query := buildRequestLogQuery(requestLogQueryInput{
 		RequestID:          params.RequestID,
 		OperatorID:         params.OperatorID,
@@ -76,11 +76,11 @@ func (s *RequestLogService) List(params *form.RequestLogList) *resources.Collect
 	total, collection, err := model.ListPageE(requestLogModel, params.Page, params.PerPage, conditionStr, args, listOptionalParams)
 	if err != nil {
 		log.Logger.Error("查询请求日志列表失败", zap.Error(err))
-		return transformer.ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 
 	// 使用资源类转换，列表不包含大字段
-	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 var requestLogOrderAllowMap = map[string]struct{}{
@@ -141,9 +141,13 @@ type requestLogQueryInput struct {
 }
 
 func buildRequestLogQuery(input requestLogQueryInput) *logListQuery {
+	var operatorID any
+	if input.OperatorID > 0 {
+		operatorID = input.OperatorID
+	}
 	query := newLogListQuery().
 		addEq("request_id", input.RequestID).
-		addEq("operator_id", uintFilterValue(input.OperatorID)).
+		addEq("operator_id", operatorID).
 		addLike("operator_account", input.OperatorAccount).
 		addLike("base_url", input.BaseURL).
 		addEq("request_kind", input.RequestKind).

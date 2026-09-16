@@ -32,10 +32,15 @@ func (api {{.ControllerName}}) List(ctx *gin.Context) {
 		return
 	}
 
-	data := api.new{{.ModelName}}Service(ctx).List(params)
+	data, err := api.new{{.ModelName}}Service(ctx).List(params)
+	if err != nil {
+		api.Err(ctx, err)
+		return
+	}
 	api.Success(ctx, data)
 }
 
+{{- if .HasOptions}}
 // Options 选择器。
 func (api {{.ControllerName}}) Options(ctx *gin.Context) {
 	params := form.New{{.ModelName}}OptionsQuery()
@@ -43,9 +48,14 @@ func (api {{.ControllerName}}) Options(ctx *gin.Context) {
 		return
 	}
 
-	data := api.new{{.ModelName}}Service(ctx).Options(params.Keyword)
+	data, err := api.new{{.ModelName}}Service(ctx).Options(params.Keyword)
+	if err != nil {
+		api.Err(ctx, err)
+		return
+	}
 	api.Success(ctx, data)
 }
+{{- end}}
 
 // Create 新增。
 func (api {{.ControllerName}}) Create(ctx *gin.Context) {

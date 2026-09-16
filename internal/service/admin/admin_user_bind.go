@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/samber/lo"
@@ -78,6 +79,9 @@ func (s *AdminUserService) updateDeptUserNumber(deptIds []uint, delta int, tx *g
 
 // BindRole 绑定角色。
 func (s *AdminUserService) BindRole(params *form.BindRole) error {
+	if err := s.requireUserInDataScope(params.UserId); err != nil {
+		return err
+	}
 	adminUserModel := model.NewAdminUsers()
 	err := adminUserModel.GetById(params.UserId)
 	if err != nil {
@@ -102,6 +106,7 @@ func (s *AdminUserService) BindRole(params *form.BindRole) error {
 	if err != nil {
 		return e.NewBusinessError(e.UpdateUserFailed)
 	}
+	access.NewDataScopeFilter().InvalidateCache(context.Background(), adminUserModel.ID)
 	return nil
 }
 

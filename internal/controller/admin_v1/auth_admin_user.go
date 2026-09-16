@@ -65,6 +65,7 @@ func (api AdminUserController) Create(c *gin.Context) {
 func (api AdminUserController) Update(c *gin.Context) {
 	handleAuditWrite(api.Api, c, form.NewUpdateAdminUser, func(p *form.UpdateAdminUser) (string, error) {
 		service := admin.NewAdminUserService()
+		service.SetCtx(c)
 		service.SetAdminUserId(api.GetCurrentUserID(c))
 		return service.UpdateWithAuditDiff(p)
 	})
@@ -80,7 +81,11 @@ func (api AdminUserController) List(c *gin.Context) {
 	svc := admin.NewAdminUserService()
 	svc.SetCtx(c)
 	svc.SetAdminUserId(api.GetCurrentUserID(c))
-	result := svc.List(params)
+	result, err := svc.List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 
@@ -98,14 +103,20 @@ func (api AdminUserController) Options(c *gin.Context) {
 // Delete 删除管理员
 func (api AdminUserController) Delete(c *gin.Context) {
 	handleAuditWrite(api.Api, c, form.NewIdForm, func(p *form.ID) (string, error) {
-		return admin.NewAdminUserService().DeleteWithAuditDiff(p.ID)
+		service := admin.NewAdminUserService()
+		service.SetCtx(c)
+		service.SetAdminUserId(api.GetCurrentUserID(c))
+		return service.DeleteWithAuditDiff(p.ID)
 	})
 }
 
 // BindRole 管理员绑定角色
 func (api AdminUserController) BindRole(c *gin.Context) {
 	handleAuditWrite(api.Api, c, form.NewBindRole, func(p *form.BindRole) (string, error) {
-		return admin.NewAdminUserService().BindRoleWithAuditDiff(p)
+		service := admin.NewAdminUserService()
+		service.SetCtx(c)
+		service.SetAdminUserId(api.GetCurrentUserID(c))
+		return service.BindRoleWithAuditDiff(p)
 	})
 }
 
@@ -116,7 +127,10 @@ func (api AdminUserController) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := admin.NewAdminUserService().GetUserInfo(query.ID)
+	service := admin.NewAdminUserService()
+	service.SetCtx(c)
+	service.SetAdminUserId(api.GetCurrentUserID(c))
+	detail, err := service.GetManagedUserInfo(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -132,7 +146,10 @@ func (api AdminUserController) GetFullPhone(c *gin.Context) {
 		return
 	}
 
-	userInfo, err := admin.NewAdminUserService().GetUserInfo(query.ID)
+	service := admin.NewAdminUserService()
+	service.SetCtx(c)
+	service.SetAdminUserId(api.GetCurrentUserID(c))
+	userInfo, err := service.GetManagedUserInfo(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -150,7 +167,10 @@ func (api AdminUserController) GetFullEmail(c *gin.Context) {
 		return
 	}
 
-	userInfo, err := admin.NewAdminUserService().GetUserInfo(query.ID)
+	service := admin.NewAdminUserService()
+	service.SetCtx(c)
+	service.SetAdminUserId(api.GetCurrentUserID(c))
+	userInfo, err := service.GetManagedUserInfo(query.ID)
 	if err != nil {
 		api.Err(c, err)
 		return

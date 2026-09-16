@@ -51,7 +51,7 @@ func (s *AdminLoginLogService) currentConfig() *config.Conf {
 }
 
 // List 分页查询登录日志列表
-func (s *AdminLoginLogService) List(params *form.AdminLoginLogList) *resources.Collection {
+func (s *AdminLoginLogService) List(params *form.AdminLoginLogList) (*resources.Collection, error) {
 	query := newLogListQuery().
 		addLike("username", params.Username).
 		addEq("login_status", params.LoginStatus).
@@ -86,12 +86,12 @@ func (s *AdminLoginLogService) List(params *form.AdminLoginLogList) *resources.C
 	total, collection, err := model.ListPageE(loginLogModel, params.Page, params.PerPage, conditionStr, args, listOptionalParams)
 	if err != nil {
 		log.Logger.Error("查询登录日志列表失败", zap.Error(err))
-		return resources.NewAdminLoginLogTransformer().ToCollection(params.Page, params.PerPage, 0, nil)
+		return nil, err
 	}
 
 	// 使用资源类转换，列表不包含大字段
 	transformer := resources.NewAdminLoginLogTransformer()
-	return transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
 // Detail 获取登录日志详情

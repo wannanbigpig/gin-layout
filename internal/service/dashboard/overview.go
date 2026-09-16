@@ -152,12 +152,16 @@ func (s *OverviewService) Overview() (*Overview, error) {
 	responseTime := buildResponseTimeStats(db, todayStart, tomorrowStart)
 	errorCodes := buildErrorCodeStats(db, todayStart, tomorrowStart)
 	storage := buildStorageStats(db)
+	errorChangeType := "danger"
+	if errorsToday <= errorsYesterday {
+		errorChangeType = "success"
+	}
 
 	return &Overview{
 		Metrics: []Metric{
 			{Key: "users", Title: "活跃用户", Value: float64(activeUsers), Compare: "较昨日", Change: formatChange(activeUsers, activeUsersYesterday), Type: changeType(activeUsers, activeUsersYesterday)},
 			{Key: "requests", Title: "请求总量", Value: float64(requestsToday), Compare: "较昨日", Change: formatChange(requestsToday, requestsYesterday), Type: changeType(requestsToday, requestsYesterday)},
-			{Key: "errors", Title: "异常告警", Value: float64(errorsToday), Compare: "较昨日", Change: formatChange(errorsToday, errorsYesterday), Type: inverseChangeType(errorsToday, errorsYesterday)},
+			{Key: "errors", Title: "异常告警", Value: float64(errorsToday), Compare: "较昨日", Change: formatChange(errorsToday, errorsYesterday), Type: errorChangeType},
 			{Key: "tasks", Title: "任务完成率", Value: taskCompletion, Suffix: "%", Compare: "计划完成", Change: "+0.0%", Type: "primary"},
 		},
 		Activities:   buildActivities(db, s.GetAdminUserId()),
@@ -186,14 +190,6 @@ func requestStatsForRange(db *gorm.DB, start time.Time, end time.Time) (int64, i
 		return 0, 0, err
 	}
 	return stat.TotalRequests, stat.ErrorRequests, nil
-}
-
-func countRows(db *gorm.DB) (int64, error) {
-	var count int64
-	if err := db.Count(&count).Error; err != nil {
-		return 0, err
-	}
-	return count, nil
 }
 
 func countDistinct(db *gorm.DB, field string) (int64, error) {
@@ -252,12 +248,16 @@ func buildActivities(db *gorm.DB, operatorID uint) []ActivityItem {
 		if title == "" {
 			title = item.Method + " " + item.BaseURL
 		}
+		activityStatus := "warning"
+		if item.OperationStatus == 0 {
+			activityStatus = "success"
+		}
 		activities = append(activities, ActivityItem{
 			Key:   strconv.FormatUint(uint64(item.ID), 10),
 			Title: title,
 			Desc:  item.OperatorAccount,
 			Time:  item.CreatedAt.Format("15:04"),
-			Type:  activityType(item.OperationStatus),
+			Type:  activityStatus,
 		})
 	}
 	return activities
@@ -275,29 +275,11 @@ func formatChange(current int64, previous int64) string {
 	if change < 0 {
 		prefix = ""
 	}
-	return prefix + strconvFormatFloat(change) + "%"
-}
-
-func strconvFormatFloat(value float64) string {
-	return strconv.FormatFloat(math.Round(value*10)/10, 'f', 1, 64)
+	return prefix + strconv.FormatFloat(math.Round(change*10)/10, 'f', 1, 64) + "%"
 }
 
 func changeType(current int64, previous int64) string {
 	if current >= previous {
-		return "success"
-	}
-	return "warning"
-}
-
-func inverseChangeType(current int64, previous int64) string {
-	if current <= previous {
-		return "success"
-	}
-	return "danger"
-}
-
-func activityType(status int) string {
-	if status == 0 {
 		return "success"
 	}
 	return "warning"
@@ -495,7 +477,7 @@ func buildResponseTimeStats(db *gorm.DB, start time.Time, end time.Time) *Respon
 }
 
 // buildErrorCodeStats 聚合指定时间窗口内 HTTP 错误 response_status 分布，按数量降序取 TOP10。
-func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCodeBucket {
+func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time, all ...bool) []ErrorCodeBucket {
 	if db == nil {
 		return nil
 	}
@@ -509,14 +491,14 @@ func buildErrorCodeStats(db *gorm.DB, start time.Time, end time.Time) []ErrorCod
 		}
 		return nil
 	}
-	return topErrorCodeBuckets(rows, true)
+	return topErrorCodeBuckets(rows, true, all...)
 }
 
 type statusDistributionRow struct {
 	Distribution string
 }
 
-func topErrorCodeBuckets(rows []statusDistributionRow, httpErrorsOnly bool) []ErrorCodeBucket {
+func topErrorCodeBuckets(rows []statusDistributionRow, httpErrorsOnly bool, all ...bool) []ErrorCodeBucket {
 	counts := map[int]int64{}
 	for _, row := range rows {
 		if row.Distribution == "" {
@@ -542,7 +524,7 @@ func topErrorCodeBuckets(rows []statusDistributionRow, httpErrorsOnly bool) []Er
 		buckets = append(buckets, ErrorCodeBucket{StatusCode: statusCode, Count: count})
 	}
 	sortErrorCodeBuckets(buckets)
-	if len(buckets) > 10 {
+	if len(buckets) > 10 && (len(all) == 0 || !all[0]) {
 		return buckets[:10]
 	}
 	return buckets

@@ -1,0 +1,24 @@
+name: Feature request
+description: 提议脚手架核心或增强能力
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 说明后台脚手架中的真实问题，不要只描述目标架构名词。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 最小方案与兼容影响
+      description: 说明能否小改解决，以及权限、数据库、API 和前端影响。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 未采用方案
+      description: 如建议新抽象，请说明复用、测试价值和跳转成本。
