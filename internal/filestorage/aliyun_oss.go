@@ -32,6 +32,7 @@ func NewAliyunOSSDriver(config AliyunOSSConfig) *AliyunOSSDriver {
 	signingCfg := oss.LoadDefaultConfig().
 		WithRegion(config.Region).
 		WithEndpoint(config.Endpoint).
+		WithAdditionalHeaders([]string{"x-oss-forbid-overwrite"}).
 		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(config.AccessKeyID, config.AccessKeySecret))
 	return &AliyunOSSDriver{
 		client:        oss.NewClient(cfg),
@@ -124,8 +125,9 @@ func (d *AliyunOSSDriver) SignedImageThumbnailURL(ctx context.Context, bucket, o
 
 func (d *AliyunOSSDriver) PresignPutObject(ctx context.Context, bucket, objectKey string, contentType string, ttl time.Duration) (string, error) {
 	request := &oss.PutObjectRequest{
-		Bucket: oss.Ptr(firstNonEmpty(bucket, d.bucket)),
-		Key:    oss.Ptr(objectKey),
+		Bucket:          oss.Ptr(firstNonEmpty(bucket, d.bucket)),
+		Key:             oss.Ptr(objectKey),
+		ForbidOverwrite: oss.Ptr("true"),
 	}
 	if contentType != "" {
 		request.ContentType = oss.Ptr(contentType)

@@ -3,6 +3,7 @@ package admin_test
 import (
 	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,6 +52,50 @@ func TestWebSocketTicketAndEndpointFollowConfiguredRedis(t *testing.T) {
 
 	wsResp := anonymousGetRequest("/admin/v1/common/ws", &url.Values{"ticket": {ticket}})
 	assert.Equal(t, http.StatusBadRequest, wsResp.Code, "有效 ticket 应进入 WebSocket Upgrade 校验")
+	reused := anonymousGetRequest("/admin/v1/common/ws", &url.Values{"ticket": {ticket}})
+	assert.Equal(t, http.StatusUnauthorized, reused.Code, "已消费 ticket 不可重用")
+}
+
+func TestWebSocketTicketIsConsumedOnceConcurrently(t *testing.T) {
+	body := `{}`
+	response := postRequest("/admin/v1/common/ws-ticket", &body)
+	if !c.GetConfig().Redis.Enable {
+		assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+		return
+	}
+	result := decodeResult(t, response)
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("ticket response: %s", response.Body.String())
+	}
+	ticket, ok := data["ticket"].(string)
+	if !ok || ticket == "" {
+		t.Fatal("missing ticket")
+	}
+	const clients = 8
+	results := make(chan int, clients)
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for i := 0; i < clients; i++ {
+		workers.Go(func() {
+			<-start
+			results <- anonymousGetRequest("/admin/v1/common/ws", &url.Values{"ticket": {ticket}}).Code
+		})
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	accepted := 0
+	for status := range results {
+		if status == http.StatusBadRequest {
+			accepted++
+		} else if status != http.StatusUnauthorized {
+			t.Errorf("unexpected handshake status %d", status)
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("%d concurrent requests consumed the same ticket", accepted)
+	}
 }
 
 func TestWebSocketEndpointRejectsMissingTicket(t *testing.T) {

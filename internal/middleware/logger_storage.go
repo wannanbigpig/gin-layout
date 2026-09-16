@@ -322,8 +322,10 @@ func operationStatusFromResponse(recorder *responseRecorder, resp *response.Resu
 }
 
 // getOperationName 获取操作名称。
+var operationNameCache = accesssvc.NewApiRouteCacheService()
+
 func getOperationName(route string, method string, headerOperationName string) string {
-	if operationName := accesssvc.NewApiRouteCacheService().GetApiName(route, method); operationName != "" {
+	if operationName := operationNameCache.GetApiName(route, method); operationName != "" {
 		return operationName
 	}
 	if headerOperationName != "" {

@@ -69,6 +69,7 @@ func (api RequestLogController) Export(c *gin.Context) {
 		"operator_account":     params.OperatorAccount,
 		"operation_status":     params.OperationStatus,
 		"is_high_risk":         params.IsHighRisk,
+		"has_change_diff":      params.HasChangeDiff,
 		"request_kind":         params.RequestKind,
 		"execution_time_scope": params.ExecutionTimeScope,
 		"method":               params.Method,

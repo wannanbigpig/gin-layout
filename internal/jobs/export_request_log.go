@@ -25,6 +25,7 @@ const (
 
 // ExportRequestLogPayload 表示异步导出请求日志任务 payload。
 type ExportRequestLogPayload struct {
+	HasChangeDiff      uint8  `json:"has_change_diff"`
 	TaskRunID          uint   `json:"task_run_id"`
 	TriggerUserID      uint   `json:"trigger_user_id"`
 	RequestID          string `json:"request_id"`
@@ -50,6 +51,7 @@ func handleExportRequestLog(ctx context.Context, payload ExportRequestLogPayload
 	exportService := service.NewExportCenterService()
 
 	params := &form.RequestLogExport{
+		HasChangeDiff:      payload.HasChangeDiff,
 		RequestID:          payload.RequestID,
 		OperatorID:         payload.OperatorID,
 		OperatorAccount:    payload.OperatorAccount,

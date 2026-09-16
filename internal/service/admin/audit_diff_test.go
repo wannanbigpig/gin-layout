@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -35,4 +36,19 @@ func TestBuildAdminUserDiffIncludesStatusDisplay(t *testing.T) {
 		return
 	}
 	t.Fatalf("expected status diff item, got %#v", items)
+}
+
+func TestAdminPasswordAuditRecordsChangeWithoutSecret(t *testing.T) {
+	before := map[string]any{"id": uint(1)}
+	after := map[string]any{"id": uint(1)}
+	password := "plain-secret-password"
+	markAdminPasswordChange(before, after, &password)
+
+	raw := buildAdminUserDiff(before, after)
+	if !strings.Contains(raw, `"field":"password_changed"`) {
+		t.Fatalf("expected password change marker, got %s", raw)
+	}
+	if strings.Contains(raw, password) {
+		t.Fatalf("password audit must not contain plaintext, got %s", raw)
+	}
 }

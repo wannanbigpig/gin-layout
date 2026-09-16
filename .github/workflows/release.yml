@@ -18,7 +18,7 @@ jobs:
       - name: Verify
         shell: bash
         run: |
-          packages="$(go list ./... | grep -v '/tests/')"
+          packages="$(go list ./... | grep -Ev '/tests(/|$)')"
           go test $packages
           go vet $packages
       - name: Build archives

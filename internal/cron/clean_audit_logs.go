@@ -107,6 +107,10 @@ func batchDeleteByCutoff(db *gorm.DB, modelPtr interface{}, tableName string, cu
 		if physicalDelete {
 			queryDB = queryDB.Unscoped()
 		}
+		// 登录日志同时是会话撤销凭据；包括已撤销会话在内，所有令牌过期后才可删除。
+		if tableName == "admin_login_logs" {
+			queryDB = queryDB.Where("(token_expires IS NULL OR token_expires <= ?) AND (refresh_expires IS NULL OR refresh_expires <= ?)", time.Now(), time.Now())
+		}
 		err := queryDB.
 			Where("created_at < ?", cutoff).
 			Limit(auditLogBatchSize).
@@ -120,6 +124,9 @@ func batchDeleteByCutoff(db *gorm.DB, modelPtr interface{}, tableName string, cu
 		}
 
 		deleteDB := db.Where("id IN ?", ids)
+		if tableName == "admin_login_logs" {
+			deleteDB = deleteDB.Where("(token_expires IS NULL OR token_expires <= ?) AND (refresh_expires IS NULL OR refresh_expires <= ?)", time.Now(), time.Now())
+		}
 		if physicalDelete {
 			deleteDB = deleteDB.Unscoped()
 		}

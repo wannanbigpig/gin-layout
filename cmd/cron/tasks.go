@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wannanbigpig/gin-layout/internal/pkg/redisutil"
+
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
 
-	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -27,7 +28,6 @@ var loadCronTaskDefinitions = loadCronTaskDefinitionsFromDB
 
 const cronDefinitionSyncInterval = 5 * time.Second
 const cronRuntimeCacheMaxAge = cronDefinitionSyncInterval * 3
-const cronDefinitionSubscribeMaxBackoff = 30 * time.Second
 
 const (
 	cronRuntimeSyncSuccess = "success"
@@ -294,66 +294,36 @@ func (r *runtimeCronRegistry) markSyncFailure(ctx context.Context, syncErr error
 }
 
 func (r *runtimeCronRegistry) subscribeTaskDefinitionChanges(ctx context.Context) {
-	cfg := config.GetConfig()
-	if cfg == nil || !cfg.Redis.Enable {
-		return
+	var subscription redisutil.DynamicSubscription
+	defer subscription.Close()
+	refresh := func() <-chan *redis.Message {
+		return subscription.Refresh(ctx, data.RedisClient(), redisutil.Channel(taskcenter.TaskDefinitionChangeChannel))
 	}
-	client := data.RedisClient()
-	if client == nil {
-		return
-	}
-
-	backoff := time.Second
+	messages := refresh()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
-		if ctx.Err() != nil {
-			return
-		}
-		err := r.receiveTaskDefinitionChanges(ctx, client)
-		if ctx.Err() != nil {
-			return
-		}
-		log.Logger.Warn("任务定义变更订阅中断，准备重连",
-			zap.Duration("backoff", backoff),
-			zap.Error(err))
-		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return
-		case <-timer.C:
-		}
-		if backoff < cronDefinitionSubscribeMaxBackoff {
-			backoff *= 2
-			if backoff > cronDefinitionSubscribeMaxBackoff {
-				backoff = cronDefinitionSubscribeMaxBackoff
+		case <-ticker.C:
+			messages = refresh()
+		case message, ok := <-messages:
+			if !ok {
+				subscription.Reset()
+				messages = nil
+				continue
 			}
+			if message == nil {
+				continue
+			}
+			payload, valid := taskcenter.DecodeTaskDefinitionChangePayload(message.Payload)
+			if !valid {
+				continue
+			}
+			log.Logger.Info("收到任务定义变更通知", zap.String("task_code", payload.TaskCode))
+			r.reconcileOnce(ctx)
 		}
-	}
-}
-
-type taskDefinitionChangeSubscriber interface {
-	Subscribe(context.Context, ...string) *redis.PubSub
-}
-
-func (r *runtimeCronRegistry) receiveTaskDefinitionChanges(ctx context.Context, client taskDefinitionChangeSubscriber) error {
-	pubsub := client.Subscribe(ctx, taskcenter.TaskDefinitionChangeChannel)
-	defer pubsub.Close()
-	if _, err := pubsub.Receive(ctx); err != nil {
-		log.Logger.Warn("订阅任务定义变更通道失败", zap.Error(err))
-		return err
-	}
-	for {
-		message, err := pubsub.ReceiveMessage(ctx)
-		if err != nil {
-			return err
-		}
-		payload, ok := taskcenter.DecodeTaskDefinitionChangePayload(message.Payload)
-		if !ok {
-			continue
-		}
-		log.Logger.Info("收到任务定义变更通知",
-			zap.String("task_code", payload.TaskCode))
-		r.reconcileOnce(ctx)
 	}
 }
 

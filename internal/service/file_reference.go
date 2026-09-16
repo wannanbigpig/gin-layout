@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -9,8 +10,10 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
+	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -38,21 +41,22 @@ func (s *FileReferenceService) BindReference(fileURL, ownerType string, ownerID 
 	if !db.Migrator().HasTable(&model.UploadFileReference{}) {
 		return nil
 	}
-	var file model.UploadFiles
-	if err := db.Where("uuid = ? AND deleted_at = 0", uuid).First(&file).Error; err != nil {
-		return nil
-	}
-	row := model.UploadFileReference{
-		FileID:     file.ID,
-		UUID:       file.UUID,
-		OwnerType:  ownerType,
-		OwnerID:    ownerID,
-		OwnerField: ownerField,
-	}
-	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "owner_type"}, {Name: "owner_id"}, {Name: "owner_field"}, {Name: "file_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"uuid", "updated_at"}),
-	}).Create(&row).Error
+	return access.RunInTransaction(db, func(tx *gorm.DB) error {
+		var file model.UploadFiles
+		if err := tx.Clauses(clauseLockForUpdate()).Where("uuid = ? AND deleted_at = 0", uuid).First(&file).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.NotFound)
+			}
+			return err
+		}
+		row := model.UploadFileReference{
+			FileID: file.ID, UUID: file.UUID, OwnerType: ownerType, OwnerID: ownerID, OwnerField: ownerField,
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "owner_type"}, {Name: "owner_id"}, {Name: "owner_field"}, {Name: "file_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"uuid", "updated_at"}),
+		}).Create(&row).Error
+	})
 }
 
 func (s *FileReferenceService) ReleaseReference(fileURL, ownerType string, ownerID uint, ownerField string) error {

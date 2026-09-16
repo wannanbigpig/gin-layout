@@ -34,17 +34,40 @@ func TestMaskSensitiveValues(t *testing.T) {
 	}
 }
 
-func TestSysConfigDetailResourceKeepsSensitiveConfigValue(t *testing.T) {
+func TestSysConfigDetailResourceMasksSensitiveConfigValue(t *testing.T) {
 	config := &model.SysConfig{
 		ConfigKey:   "audit.sensitive_fields",
 		ConfigValue: `{"common":["password"]}`,
 		IsSensitive: 1,
 	}
 
+	NewSysConfigService().maskSensitiveValues([]*model.SysConfig{config})
 	detail := resources.NewSysConfigTransformer().ToStruct(config)
 
-	if detail.ConfigValue != config.ConfigValue {
-		t.Fatalf("expected detail value to remain unmasked, got %q", detail.ConfigValue)
+	if detail.ConfigValue != maskedConfigValue {
+		t.Fatalf("expected detail value to be masked, got %q", detail.ConfigValue)
+	}
+}
+
+func TestDedicatedManagedConfigCannotUseGenericMutation(t *testing.T) {
+	config := &model.SysConfig{
+		IsSystem:  1,
+		ManageTab: "storage",
+	}
+
+	if !isDedicatedManagedConfig(config) {
+		t.Fatal("expected storage config to be protected by its dedicated management tab")
+	}
+	if isDedicatedManagedConfig(&model.SysConfig{IsSystem: 1}) {
+		t.Fatal("expected generic protected config without dedicated tab to remain editable")
+	}
+	for _, key := range []string{AuditSensitiveFieldsConfigKey, "storage.active_driver", "storage.config"} {
+		if !isDedicatedManagedConfigKey(key) {
+			t.Fatalf("expected dedicated key %q to be reserved", key)
+		}
+	}
+	if isDedicatedManagedConfigKey("feature.demo") {
+		t.Fatal("expected ordinary config key to remain generically manageable")
 	}
 }
 
@@ -163,5 +186,21 @@ func TestBuildSysConfigDiffIncludesVisibilityFields(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"field":"manage_tab"`) {
 		t.Fatalf("expected diff to include manage_tab, got %s", raw)
+	}
+}
+
+func TestBuildSysConfigDiffRecordsSensitiveChangeWithoutValue(t *testing.T) {
+	before := map[string]any{
+		"config_value":            maskedConfigValue,
+		"sensitive_value_changed": false,
+	}
+	after := map[string]any{
+		"config_value":            maskedConfigValue,
+		"sensitive_value_changed": true,
+	}
+
+	raw := buildSysConfigDiffJSON(before, after)
+	if !strings.Contains(raw, `"field":"sensitive_value_changed"`) {
+		t.Fatalf("expected sensitive value change marker, got %s", raw)
 	}
 }

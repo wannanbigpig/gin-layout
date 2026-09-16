@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -262,7 +263,7 @@ func TestFileResourceUploadLocalRecordsLocationFields(t *testing.T) {
 	}
 	header := newMultipartFileHeader(t, "hello.txt", []byte("hello"))
 
-	result, err := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).UploadLocal([]*multipart.FileHeader{header}, &form.FileLocalUpload{FolderID: folder.ID, IsPublic: global.Yes, UploadScene: "test"}, 9)
+	result, err := newLocalUploadTestService(db).UploadLocal([]*multipart.FileHeader{header}, &form.FileLocalUpload{FolderID: folder.ID, IsPublic: global.Yes, UploadScene: "test"}, 9)
 	if err != nil {
 		t.Fatalf("upload local failed: %v", err)
 	}
@@ -297,7 +298,7 @@ func TestFileResourceUploadLocalRecordsLocationFields(t *testing.T) {
 func TestFileResourceUploadLocalReusesPhysicalObject(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	config.Config.BasePath = t.TempDir()
-	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+	service := newLocalUploadTestService(db)
 	content := []byte("same content")
 
 	first, err := service.UploadLocal([]*multipart.FileHeader{newMultipartFileHeader(t, "first.txt", content)}, &form.FileLocalUpload{IsPublic: global.Yes}, 1)
@@ -333,7 +334,7 @@ func TestFileResourceUploadLocalReusesPhysicalObject(t *testing.T) {
 func TestFileResourceUploadLocalReturnsPartialSuccessForMultipleFiles(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	config.Config.BasePath = t.TempDir()
-	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+	service := newLocalUploadTestService(db)
 
 	successHeader := newMultipartFileHeader(t, "ok.txt", []byte("ok"))
 	failedHeader := &multipart.FileHeader{Filename: "broken.txt"}
@@ -423,7 +424,7 @@ func TestFileResourceDestroyKeepsPhysicalObjectUntilLastRecord(t *testing.T) {
 	}
 }
 
-func TestFileResourceUploadCredentialReturnsReuse(t *testing.T) {
+func TestFileResourceUploadCredentialDoesNotReuseUnverifiedHash(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	hash := strings.Repeat("b", 64)
 	object := model.UploadFileObject{
@@ -448,6 +449,9 @@ func TestFileResourceUploadCredentialReturnsReuse(t *testing.T) {
 				AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"},
 			}, model.StorageDriverAliyunOSS, nil
 		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
+		},
 	})
 	result, err := service.UploadCredential(&form.FileUploadCredential{
 		OriginName: "existing.txt",
@@ -459,11 +463,11 @@ func TestFileResourceUploadCredentialReturnsReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upload credential failed: %v", err)
 	}
-	if !result.Reuse || result.FileObjectID != object.ID || result.ObjectKey != object.ObjectKey {
-		t.Fatalf("unexpected reuse credential: %#v", result)
+	if result.Reuse || result.FileObjectID != 0 || result.ObjectKey == object.ObjectKey {
+		t.Fatalf("unverified client hash must not reuse object: %#v", result)
 	}
-	if result.UploadURL != "" || result.Method != "" {
-		t.Fatalf("reuse credential should not require direct upload: %#v", result)
+	if result.Method != "PUT" || result.Headers["x-oss-forbid-overwrite"] != "true" {
+		t.Fatalf("expected non-overwriting direct upload credential: %#v", result)
 	}
 	if result.CompleteToken == "" || result.CompletePayload["complete_token"] != result.CompleteToken {
 		t.Fatalf("expected credential to return complete_token, got %#v", result)
@@ -507,8 +511,8 @@ func TestFileResourceUploadCredentialDoesNotReusePrivateObjectAcrossUsers(t *tes
 	if err != nil {
 		t.Fatalf("owner credential failed: %v", err)
 	}
-	if !ownerCredential.Reuse || ownerCredential.FileObjectID != object.ID {
-		t.Fatalf("expected owner to reuse private object, got %#v", ownerCredential)
+	if ownerCredential.Reuse || ownerCredential.FileObjectID != 0 || ownerCredential.ObjectKey == object.ObjectKey {
+		t.Fatalf("owner must upload before hash-based reuse, got %#v", ownerCredential)
 	}
 	otherCredential, err := service.UploadCredential(&form.FileUploadCredential{
 		OriginName: "private.txt",
@@ -567,8 +571,8 @@ func TestFileResourceUploadCredentialBatchReturnsPerItemResults(t *testing.T) {
 	if result.Total != 2 || result.Success != 2 || result.Failed != 0 || len(result.Items) != 2 {
 		t.Fatalf("unexpected batch credential stats: %#v", result)
 	}
-	if !result.Items[0].Success || result.Items[0].Data == nil || result.Items[0].Data.FileObjectID != object.ID {
-		t.Fatalf("expected first credential item to reuse object, got %#v", result.Items[0])
+	if !result.Items[0].Success || result.Items[0].Data == nil || result.Items[0].Data.Reuse || result.Items[0].Data.FileObjectID != 0 {
+		t.Fatalf("expected first credential item to require verified upload, got %#v", result.Items[0])
 	}
 	if !result.Items[1].Success || result.Items[1].Data == nil || result.Items[1].Data.Reuse || result.Items[1].Data.ObjectKey == "" {
 		t.Fatalf("expected second credential item to return non-reuse credential payload, got %#v", result.Items[1])
@@ -730,14 +734,15 @@ func TestFileResourceMimeSniffFailsClosedOnStorageErrors(t *testing.T) {
 
 func TestFileResourceCompleteDirectUploadReuseUsesObjectFields(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
+	content := []byte("plain text content")
 	object := model.UploadFileObject{
 		StorageDriver: model.StorageDriverAliyunOSS,
 		Bucket:        "assets",
 		StoragePath:   "uploads/reuse.txt",
 		ObjectKey:     "uploads/reuse.txt",
 		IsPublic:      global.Yes,
-		Size:          12,
-		Hash:          strings.Repeat("9", 64),
+		Size:          uint(len(content)),
+		Hash:          testSHA256(content),
 		MimeType:      "text/plain",
 		ETag:          "etag-reuse",
 		Status:        model.StorageStatusStored,
@@ -751,12 +756,12 @@ func TestFileResourceCompleteDirectUploadReuseUsesObjectFields(t *testing.T) {
 			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
 		},
 		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
-			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
+			return fakeFileResourceDriver{name: driverName, content: content}, filestorage.Config{}, nil
 		},
 	})
 	credential, err := service.UploadCredential(&form.FileUploadCredential{
 		OriginName: "reuse.txt",
-		Size:       12,
+		Size:       int64(object.Size),
 		Hash:       object.Hash,
 		MimeType:   "text/plain",
 		IsPublic:   global.Yes,
@@ -767,16 +772,14 @@ func TestFileResourceCompleteDirectUploadReuseUsesObjectFields(t *testing.T) {
 
 	result, err := service.CompleteDirectUpload(&form.FileUploadComplete{
 		CompleteToken: credential.CompleteToken,
-		Reuse:         true,
-		FileObjectID:  object.ID,
 		OriginName:    "reuse.txt",
 		Size:          object.Size,
 		Hash:          object.Hash,
 		MimeType:      object.MimeType,
 		IsPublic:      global.Yes,
 		Driver:        model.StorageDriverAliyunOSS,
-		Bucket:        object.Bucket,
-		ObjectKey:     object.ObjectKey,
+		Bucket:        credential.Bucket,
+		ObjectKey:     credential.ObjectKey,
 	}, 1)
 	if err != nil {
 		t.Fatalf("direct complete reuse failed: %v", err)
@@ -841,16 +844,226 @@ func TestFileResourceCompleteDirectUploadRequiresValidCompleteToken(t *testing.T
 	}
 }
 
+func TestFileResourceCompleteDirectUploadVerifiesHashAndIsolatesFinalObject(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	content := []byte("verified direct upload")
+	driver := fakeFileResourceDriver{name: model.StorageDriverAliyunOSS, content: content}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(context.Context, string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{}, nil
+		},
+	})
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "verified.txt", Size: int64(len(content)), Hash: testSHA256(content), MimeType: "text/plain", IsPublic: global.Yes,
+	}, 7)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
+	result, err := service.CompleteDirectUpload(&form.FileUploadComplete{
+		CompleteToken: credential.CompleteToken,
+		OriginName:    "verified.txt",
+		Size:          uint(len(content)),
+		Hash:          testSHA256(content),
+		MimeType:      "text/plain",
+		IsPublic:      global.Yes,
+		Driver:        model.StorageDriverAliyunOSS,
+		Bucket:        credential.Bucket,
+		ObjectKey:     credential.ObjectKey,
+	}, 7)
+	if err != nil {
+		t.Fatalf("complete direct upload failed: %v", err)
+	}
+	if result.ObjectKey == credential.ObjectKey || result.Hash != testSHA256(content) {
+		t.Fatalf("expected verified final object isolated from signed temp key, got %#v", result)
+	}
+}
+
+func TestFileResourceCompleteDirectUploadRejectsActualHashMismatch(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	content := []byte("tampered direct upload")
+	driver := fakeFileResourceDriver{name: model.StorageDriverAliyunOSS, content: content}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(context.Context, string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{}, nil
+		},
+	})
+	declaredHash := testSHA256([]byte("declared content"))
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "tampered.txt", Size: int64(len(content)), Hash: declaredHash, MimeType: "text/plain", IsPublic: global.Yes,
+	}, 7)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
+	_, err = service.CompleteDirectUpload(&form.FileUploadComplete{
+		CompleteToken: credential.CompleteToken, OriginName: "tampered.txt", Size: uint(len(content)), Hash: declaredHash,
+		MimeType: "text/plain", IsPublic: global.Yes, Driver: model.StorageDriverAliyunOSS, Bucket: credential.Bucket, ObjectKey: credential.ObjectKey,
+	}, 7)
+	if err == nil {
+		t.Fatal("expected actual hash mismatch to fail")
+	}
+	var session model.UploadSession
+	if err := db.Where("complete_token_hash = ?", uploadCompleteTokenHash(credential.CompleteToken)).First(&session).Error; err != nil {
+		t.Fatalf("query upload session failed: %v", err)
+	}
+	if session.Status != model.UploadSessionStatusExpired {
+		t.Fatalf("expected rejected upload session expired, got %q", session.Status)
+	}
+	var count int64
+	if err := db.Model(&model.UploadFiles{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("expected no file record after hash mismatch, count=%d err=%v", count, err)
+	}
+}
+
+func TestFileResourceCompleteDirectUploadRestoresSessionAfterPutFailure(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	content := []byte("retryable direct upload")
+	driver := fakeFileResourceDriver{name: model.StorageDriverAliyunOSS, content: content, putErr: stderrors.New("temporary put failure")}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(context.Context, string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{}, nil
+		},
+	})
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "retry.txt", Size: int64(len(content)), Hash: testSHA256(content), MimeType: "text/plain", IsPublic: global.Yes,
+	}, 7)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
+	_, err = service.CompleteDirectUpload(&form.FileUploadComplete{
+		CompleteToken: credential.CompleteToken, OriginName: "retry.txt", Size: uint(len(content)), Hash: testSHA256(content),
+		MimeType: "text/plain", IsPublic: global.Yes, Driver: model.StorageDriverAliyunOSS,
+	}, 7)
+	if err == nil {
+		t.Fatal("expected temporary put failure")
+	}
+	var session model.UploadSession
+	if err := db.Where("complete_token_hash = ?", uploadCompleteTokenHash(credential.CompleteToken)).First(&session).Error; err != nil {
+		t.Fatalf("query upload session failed: %v", err)
+	}
+	if session.Status != model.UploadSessionStatusPending || session.ObjectKey != credential.ObjectKey {
+		t.Fatalf("expected retryable pending session with original object, got status=%q object=%q", session.Status, session.ObjectKey)
+	}
+}
+
+func TestFileResourceCompleteDirectUploadRevalidatesFinalObjectMime(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	malicious := []byte("<html>bad</html>")
+	initialJPEG := make([]byte, len(malicious))
+	copy(initialJPEG, []byte{0xff, 0xd8, 0xff, 0xe0})
+	openCalls := 0
+	driver := fakeFileResourceDriver{
+		name: model.StorageDriverAliyunOSS,
+		openFunc: func(_, _ string) ([]byte, error) {
+			openCalls++
+			if openCalls == 1 {
+				return initialJPEG, nil
+			}
+			return malicious, nil
+		},
+	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(context.Context, string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{}, nil
+		},
+	})
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "avatar.jpg", Size: int64(len(malicious)), Hash: testSHA256(malicious), MimeType: "image/jpeg", IsPublic: global.Yes,
+	}, 7)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
+	_, err = service.CompleteDirectUpload(&form.FileUploadComplete{
+		CompleteToken: credential.CompleteToken, OriginName: "avatar.jpg", Size: uint(len(malicious)), Hash: testSHA256(malicious),
+		MimeType: "image/jpeg", IsPublic: global.Yes, Driver: model.StorageDriverAliyunOSS,
+	}, 7)
+	if err == nil {
+		t.Fatal("expected final object MIME mismatch to fail")
+	}
+	if openCalls < 3 {
+		t.Fatalf("expected temp validation, copy, and final validation reads, got %d", openCalls)
+	}
+	var session model.UploadSession
+	if err := db.Where("complete_token_hash = ?", uploadCompleteTokenHash(credential.CompleteToken)).First(&session).Error; err != nil {
+		t.Fatalf("query upload session failed: %v", err)
+	}
+	if session.Status != model.UploadSessionStatusPending || session.ObjectKey != credential.ObjectKey {
+		t.Fatalf("expected retryable original session after final validation failure, got status=%q object=%q", session.Status, session.ObjectKey)
+	}
+}
+
+func TestFinalizeDirectUploadObjectUsesSessionObjectCAS(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	content := []byte("cas protected upload")
+	driver := fakeFileResourceDriver{name: model.StorageDriverAliyunOSS, content: content}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(context.Context, string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{}, nil
+		},
+	})
+	credential, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "cas.txt", Size: int64(len(content)), Hash: testSHA256(content), MimeType: "text/plain", IsPublic: global.Yes,
+	}, 7)
+	if err != nil {
+		t.Fatalf("upload credential failed: %v", err)
+	}
+	params := &form.FileUploadComplete{
+		CompleteToken: credential.CompleteToken, OriginName: "cas.txt", Size: uint(len(content)), Hash: testSHA256(content),
+		MimeType: "text/plain", IsPublic: global.Yes, Driver: model.StorageDriverAliyunOSS,
+	}
+	target, err := service.claimDirectUploadMimeSniffTarget(context.Background(), params, 7)
+	if err != nil {
+		t.Fatalf("claim direct upload failed: %v", err)
+	}
+	first, reject, err := service.finalizeDirectUploadObject(context.Background(), db, target)
+	if err != nil || reject {
+		t.Fatalf("first finalize failed: reject=%v err=%v", reject, err)
+	}
+	if first.objectKey == target.objectKey {
+		t.Fatal("expected first finalize to replace temporary object key")
+	}
+	if _, reject, err = service.finalizeDirectUploadObject(context.Background(), db, target); err == nil || reject {
+		t.Fatalf("expected stale target CAS failure without integrity rejection, reject=%v err=%v", reject, err)
+	}
+	var session model.UploadSession
+	if err := db.First(&session, target.sessionID).Error; err != nil {
+		t.Fatalf("query upload session failed: %v", err)
+	}
+	if session.ObjectKey != first.objectKey || session.Status != model.UploadSessionStatusCompleting {
+		t.Fatalf("stale finalizer changed winner session: status=%q object=%q winner=%q", session.Status, session.ObjectKey, first.objectKey)
+	}
+}
+
 func TestFileResourceCompleteDirectUploadBatchReturnsPerItemResults(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
+	content := []byte("plain text content")
 	object := model.UploadFileObject{
 		StorageDriver: model.StorageDriverAliyunOSS,
 		Bucket:        "assets",
 		StoragePath:   "uploads/reuse.txt",
 		ObjectKey:     "uploads/reuse.txt",
 		IsPublic:      global.Yes,
-		Size:          12,
-		Hash:          strings.Repeat("9", 64),
+		Size:          uint(len(content)),
+		Hash:          testSHA256(content),
 		MimeType:      "text/plain",
 		ETag:          "etag-reuse",
 		Status:        model.StorageStatusStored,
@@ -864,7 +1077,7 @@ func TestFileResourceCompleteDirectUploadBatchReturnsPerItemResults(t *testing.T
 			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
 		},
 		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
-			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
+			return fakeFileResourceDriver{name: driverName, content: content}, filestorage.Config{}, nil
 		},
 	})
 	okCredential, err := service.UploadCredential(&form.FileUploadCredential{
@@ -892,8 +1105,8 @@ func TestFileResourceCompleteDirectUploadBatchReturnsPerItemResults(t *testing.T
 		IsPublic: global.Yes,
 		Driver:   model.StorageDriverAliyunOSS,
 		Items: []form.FileUploadCompleteBatchItem{
-			{ClientID: "ok", CompleteToken: okCredential.CompleteToken, Reuse: true, FileObjectID: object.ID, OriginName: "reuse.txt", Size: object.Size, Hash: object.Hash, MimeType: object.MimeType, Bucket: object.Bucket, ObjectKey: object.ObjectKey},
-			{ClientID: "bad", CompleteToken: badCredential.CompleteToken, Reuse: true, FileObjectID: object.ID, OriginName: "reuse.pdf", Size: object.Size, Hash: object.Hash, MimeType: object.MimeType, Bucket: object.Bucket, ObjectKey: object.ObjectKey, FileType: "pdf,word"},
+			{ClientID: "ok", CompleteToken: okCredential.CompleteToken, OriginName: "reuse.txt", Size: object.Size, Hash: object.Hash, MimeType: object.MimeType, Bucket: okCredential.Bucket, ObjectKey: okCredential.ObjectKey},
+			{ClientID: "bad", CompleteToken: badCredential.CompleteToken, OriginName: "reuse.pdf", Size: object.Size, Hash: object.Hash, MimeType: object.MimeType, Bucket: badCredential.Bucket, ObjectKey: badCredential.ObjectKey, FileType: "pdf,word"},
 		},
 	}, 1)
 	if err != nil {
@@ -953,7 +1166,7 @@ func TestFileResourceListAllowsOtherFileType(t *testing.T) {
 	}
 }
 
-func TestFileResourceMultipartInitReuseReturnsCompletablePayload(t *testing.T) {
+func TestFileResourceMultipartInitDoesNotReuseUnverifiedHash(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	hash := strings.Repeat("c", 64)
 	object := model.UploadFileObject{
@@ -976,6 +1189,9 @@ func TestFileResourceMultipartInitReuseReturnsCompletablePayload(t *testing.T) {
 		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
 			return fakeFileResourceDriver{name: "aliyun_oss"}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, "aliyun_oss", nil
 		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName}, filestorage.Config{}, nil
+		},
 	})
 
 	result, err := service.MultipartInit(&form.FileMultipartInit{
@@ -989,8 +1205,8 @@ func TestFileResourceMultipartInitReuseReturnsCompletablePayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("multipart init failed: %v", err)
 	}
-	if !result.Reuse || result.FileObjectID != object.ID || result.UploadID != "" || len(result.Parts) != 0 {
-		t.Fatalf("unexpected reuse init result: %#v", result)
+	if result.Reuse || result.FileObjectID != 0 || result.UploadID == "" || len(result.Parts) != 2 || result.ObjectKey == object.ObjectKey {
+		t.Fatalf("unverified client hash must not reuse multipart object: %#v", result)
 	}
 	if result.CompleteToken == "" || result.CompletePayload["complete_token"] != result.CompleteToken {
 		t.Fatalf("unexpected complete payload: %#v", result.CompletePayload)
@@ -1029,14 +1245,15 @@ func TestFileResourceMultipartInitLocalDriverUnsupported(t *testing.T) {
 
 func TestFileResourceMultipartCompleteReuseCreatesUploadRecord(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
-	hash := strings.Repeat("d", 64)
+	content := []byte("plain text content")
+	hash := testSHA256(content)
 	object := model.UploadFileObject{
 		StorageDriver: model.StorageDriverAliyunOSS,
 		Bucket:        "assets",
 		StoragePath:   "uploads/reuse.txt",
 		ObjectKey:     "uploads/reuse.txt",
 		IsPublic:      global.Yes,
-		Size:          12,
+		Size:          uint(len(content)),
 		Hash:          hash,
 		MimeType:      "text/plain",
 		ETag:          "etag-reuse",
@@ -1051,13 +1268,13 @@ func TestFileResourceMultipartCompleteReuseCreatesUploadRecord(t *testing.T) {
 			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
 		},
 		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
-			return fakeFileResourceDriver{name: driverName}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, nil
+			return fakeFileResourceDriver{name: driverName, content: content}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, nil
 		},
 	})
 	initResult, err := service.MultipartInit(&form.FileMultipartInit{
 		Hash:       hash,
 		OriginName: "reuse.txt",
-		Size:       12,
+		Size:       int64(len(content)),
 		MimeType:   "text/plain",
 		IsPublic:   global.Yes,
 		PartCount:  2,
@@ -1068,15 +1285,15 @@ func TestFileResourceMultipartCompleteReuseCreatesUploadRecord(t *testing.T) {
 
 	result, err := service.MultipartComplete(&form.FileMultipartComplete{
 		CompleteToken: initResult.CompleteToken,
-		Reuse:         true,
-		FileObjectID:  object.ID,
 		OriginName:    "reuse.txt",
-		Size:          12,
+		Size:          uint(len(content)),
 		Hash:          hash,
 		MimeType:      "text/plain",
 		IsPublic:      global.Yes,
-		Bucket:        object.Bucket,
-		ObjectKey:     object.ObjectKey,
+		Bucket:        initResult.Bucket,
+		ObjectKey:     initResult.ObjectKey,
+		UploadID:      initResult.UploadID,
+		Parts:         []form.MultipartCompletePart{{PartNumber: 1, ETag: "etag"}, {PartNumber: 2, ETag: "etag-2"}},
 	}, 8)
 	if err != nil {
 		t.Fatalf("multipart complete reuse failed: %v", err)
@@ -1136,11 +1353,12 @@ func TestFileResourceMultipartCompleteRequiresValidCompleteToken(t *testing.T) {
 
 func TestFileResourceMultipartCompleteDoesNotCompleteStorageTwiceForSameToken(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
-	hash := strings.Repeat("e", 64)
+	content := []byte("plain text content")
+	hash := testSHA256(content)
 	var completeCalls int
 	driver := fakeFileResourceDriver{
 		name:    model.StorageDriverAliyunOSS,
-		content: []byte("plain text content"),
+		content: content,
 		onCompleteMultipart: func() {
 			completeCalls++
 		},
@@ -1186,6 +1404,84 @@ func TestFileResourceMultipartCompleteDoesNotCompleteStorageTwiceForSameToken(t 
 	}
 	if completeCalls != 1 {
 		t.Fatalf("expected storage complete once, got %d", completeCalls)
+	}
+}
+
+func TestFileResourceMultipartAbortUsesOwnedSessionMetadata(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	var abortedBucket, abortedKey, abortedID string
+	driver := fakeFileResourceDriver{
+		name: model.StorageDriverAliyunOSS,
+		onAbortMultipart: func(bucket, objectKey, uploadID string) {
+			abortedBucket, abortedKey, abortedID = bucket, objectKey, uploadID
+		},
+	}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		StorageDriverResolver: func(context.Context, string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{}, nil
+		},
+	})
+	token, _, err := createUploadSession(db, uploadSessionInput{
+		UploadType: model.UploadSessionTypeMultipart, StorageDriver: model.StorageDriverAliyunOSS, Bucket: "trusted-bucket",
+		ObjectKey: "trusted/object.txt", UploadID: "trusted-upload", OwnerUID: 9, OriginName: "object.txt", Size: 1,
+		Hash: testSHA256([]byte("x")), MimeType: "text/plain", ExpiresAt: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("create upload session failed: %v", err)
+	}
+	if err := service.MultipartAbort(context.Background(), &form.FileMultipartAbort{CompleteToken: token}, 8); err == nil {
+		t.Fatal("expected cross-user abort to fail")
+	}
+	if err := service.MultipartAbort(context.Background(), &form.FileMultipartAbort{CompleteToken: token}, 9); err != nil {
+		t.Fatalf("owned multipart abort failed: %v", err)
+	}
+	if abortedBucket != "trusted-bucket" || abortedKey != "trusted/object.txt" || abortedID != "trusted-upload" {
+		t.Fatalf("abort did not use trusted session metadata: %q %q %q", abortedBucket, abortedKey, abortedID)
+	}
+	var session model.UploadSession
+	if err := db.Where("complete_token_hash = ?", uploadCompleteTokenHash(token)).First(&session).Error; err != nil {
+		t.Fatalf("query upload session failed: %v", err)
+	}
+	if session.Status != model.UploadSessionStatusExpired {
+		t.Fatalf("expected aborted session expired, got %q", session.Status)
+	}
+}
+
+func TestFileResourceMultipartCompleteRejectsActualHashMismatch(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	content := []byte("tampered multipart content")
+	driver := fakeFileResourceDriver{name: model.StorageDriverAliyunOSS, content: content}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(context.Context, string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{}, nil
+		},
+	})
+	declaredHash := testSHA256([]byte("declared multipart content"))
+	initResult, err := service.MultipartInit(&form.FileMultipartInit{
+		Hash: declaredHash, OriginName: "tampered.txt", Size: int64(len(content)), MimeType: "text/plain", IsPublic: global.Yes, PartCount: 1,
+	}, 9)
+	if err != nil {
+		t.Fatalf("multipart init failed: %v", err)
+	}
+	_, err = service.MultipartComplete(&form.FileMultipartComplete{
+		CompleteToken: initResult.CompleteToken, UploadID: initResult.UploadID, Bucket: initResult.Bucket, ObjectKey: initResult.ObjectKey,
+		OriginName: "tampered.txt", Size: uint(len(content)), Hash: declaredHash, MimeType: "text/plain", IsPublic: global.Yes,
+		Driver: model.StorageDriverAliyunOSS, Parts: []form.MultipartCompletePart{{PartNumber: 1, ETag: "etag"}},
+	}, 9)
+	if err == nil {
+		t.Fatal("expected actual multipart hash mismatch to fail")
+	}
+	var session model.UploadSession
+	if err := db.Where("complete_token_hash = ?", uploadCompleteTokenHash(initResult.CompleteToken)).First(&session).Error; err != nil {
+		t.Fatalf("query upload session failed: %v", err)
+	}
+	if session.Status != model.UploadSessionStatusExpired {
+		t.Fatalf("expected rejected multipart session expired, got %q", session.Status)
 	}
 }
 
@@ -1299,14 +1595,15 @@ func TestFileResourceMultipartCompleteRestoresPendingWhenStorageCompleteFails(t 
 
 func TestFileResourceMultipartCompleteRejectsMultiFileType(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
+	content := []byte("plain text content")
 	object := model.UploadFileObject{
 		StorageDriver: model.StorageDriverAliyunOSS,
 		Bucket:        "assets",
 		StoragePath:   "uploads/reuse.pdf",
 		ObjectKey:     "uploads/reuse.pdf",
 		IsPublic:      global.Yes,
-		Size:          12,
-		Hash:          strings.Repeat("7", 64),
+		Size:          uint(len(content)),
+		Hash:          testSHA256(content),
 		MimeType:      "application/pdf",
 		Status:        model.StorageStatusStored,
 	}
@@ -1318,11 +1615,14 @@ func TestFileResourceMultipartCompleteRejectsMultiFileType(t *testing.T) {
 		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
 			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
 		},
+		StorageDriverResolver: func(_ context.Context, driverName string) (filestorage.Driver, filestorage.Config, error) {
+			return fakeFileResourceDriver{name: driverName, content: content}, filestorage.Config{}, nil
+		},
 	})
 	initResult, err := service.MultipartInit(&form.FileMultipartInit{
 		Hash:       object.Hash,
 		OriginName: "reuse.pdf",
-		Size:       12,
+		Size:       int64(len(content)),
 		MimeType:   "application/pdf",
 		IsPublic:   global.Yes,
 		PartCount:  1,
@@ -1333,15 +1633,15 @@ func TestFileResourceMultipartCompleteRejectsMultiFileType(t *testing.T) {
 
 	_, err = service.MultipartComplete(&form.FileMultipartComplete{
 		CompleteToken: initResult.CompleteToken,
-		Reuse:         true,
-		FileObjectID:  object.ID,
 		OriginName:    "reuse.pdf",
-		Size:          12,
+		Size:          uint(len(content)),
 		Hash:          object.Hash,
 		MimeType:      "application/pdf",
 		IsPublic:      global.Yes,
-		Bucket:        object.Bucket,
-		ObjectKey:     object.ObjectKey,
+		Bucket:        initResult.Bucket,
+		ObjectKey:     initResult.ObjectKey,
+		UploadID:      initResult.UploadID,
+		Parts:         []form.MultipartCompletePart{{PartNumber: 1, ETag: "etag"}},
 		FileType:      "pdf,word",
 	}, 8)
 	if err == nil {
@@ -1941,22 +2241,52 @@ type fakeFileResourceDriver struct {
 	name                string
 	content             []byte
 	openErr             error
+	putErr              error
 	readErr             error
+	exists              bool
+	existsErr           error
 	completeErr         error
+	openFunc            func(bucket, objectKey string) ([]byte, error)
+	onPut               func(bucket, objectKey string)
+	onDelete            func(bucket, objectKey string)
 	onCompleteMultipart func()
+	onAbortMultipart    func(bucket, objectKey, uploadID string)
+}
+
+func testSHA256(content []byte) string {
+	sum := sha256.Sum256(content)
+	return fmt.Sprintf("%x", sum[:])
 }
 
 func (d fakeFileResourceDriver) Name() string { return d.name }
 
-func (d fakeFileResourceDriver) Put(context.Context, filestorage.PutInput) (filestorage.PutResult, error) {
-	return filestorage.PutResult{}, nil
+func (d fakeFileResourceDriver) Put(_ context.Context, input filestorage.PutInput) (filestorage.PutResult, error) {
+	if input.Reader != nil {
+		if _, err := io.Copy(io.Discard, input.Reader); err != nil {
+			return filestorage.PutResult{}, err
+		}
+	}
+	if d.putErr != nil {
+		return filestorage.PutResult{}, d.putErr
+	}
+	if d.onPut != nil {
+		d.onPut(input.Bucket, input.ObjectKey)
+	}
+	return filestorage.PutResult{Bucket: input.Bucket, ObjectKey: input.ObjectKey, ETag: "final-etag"}, nil
 }
 
-func (d fakeFileResourceDriver) Open(context.Context, string, string) (io.ReadCloser, error) {
+func (d fakeFileResourceDriver) Open(_ context.Context, bucket, objectKey string) (io.ReadCloser, error) {
 	if d.openErr != nil {
 		return nil, d.openErr
 	}
 	content := d.content
+	if d.openFunc != nil {
+		var err error
+		content, err = d.openFunc(bucket, objectKey)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if content == nil {
 		content = []byte("plain text content")
 	}
@@ -1981,10 +2311,13 @@ func (r *errorAfterPartialReader) Read(p []byte) (int, error) {
 }
 
 func (d fakeFileResourceDriver) Exists(context.Context, string, string) (bool, error) {
-	return true, nil
+	return d.exists, d.existsErr
 }
 
-func (d fakeFileResourceDriver) Delete(context.Context, string, string) error {
+func (d fakeFileResourceDriver) Delete(_ context.Context, bucket, objectKey string) error {
+	if d.onDelete != nil {
+		d.onDelete(bucket, objectKey)
+	}
 	return nil
 }
 
@@ -2035,7 +2368,10 @@ func (d fakeFileResourceDriver) CompleteMultipartUpload(context.Context, string,
 	return nil
 }
 
-func (d fakeFileResourceDriver) AbortMultipartUpload(context.Context, string, string, string) error {
+func (d fakeFileResourceDriver) AbortMultipartUpload(_ context.Context, bucket, objectKey, uploadID string) error {
+	if d.onAbortMultipart != nil {
+		d.onAbortMultipart(bucket, objectKey, uploadID)
+	}
 	return nil
 }
 
@@ -2446,6 +2782,32 @@ func TestFileResourceUploadLimits(t *testing.T) {
 	}
 }
 
+func TestFileResourceUploadOptionsExposeOnlyUploadCapabilities(t *testing.T) {
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return fakeFileResourceDriver{name: model.StorageDriverAliyunOSS}, filestorage.Config{
+				MaxFileSizeMB:     25,
+				AllowedExtensions: []string{".png", ".pdf"},
+				AllowedMimeTypes:  []string{"image/png", "application/pdf"},
+				AliyunOSS: filestorage.AliyunOSSConfig{
+					Bucket:          "secret-bucket",
+					AccessKeySecret: "must-not-be-exposed",
+				},
+			}, model.StorageDriverAliyunOSS, nil
+		},
+	})
+	options, err := service.UploadOptions(context.Background())
+	if err != nil {
+		t.Fatalf("upload options failed: %v", err)
+	}
+	if options.ActiveDriver != model.StorageDriverAliyunOSS || options.MaxFileSizeMB != 25 || !options.SupportsDirectUpload || !options.SupportsMultipartUpload {
+		t.Fatalf("unexpected upload options: %#v", options)
+	}
+	if len(options.AllowedExtensions) != 2 || len(options.AllowedMimeTypes) != 2 {
+		t.Fatalf("expected allowlists in upload options: %#v", options)
+	}
+}
+
 func TestFileResourceDefaultWhitelistAllowsOctetStreamForKnownExtensions(t *testing.T) {
 	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
 		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
@@ -2727,4 +3089,16 @@ func TestFileResourceListIncludesHiddenFolderFilesWhenRequested(t *testing.T) {
 	if item.OriginName != "hidden.txt" {
 		t.Fatalf("expected hidden.txt, got %q", item.OriginName)
 	}
+}
+
+func newLocalUploadTestService(db *gorm.DB) *FileResourceService {
+	settings := StorageSettings{ActiveDriver: model.StorageDriverLocal, Config: filestorage.DefaultConfig()}
+	applyLocalStorageDefaults(&settings)
+	return NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(ctx context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			driver, err := buildStorageDriver(ctx, settings.ActiveDriver, settings.Config)
+			return driver, settings.Config, settings.ActiveDriver, err
+		},
+	})
 }

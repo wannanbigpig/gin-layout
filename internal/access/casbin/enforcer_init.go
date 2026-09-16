@@ -113,8 +113,9 @@ func buildEnforcer(db *gorm.DB) (*CasbinEnforcer, error) {
 		return nil, fmt.Errorf("创建 Enforcer 失败: %w", err)
 	}
 	return &CasbinEnforcer{
-		Enforcer:    enforcer,
-		model:       m,
-		policyState: &sharedPolicyState{},
+		Enforcer:     enforcer,
+		model:        m,
+		policyState:  &sharedPolicyState{},
+		versionStore: defaultPolicyVersionStore,
 	}, nil
 }

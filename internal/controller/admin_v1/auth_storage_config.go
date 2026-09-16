@@ -4,10 +4,13 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/sys_config"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"go.uber.org/zap"
 )
 
 type StorageConfigController struct {
@@ -32,16 +35,17 @@ func (api StorageConfigController) Save(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	if err := service.NewStorageConfigService().Save(service.StorageSettings{
+	diff, err := service.NewStorageConfigService().SaveWithAuditDiff(service.StorageSettings{
 		ActiveDriver: params.ActiveDriver,
 		Config:       params.Config,
-	}); err != nil {
+	})
+	if err != nil {
 		api.Err(c, err)
 		return
 	}
+	middleware.SetAuditChangeDiffRaw(c, diff)
 	if err := sys_config.NewSysConfigService().RefreshCache(); err != nil {
-		api.Err(c, err)
-		return
+		log.Logger.Warn("存储配置已保存，运行时缓存刷新失败", zap.Error(err))
 	}
 	api.Success(c, nil)
 }

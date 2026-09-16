@@ -1,10 +1,11 @@
 package jobs
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
+	"time"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
@@ -36,6 +37,7 @@ type ExportFileListPayload struct {
 	IsPublic         *uint8 `json:"is_public"`
 	FolderID         *uint  `json:"folder_id"`
 	IncludeSubfolder uint8  `json:"include_subfolder"`
+	IncludeHidden    *uint8 `json:"include_hidden"`
 	StorageDriver    string `json:"storage_driver"`
 	StorageStatus    string `json:"storage_status"`
 	IsReferenced     *uint8 `json:"is_referenced"`
@@ -65,6 +67,7 @@ func handleExportFileList(ctx context.Context, payload ExportFileListPayload) er
 		IsPublic:         payload.IsPublic,
 		FolderID:         payload.FolderID,
 		IncludeSubfolder: payload.IncludeSubfolder,
+		IncludeHidden:    payload.IncludeHidden,
 		StorageDriver:    payload.StorageDriver,
 		StorageStatus:    payload.StorageStatus,
 		IsReferenced:     payload.IsReferenced,
@@ -77,28 +80,45 @@ func handleExportFileList(ctx context.Context, payload ExportFileListPayload) er
 
 	fileService := service.NewFileResourceService()
 
+	pipeReader, pipeWriter := io.Pipe()
+	fileName := "file_resources_" + time.Now().Format("20060102150405") + ".csv"
 	progressStarted := false
-	csvData, fileName, err := fileService.GenerateFileListExportCSVWithProgress(params, func(processed, total int) error {
-		if !progressStarted {
-			progressStarted = true
-			return exportService.MarkRunningWithTotal(ctx, payload.TaskRunID, uint64(total))
+	streamErrCh := make(chan error, 1)
+	go func() {
+		err := fileService.StreamFileListExportCSV(ctx, params, pipeWriter, func(processed, total int) error {
+			if !progressStarted {
+				progressStarted = true
+				return exportService.MarkRunningWithTotal(ctx, payload.TaskRunID, uint64(total))
+			}
+			return exportService.UpdateProgress(ctx, payload.TaskRunID, uint64(processed), uint64(total))
+		})
+		if err != nil {
+			_ = pipeWriter.CloseWithError(err)
+			streamErrCh <- err
+			return
 		}
-		return exportService.UpdateProgress(ctx, payload.TaskRunID, uint64(processed), uint64(total))
-	})
-	if err != nil {
-		_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
-		notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)
-		return err
-	}
-
+		_ = pipeWriter.Close()
+		streamErrCh <- nil
+	}()
 	uploadFile, err := fileService.CreateFromReader(ctx, service.ServerGeneratedFileInput{
 		UID:         payload.TriggerUserID,
 		OriginName:  fileName,
 		MimeType:    "text/csv; charset=utf-8",
 		IsPublic:    0,
 		UploadScene: "export",
-		Reader:      bytes.NewReader(csvData),
+		Reader:      pipeReader,
 	})
+	if err != nil {
+		_ = pipeReader.CloseWithError(err)
+	} else {
+		_ = pipeReader.Close()
+	}
+	streamErr := <-streamErrCh
+	if streamErr != nil {
+		_ = exportService.MarkFailed(ctx, payload.TaskRunID, streamErr)
+		notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", streamErr)
+		return streamErr
+	}
 	if err != nil {
 		_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
 		notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)

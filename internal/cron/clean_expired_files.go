@@ -2,6 +2,7 @@ package taskcron
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -82,5 +83,8 @@ func CleanExpiredFilesHandler(ctx context.Context, _ map[string]any) error {
 	}
 
 	log.Logger.Info("清理过期文件完成", zap.Int("scanned", totalScanned), zap.Int("success", successCount), zap.Int("failed", failCount))
+	if failCount > 0 {
+		return fmt.Errorf("clean expired files completed with %d failures out of %d scanned files", failCount, totalScanned)
+	}
 	return nil
 }

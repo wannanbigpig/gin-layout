@@ -21,11 +21,19 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 			id integer primary key autoincrement,
 			created_at datetime,
 			updated_at datetime,
+			request_id text,
+			operator_id integer default 0,
+			operator_account text,
+			operator_name text,
+			operation_name text,
+			method text,
 			base_url text,
 			request_kind text,
 			execution_time_scope text,
 			response_status integer,
 			operation_status integer,
+			is_high_risk integer default 0,
+			change_diff text,
 			execution_time_us integer
 		)`,
 		`CREATE TABLE daily_request_stats (
@@ -303,6 +311,49 @@ func TestBuildStorageStatsAggregates(t *testing.T) {
 	}
 	if stats.ByType[2].FileType != "other" {
 		t.Fatalf("by_type[2] expected other, got %+v", stats.ByType[2])
+	}
+}
+
+func TestBuildActivitiesReturnsMeaningfulStructuredOperations(t *testing.T) {
+	db := newDashboardTestDB(t)
+	now := time.Now().Truncate(time.Second)
+	insertActivity := func(operatorID uint, method string, status int, highRisk uint8, changeDiff string, name string, createdAt time.Time) {
+		t.Helper()
+		if err := db.Exec(`INSERT INTO request_logs (
+			created_at, updated_at, request_id, operator_id, operator_account, operator_name,
+			operation_name, method, base_url, request_kind, execution_time_scope,
+			response_status, operation_status, is_high_risk, change_diff, execution_time_us
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'http', 'request', 200, ?, ?, ?, 1000)`,
+			createdAt, createdAt, "request-activity", operatorID, "admin", "管理员", name, method, "/admin/v1/resource", status, highRisk, changeDiff).Error; err != nil {
+			t.Fatalf("insert activity failed: %v", err)
+		}
+	}
+
+	insertActivity(7, "GET", 0, 0, "", "浏览列表", now.Add(-time.Minute))
+	insertActivity(7, "POST", 0, 0, "", "创建资源", now.Add(-4*time.Minute))
+	insertActivity(7, "GET", 0, 0, `{"name":{"before":"旧","after":"新"}}`, "数据变更", now.Add(-3*time.Minute))
+	insertActivity(7, "GET", 500, 0, "", "读取失败", now.Add(-2*time.Minute))
+	insertActivity(7, "GET", 0, 1, "", "查看敏感配置", now.Add(-time.Minute))
+	insertActivity(8, "DELETE", 0, 1, "", "其他用户删除", now)
+
+	activities := buildActivities(db, 7)
+	if len(activities) != 4 {
+		t.Fatalf("expected 4 meaningful activities, got %d: %+v", len(activities), activities)
+	}
+	if activities[0].OperationName != "查看敏感配置" || activities[0].IsHighRisk != 1 {
+		t.Fatalf("unexpected latest activity: %+v", activities[0])
+	}
+	if activities[1].OperationStatus != 500 || activities[1].Type != "warning" {
+		t.Fatalf("expected failed activity metadata, got %+v", activities[1])
+	}
+	if !activities[2].HasChangeDiff || activities[2].OperationName != "数据变更" {
+		t.Fatalf("expected change-diff activity, got %+v", activities[2])
+	}
+	if activities[3].Method != "POST" || activities[3].RequestLogID == 0 || activities[3].RequestID != "request-activity" {
+		t.Fatalf("expected structured write activity, got %+v", activities[3])
+	}
+	if !activities[0].CreatedAt.Equal(now.Add(-time.Minute)) {
+		t.Fatalf("expected full created_at timestamp, got %v", activities[0].CreatedAt)
 	}
 }
 

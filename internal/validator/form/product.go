@@ -3,7 +3,7 @@ package form
 type ProductList struct {
 	Paginate
 	Status *int8  `form:"status" json:"status" binding:"omitempty,oneof=0 1"`
-	Name   string `form:"name" json:"name" binding:"omitempty"`
+	Name   string `form:"name" json:"name" binding:"omitempty,max=200"`
 }
 
 func NewProductListQuery() *ProductList {
@@ -11,7 +11,7 @@ func NewProductListQuery() *ProductList {
 }
 
 type productMutablePayload struct {
-	Name        string `form:"name" json:"name" binding:"required"`
+	Name        string `form:"name" json:"name" binding:"required,max=200"`
 	Description string `form:"description" json:"description" binding:"omitempty"`
 	Price       int64  `form:"price" json:"price" binding:"omitempty,gte=0"`
 	Status      uint8  `form:"status" json:"status" binding:"omitempty,oneof=0 1"`

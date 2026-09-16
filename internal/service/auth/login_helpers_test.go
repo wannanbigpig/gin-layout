@@ -127,7 +127,8 @@ func TestIsPrincipalValidSkipsFallbackWhenMysqlUnavailable(t *testing.T) {
 	claims := &token.AdminCustomClaims{
 		AdminUserInfo: token.AdminUserInfo{UserID: 12},
 		RegisteredClaims: jwt.RegisteredClaims{
-			ID: "jwt-id",
+			ID:        "jwt-id",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 	}
 
@@ -135,9 +136,9 @@ func TestIsPrincipalValidSkipsFallbackWhenMysqlUnavailable(t *testing.T) {
 	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, errRedisUnavailable
 	}
-	service.tokenRevokedLookupFn = func(_ string) bool {
+	service.tokenRevokedLookupFn = func(_ string) (bool, error) {
 		tokenRevokedCalled = true
-		return false
+		return false, nil
 	}
 	service.mysqlReadyFn = func() bool { return false }
 
@@ -149,12 +150,39 @@ func TestIsPrincipalValidSkipsFallbackWhenMysqlUnavailable(t *testing.T) {
 	}
 }
 
+func TestIsPrincipalValidRejectsRedisMissWhenMysqlUnavailable(t *testing.T) {
+	service := NewLoginService()
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        "jwt-id",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+
+	tokenRevokedCalled := false
+	service.blacklistLookupFn = func(_ string) (bool, error) { return false, nil }
+	service.tokenRevokedLookupFn = func(_ string) (bool, error) {
+		tokenRevokedCalled = true
+		return false, nil
+	}
+	service.mysqlReadyFn = func() bool { return false }
+
+	if service.isPrincipalValid(claims) {
+		t.Fatal("expected principal to be rejected when session state cannot be confirmed")
+	}
+	if tokenRevokedCalled {
+		t.Fatal("expected database revoke lookup to be skipped while mysql is unavailable")
+	}
+}
+
 func TestIsPrincipalValidFallsBackToDatabaseWhenMysqlReady(t *testing.T) {
 	service := NewLoginService()
 	claims := &token.AdminCustomClaims{
 		AdminUserInfo: token.AdminUserInfo{UserID: 12},
 		RegisteredClaims: jwt.RegisteredClaims{
-			ID: "jwt-id",
+			ID:        "jwt-id",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 	}
 
@@ -162,9 +190,9 @@ func TestIsPrincipalValidFallsBackToDatabaseWhenMysqlReady(t *testing.T) {
 	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, errRedisUnavailable
 	}
-	service.tokenRevokedLookupFn = func(jwtID string) bool {
+	service.tokenRevokedLookupFn = func(jwtID string) (bool, error) {
 		tokenRevokedCalled = true
-		return jwtID == "revoked"
+		return jwtID == "revoked", nil
 	}
 	service.mysqlReadyFn = func() bool { return true }
 
@@ -181,7 +209,8 @@ func TestIsPrincipalValidChecksDatabaseWhenRedisMisses(t *testing.T) {
 	claims := &token.AdminCustomClaims{
 		AdminUserInfo: token.AdminUserInfo{UserID: 12},
 		RegisteredClaims: jwt.RegisteredClaims{
-			ID: "jwt-id",
+			ID:        "jwt-id",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 	}
 
@@ -189,9 +218,9 @@ func TestIsPrincipalValidChecksDatabaseWhenRedisMisses(t *testing.T) {
 	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, nil
 	}
-	service.tokenRevokedLookupFn = func(jwtID string) bool {
+	service.tokenRevokedLookupFn = func(jwtID string) (bool, error) {
 		tokenRevokedCalled = true
-		return jwtID == "jwt-id"
+		return jwtID == "jwt-id", nil
 	}
 	service.mysqlReadyFn = func() bool { return true }
 
@@ -208,19 +237,82 @@ func TestIsPrincipalValidRejectsRevokedToken(t *testing.T) {
 	claims := &token.AdminCustomClaims{
 		AdminUserInfo: token.AdminUserInfo{UserID: 12},
 		RegisteredClaims: jwt.RegisteredClaims{
-			ID: "jwt-id",
+			ID:        "jwt-id",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 	}
 
 	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, errors.New("redis unavailable")
 	}
-	service.tokenRevokedLookupFn = func(jwtID string) bool {
-		return jwtID == "jwt-id"
+	service.tokenRevokedLookupFn = func(jwtID string) (bool, error) {
+		return jwtID == "jwt-id", nil
 	}
 
 	if service.isPrincipalValid(claims) {
 		t.Fatal("expected revoked token to be rejected")
+	}
+}
+
+func TestIsPrincipalValidRejectsDatabaseLookupError(t *testing.T) {
+	service := NewLoginService()
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        "jwt-id",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+
+	service.blacklistLookupFn = func(_ string) (bool, error) { return false, nil }
+	service.mysqlReadyFn = func() bool { return true }
+	service.tokenRevokedLookupFn = func(string) (bool, error) {
+		return false, errors.New("query failed")
+	}
+
+	if service.isPrincipalValid(claims) {
+		t.Fatal("expected principal to be rejected when revoke state cannot be confirmed")
+	}
+}
+
+func TestIsPrincipalValidRejectsMissingSuccessfulSession(t *testing.T) {
+	db := newSessionTestDB(t)
+	service := NewLoginServiceWithDeps(LoginServiceDeps{
+		LoginLogDB: db,
+		BlacklistLookup: func(string) (bool, error) {
+			return false, nil
+		},
+		MySQLReady: func() bool { return true },
+	})
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        "missing-session",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+	}
+
+	if service.isPrincipalValid(claims) {
+		t.Fatal("expected signed token without a persisted successful session to be rejected")
+	}
+}
+
+func TestIsPrincipalValidRejectsExpiredClaims(t *testing.T) {
+	service := NewLoginService()
+	claims := &token.AdminCustomClaims{
+		AdminUserInfo: token.AdminUserInfo{UserID: 12},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        "jwt-id",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
+		},
+	}
+	service.blacklistLookupFn = func(string) (bool, error) {
+		t.Fatal("expired claims must be rejected before dependency lookups")
+		return false, nil
+	}
+
+	if service.isPrincipalValid(claims) {
+		t.Fatal("expected expired claims to be rejected")
 	}
 }
 

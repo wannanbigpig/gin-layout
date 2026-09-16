@@ -97,6 +97,22 @@ type FileResourceServiceDeps struct {
 	ActiveStorageResolver func(context.Context) (filestorage.Driver, filestorage.Config, string, error)
 }
 
+// FileAuditSnapshot 仅包含文件变更审计所需的稳定业务字段。
+type FileAuditSnapshot struct {
+	ID          uint   `json:"id"`
+	OriginName  string `json:"origin_name"`
+	FolderID    uint   `json:"folder_id"`
+	LogicalPath string `json:"logical_path"`
+}
+
+// FileFolderAuditSnapshot 仅包含目录变更审计所需的稳定业务字段。
+type FileFolderAuditSnapshot struct {
+	ID          uint   `json:"id"`
+	ParentID    uint   `json:"parent_id"`
+	Name        string `json:"name"`
+	LogicalPath string `json:"logical_path"`
+}
+
 func NewFileResourceService() *FileResourceService {
 	return NewFileResourceServiceWithDeps(FileResourceServiceDeps{})
 }
@@ -105,8 +121,81 @@ func NewFileResourceServiceWithDeps(deps FileResourceServiceDeps) *FileResourceS
 	return &FileResourceService{db: deps.DB, storageDriverResolver: deps.StorageDriverResolver, activeStorageResolver: deps.ActiveStorageResolver}
 }
 
+func (s *FileResourceService) FileAuditSnapshots(ids []uint) ([]FileAuditSnapshot, error) {
+	if len(ids) == 0 {
+		return []FileAuditSnapshot{}, nil
+	}
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]FileAuditSnapshot, 0, len(ids))
+	if err := db.Model(&model.UploadFiles{}).
+		Select("id", "origin_name", "folder_id", "logical_path").
+		Where("id IN ?", ids).
+		Order("id ASC").
+		Scan(&result).Error; err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *FileResourceService) FileFolderAuditSnapshot(id uint) (*FileFolderAuditSnapshot, error) {
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	result := new(FileFolderAuditSnapshot)
+	if err := db.Model(&model.UploadFileFolder{}).
+		Select("id", "parent_id", "name", "logical_path").
+		Where("id = ?", id).
+		Take(result).Error; err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// UploadOptions 返回上传流程需要的最小公开配置，不暴露存储凭证、bucket 或 endpoint。
+func (s *FileResourceService) UploadOptions(ctx context.Context) (*resources.FileUploadOptionsResources, error) {
+	driver, cfg, activeDriver, err := s.activeStorageDriver(ctx)
+	if err != nil {
+		return nil, err
+	}
+	maxFileSizeMB := cfg.MaxFileSizeMB
+	if maxFileSizeMB <= 0 {
+		maxFileSizeMB = 10
+	}
+	_, supportsMultipart := driver.(filestorage.MultipartCapable)
+	return &resources.FileUploadOptionsResources{
+		ActiveDriver:            activeDriver,
+		MaxFileSizeMB:           maxFileSizeMB,
+		AllowedExtensions:       append([]string(nil), cfg.AllowedExtensions...),
+		AllowedMimeTypes:        append([]string(nil), cfg.AllowedMimeTypes...),
+		SupportsDirectUpload:    activeDriver != model.StorageDriverLocal,
+		SupportsMultipartUpload: supportsMultipart,
+	}, nil
+}
+
 // List 分页查询文件资源列表。
 func (s *FileResourceService) List(params *form.FileResourceList) (*resources.Collection, error) {
+	condition, args := s.buildFileResourceFilter(params)
+
+	transformer := resources.NewFileResourceTransformer()
+	total, collection, err := s.listUploadFiles(params, condition, args)
+	if err != nil {
+		log.Logger.Error("查询文件资源列表失败", zap.Error(err))
+		return nil, err
+	}
+	result := transformer.ToCollection(params.Page, params.PerPage, total, collection)
+	s.fillUploaderNames(result)
+	return result, nil
+}
+
+// buildFileResourceFilter 是文件列表与导出的共同筛选入口。
+func (s *FileResourceService) buildFileResourceFilter(params *form.FileResourceList) (string, []any) {
+	if params == nil {
+		params = &form.FileResourceList{}
+	}
 	query := query_builder.New().
 		AddLike("origin_name", params.OriginName).
 		AddLike("uuid", params.UUID).
@@ -147,17 +236,7 @@ func (s *FileResourceService) List(params *form.FileResourceList) (*resources.Co
 	if params.IncludeHidden == nil || *params.IncludeHidden != global.Yes {
 		query.AddCondition("NOT EXISTS (SELECT 1 FROM upload_file_folders WHERE upload_file_folders.id = upload_files.folder_id AND upload_file_folders.is_hidden = 1)")
 	}
-	condition, args := query.Build()
-
-	transformer := resources.NewFileResourceTransformer()
-	total, collection, err := s.listUploadFiles(params, condition, args)
-	if err != nil {
-		log.Logger.Error("查询文件资源列表失败", zap.Error(err))
-		return nil, err
-	}
-	result := transformer.ToCollection(params.Page, params.PerPage, total, collection)
-	s.fillUploaderNames(result)
-	return result, nil
+	return query.Build()
 }
 
 func normalizeFileTypeFilter(value string) []string {
@@ -263,33 +342,30 @@ func ensureFileNameUnique(tx *gorm.DB, currentID, folderID uint, name string) er
 
 // Delete 软删除文件记录。存在业务引用时拒绝删除，避免留下悬空引用。
 func (s *FileResourceService) Delete(id uint, deletedBy uint, reason string) error {
-	uploadFile, err := s.findByID(id)
+	db, err := s.dbOrDefault()
 	if err != nil {
 		return err
 	}
-	refs, err := NewFileReferenceService(s.db).ReferencesByFileID(id)
-	if err != nil {
-		return err
-	}
-	if len(refs) > 0 {
-		return NewFileReferencedDeleteError(buildFileReferenceResources(refs))
-	}
-
-	if s.db != nil {
-		uploadFile.SetDB(s.db)
-	}
-	if err := uploadFile.UpdateById(id, map[string]any{"deleted_by": deletedBy, "deleted_reason": reason}); err != nil {
-		log.Logger.Warn("更新文件删除审计信息失败", zap.Error(err), zap.Uint("id", id), zap.Uint("deleted_by", deletedBy))
-	}
-	rowsAffected, err := uploadFile.DeleteByID(id)
-	if err != nil {
-		log.Logger.Error("删除文件资源记录失败", zap.Error(err), zap.Uint("id", id))
-		return err
-	}
-	if rowsAffected == 0 {
-		return e.NewBusinessError(e.NotFound)
-	}
-	return nil
+	return access.RunInTransaction(db, func(tx *gorm.DB) error {
+		var file model.UploadFiles
+		if err := tx.Clauses(clauseLockForUpdate()).First(&file, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.NotFound)
+			}
+			return err
+		}
+		refs, err := NewFileReferenceService(tx.Clauses(clauseLockForUpdate())).ReferencesByFileID(id)
+		if err != nil {
+			return err
+		}
+		if len(refs) > 0 {
+			return NewFileReferencedDeleteError(buildFileReferenceResources(refs))
+		}
+		if err := tx.Model(&file).Updates(map[string]any{"deleted_by": deletedBy, "deleted_reason": reason}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&file).Error
+	})
 }
 
 func (s *FileResourceService) BatchDelete(ids []uint, deletedBy uint, reason string) (*FileBatchDeleteResult, error) {
@@ -325,39 +401,39 @@ func (s *FileResourceService) BatchDelete(ids []uint, deletedBy uint, reason str
 		return result, nil
 	}
 
-	var files []model.UploadFiles
-	if err := db.Where("id IN ? AND deleted_at = 0", uniqueIDs).Find(&files).Error; err != nil {
-		return nil, err
-	}
-	existing := make(map[uint]struct{}, len(files))
-	for _, file := range files {
-		existing[file.ID] = struct{}{}
-	}
-
-	refsByFileID, err := NewFileReferenceService(db).ReferencesByFileIDs(uniqueIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	deletableIDs := make([]uint, 0, len(uniqueIDs))
-	for _, id := range ids {
-		if _, ok := existing[id]; !ok {
-			result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, e.NewBusinessError(e.NotFound)))
-			continue
+	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+		var files []model.UploadFiles
+		if err := tx.Clauses(clauseLockForUpdate()).Where("id IN ? AND deleted_at = 0", uniqueIDs).Order("id ASC").Find(&files).Error; err != nil {
+			return err
 		}
-		if refs := refsByFileID[id]; len(refs) > 0 {
-			result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, NewFileReferencedDeleteError(buildFileReferenceResources(refs))))
-			continue
+		existing := make(map[uint]struct{}, len(files))
+		for _, file := range files {
+			existing[file.ID] = struct{}{}
 		}
-		if _, ok := seen[id]; !ok {
-			continue
-		}
-		delete(seen, id)
-		deletableIDs = append(deletableIDs, id)
-	}
 
-	if len(deletableIDs) > 0 {
-		err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+		refsByFileID, err := NewFileReferenceService(tx.Clauses(clauseLockForUpdate())).ReferencesByFileIDs(uniqueIDs)
+		if err != nil {
+			return err
+		}
+
+		deletableIDs := make([]uint, 0, len(uniqueIDs))
+		for _, id := range ids {
+			if _, ok := existing[id]; !ok {
+				result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, e.NewBusinessError(e.NotFound)))
+				continue
+			}
+			if refs := refsByFileID[id]; len(refs) > 0 {
+				result.Failures = append(result.Failures, buildFileBatchDeleteFailure(id, NewFileReferencedDeleteError(buildFileReferenceResources(refs))))
+				continue
+			}
+			if _, ok := seen[id]; !ok {
+				continue
+			}
+			delete(seen, id)
+			deletableIDs = append(deletableIDs, id)
+		}
+
+		if len(deletableIDs) > 0 {
 			if err := tx.Model(&model.UploadFiles{}).Where("id IN ? AND deleted_at = 0", deletableIDs).Updates(map[string]any{
 				"deleted_by":     deletedBy,
 				"deleted_reason": reason,
@@ -369,11 +445,11 @@ func (s *FileResourceService) BatchDelete(ids []uint, deletedBy uint, reason str
 				return deleteResult.Error
 			}
 			result.Deleted = int(deleteResult.RowsAffected)
-			return nil
-		})
-		if err != nil {
-			return nil, err
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	result.Failed = len(result.Failures)

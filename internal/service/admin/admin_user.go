@@ -57,8 +57,12 @@ func (s *AdminUserService) handleMutationError(err error, fallbackCode int) erro
 	return e.NewBusinessError(fallbackCode)
 }
 
-var revokeUserTokensFunc = func(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) error {
-	return auth.NewLoginService().RevokeUserTokens(userID, revokedCode, revokedReason, tx)
+var prepareUserTokenRevocationFunc = func(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) (*auth.PreparedUserTokenRevocation, error) {
+	return auth.NewLoginService().PrepareUserTokenRevocation(tx, userID, revokedCode, revokedReason)
+}
+
+var completeUserTokenRevocationFunc = func(prepared *auth.PreparedUserTokenRevocation) error {
+	return auth.NewLoginService().CompleteUserTokenRevocation(prepared)
 }
 
 type adminDataScopeFilter interface {
@@ -70,11 +74,13 @@ var newAdminDataScopeFilter = func() adminDataScopeFilter {
 	return access.NewDataScopeFilter()
 }
 
-func (s *AdminUserService) revokeUserTokens(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) error {
-	if err := revokeUserTokensFunc(tx, userID, revokedCode, revokedReason); err != nil {
-		log.Logger.Error("撤销用户token失败", zap.Error(err), zap.Uint("user_id", userID))
+func (s *AdminUserService) prepareUserTokenRevocation(tx *gorm.DB, item *userTokenRevocation) error {
+	prepared, err := prepareUserTokenRevocationFunc(tx, item.userID, item.revokedCode, item.revokedReason)
+	if err != nil {
+		log.Logger.Error("撤销用户token失败", zap.Error(err), zap.Uint("user_id", item.userID))
 		return err
 	}
+	item.prepared = prepared
 	return nil
 }
 
@@ -82,12 +88,14 @@ type userTokenRevocation struct {
 	userID        uint
 	revokedCode   uint8
 	revokedReason string
+	prepared      *auth.PreparedUserTokenRevocation
 }
 
 func (s *AdminUserService) revokeUserTokensAfterCommit(items []userTokenRevocation) error {
 	var errs []error
 	for _, item := range items {
-		if err := s.revokeUserTokens(nil, item.userID, item.revokedCode, item.revokedReason); err != nil {
+		if err := completeUserTokenRevocationFunc(item.prepared); err != nil {
+			log.Logger.Error("同步用户token撤销状态失败", zap.Error(err), zap.Uint("user_id", item.userID))
 			errs = append(errs, err)
 		}
 	}

@@ -41,44 +41,26 @@ func (api ProductController) List(ctx *gin.Context) {
 
 // Create 新增产品
 func (api ProductController) Create(ctx *gin.Context) {
-	params := form.NewCreateProductForm()
-	if err := validator.CheckPostParams(ctx, &params); err != nil {
-		return
-	}
-
-	if err := api.newProductService(ctx).Create(params); err != nil {
-		api.Err(ctx, err)
-		return
-	}
-	api.Success(ctx, nil)
+	service := api.newProductService(ctx)
+	handleAuditWrite(api.Api, ctx, form.NewCreateProductForm, func(params *form.CreateProduct) (string, error) {
+		return service.CreateWithAuditDiff(params)
+	})
 }
 
 // Update 更新产品
 func (api ProductController) Update(ctx *gin.Context) {
-	params := form.NewUpdateProductForm()
-	if err := validator.CheckPostParams(ctx, &params); err != nil {
-		return
-	}
-
-	if err := api.newProductService(ctx).Update(params); err != nil {
-		api.Err(ctx, err)
-		return
-	}
-	api.Success(ctx, nil)
+	service := api.newProductService(ctx)
+	handleAuditWrite(api.Api, ctx, form.NewUpdateProductForm, func(params *form.UpdateProduct) (string, error) {
+		return service.UpdateWithAuditDiff(params)
+	})
 }
 
 // Delete 删除产品
 func (api ProductController) Delete(ctx *gin.Context) {
-	query := form.NewIdForm()
-	if err := validator.CheckPostParams(ctx, &query); err != nil {
-		return
-	}
-
-	if err := api.newProductService(ctx).Delete(query.ID); err != nil {
-		api.Err(ctx, err)
-		return
-	}
-	api.Success(ctx, nil)
+	service := api.newProductService(ctx)
+	handleAuditWrite(api.Api, ctx, form.NewIdForm, func(params *form.ID) (string, error) {
+		return service.DeleteWithAuditDiff(params.ID)
+	})
 }
 
 // Detail 产品详情

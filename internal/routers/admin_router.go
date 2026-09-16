@@ -382,6 +382,7 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					POST("folder/move", "移动文件目录", deps.File.FolderMove),
 					POST("update", "更新文件资源", deps.File.Update),
 					POST("move", "移动文件资源", deps.File.Move),
+					GET("upload/options", "文件上传能力", deps.File.UploadOptions),
 					POST("upload/local", "本地上传文件资源", deps.File.UploadLocal),
 					POST("upload/credential", "获取文件直传凭证", deps.File.UploadCredential),
 					POST("upload/credential/batch", "批量获取文件直传凭证", deps.File.UploadCredentialBatch),

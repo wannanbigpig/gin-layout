@@ -152,15 +152,12 @@ func (api SysMessageController) WS(c *gin.Context) {
 		rdb := data.RedisClient()
 
 		if rdb != nil {
-			// 管道执行：读取并即刻删除 Ticket
-			pipe := rdb.Pipeline()
-			getCmd := pipe.Get(c.Request.Context(), redisKey)
-			pipe.Del(c.Request.Context(), redisKey)
-			_, err := pipe.Exec(c.Request.Context())
+			// GETDEL 原子消费，避免并发握手读取同一张票据。
+			value, err := rdb.GetDel(c.Request.Context(), redisKey).Result()
 
 			if err == nil {
 				var cachedPrincipal auth.AuthPrincipal
-				if err := json.Unmarshal([]byte(getCmd.Val()), &cachedPrincipal); err == nil && cachedPrincipal.UserID != 0 {
+				if err := json.Unmarshal([]byte(value), &cachedPrincipal); err == nil && cachedPrincipal.UserID != 0 {
 					// 在 Redis 消费 Ticket 时，反查一次主登录 Session 的存活状态（黑名单与撤销检测）
 					if auth.NewLoginService().IsPrincipalValid(cachedPrincipal.Claims) {
 						principal = &cachedPrincipal

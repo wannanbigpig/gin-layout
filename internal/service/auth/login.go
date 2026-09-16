@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
@@ -148,7 +149,7 @@ type LoginService struct {
 	// blacklistLookupFn 查询 token 是否在 Redis 黑名单中。
 	blacklistLookupFn func(jwtID string) (bool, error)
 	// tokenRevokedLookupFn 查询 token 是否在登录日志中已标记撤销。
-	tokenRevokedLookupFn func(jwtID string) bool
+	tokenRevokedLookupFn func(jwtID string) (bool, error)
 	// mysqlReadyFn 判断 MySQL 依赖是否可用。
 	mysqlReadyFn func() bool
 	// markTokensRevokedFn 批量标记 token 为撤销状态。
@@ -166,7 +167,7 @@ type LoginServiceDeps struct {
 	// BlacklistLookup 自定义 Redis 黑名单查询实现。
 	BlacklistLookup func(jwtID string) (bool, error)
 	// TokenRevokedLookup 自定义登录日志撤销状态查询实现。
-	TokenRevokedLookup func(jwtID string) bool
+	TokenRevokedLookup func(jwtID string) (bool, error)
 	// MySQLReady 自定义 MySQL 可用性判断逻辑。
 	MySQLReady func() bool
 	// MarkTokensRevoked 自定义 token 撤销标记逻辑。
@@ -262,7 +263,7 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	if err != nil {
 		return nil, e.NewBusinessError(e.TokenGenerateFailed)
 	}
-	if err := s.persistLoginLog(loginLog, true); err != nil {
+	if err := s.persistLoginLog(loginLog, true, adminUser); err != nil {
 		return nil, e.NewBusinessError(e.LoginFailed)
 	}
 	if err := s.clearLoginFailState(username); err != nil && !isTableNotFoundErr(err) {
@@ -305,10 +306,10 @@ func (s *LoginService) recordLoginLog(adminUser *model.AdminUser, claims token.A
 	if s.loginLogDB != nil {
 		loginLog.SetDB(s.loginLogDB)
 	}
-	return s.persistLoginLog(loginLog, logType == model.LoginTypeLogin)
+	return s.persistLoginLog(loginLog, logType == model.LoginTypeLogin, adminUser)
 }
 
-func (s *LoginService) persistLoginLog(loginLog *model.AdminLoginLogs, updateLastLogin bool) error {
+func (s *LoginService) persistLoginLog(loginLog *model.AdminLoginLogs, updateLastLogin bool, expectedUsers ...*model.AdminUser) error {
 	if loginLog == nil {
 		return nil
 	}
@@ -321,6 +322,11 @@ func (s *LoginService) persistLoginLog(loginLog *model.AdminLoginLogs, updateLas
 		}
 	}
 	err := db.Transaction(func(tx *gorm.DB) error {
+		if len(expectedUsers) > 0 && expectedUsers[0] != nil {
+			if err := validateAuthenticatedUserSnapshot(tx, expectedUsers[0]); err != nil {
+				return err
+			}
+		}
 		if updateLastLogin {
 			adminUserModel := model.NewAdminUsers()
 			adminUserModel.SetDB(tx)
@@ -338,6 +344,48 @@ func (s *LoginService) persistLoginLog(loginLog *model.AdminLoginLogs, updateLas
 		log.Logger.Error("保存登录会话失败", zap.Error(err), zap.Uint("user_id", loginLog.UID))
 	}
 	return err
+}
+
+func validateAuthenticatedUserSnapshot(tx *gorm.DB, expected *model.AdminUser) error {
+	if tx == nil || expected == nil || expected.ID == 0 {
+		return e.NewBusinessError(e.NotLogin)
+	}
+	var current struct {
+		ID           uint
+		Username     string
+		Password     string
+		Status       uint8
+		IsSuperAdmin uint8
+	}
+	if err := tx.Model(&model.AdminUser{}).
+		Select("id", "username", "password", "status", "is_super_admin").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND deleted_at = 0", expected.ID).
+		Take(&current).Error; err != nil {
+		return err
+	}
+	if current.Status != model.AdminUserStatusEnabled ||
+		current.Username != expected.Username ||
+		current.Password != expected.Password ||
+		current.IsSuperAdmin != expected.IsSuperAdmin {
+		return e.NewBusinessError(e.NotLogin)
+	}
+	return nil
+}
+
+func loadAdminUserForAuthentication(tx *gorm.DB, userID uint) (*model.AdminUser, error) {
+	if tx == nil || userID == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	user := model.NewAdminUsers()
+	if err := tx.Model(user).
+		Select("id", "username", "status", "is_super_admin").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND deleted_at = 0", userID).
+		Take(user).Error; err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 // newAdminCustomClaims 创建管理员自定义 Claims。

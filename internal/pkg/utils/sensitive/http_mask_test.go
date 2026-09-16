@@ -23,6 +23,19 @@ func TestRequestBodyMasksFormCredentials(t *testing.T) {
 	}
 }
 
+func TestRequestBodyMasksNestedStorageCredentials(t *testing.T) {
+	previous := GetSensitiveFieldsConfig()
+	defer LoadSensitiveFieldsConfig(previous)
+	LoadSensitiveFieldsConfig(DefaultSensitiveFieldsConfig())
+	raw := `{"config":{"aliyun_oss":{"access_key_secret":"storage-private-value","secret_access_key":"other-private-value","session_token":"temporary-private-value"}},"complete_token":"upload-private-value"}`
+	masked := GetMaskedRequestBody([]byte(raw), "application/json")
+	for _, secret := range []string{"storage-private-value", "other-private-value", "temporary-private-value", "upload-private-value"} {
+		if strings.Contains(masked, secret) {
+			t.Fatalf("credential leaked: %s", masked)
+		}
+	}
+}
+
 func TestRequestBodyDoesNotLogMalformedStructuredSecrets(t *testing.T) {
 	for _, test := range []struct{ body, contentType string }{
 		{`{"password":"ExamplePwd!","extra":1e1000}`, "application/json"},

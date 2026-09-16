@@ -10,6 +10,7 @@ const (
 
 // businessScenarioRoutes 已有成功响应、状态流或真实 MySQL 回读断言。
 var businessScenarioRoutes = []string{
+	"GET /admin/v1/system/file/upload/options",
 	"GET /admin/v1/admin-user/detail",
 	"GET /admin/v1/admin-user/get",
 	"GET /admin/v1/admin-user/get-full-email",

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wannanbigpig/gin-layout/internal/pkg/redisutil"
+
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 )
@@ -46,7 +48,7 @@ func NotifyTaskDefinitionChanged(taskCode string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), taskDefinitionChangeTimeout)
 	defer cancel()
-	return client.Publish(ctx, TaskDefinitionChangeChannel, payload).Err()
+	return client.Publish(ctx, redisutil.Channel(TaskDefinitionChangeChannel), payload).Err()
 }
 
 func DecodeTaskDefinitionChangePayload(raw string) (TaskDefinitionChangePayload, bool) {

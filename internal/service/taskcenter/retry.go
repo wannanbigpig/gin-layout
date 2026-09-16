@@ -2,7 +2,6 @@ package taskcenter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -155,31 +154,32 @@ func loadTaskRetryChainSummaries(ctx context.Context, db *gorm.DB, rootRunIDs []
 	if err != nil {
 		return result, err
 	}
-	for i := range rows {
-		if rows[i].MaxSeq <= 0 {
-			continue
+	// 一次查询取各链路最大序号对应的最后一行，避免每条链路单独回源。
+	maxSequences := db.Model(&model.TaskRun{}).
+		Select("retry_root_run_id, MAX(retry_seq) AS max_seq").
+		Where("retry_root_run_id IN ?", rootRunIDs).Group("retry_root_run_id")
+	var latestRuns []model.TaskRun
+	err = db.WithContext(ctx).Model(&model.TaskRun{}).
+		Select("task_runs.id, task_runs.retry_root_run_id, task_runs.status").
+		Joins("JOIN (?) AS retry_max ON retry_max.retry_root_run_id = task_runs.retry_root_run_id AND retry_max.max_seq = task_runs.retry_seq", maxSequences).
+		Where("task_runs.retry_seq > 0").Order("task_runs.id DESC").Find(&latestRuns).Error
+	if err != nil {
+		return result, err
+	}
+	latestByRoot := make(map[uint]model.TaskRun, len(latestRuns))
+	for _, latest := range latestRuns {
+		if _, exists := latestByRoot[latest.RetryRootRunID]; !exists {
+			latestByRoot[latest.RetryRootRunID] = latest
 		}
-		var latest model.TaskRun
-		if err := db.WithContext(ctx).
-			Select("id", "status").
-			Where("retry_root_run_id = ? AND retry_seq = ?", rows[i].RetryRootRunID, rows[i].MaxSeq).
-			Order("id DESC").
-			First(&latest).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				continue
-			}
-			return result, err
-		}
-		rows[i].LatestRetryRunID = latest.ID
-		rows[i].LatestRetryStatus = latest.Status
 	}
 	for _, item := range rows {
+		latest := latestByRoot[item.RetryRootRunID]
 		result[item.RetryRootRunID] = retryChainSummary{
 			MaxSeq:            item.MaxSeq,
 			SuccessCount:      item.SuccessCount,
 			ActiveCount:       item.ActiveCount,
-			LatestRetryRunID:  item.LatestRetryRunID,
-			LatestRetryStatus: item.LatestRetryStatus,
+			LatestRetryRunID:  latest.ID,
+			LatestRetryStatus: latest.Status,
 		}
 	}
 	return result, nil

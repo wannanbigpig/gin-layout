@@ -29,11 +29,23 @@ type Metric struct {
 }
 
 type ActivityItem struct {
-	Key   string `json:"key"`
-	Title string `json:"title"`
-	Desc  string `json:"desc"`
-	Time  string `json:"time"`
-	Type  string `json:"type"`
+	Key             string    `json:"key"`
+	Title           string    `json:"title"`
+	Desc            string    `json:"desc"`
+	Time            string    `json:"time"`
+	Type            string    `json:"type"`
+	RequestLogID    uint      `json:"request_log_id"`
+	RequestID       string    `json:"request_id"`
+	OperationName   string    `json:"operation_name"`
+	Method          string    `json:"method"`
+	BaseURL         string    `json:"base_url"`
+	OperatorID      uint      `json:"operator_id"`
+	OperatorAccount string    `json:"operator_account"`
+	OperatorName    string    `json:"operator_name"`
+	OperationStatus int       `json:"operation_status"`
+	IsHighRisk      uint8     `json:"is_high_risk"`
+	HasChangeDiff   bool      `json:"has_change_diff"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type UserLogin struct {
@@ -221,23 +233,29 @@ func taskCompletionRate(db *gorm.DB, start time.Time, end time.Time) (float64, e
 func buildActivities(db *gorm.DB, operatorID uint) []ActivityItem {
 	type row struct {
 		ID              uint
+		RequestID       string
+		OperatorID      uint
 		OperatorAccount string
+		OperatorName    string
 		OperationName   string
 		Method          string
 		BaseURL         string
 		CreatedAt       time.Time
 		OperationStatus int
+		IsHighRisk      uint8
+		HasChangeDiff   bool
 	}
 	var rows []row
 	query := db.Table("request_logs").
-		Select("id, operator_account, operation_name, method, base_url, created_at, operation_status")
+		Select("id, request_id, operator_id, operator_account, operator_name, operation_name, method, base_url, created_at, operation_status, is_high_risk, (change_diff IS NOT NULL AND change_diff <> '' AND change_diff <> '{}') AS has_change_diff").
+		Where("operation_status <> 0 OR is_high_risk = 1 OR (change_diff IS NOT NULL AND change_diff <> '' AND change_diff <> '{}') OR method IN ?", []string{"POST", "PUT", "PATCH", "DELETE"})
 	if operatorID > 0 {
 		// 首页"最近动态"只展示当前登录用户自己的操作记录。
 		query = query.Where("operator_id = ?", operatorID)
 	}
 	if err := query.
 		Order("created_at DESC, id DESC").
-		Limit(4).
+		Limit(6).
 		Scan(&rows).Error; err != nil {
 		log.Warn("查询最近动态失败", zap.Error(err))
 	}
@@ -253,11 +271,23 @@ func buildActivities(db *gorm.DB, operatorID uint) []ActivityItem {
 			activityStatus = "success"
 		}
 		activities = append(activities, ActivityItem{
-			Key:   strconv.FormatUint(uint64(item.ID), 10),
-			Title: title,
-			Desc:  item.OperatorAccount,
-			Time:  item.CreatedAt.Format("15:04"),
-			Type:  activityStatus,
+			Key:             strconv.FormatUint(uint64(item.ID), 10),
+			Title:           title,
+			Desc:            item.OperatorAccount,
+			Time:            item.CreatedAt.Format("15:04"),
+			Type:            activityStatus,
+			RequestLogID:    item.ID,
+			RequestID:       item.RequestID,
+			OperationName:   item.OperationName,
+			Method:          item.Method,
+			BaseURL:         item.BaseURL,
+			OperatorID:      item.OperatorID,
+			OperatorAccount: item.OperatorAccount,
+			OperatorName:    item.OperatorName,
+			OperationStatus: item.OperationStatus,
+			IsHighRisk:      item.IsHighRisk,
+			HasChangeDiff:   item.HasChangeDiff,
+			CreatedAt:       item.CreatedAt,
 		})
 	}
 	return activities

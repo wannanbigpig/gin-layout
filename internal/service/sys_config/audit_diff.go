@@ -17,6 +17,14 @@ var sysConfigDiffRules = []auditdiff.FieldRule{
 	{Field: "config_name_i18n", Label: "参数名称"},
 	{Field: "config_value", Label: "参数值"},
 	{
+		Field: "sensitive_value_changed",
+		Label: "敏感参数值变更",
+		ValueLabels: map[string]string{
+			"false": "否",
+			"true":  "是",
+		},
+	},
+	{
 		Field: "value_type",
 		Label: "值类型",
 		ValueLabels: map[string]string{
@@ -68,6 +76,9 @@ func (s *SysConfigService) CreateWithAuditDiff(params *form.CreateSysConfig) (st
 	if err != nil {
 		return "", nil
 	}
+	if params.IsSensitive != nil && *params.IsSensitive == 1 {
+		after["sensitive_value_changed"] = true
+	}
 	return buildSysConfigDiffJSON(nil, after), nil
 }
 
@@ -80,12 +91,20 @@ func (s *SysConfigService) UpdateWithAuditDiff(params *form.UpdateSysConfig) (st
 	if err != nil {
 		return "", err
 	}
+	sensitiveValueChanged, err := sensitiveConfigValueWouldChange(params.Id, &params.SysConfigPayload)
+	if err != nil {
+		return "", err
+	}
 	if err := s.applyMutation(params.Id, &params.SysConfigPayload); err != nil {
 		return "", err
 	}
 	after, err := s.snapshotConfigByID(params.Id)
 	if err != nil {
 		return "", nil
+	}
+	if sensitiveValueChanged {
+		before["sensitive_value_changed"] = false
+		after["sensitive_value_changed"] = true
 	}
 	return buildSysConfigDiffJSON(before, after), nil
 }
@@ -106,6 +125,9 @@ func (s *SysConfigService) deleteConfig(id uint) error {
 	config := model.NewSysConfig()
 	if err := config.GetById(id); err != nil || config.ID == 0 {
 		return e.NewBusinessError(e.NotFound)
+	}
+	if isDedicatedManagedConfig(config) || isDedicatedManagedConfigKey(config.ConfigKey) {
+		return e.NewBusinessError(e.AuthorizationErr)
 	}
 	if config.IsProtected() {
 		return e.NewBusinessError(e.InvalidParameter)
@@ -167,6 +189,24 @@ func snapshotConfig(config *model.SysConfig) (map[string]any, error) {
 		"sort":             config.Sort,
 		"remark":           config.Remark,
 	}, nil
+}
+
+func sensitiveConfigValueWouldChange(id uint, params *form.SysConfigPayload) (bool, error) {
+	if params == nil {
+		return false, nil
+	}
+	config := model.NewSysConfig()
+	if err := config.GetById(id); err != nil || config.ID == 0 {
+		return false, e.NewBusinessError(e.NotFound)
+	}
+	nextSensitive := config.IsSensitive
+	if params.IsSensitive != nil {
+		nextSensitive = *params.IsSensitive
+	}
+	if config.IsSensitive != 1 && nextSensitive != 1 {
+		return false, nil
+	}
+	return resolveMutationConfigValue(config, params.ConfigValue) != config.ConfigValue, nil
 }
 
 func buildSysConfigDiffJSON(before, after map[string]any) string {

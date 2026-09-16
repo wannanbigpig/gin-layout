@@ -9,6 +9,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/service"
+	"github.com/wannanbigpig/gin-layout/internal/validator"
 )
 
 const (
@@ -29,7 +30,7 @@ func NewCommonController() *CommonController {
 func (api CommonController) Upload(c *gin.Context) {
 	form, err := c.MultipartForm()
 	if err != nil {
-		api.FailCode(c, errors.InvalidParameter)
+		validator.ResponseError(c, err)
 		return
 	}
 

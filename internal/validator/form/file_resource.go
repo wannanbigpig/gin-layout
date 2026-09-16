@@ -292,10 +292,7 @@ func NewFileMultipartCompleteForm() *FileMultipartComplete {
 
 // FileMultipartAbort 分片上传中止参数。
 type FileMultipartAbort struct {
-	UploadID  string `form:"upload_id" json:"upload_id" binding:"required"`
-	Bucket    string `form:"bucket" json:"bucket" binding:"required"`
-	ObjectKey string `form:"object_key" json:"object_key" binding:"required"`
-	Driver    string `form:"driver" json:"driver" binding:"omitempty,oneof=aliyun_oss"`
+	CompleteToken string `form:"complete_token" json:"complete_token" binding:"required,max=128"`
 }
 
 func NewFileMultipartAbortForm() *FileMultipartAbort {

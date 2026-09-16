@@ -13,11 +13,10 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/filestorage"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
-	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -42,11 +41,15 @@ func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) 
 	settings := StorageSettings{ActiveDriver: model.StorageDriverLocal, Config: filestorage.DefaultConfig()}
 	if value, err := storageSysConfigValue(StorageActiveDriverConfigKey); err == nil && strings.TrimSpace(value) != "" {
 		settings.ActiveDriver = strings.TrimSpace(value)
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return StorageSettings{}, err
 	}
 	if value, err := storageSysConfigValue(StorageConfigConfigKey); err == nil && strings.TrimSpace(value) != "" {
 		if unmarshalErr := json.Unmarshal([]byte(value), &settings.Config); unmarshalErr != nil {
-			log.Logger.Warn("存储配置 JSON 解析失败，使用默认配置", zap.Error(unmarshalErr))
+			return StorageSettings{}, fmt.Errorf("invalid storage configuration: %w", unmarshalErr)
 		}
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return StorageSettings{}, err
 	}
 	if settings.Config.SignedURLTTLSeconds <= 0 {
 		settings.Config.SignedURLTTLSeconds = 300
@@ -64,18 +67,26 @@ func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) 
 }
 
 func (s *StorageConfigService) Save(next StorageSettings) error {
+	_, err := s.SaveWithAuditDiff(next)
+	return err
+}
+
+func (s *StorageConfigService) SaveWithAuditDiff(next StorageSettings) (string, error) {
 	if err := validateStorageDriver(next.ActiveDriver); err != nil {
-		return err
+		return "", err
 	}
-	current, _ := s.Get(false)
+	current, err := s.Get(false)
+	if err != nil {
+		return "", err
+	}
 	mergeSensitiveStorageConfig(&next.Config, current.Config)
 	payload, err := json.Marshal(next.Config)
 	if err != nil {
-		return err
+		return "", err
 	}
 	db, err := model.GetDB()
 	if err != nil {
-		return err
+		return "", err
 	}
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		if err := upsertStorageSysConfig(tx, StorageActiveDriverConfigKey, next.ActiveDriver, model.SysConfigValueTypeString, 0, "当前启用的文件存储驱动", map[string]string{
@@ -90,9 +101,23 @@ func (s *StorageConfigService) Save(next StorageSettings) error {
 		})
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return storageSettingsAuditDiff(current, next), nil
+}
+
+func storageSettingsAuditDiff(before, after StorageSettings) string {
+	secretChanged := before.Config.AliyunOSS.AccessKeySecret != after.Config.AliyunOSS.AccessKeySecret
+	before.Config.AliyunOSS.AccessKeySecret, after.Config.AliyunOSS.AccessKeySecret = "", ""
+	items := auditdiff.BuildFieldDiff(
+		map[string]any{"active_driver": before.ActiveDriver, "config": before.Config},
+		map[string]any{"active_driver": after.ActiveDriver, "config": after.Config},
+		[]auditdiff.FieldRule{{Field: "active_driver", Label: "存储驱动"}, {Field: "config", Label: "存储参数"}},
+	)
+	if secretChanged {
+		items = append(items, auditdiff.ChangeDiffItem{Field: "access_key_secret", Label: "存储密钥", Before: "[REDACTED]", After: "[CHANGED]"})
+	}
+	return auditdiff.Marshal(items)
 }
 
 func storageSysConfigValue(key string) (string, error) {
@@ -107,7 +132,10 @@ func storageSysConfigValue(key string) (string, error) {
 }
 
 func (s *StorageConfigService) Test(ctx context.Context, settings StorageSettings) error {
-	current, _ := s.Get(false)
+	current, err := s.Get(false)
+	if err != nil {
+		return err
+	}
 	mergeSensitiveStorageConfig(&settings.Config, current.Config)
 	driver, err := buildStorageDriver(ctx, settings.ActiveDriver, settings.Config)
 	if err != nil {

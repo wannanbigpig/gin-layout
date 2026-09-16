@@ -2,18 +2,17 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
+	"io"
 	"strconv"
 	"time"
 
-	"gorm.io/gorm"
-
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/csvutil"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"gorm.io/gorm"
 )
 
 const (
@@ -36,56 +35,34 @@ func (s *FileResourceService) GenerateFileListExportCSVWithProgress(params *form
 }
 
 func (s *FileResourceService) generateFileListExportCSV(params *form.FileResourceList, reporter fileExportProgressReporter) ([]byte, string, error) {
+	buffer := &bytes.Buffer{}
+	if err := s.StreamFileListExportCSV(context.Background(), params, buffer, reporter); err != nil {
+		return nil, "", err
+	}
+	fileName := "file_resources_" + time.Now().Format("20060102150405") + ".csv"
+	return buffer.Bytes(), fileName, nil
+}
+
+// StreamFileListExportCSV 使用稳定游标分批写出 CSV，避免 OFFSET 扫描和整份结果驻留内存。
+func (s *FileResourceService) StreamFileListExportCSV(ctx context.Context, params *form.FileResourceList, output io.Writer, reporter fileExportProgressReporter) error {
 	if params == nil {
 		params = &form.FileResourceList{}
 	}
-
-	query := query_builder.New().
-		AddLike("origin_name", params.OriginName).
-		AddLike("uuid", params.UUID).
-		AddLike("mime_type", params.MimeType)
-	if types := normalizeFileTypeFilter(params.FileType); len(types) > 1 {
-		query.AddCondition("file_type IN ?", types)
-	} else if len(types) == 1 {
-		query.AddEq("file_type", types[0])
+	if output == nil {
+		return io.ErrClosedPipe
 	}
-	query.AddEq("is_public", params.IsPublic).
-		AddEq("storage_driver", params.StorageDriver).
-		AddEq("storage_status", params.StorageStatus)
-	if params.UID > 0 {
-		query.AddEq("uid", params.UID)
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if params.FolderID != nil {
-		if params.IncludeSubfolder == global.Yes {
-			folderIDs := s.descendantFolderIDs(*params.FolderID)
-			folderIDs = append(folderIDs, *params.FolderID)
-			query.AddCondition("folder_id IN ?", folderIDs)
-		} else {
-			query.AddEq("folder_id", *params.FolderID)
-		}
-	}
-	if params.IsReferenced != nil {
-		if *params.IsReferenced == global.Yes {
-			query.AddCondition("EXISTS (SELECT 1 FROM upload_file_references WHERE upload_file_references.file_id = upload_files.id)")
-		} else {
-			query.AddCondition("NOT EXISTS (SELECT 1 FROM upload_file_references WHERE upload_file_references.file_id = upload_files.id)")
-		}
-	}
-	if t, ok := utils.ParseTimeBoundary(params.StartTime); ok {
-		query.AddCondition("created_at >= ?", t)
-	}
-	if t, ok := utils.ParseTimeBoundary(params.EndTime); ok {
-		query.AddCondition("created_at <= ?", t)
-	}
-	condition, args := query.Build()
+	condition, args := s.buildFileResourceFilter(params)
 
 	limit := normalizeFileListExportLimit(params.Limit)
 
 	db, err := s.dbOrDefault()
 	if err != nil {
-		return nil, "", err
+		return err
 	}
-	q := db.Model(&model.UploadFiles{})
+	q := db.WithContext(ctx).Model(&model.UploadFiles{})
 	isDeleted := uint8(0)
 	if params.IsDeleted != nil {
 		isDeleted = *params.IsDeleted
@@ -99,15 +76,14 @@ func (s *FileResourceService) generateFileListExportCSV(params *form.FileResourc
 
 	var totalRows int64
 	if err := q.Count(&totalRows).Error; err != nil {
-		return nil, "", err
+		return err
 	}
 	total := int(totalRows)
 	if total > limit {
 		total = limit
 	}
 
-	buffer := &bytes.Buffer{}
-	writer := csv.NewWriter(buffer)
+	writer := csv.NewWriter(output)
 	if err := writer.Write([]string{
 		"id",
 		"uuid",
@@ -121,25 +97,33 @@ func (s *FileResourceService) generateFileListExportCSV(params *form.FileResourc
 		"folder_id",
 		"created_at",
 	}); err != nil {
-		return nil, "", err
+		return err
 	}
 
 	if reporter != nil {
 		if err := reporter(0, total); err != nil {
-			return nil, "", err
+			return err
 		}
 	}
 
 	processed := 0
+	var cursorCreatedAt time.Time
+	var cursorID uint
 	for processed < total {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		batchLimit := fileListExportBatchSize
 		if remaining := total - processed; remaining < batchLimit {
 			batchLimit = remaining
 		}
 		rows := make([]*model.UploadFiles, 0, batchLimit)
-		batchQuery := q.Session(&gorm.Session{}).Order("created_at DESC, id DESC").Limit(batchLimit).Offset(processed)
+		batchQuery := q.Session(&gorm.Session{}).Order("created_at DESC, id DESC").Limit(batchLimit)
+		if !cursorCreatedAt.IsZero() {
+			batchQuery = batchQuery.Where("created_at < ? OR (created_at = ? AND id < ?)", cursorCreatedAt, cursorCreatedAt, cursorID)
+		}
 		if err := batchQuery.Find(&rows).Error; err != nil {
-			return nil, "", err
+			return err
 		}
 		if len(rows) == 0 {
 			break
@@ -158,24 +142,25 @@ func (s *FileResourceService) generateFileListExportCSV(params *form.FileResourc
 				strconv.FormatUint(uint64(row.FolderID), 10),
 				row.CreatedAt.String(),
 			}); err != nil {
-				return nil, "", err
+				return err
 			}
 		}
 		processed += len(rows)
+		last := rows[len(rows)-1]
+		cursorCreatedAt = last.CreatedAt.Time
+		cursorID = last.ID
 		if reporter != nil {
 			if err := reporter(processed, total); err != nil {
-				return nil, "", err
+				return err
 			}
 		}
 	}
 
 	writer.Flush()
 	if err := writer.Error(); err != nil {
-		return nil, "", err
+		return err
 	}
-
-	fileName := "file_resources_" + time.Now().Format("20060102150405") + ".csv"
-	return buffer.Bytes(), fileName, nil
+	return nil
 }
 
 // normalizeFileListExportLimit 将 limit 规整到合理区间，避免任务跑飞。

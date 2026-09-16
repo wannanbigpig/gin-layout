@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func TestStopSysConfigCacheSyncSubscriberClosesBlockingReceive(t *testing.T) {
 	done := sysConfigSubscriberState.done
 	sysConfigSubscriberState.mu.Unlock()
 
-	go runSysConfigCacheSyncSubscriber(ctx, client)
+	go runSysConfigCacheSyncSubscriberWithSource(ctx, func() *redis.Client { return client }, 10*time.Millisecond, time.Hour)
 	server.waitForSubscriptions(t)
 
 	start := time.Now()
@@ -79,13 +80,53 @@ func TestStopSysConfigCacheSyncSubscriberClosesBlockingReceive(t *testing.T) {
 	}
 }
 
-func TestSysConfigCacheSyncClosingErrorIsSilent(t *testing.T) {
+func TestSysConfigSubscriberReconcilesWithoutNotifications(t *testing.T) {
+	originalReload := reloadSysConfigCache
+	defer func() { reloadSysConfigCache = originalReload }()
+	var calls atomic.Int32
+	reloadSysConfigCache = func() error { calls.Add(1); return fmt.Errorf("temporary refresh failure") }
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if !isSysConfigCacheSyncClosing(ctx, fmt.Errorf("read tcp 127.0.0.1:1->127.0.0.1:2: use of closed network connection")) {
-		t.Fatal("expected canceled context with closed connection error to be treated as closing")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		reconcileSysConfigCache(ctx, func() *redis.Client { return nil }, 10*time.Millisecond, 10*time.Millisecond)
+	}()
+	defer func() { cancel(); <-done }()
+	deadline := time.After(time.Second)
+	for calls.Load() < 2 {
+		select {
+		case <-deadline:
+			t.Fatal("failed initial refresh was not retried without notification")
+		case <-time.After(time.Millisecond):
+		}
 	}
+}
+
+func TestSysConfigSubscriberSwitchesToCurrentRedisClient(t *testing.T) {
+	firstServer := newBlockingRedisPubSubServer(t)
+	secondServer := newBlockingRedisPubSubServer(t)
+	firstClient := redis.NewClient(&redis.Options{Addr: firstServer.addr, Protocol: 2, DisableIdentity: true, ReadTimeout: -1})
+	secondClient := redis.NewClient(&redis.Options{Addr: secondServer.addr, Protocol: 2, DisableIdentity: true, ReadTimeout: -1})
+	defer firstClient.Close()
+	defer secondClient.Close()
+
+	originalReload := reloadSysConfigCache
+	defer func() { reloadSysConfigCache = originalReload }()
+	reloadSysConfigCache = func() error { return nil }
+
+	var current atomic.Pointer[redis.Client]
+	current.Store(firstClient)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		reconcileSysConfigCache(ctx, current.Load, 10*time.Millisecond, time.Hour)
+	}()
+	defer func() { cancel(); <-done }()
+
+	firstServer.waitForSubscriptions(t)
+	current.Store(secondClient)
+	secondServer.waitForSubscriptions(t)
 }
 
 func resetSysConfigSubscriberStateForTesting(t *testing.T) {

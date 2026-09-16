@@ -52,7 +52,9 @@ func TestBatchDeleteByCutoffPhysicallyDeletesSoftDeletedLoginLogs(t *testing.T) 
 		id integer primary key autoincrement,
 		created_at datetime,
 		updated_at datetime,
-		deleted_at integer NOT NULL DEFAULT 0
+		deleted_at integer NOT NULL DEFAULT 0,
+		token_expires datetime,
+		refresh_expires datetime
 	)`).Error; err != nil {
 		t.Fatalf("create admin_login_logs failed: %v", err)
 	}
@@ -78,5 +80,35 @@ func TestBatchDeleteByCutoffPhysicallyDeletesSoftDeletedLoginLogs(t *testing.T) 
 	}
 	if count != 0 {
 		t.Fatalf("expected no remaining rows, got %d", count)
+	}
+}
+
+func TestAuditCleanupRetainsSessionsUntilBothTokensExpire(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE admin_login_logs (id INTEGER PRIMARY KEY, created_at datetime, deleted_at integer DEFAULT 0, token_expires datetime, refresh_expires datetime)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	old, future := time.Now().AddDate(0, 0, -60), time.Now().Add(time.Hour)
+	for _, row := range []struct {
+		id              int
+		access, refresh time.Time
+	}{{1, old, future}, {2, future, old}, {3, old, old}} {
+		if err := db.Exec("INSERT INTO admin_login_logs (id,created_at,token_expires,refresh_expires) VALUES (?,?,?,?)", row.id, old, row.access, row.refresh).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	deleted, err := batchDeleteByCutoff(db, &model.AdminLoginLogs{}, "admin_login_logs", time.Now().AddDate(0, 0, -30), context.Background(), true)
+	if err != nil || deleted != 1 {
+		t.Fatalf("deleted=%d error=%v", deleted, err)
+	}
+	var ids []int
+	if err := db.Table("admin_login_logs").Order("id").Pluck("id", &ids).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		t.Fatalf("active sessions removed: %v", ids)
 	}
 }

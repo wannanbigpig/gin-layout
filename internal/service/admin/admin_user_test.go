@@ -14,6 +14,7 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -424,16 +425,12 @@ func TestAdminUserHandleMutationErrorWrapsPlainError(t *testing.T) {
 func TestRevokeUserTokensAfterCommitReturnsError(t *testing.T) {
 	service := NewAdminUserService()
 	wantErr := errors.New("revoke failed")
-	previous := revokeUserTokensFunc
-	revokeUserTokensFunc = func(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) error {
-		_ = tx
-		if userID != 12 || revokedCode != model.RevokedCodePasswordChangeAdmin || revokedReason == "" {
-			t.Fatalf("unexpected revocation input: userID=%d code=%d reason=%q", userID, revokedCode, revokedReason)
-		}
+	previous := completeUserTokenRevocationFunc
+	completeUserTokenRevocationFunc = func(*auth.PreparedUserTokenRevocation) error {
 		return wantErr
 	}
 	defer func() {
-		revokeUserTokensFunc = previous
+		completeUserTokenRevocationFunc = previous
 	}()
 
 	err := service.revokeUserTokensAfterCommit([]userTokenRevocation{{
@@ -443,6 +440,91 @@ func TestRevokeUserTokensAfterCommitReturnsError(t *testing.T) {
 	}})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected revoke error %v, got %v", wantErr, err)
+	}
+}
+
+func TestPrepareUserTokenRevocationUsesSecurityChangeReason(t *testing.T) {
+	service := NewAdminUserService()
+	previous := prepareUserTokenRevocationFunc
+	prepareUserTokenRevocationFunc = func(_ *gorm.DB, userID uint, revokedCode uint8, revokedReason string) (*auth.PreparedUserTokenRevocation, error) {
+		if userID != 12 || revokedCode != model.RevokedCodePasswordChangeAdmin || revokedReason != "管理员修改密码" {
+			t.Fatalf("unexpected revocation input: userID=%d code=%d reason=%q", userID, revokedCode, revokedReason)
+		}
+		return &auth.PreparedUserTokenRevocation{}, nil
+	}
+	defer func() { prepareUserTokenRevocationFunc = previous }()
+
+	item := &userTokenRevocation{userID: 12, revokedCode: model.RevokedCodePasswordChangeAdmin, revokedReason: "管理员修改密码"}
+	if err := service.prepareUserTokenRevocation(nil, item); err != nil {
+		t.Fatalf("prepare revocation failed: %v", err)
+	}
+	if item.prepared == nil {
+		t.Fatal("expected prepared revocation to be retained until commit")
+	}
+}
+
+func TestAdminUserUpdateValuesOnlyIncludesRequestedColumns(t *testing.T) {
+	nickname := "new nickname"
+	user := &model.AdminUser{
+		Nickname:        nickname,
+		Password:        "existing-hash",
+		Status:          model.AdminUserStatusEnabled,
+		IsSuperAdmin:    global.Yes,
+		LastIp:          "127.0.0.1",
+		FullPhoneNumber: "+8613800138000",
+	}
+
+	values := adminUserUpdateValues(user, &adminUserEditParams{Nickname: &nickname})
+	if len(values) != 1 || values["nickname"] != nickname {
+		t.Fatalf("expected nickname-only update, got %#v", values)
+	}
+	for _, field := range []string{"password", "status", "is_super_admin", "last_ip", "last_login", "full_phone_number"} {
+		if _, exists := values[field]; exists {
+			t.Fatalf("unrequested security/session column %q must not be overwritten: %#v", field, values)
+		}
+	}
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE admin_user (
+		id integer primary key,
+		nickname text,
+		password text,
+		status integer,
+		is_super_admin integer,
+		last_ip text,
+		last_login datetime,
+		full_phone_number text,
+		updated_at datetime,
+		deleted_at integer default 0
+	)`).Error; err != nil {
+		t.Fatalf("create admin_user failed: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO admin_user
+		(id, nickname, password, status, is_super_admin, last_ip, last_login, full_phone_number, deleted_at)
+		VALUES (12, 'old nickname', 'current-hash', 0, 1, '10.0.0.8', '2026-09-16 10:00:00', '+85255550000', 0)`).Error; err != nil {
+		t.Fatalf("insert admin_user failed: %v", err)
+	}
+	if err := db.Model(&model.AdminUser{}).Where("id = ? AND deleted_at = 0", 12).Updates(values).Error; err != nil {
+		t.Fatalf("apply exact-column update failed: %v", err)
+	}
+	var got struct {
+		Nickname        string
+		Password        string
+		Status          uint8
+		IsSuperAdmin    uint8
+		LastIP          string `gorm:"column:last_ip"`
+		LastLogin       string
+		FullPhoneNumber string
+	}
+	if err := db.Table("admin_user").Where("id = ?", 12).Take(&got).Error; err != nil {
+		t.Fatalf("query updated admin_user failed: %v", err)
+	}
+	if got.Nickname != nickname || got.Password != "current-hash" || got.Status != model.AdminUserStatusDisabled ||
+		got.IsSuperAdmin != global.Yes || got.LastIP != "10.0.0.8" || got.FullPhoneNumber != "+85255550000" || got.LastLogin == "" {
+		t.Fatalf("unexpected row after exact-column update: %#v", got)
 	}
 }
 

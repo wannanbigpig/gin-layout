@@ -255,6 +255,7 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 
 	query := buildRequestLogQuery(requestLogQueryInput{
 		RequestID:          params.RequestID,
+		HasChangeDiff:      params.HasChangeDiff,
 		OperatorID:         params.OperatorID,
 		OperatorAccount:    params.OperatorAccount,
 		OperationStatus:    params.OperationStatus,

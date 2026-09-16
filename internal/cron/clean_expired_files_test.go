@@ -42,8 +42,8 @@ func TestCleanExpiredFilesHandlerUsesCursorAndDoesNotLoopOnFailure(t *testing.T)
 		return nil
 	}
 
-	if err := CleanExpiredFilesHandler(context.Background(), nil); err != nil {
-		t.Fatalf("CleanExpiredFilesHandler returned error: %v", err)
+	if err := CleanExpiredFilesHandler(context.Background(), nil); err == nil {
+		t.Fatal("expected partial cleanup failure to be returned")
 	}
 
 	if len(visited) != 205 {

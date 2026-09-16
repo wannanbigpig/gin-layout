@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,6 +77,31 @@ func TestShutdownRealtimeDispatcherSendsCloseFrame(t *testing.T) {
 	if _, _, err := clientConn.ReadMessage(); !websocket.IsCloseError(err, websocket.CloseGoingAway) {
 		t.Fatalf("expected close going away error, got %v", err)
 	}
+}
+
+func TestCloseRealtimeClientsUsesOneGlobalDeadline(t *testing.T) {
+	clients := []*wsClient{{}, {}, {}}
+	release := make(chan struct{})
+	var workers sync.WaitGroup
+	var started atomic.Int32
+	workers.Add(len(clients))
+	start := time.Now()
+	completed := closeRealtimeClientsWithin(clients, 20*time.Millisecond, func(*wsClient) {
+		defer workers.Done()
+		started.Add(1)
+		<-release
+	})
+	if completed {
+		t.Fatal("expected global close timeout")
+	}
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("close duration grew with client count: %s", elapsed)
+	}
+	if got := started.Load(); got != int32(len(clients)) {
+		t.Fatalf("expected all closes to run concurrently, started=%d", got)
+	}
+	close(release)
+	workers.Wait()
 }
 
 func TestHubChannelSubscriberCountOnlyCountsMatchingSubscriptions(t *testing.T) {
@@ -217,12 +243,34 @@ func TestRunRealtimeSubscriberStopsBlockingReceiveWithoutWarn(t *testing.T) {
 	}
 }
 
-func TestRealtimeSubscriberClosingErrorIsSilent(t *testing.T) {
+func TestRealtimeSubscriberFollowsReplacedClientAndStops(t *testing.T) {
+	firstServer := newBlockingRealtimeRedisPubSubServer(t)
+	secondServer := newBlockingRealtimeRedisPubSubServer(t)
+	newClient := func(addr string) *redis.Client {
+		return redis.NewClient(&redis.Options{Addr: addr, Protocol: 2, DisableIdentity: true, ReadTimeout: -1, WriteTimeout: time.Second})
+	}
+	first := newClient(firstServer.addr)
+	second := newClient(secondServer.addr)
+	defer first.Close()
+	defer second.Close()
+	var current atomic.Pointer[redis.Client]
+	current.Store(first)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runRealtimeSubscriberWithSource(ctx, current.Load, 5*time.Millisecond)
+	}()
+	firstServer.waitForSubscriptions(t)
+	_ = first.Close()
+	current.Store(second)
+	secondServer.waitForSubscriptions(t)
 	cancel()
-
-	if !isRealtimeSubscriberClosing(ctx, fmt.Errorf("read tcp 127.0.0.1:1->127.0.0.1:2: use of closed network connection")) {
-		t.Fatal("expected canceled context with closed connection error to be treated as closing")
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("subscriber failed to stop after client replacement")
 	}
 }
 

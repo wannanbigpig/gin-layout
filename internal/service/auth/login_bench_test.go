@@ -31,8 +31,8 @@ func BenchmarkResolvePrincipal(b *testing.B) {
 	service.blacklistLookupFn = func(_ string) (bool, error) {
 		return false, nil
 	}
-	service.tokenRevokedLookupFn = func(_ string) bool {
-		return false
+	service.tokenRevokedLookupFn = func(_ string) (bool, error) {
+		return false, nil
 	}
 
 	b.ReportAllocs()

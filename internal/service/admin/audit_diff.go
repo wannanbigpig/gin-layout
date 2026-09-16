@@ -19,6 +19,14 @@ var adminUserDiffRules = []auditdiff.FieldRule{
 	{Field: "email", Label: "邮箱"},
 	{Field: "avatar", Label: "头像"},
 	{
+		Field: "password_changed",
+		Label: "密码变更",
+		ValueLabels: map[string]string{
+			"false": "否",
+			"true":  "是",
+		},
+	},
+	{
 		Field: "status",
 		Label: "状态",
 		ValueLabels: map[string]string{
@@ -62,6 +70,7 @@ func (s *AdminUserService) CreateWithAuditDiff(params *form.CreateAdminUser) (st
 	if err != nil {
 		return auditdiff.Marshal(nil), nil
 	}
+	after["password_changed"] = true
 	return buildAdminUserDiff(nil, after), nil
 }
 
@@ -81,6 +90,7 @@ func (s *AdminUserService) UpdateWithAuditDiff(params *form.UpdateAdminUser) (st
 	if err != nil {
 		return auditdiff.Marshal(nil), nil
 	}
+	markAdminPasswordChange(before, after, params.Password)
 	return buildAdminUserDiff(before, after), nil
 }
 
@@ -112,6 +122,7 @@ func (s *AdminUserService) UpdateProfileWithAuditDiff(uid uint, params *form.Upd
 	if err != nil {
 		return auditdiff.Marshal(nil), nil
 	}
+	markAdminPasswordChange(before, after, params.Password)
 	return buildAdminUserDiff(before, after), nil
 }
 
@@ -196,6 +207,18 @@ func (s *AdminUserService) snapshotAdminUserRoleBinding(userID uint) (map[string
 func buildAdminUserDiff(before, after map[string]any) string {
 	items := auditdiff.BuildFieldDiff(before, after, adminUserDiffRules)
 	return auditdiff.Marshal(items)
+}
+
+func markAdminPasswordChange(before, after map[string]any, password *string) {
+	if password == nil || strings.TrimSpace(*password) == "" {
+		return
+	}
+	if before != nil {
+		before["password_changed"] = false
+	}
+	if after != nil {
+		after["password_changed"] = true
+	}
 }
 
 func sortUintSlice(values []uint) {

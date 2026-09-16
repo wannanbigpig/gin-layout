@@ -66,8 +66,8 @@
 ### 1. 环境要求
 
 - `Go >= 1.27`
-- `MySQL >= 5.7`
-- `Redis >= 5.0`（可选）
+- `MySQL >= 8.0`
+- `Redis >= 6.2`（可选；启用 WebSocket ticket、缓存、队列或分布式锁时需要）
 
 ### 2. 安装项目
 
@@ -221,7 +221,13 @@ curl http://127.0.0.1:9001/health/readiness
 
 当前权限模型采用“数据库关系为真相，Casbin 负责最终接口判定”的方式。角色、部门、菜单和 API 的业务关系以数据库为准，`rebuild-user-permissions` 命令会按这些关系重建用户最终 API 权限。
 
-当前 Casbin 内存策略刷新只作用于执行权限变更的 `service` 进程。默认按单个 `service` 实例部署；如自行横向扩容，需在所有实例重载策略或先实现跨实例策略变更广播，不能假设 Redis 缓存失效会自动刷新其他进程的 Casbin 快照。
+Casbin 策略刷新支持多个 `service` 实例。权限策略与全局版本在同一 MySQL 事务内提交；正常请求优先读取 Redis 版本，发现本机策略落后时同步回源 MySQL 后再判权。权限写事务会先设置 Redis dirty 标记，提交后更新版本并发布通知；其他实例收到通知会立即刷新。Redis 缺失、异常或 dirty 存在时，请求回源 MySQL，单个实例内的并发回源由 `singleflight` 合并；Redis 版本键保留 30 秒安全过期，定时回源仍作为补偿。版本读取或策略重载失败时 fail-closed。该机制提供正常路径近实时、异常路径有界最终一致，不是跨实例提交确认屏障。
+
+升级到含权限版本校验的版本时，必须先执行 `command migrate up` 创建 `permission_policy_versions`，再启动或滚动替换 `service` 实例；缺少该表时权限判定会按 fail-closed 拒绝，并在日志中报告迁移缺失。
+
+多实例必须使用同一 MySQL 数据库、同一 Redis 实例与逻辑库，并保持 `jwt.secret_key`、`app.app_env` 和 `queue.namespace` 一致。策略、系统参数缓存和其他内部 Pub/Sub 通道使用 `queue.namespace`、`app.app_env`、`redis.database` 组成隔离命名；不要让同一部署的进程使用不同值。系统参数缓存也在启动时回源、订阅通知，并每 30 秒回源兜底。
+
+滚动升级若改变通道命名，旧版本和新版本不会互相收到通知；短时混用可能造成缓存或策略刷新延迟。此类版本应协调重启全部 `service`、`worker`、`cron` 进程后再恢复流量。
 
 ### 配置热更新是分级的
 
@@ -288,6 +294,7 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 ```
 
 - 新增内置异步任务或定时任务上线后，不要执行 `init-system`；使用 `command task sync-definitions` 同步任务定义，再用 `scan-async` / `scan-cron` 检查任务是否已在表中。同步只更新代码定义字段，会保留线上 `status`、`cron_spec`、是否允许手动触发、是否允许重试和记录策略等运营配置。
+- `20260916000001_add_refresh_session_lookup_index` 是独立的 refresh-token 查询索引迁移。部署时先执行 `go run main.go -c ./config.yaml command migrate up`，再在获授权的目标环境执行 `go run main.go -c ./config.yaml command api-route -y` 同步包含新路由的 API 表和权限。
 
 ## 配置说明
 
@@ -306,6 +313,8 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 | 配置项 | 说明 |
 | --- | --- |
 | `app.base_path` | 日志、上传文件等本地路径的基础目录；未配置时默认按 `GO_ENV` 选择（development=当前工作目录，其他=可执行文件目录） |
+| `app.max_request_body_mb` | 普通 API 请求体上限，默认 `16` MB |
+| `app.max_upload_body_mb` | 本地 `multipart` 上传的整个请求体上限，默认 `256` MB；包含全部文件和表单字段，不替代 `storage.max_file_size_mb` 的单文件限制 |
 | `app.allow_degraded_startup` | 仅 `service` 命令生效；依赖初始化失败时允许 HTTP 服务先启动，并通过 readiness / 路由守卫暴露未就绪状态 |
 | `app.base_url` | 文件访问 URL 前缀，用于生成公开文件地址 |
 | `app.trusted_proxies` | 受信任代理地址或网段，影响 `ClientIP()` 与日志 IP |
@@ -322,12 +331,15 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 
 ### Worker 与 Cron
 
+- `service`、`worker`、`cron` 是三类进程角色；扩容 API 时只增加 `service` 实例，不要把它们理解为三个 API 实例。
 - `service` 负责提供 HTTP API。
 - `worker` 负责消费 Asynq 异步任务，当前内置了请求审计日志落库、请求日志导出、文件资源导出 3 类任务。
+- 使用导出能力时，`queue.queues` 必须包含可消费的 `export` 队列，并运行 `worker`；仅注册任务或启动 `service` 不会消费导出任务。
 - `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会在当前请求链路同步落库，但导出类异步能力也会随之不可用。
 - `cron` 负责定时任务调度；代码内置任务会同步到 `task_definitions`，后台运营配置中的 `status/cron_spec/allow_manual/allow_retry` 会作为运行时真相，并通过进程缓存和 `cron_task_states` 维护最近同步/执行状态。
 - 演示定时任务初始化默认关闭；`reset-system-data` 默认关闭，启用执行时会输出高风险告警。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
+- 高风险 cron 任务使用 Redis 分布式锁跨实例互斥；普通任务只有进程内 `WithoutOverlapping` 保护，多个 `cron` 实例仍可能并发执行。普通任务完成幂等化前建议只运行一个 `cron` 实例。
 
 注意：`reset-system-data` 当前调用的是 `system.ReinitializeSystemData()`，会清空数据库对象并按当前迁移重建系统数据。生产环境必须保持该任务在 `task_definitions.status=0`，只有在明确需要重建系统数据时才临时启用并及时关闭。
 
@@ -389,6 +401,10 @@ go test ./tests/admin_test
 
 `tests` 下的接口集成测试只使用项目根目录 `config.yaml`，并要求其中启用且可连接真实 MySQL；配置缺失、MySQL 不可用或迁移表缺失时直接失败，不会回退示例配置或跳过数据库流程。建议使用可重建的专用测试库，详见 `tests/README.md`。
 
+文件上传约定：`GET /admin/v1/system/file/upload/options` 需要 `file:create` 权限，只返回当前驱动、大小和类型白名单、直传/分片能力等最小配置，不返回密钥、`bucket` 或 endpoint。上传初始化由服务端创建 session 并签发 `complete_token`；complete 只接受 token 对应的服务端元数据，multipart abort 只接受 `complete_token`。直传完成时，服务端把临时对象流复制到独立最终 key，并对实际内容计算 SHA-256 后校验；客户端 hash 只用于完整性声明，不再据此执行秒传复用。升级前已创建的旧版秒传复用会话会被拒绝，客户端需重新初始化上传。
+
+审计日志统一落在 `request_logs` 的 `change_diff` 字段；有字段级差异的写操作可通过 `has_change_diff=1` 在列表和导出中筛选。低风险成功只读请求可按 `queue.audit_sample_get_keep_every` 采样，写操作不采样；队列、数据库或进程关闭期间的降级路径不能承诺进程崩溃时零丢失，非数据库触发器也不会覆盖人工 SQL。
+
 ## 部署说明
 
 ### 构建
@@ -399,6 +415,12 @@ go build -o go-layout main.go
 ```
 
 如果没有显式传 `-c`，请在开发环境使用 `GO_ENV=development`，并确保当前工作目录存在 `config/config.yaml.example`（或已生成 `config.yaml`）；部署二进制时请保证可执行文件同级存在配置文件。
+
+### 负载均衡与多实例
+
+多个 API 实例可以通过负载均衡或 Kubernetes Service 暴露。负载均衡器需支持 WebSocket Upgrade，并将 `/health/readiness` 用作 readiness 检查、`/ping` 用作存活检查；依赖未就绪时 readiness 返回非 2xx，实例不应继续接收流量。
+
+默认 `local` 存储只适合单实例。多实例部署请启用 OSS 或其他共享对象存储，并让 API、`worker`、`cron` 使用同一存储配置；所有进程还必须共享同一 MySQL/Redis 逻辑库、JWT 密钥和环境 namespace。
 
 ### Supervisor
 
@@ -417,18 +439,28 @@ stdout_logfile=/path/to/go-layout/supervisord.log
 ### Nginx
 
 ```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 80;
     server_name api.example.com;
 
     location / {
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_pass http://127.0.0.1:9001;
     }
 }
 ```
+
+上例中的 `map` 放在 Nginx `http` 配置块中。如果由云负载均衡或 Ingress 转发，也要开启对应的 WebSocket Upgrade 和长连接超时。
 
 如果前面有反向代理，请把代理地址或网段加入 `app.trusted_proxies`。
 

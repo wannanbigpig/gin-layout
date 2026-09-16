@@ -191,6 +191,16 @@ type FileUploadCredentialResources struct {
 	CompletePayload map[string]any    `json:"complete_payload"`
 }
 
+// FileUploadOptionsResources 返回上传流程所需的最小公开配置。
+type FileUploadOptionsResources struct {
+	ActiveDriver            string   `json:"active_driver"`
+	MaxFileSizeMB           int      `json:"max_file_size_mb"`
+	AllowedExtensions       []string `json:"allowed_extensions"`
+	AllowedMimeTypes        []string `json:"allowed_mime_types"`
+	SupportsDirectUpload    bool     `json:"supports_direct_upload"`
+	SupportsMultipartUpload bool     `json:"supports_multipart_upload"`
+}
+
 type FileUploadBatchFailure struct {
 	ClientID   string `json:"client_id,omitempty"`
 	OriginName string `json:"origin_name,omitempty"`

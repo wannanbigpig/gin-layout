@@ -6,6 +6,10 @@ import (
 
 // AppConfig 定义应用运行时基础配置。
 type AppConfig struct {
+	// MaxRequestBodyMB 普通 API 请求体上限；上传接口单独受 MaxUploadBodyMB 限制。
+	MaxRequestBodyMB int64 `mapstructure:"max_request_body_mb"`
+	// MaxUploadBodyMB 本地 multipart 上传整个请求体上限，包含全部文件与表单。
+	MaxUploadBodyMB int64 `mapstructure:"max_upload_body_mb"`
 	// AppEnv 应用环境标识，如：local（本地）、dev（开发）、prod（生产）
 	AppEnv string `mapstructure:"app_env"`
 	// Debug 是否开启调试模式，true 时输出详细调试信息
@@ -61,6 +65,8 @@ type AppConfig struct {
 }
 
 var App = AppConfig{
+	MaxRequestBodyMB:      16,
+	MaxUploadBodyMB:       256,
 	AppEnv:                "local", // 默认本地环境
 	Debug:                 true,    // 默认开启调试模式
 	Language:              "zh_CN", // 默认中文

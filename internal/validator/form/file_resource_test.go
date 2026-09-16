@@ -79,6 +79,15 @@ func TestFileMultipartCompleteAllowsReuseTokenWithoutUploadIDAndParts(t *testing
 	}
 }
 
+func TestFileMultipartAbortRequiresOnlyCompleteToken(t *testing.T) {
+	if err := bindJSONBody(t, `{"complete_token":"token"}`, NewFileMultipartAbortForm()); err != nil {
+		t.Fatalf("expected complete_token-only abort to pass validation, got %v", err)
+	}
+	if err := bindJSONBody(t, `{"driver":"aliyun_oss","bucket":"assets","object_key":"a.txt","upload_id":"u1"}`, NewFileMultipartAbortForm()); err == nil {
+		t.Fatal("expected abort without complete_token to fail validation")
+	}
+}
+
 func TestFileResourceIDRejectsZero(t *testing.T) {
 	err := bindJSONBody(t, `{"id":0}`, NewFileResourceIDForm())
 	if err == nil {

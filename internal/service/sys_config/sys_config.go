@@ -23,6 +23,12 @@ type SysConfigService struct {
 
 const maskedConfigValue = "******"
 
+var dedicatedManagedConfigKeys = map[string]struct{}{
+	AuditSensitiveFieldsConfigKey: {},
+	"storage.active_driver":       {},
+	"storage.config":              {},
+}
+
 func NewSysConfigService() *SysConfigService {
 	return &SysConfigService{}
 }
@@ -66,7 +72,8 @@ func (s *SysConfigService) Detail(id uint, locale string) (any, error) {
 	}
 	config.ConfigNameI18n = translations
 	config.ConfigName = service.ResolveLocaleText(translations, locale)
-	// 详情接口用于编辑回填，敏感参数保留真实值；列表和 PublicValue 继续脱敏。
+	// 详情接口也使用掩码回填；更新时传回掩码会保留数据库中的原值。
+	s.maskSensitiveValues([]*model.SysConfig{config})
 	return resources.NewSysConfigTransformer().ToStruct(config), nil
 }
 
@@ -152,11 +159,18 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	if len(params.ConfigNameI18n) == 0 {
 		return e.NewBusinessError(e.InvalidParameter)
 	}
+	if isDedicatedManagedConfigKey(params.ConfigKey) {
+		return e.NewBusinessError(e.AuthorizationErr)
+	}
 
 	config := model.NewSysConfig()
 	if id > 0 {
 		if err := config.GetById(id); err != nil || config.ID == 0 {
 			return e.NewBusinessError(e.NotFound)
+		}
+		// 专属配置由各自的受权接口维护，禁止通过通用系统参数写接口绕过权限。
+		if isDedicatedManagedConfig(config) {
+			return e.NewBusinessError(e.AuthorizationErr)
 		}
 		// 系统内置参数禁止修改稳定字段。
 		if config.IsProtected() {
@@ -231,6 +245,15 @@ func resolveMutationConfigValue(existing *model.SysConfig, incoming string) stri
 		return existing.ConfigValue
 	}
 	return incoming
+}
+
+func isDedicatedManagedConfig(config *model.SysConfig) bool {
+	return config != nil && config.IsProtected() && strings.TrimSpace(config.ManageTab) != ""
+}
+
+func isDedicatedManagedConfigKey(key string) bool {
+	_, ok := dedicatedManagedConfigKeys[strings.TrimSpace(key)]
+	return ok
 }
 
 func (s *SysConfigService) fillLocalizedNames(configs []*model.SysConfig, locale string) {

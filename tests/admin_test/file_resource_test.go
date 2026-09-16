@@ -88,6 +88,32 @@ func TestFileResourceReadRoutesWithConfiguredMySQL(t *testing.T) {
 	}
 }
 
+func TestFileUploadOptionsExposeMinimalCapabilities(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/system/file/upload/options", nil)
+	assert.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+	result := decodeResult(t, resp)
+	assert.Equal(t, e.SUCCESS, result.Code)
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("上传能力响应 data 类型错误: %#v", result.Data)
+	}
+	for _, field := range []string{
+		"active_driver",
+		"max_file_size_mb",
+		"allowed_extensions",
+		"allowed_mime_types",
+		"supports_direct_upload",
+		"supports_multipart_upload",
+	} {
+		assert.Contains(t, data, field)
+	}
+	for _, sensitiveField := range []string{"access_key_id", "access_key_secret", "bucket", "endpoint", "base_url", "base_path"} {
+		assert.NotContains(t, data, sensitiveField)
+	}
+}
+
 func TestFileResourceMutationRoutesReachValidation(t *testing.T) {
 	requireMySQL(t)
 

@@ -30,6 +30,7 @@ func NewRequestLogService() *RequestLogService {
 func (s *RequestLogService) List(params *form.RequestLogList) (*resources.Collection, error) {
 	query := buildRequestLogQuery(requestLogQueryInput{
 		RequestID:          params.RequestID,
+		HasChangeDiff:      params.HasChangeDiff,
 		OperatorID:         params.OperatorID,
 		OperatorAccount:    params.OperatorAccount,
 		OperationStatus:    params.OperationStatus,
@@ -125,6 +126,7 @@ func (s *RequestLogService) Detail(id uint) (any, error) {
 }
 
 type requestLogQueryInput struct {
+	HasChangeDiff      uint8
 	RequestID          string
 	OperatorID         uint
 	OperatorAccount    string
@@ -158,6 +160,9 @@ func buildRequestLogQuery(input requestLogQueryInput) *logListQuery {
 		addEq("is_high_risk", input.IsHighRisk).
 		addCreatedAtRange(input.StartTime, input.EndTime)
 
+	if input.HasChangeDiff == 1 {
+		query.addCondition("change_diff IS NOT NULL AND TRIM(change_diff) NOT IN (?, ?, ?)", "", "[]", "{}")
+	}
 	if input.OperationStatus != nil {
 		switch *input.OperationStatus {
 		case 0:

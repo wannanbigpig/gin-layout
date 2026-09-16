@@ -17,7 +17,6 @@ import (
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/token"
-	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"go.uber.org/zap"
 )
 
@@ -205,44 +204,86 @@ func (s *LoginService) calculateRemainingTime(tokenExpires *utils.FormatDate, no
 	return defaultTokenTTL
 }
 
+// PreparedUserTokenRevocation 保存已在事务中撤销的会话，供提交后同步 Redis 和在线连接。
+type PreparedUserTokenRevocation struct {
+	userID        uint
+	revokedCode   uint8
+	revokedReason string
+	loginLogs     []model.AdminLoginLogs
+}
+
+// PrepareUserTokenRevocation 在调用方事务内撤销数据库会话，避免账号变更提交后仍有可用 token 的窗口。
+func (s *LoginService) PrepareUserTokenRevocation(tx *gorm.DB, userID uint, revokedCode uint8, revokedReason string) (*PreparedUserTokenRevocation, error) {
+	prepared := &PreparedUserTokenRevocation{
+		userID:        userID,
+		revokedCode:   revokedCode,
+		revokedReason: revokedReason,
+	}
+	if userID == 0 {
+		return prepared, nil
+	}
+
+	loginLog := model.NewAdminLoginLogs()
+	if tx != nil {
+		loginLog.SetDB(tx)
+	} else if s.loginLogDB != nil {
+		loginLog.SetDB(s.loginLogDB)
+	} else if _, err := loginLog.GetDB(); err != nil {
+		return nil, err
+	}
+
+	loginLogs, err := loginLog.FindActiveTokensByUserIdForUpdate(userID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	prepared.loginLogs = loginLogs
+	loginLogIDs := collectLoginLogIDs(loginLogs)
+	if len(loginLogIDs) == 0 {
+		return prepared, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), revokeLogAsyncTimeout)
+	defer cancel()
+	if err := s.markLoginLogRowsRevoked(ctx, loginLogIDs, revokedCode, revokedReason, tx); err != nil {
+		return nil, err
+	}
+	return prepared, nil
+}
+
+// CompleteUserTokenRevocation 在数据库事务提交后同步缓存并踢出在线连接。
+func (s *LoginService) CompleteUserTokenRevocation(prepared *PreparedUserTokenRevocation) error {
+	if prepared == nil || prepared.userID == 0 {
+		return nil
+	}
+	blacklistErr := s.addTokensToBlacklist(prepared.loginLogs)
+	s.kickSession(prepared.userID, "", int(prepared.revokedCode), prepared.revokedReason)
+	return blacklistErr
+}
+
 // RevokeUserTokens 撤销用户所有未过期的 token。
-func (s *LoginService) RevokeUserTokens(userId uint, revokedCode uint8, revokedReason string, tx ...*gorm.DB) error {
+func (s *LoginService) RevokeUserTokens(userId uint, revokedCode uint8, revokedReason string) error {
 	if userId == 0 {
 		return nil
 	}
 
 	loginLog := model.NewAdminLoginLogs()
-	if existingTx := access.FirstTx(tx); existingTx != nil {
-		loginLog.SetDB(existingTx)
-	} else if s.loginLogDB != nil {
-		loginLog.SetDB(s.loginLogDB)
-	} else {
-		if _, err := loginLog.GetDB(); err != nil {
+	db := s.loginLogDB
+	if db == nil {
+		var err error
+		db, err = loginLog.GetDB()
+		if err != nil {
 			return err
 		}
 	}
-
-	loginLogs, err := loginLog.FindActiveTokensByUserId(userId, time.Now().UTC())
-	if err != nil || len(loginLogs) == 0 {
+	var prepared *PreparedUserTokenRevocation
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		var prepareErr error
+		prepared, prepareErr = s.PrepareUserTokenRevocation(tx, userId, revokedCode, revokedReason)
+		return prepareErr
+	}); err != nil {
 		return err
 	}
-
-	loginLogIds := collectLoginLogIDs(loginLogs)
-	if len(loginLogIds) == 0 {
-		return nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), revokeLogAsyncTimeout)
-	defer cancel()
-	// 用户禁用/强制下线需要撤销“会话行”，因为 access token 可能已过期，
-	// 但同一行上的 refresh token 仍可能有效；只按 jwt_id 更新会漏掉这类会话。
-	if err := s.markLoginLogRowsRevoked(ctx, loginLogIds, revokedCode, revokedReason, tx...); err != nil {
-		return err
-	}
-	blacklistErr := s.addTokensToBlacklist(loginLogs)
-	// 全端强踢：SessionID 留空，踢掉该用户全部在线连接。
-	s.kickSession(userId, "", int(revokedCode), revokedReason)
-	return blacklistErr
+	return s.CompleteUserTokenRevocation(prepared)
 }
 
 // kickSession 派发单会话强踢指令（SessionID 非空仅踢该会话）。

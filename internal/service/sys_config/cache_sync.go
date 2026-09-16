@@ -3,26 +3,24 @@ package sys_config
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"net"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/redisutil"
 	"go.uber.org/zap"
 )
 
 const (
 	sysConfigCacheSyncChannel    = "sys_config:cache:refresh"
 	sysConfigCacheSyncTimeout    = 3 * time.Second
-	sysConfigSubscribeMaxBackoff = 30 * time.Second
+	sysConfigSubscriptionRefresh = time.Second
 )
 
 type sysConfigCacheSyncPayload struct {
@@ -31,7 +29,9 @@ type sysConfigCacheSyncPayload struct {
 }
 
 var (
-	sysConfigCacheSyncSourceID = buildSysConfigCacheSyncSourceID()
+	sysConfigCacheSyncSourceID = uuid.New().String()
+	sysConfigReconcileInterval = 30 * time.Second
+	reloadSysConfigCache       func() error
 	sysConfigSubscriberState   = struct {
 		mu      sync.Mutex
 		started bool
@@ -39,6 +39,10 @@ var (
 		done    chan struct{}
 	}{}
 )
+
+func init() {
+	reloadSysConfigCache = func() error { return NewSysConfigService().refreshCache(false) }
+}
 
 func notifySysConfigCacheRefreshed() {
 	ensureSysConfigCacheSyncSubscriber()
@@ -62,21 +66,12 @@ func notifySysConfigCacheRefreshed() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), sysConfigCacheSyncTimeout)
 	defer cancel()
-	if err := client.Publish(ctx, sysConfigCacheSyncChannel, payload).Err(); err != nil && log.Logger != nil {
+	if err := client.Publish(ctx, redisutil.Channel(sysConfigCacheSyncChannel), payload).Err(); err != nil && log.Logger != nil {
 		log.Logger.Warn("发布系统参数缓存刷新通知失败", zap.Error(err))
 	}
 }
 
 func ensureSysConfigCacheSyncSubscriber() {
-	cfg := config.GetConfig()
-	if cfg == nil || !cfg.Redis.Enable {
-		return
-	}
-	client := data.RedisClient()
-	if client == nil {
-		return
-	}
-
 	sysConfigSubscriberState.mu.Lock()
 	if sysConfigSubscriberState.started {
 		sysConfigSubscriberState.mu.Unlock()
@@ -88,7 +83,7 @@ func ensureSysConfigCacheSyncSubscriber() {
 	sysConfigSubscriberState.done = make(chan struct{})
 	sysConfigSubscriberState.mu.Unlock()
 
-	go runSysConfigCacheSyncSubscriber(ctx, client)
+	go runSysConfigCacheSyncSubscriber(ctx)
 }
 
 func StopSysConfigCacheSyncSubscriber(timeout time.Duration) {
@@ -116,7 +111,11 @@ func StopSysConfigCacheSyncSubscriber(timeout time.Duration) {
 	}
 }
 
-func runSysConfigCacheSyncSubscriber(ctx context.Context, client *redis.Client) {
+func runSysConfigCacheSyncSubscriber(ctx context.Context) {
+	runSysConfigCacheSyncSubscriberWithSource(ctx, data.RedisClient, sysConfigSubscriptionRefresh, sysConfigReconcileInterval)
+}
+
+func runSysConfigCacheSyncSubscriberWithSource(ctx context.Context, clientProvider func() *redis.Client, subscriptionRefreshInterval, reconcileInterval time.Duration) {
 	defer func() {
 		sysConfigSubscriberState.mu.Lock()
 		done := sysConfigSubscriberState.done
@@ -129,104 +128,44 @@ func runSysConfigCacheSyncSubscriber(ctx context.Context, client *redis.Client) 
 		}
 	}()
 
-	backoff := time.Second
+	reconcileSysConfigCache(ctx, clientProvider, subscriptionRefreshInterval, reconcileInterval)
+}
+
+func reconcileSysConfigCache(ctx context.Context, clientProvider func() *redis.Client, subscriptionRefreshInterval, reconcileInterval time.Duration) {
+	// Pub/Sub 是至多一次投递；首次订阅和定时回源弥补断线或刷新失败期间丢失的通知。
+	refresh := func() {
+		if err := reloadSysConfigCache(); err != nil && log.Logger != nil {
+			log.Logger.Warn("系统参数缓存回源刷新失败，将定时重试", zap.Error(err))
+		}
+	}
+	refresh()
+	ticker := time.NewTicker(reconcileInterval)
+	defer ticker.Stop()
+	subscriptionTicker := time.NewTicker(subscriptionRefreshInterval)
+	defer subscriptionTicker.Stop()
+	var subscription redisutil.DynamicSubscription
+	defer subscription.Close()
+	messages := subscription.Refresh(ctx, clientProvider(), redisutil.Channel(sysConfigCacheSyncChannel))
 	for {
-		if ctx.Err() != nil {
-			return
-		}
-		connected, err := receiveSysConfigCacheChanges(ctx, client)
-		if isSysConfigCacheSyncClosing(ctx, err) {
-			return
-		}
-		if connected {
-			backoff = time.Second
-		}
-		if log.Logger != nil {
-			log.Logger.Warn("系统参数缓存刷新订阅中断，准备重连",
-				zap.Duration("backoff", backoff),
-				zap.Error(err))
-		}
-		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
 			return
-		case <-timer.C:
-		}
-		if backoff < sysConfigSubscribeMaxBackoff {
-			backoff *= 2
-			if backoff > sysConfigSubscribeMaxBackoff {
-				backoff = sysConfigSubscribeMaxBackoff
+		case <-ticker.C:
+			refresh()
+		case <-subscriptionTicker.C:
+			messages = subscription.Refresh(ctx, clientProvider(), redisutil.Channel(sysConfigCacheSyncChannel))
+		case message, open := <-messages:
+			if !open {
+				subscription.Reset()
+				messages = nil
+				continue
+			}
+			payload, ok := decodeSysConfigCacheSyncPayload(message.Payload)
+			if ok && payload.Source != sysConfigCacheSyncSourceID {
+				refresh()
 			}
 		}
 	}
-}
-
-func receiveSysConfigCacheChanges(ctx context.Context, client *redis.Client) (connected bool, err error) {
-	pubsub := client.Subscribe(ctx, sysConfigCacheSyncChannel)
-	defer func() { _ = pubsub.Close() }()
-	stopClosing := closePubSubOnContextDone(ctx, pubsub)
-	defer stopClosing()
-
-	if _, err := pubsub.Receive(ctx); err != nil {
-		if isSysConfigCacheSyncClosing(ctx, err) {
-			return false, err
-		}
-		if log.Logger != nil {
-			log.Logger.Warn("订阅系统参数缓存刷新通道失败", zap.Error(err))
-		}
-		return false, err
-	}
-
-	for {
-		message, err := pubsub.ReceiveMessage(ctx)
-		if err != nil {
-			if isSysConfigCacheSyncClosing(ctx, err) {
-				return true, err
-			}
-			if log.Logger != nil {
-				log.Logger.Warn("系统参数缓存刷新订阅中断", zap.Error(err))
-			}
-			return true, err
-		}
-
-		payload, ok := decodeSysConfigCacheSyncPayload(message.Payload)
-		if !ok || payload.Source == sysConfigCacheSyncSourceID {
-			continue
-		}
-		if err := NewSysConfigService().refreshCache(false); err != nil && log.Logger != nil {
-			log.Logger.Warn("处理系统参数缓存刷新通知失败", zap.Error(err))
-		}
-	}
-}
-
-func closePubSubOnContextDone(ctx context.Context, pubsub *redis.PubSub) func() {
-	if ctx == nil || pubsub == nil {
-		return func() {}
-	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = pubsub.Close()
-		case <-done:
-		}
-	}()
-	return func() { close(done) }
-}
-
-func isSysConfigCacheSyncClosing(ctx context.Context, err error) bool {
-	if ctx != nil && ctx.Err() != nil {
-		return true
-	}
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, net.ErrClosed) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "use of closed network connection") || strings.Contains(msg, "redis: client is closed")
 }
 
 func decodeSysConfigCacheSyncPayload(raw string) (sysConfigCacheSyncPayload, bool) {
@@ -239,12 +178,4 @@ func decodeSysConfigCacheSyncPayload(raw string) (sysConfigCacheSyncPayload, boo
 		return payload, false
 	}
 	return payload, true
-}
-
-func buildSysConfigCacheSyncSourceID() string {
-	host, err := os.Hostname()
-	if err != nil {
-		host = "unknown"
-	}
-	return host + ":" + strconv.Itoa(os.Getpid())
 }

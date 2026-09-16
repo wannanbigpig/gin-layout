@@ -15,13 +15,13 @@ import (
 
 func TestRecordLoginLogLoginCommitsUserAndLogTogether(t *testing.T) {
 	db := newLoginRecordTestDB(t, true)
-	if err := db.Exec(`INSERT INTO admin_user(id, deleted_at, username, last_ip, last_login) VALUES (?, ?, ?, ?, ?)`,
-		1, 0, "admin", "", nil).Error; err != nil {
+	if err := db.Exec(`INSERT INTO admin_user(id, deleted_at, username, password, status, is_super_admin, last_ip, last_login) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, 0, "admin", "hash", model.AdminUserStatusEnabled, 0, "", nil).Error; err != nil {
 		t.Fatalf("insert admin_user failed: %v", err)
 	}
 
 	service := NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db})
-	adminUser := &model.AdminUser{ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{BaseModel: model.BaseModel{ID: 1}}, Username: "admin"}
+	adminUser := &model.AdminUser{ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{BaseModel: model.BaseModel{ID: 1}}, Username: "admin", Password: "hash", Status: model.AdminUserStatusEnabled}
 	claims := token.AdminCustomClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        "jwt-1",
@@ -54,13 +54,13 @@ func TestRecordLoginLogLoginCommitsUserAndLogTogether(t *testing.T) {
 
 func TestRecordLoginLogLoginRollsBackWhenUserUpdateFails(t *testing.T) {
 	db := newLoginRecordTestDB(t, false)
-	if err := db.Exec(`INSERT INTO admin_user(id, deleted_at, username, last_ip) VALUES (?, ?, ?, ?)`,
-		1, 0, "admin", "").Error; err != nil {
+	if err := db.Exec(`INSERT INTO admin_user(id, deleted_at, username, password, status, is_super_admin, last_ip) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		1, 0, "admin", "hash", model.AdminUserStatusEnabled, 0, "").Error; err != nil {
 		t.Fatalf("insert admin_user failed: %v", err)
 	}
 
 	service := NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db})
-	adminUser := &model.AdminUser{ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{BaseModel: model.BaseModel{ID: 1}}, Username: "admin"}
+	adminUser := &model.AdminUser{ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{BaseModel: model.BaseModel{ID: 1}}, Username: "admin", Password: "hash", Status: model.AdminUserStatusEnabled}
 	claims := token.AdminCustomClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        "jwt-rollback",
@@ -78,6 +78,37 @@ func TestRecordLoginLogLoginRollsBackWhenUserUpdateFails(t *testing.T) {
 	}
 	if logCount != 0 {
 		t.Fatalf("expected login log insert rolled back, got %d", logCount)
+	}
+}
+
+func TestRecordLoginLogRejectsStaleAuthenticatedUserSnapshot(t *testing.T) {
+	db := newLoginRecordTestDB(t, true)
+	if err := db.Exec(`INSERT INTO admin_user(id, deleted_at, username, password, status, is_super_admin, last_ip) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		1, 0, "admin", "new-hash", model.AdminUserStatusEnabled, 0, "").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db})
+	staleUser := &model.AdminUser{
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{BaseModel: model.BaseModel{ID: 1}},
+		Username:                "admin",
+		Password:                "old-hash",
+		Status:                  model.AdminUserStatusEnabled,
+	}
+	claims := token.AdminCustomClaims{RegisteredClaims: jwt.RegisteredClaims{
+		ID:        "jwt-stale-user",
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+	}}
+
+	if err := service.recordLoginLog(staleUser, claims, "access-token", "", LoginLogInfo{}, model.LoginTypeLogin); err == nil {
+		t.Fatal("expected stale password snapshot to be rejected")
+	}
+	var count int64
+	if err := db.Table("admin_login_logs").Where("jwt_id = ?", "jwt-stale-user").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no session for stale snapshot, got %d", count)
 	}
 }
 
@@ -127,6 +158,9 @@ func newLoginRecordTestDB(t *testing.T, withLastLoginColumn bool) *gorm.DB {
 		id integer primary key,
 		deleted_at integer not null default 0,
 		username text,
+		password text,
+		status integer,
+		is_super_admin integer,
 		last_ip text,
 		updated_at datetime`
 	if withLastLoginColumn {

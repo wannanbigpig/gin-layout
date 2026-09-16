@@ -96,6 +96,7 @@ var builtInDefaultMenuAPIBindings = [...]defaultMenuAPIBinding{
 	{MenuCode: "file:list", Route: "/admin/v1/system/file/export", Method: "POST"},
 	{MenuCode: "file:list", Route: "/admin/v1/system/export/list", Method: "GET"},
 	{MenuCode: "file:list", Route: "/admin/v1/system/export/detail", Method: "GET"},
+	{MenuCode: "file:create", Route: "/admin/v1/system/file/upload/options", Method: "GET"},
 	{MenuCode: "file:create", Route: "/admin/v1/system/file/upload/credential", Method: "POST"},
 	{MenuCode: "file:create", Route: "/admin/v1/system/file/upload/credential/batch", Method: "POST"},
 	{MenuCode: "file:create", Route: "/admin/v1/system/file/upload/complete", Method: "POST"},

@@ -202,6 +202,87 @@ func TestSystemConfigUpdateOmittedLocaleKeepsExistingTranslation(t *testing.T) {
 	}, stored)
 }
 
+func TestSystemConfigSensitiveDetailAndMaskedUpdate(t *testing.T) {
+	requireWritableDB(t)
+	requireSystemModuleTables(t)
+
+	configKeyPrefix := uniqueCompactTestName("cfgsecret")
+	configKey := configKeyPrefix + ".key"
+	secretValue := configKeyPrefix + "-secret"
+	cleanupSysConfigsByKeyPrefix(t, configKeyPrefix)
+	t.Cleanup(func() { cleanupSysConfigsByKeyPrefix(t, configKeyPrefix) })
+
+	createBody := map[string]any{
+		"config_key": configKey,
+		"config_name_i18n": map[string]string{
+			"zh-CN": configKeyPrefix,
+		},
+		"config_value": secretValue,
+		"value_type":   "string",
+		"group_code":   "test",
+		"is_sensitive": 1,
+		"status":       1,
+	}
+	createBytes, _ := json.Marshal(createBody)
+	createPayload := string(createBytes)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, postRequest("/admin/v1/system/config/create", &createPayload)).Code)
+
+	config := findSysConfigByKey(t, configKey)
+	detailResult := decodeResult(t, getRequest("/admin/v1/system/config/detail", &url.Values{
+		"id": {strconv.FormatUint(uint64(config.ID), 10)},
+	}))
+	assert.Equal(t, e.SUCCESS, detailResult.Code, detailResult.Msg)
+	detailData, ok := detailResult.Data.(map[string]any)
+	assert.True(t, ok)
+	assert.Equal(t, "******", detailData["config_value"])
+
+	updateBody := map[string]any{
+		"id":         config.ID,
+		"config_key": configKey,
+		"config_name_i18n": map[string]string{
+			"zh-CN": configKeyPrefix,
+		},
+		"config_value": "******",
+		"value_type":   "string",
+		"group_code":   "test",
+		"is_sensitive": 1,
+		"status":       1,
+	}
+	updateBytes, _ := json.Marshal(updateBody)
+	updatePayload := string(updateBytes)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, postRequest("/admin/v1/system/config/update", &updatePayload)).Code)
+
+	stored := findSysConfigByKey(t, configKey)
+	assert.Equal(t, secretValue, stored.ConfigValue)
+}
+
+func TestSystemConfigGenericUpdateRejectsDedicatedManagedConfig(t *testing.T) {
+	requireWritableDB(t)
+	requireSystemModuleTables(t)
+
+	config := findSysConfigByKey(t, "storage.config")
+	updateBody := map[string]any{
+		"id":         config.ID,
+		"config_key": config.ConfigKey,
+		"config_name_i18n": map[string]string{
+			"zh-CN": "文件存储配置",
+		},
+		"config_value": "******",
+		"value_type":   config.ValueType,
+		"group_code":   config.GroupCode,
+		"is_sensitive": config.IsSensitive,
+		"is_visible":   config.IsVisible,
+		"manage_tab":   config.ManageTab,
+		"status":       config.Status,
+		"sort":         config.Sort,
+		"remark":       config.Remark,
+	}
+	updateBytes, _ := json.Marshal(updateBody)
+	updatePayload := string(updateBytes)
+	result := decodeResult(t, postRequest("/admin/v1/system/config/update", &updatePayload))
+	assert.Equal(t, e.AuthorizationErr, result.Code, result.Msg)
+}
+
 func TestSystemConfigVisibilityTabsAndHiddenSaveFlags(t *testing.T) {
 	requireWritableDB(t)
 	requireSystemModuleTables(t)

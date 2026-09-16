@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"time"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
@@ -49,7 +50,11 @@ func (s *LoginService) resolvePrincipalFromClaims(claims *token.AdminCustomClaim
 // isPrincipalValid 检查 token 对应主体是否仍然有效。
 func (s *LoginService) isPrincipalValid(claims *token.AdminCustomClaims) bool {
 	s.ensureRuntimeDeps()
-	if claims == nil {
+	if claims == nil || claims.ID == "" {
+		return false
+	}
+	expiresAt, err := claims.GetExpirationTime()
+	if err != nil || expiresAt == nil || !expiresAt.Time.After(time.Now()) {
 		return false
 	}
 	inBlacklist, err := s.blacklistLookupFn(claims.ID)
@@ -58,9 +63,11 @@ func (s *LoginService) isPrincipalValid(claims *token.AdminCustomClaims) bool {
 			return false
 		}
 		if s.mysqlReadyFn() {
-			return !s.tokenRevokedLookupFn(claims.ID)
+			return s.isTokenSessionValid(claims.ID)
 		}
-		return true
+		// 登录会话记录是 token 状态的持久化真相。即使 Redis 黑名单未命中，
+		// MySQL 不可用时也无法确认会话仍存在且未撤销，必须拒绝认证。
+		return false
 	}
 
 	if !s.mysqlReadyFn() {
@@ -70,7 +77,18 @@ func (s *LoginService) isPrincipalValid(claims *token.AdminCustomClaims) bool {
 	if log.Logger != nil && s.shouldLogRedisFallback(err) {
 		log.Logger.Warn("Redis 黑名单查询失败，回退到数据库撤销状态校验", zap.Error(err), zap.String("jwt_id", claims.ID))
 	}
-	return !s.tokenRevokedLookupFn(claims.ID)
+	return s.isTokenSessionValid(claims.ID)
+}
+
+func (s *LoginService) isTokenSessionValid(jwtID string) bool {
+	revoked, err := s.tokenRevokedLookupFn(jwtID)
+	if err != nil {
+		if log.Logger != nil {
+			log.Logger.Error("检查token撤销状态失败，拒绝认证", zap.Error(err), zap.String("jwt_id", jwtID))
+		}
+		return false
+	}
+	return !revoked
 }
 
 // IsPrincipalValid 检查 Token 对应主体是否仍然有效，用于 WebSocket 等长连接外部反查。

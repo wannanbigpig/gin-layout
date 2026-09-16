@@ -2,6 +2,7 @@ package validator
 
 import (
 	"errors"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	ut "github.com/go-playground/universal-translator"
@@ -13,6 +14,11 @@ import (
 
 // ResponseError 处理错误并返回给前端。
 func ResponseError(c *gin.Context, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		r.Resp().SetHttpCode(http.StatusRequestEntityTooLarge).FailCode(c, errcode.InvalidParameter)
+		return
+	}
 	var errs validator.ValidationErrors
 	if errors.As(err, &errs) {
 		handleValidationError(c, errs)

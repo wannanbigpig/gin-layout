@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -75,32 +76,19 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 
 	mutationFailedCode := e.CreateUserFailed
 	excludeID := uint(0)
-	oldStatus := uint8(0)
-	oldIsSuperAdmin := uint8(0)
 	adminUserModel := model.NewAdminUsers()
-
-	if params.Id > 0 {
+	isUpdate := params.Id > 0
+	if isUpdate {
 		mutationFailedCode = e.UpdateUserFailed
-		if err := adminUserModel.GetById(params.Id); err != nil {
-			return e.NewBusinessError(e.UserDoesNotExist)
-		}
 		excludeID = params.Id
-		oldStatus = adminUserModel.Status
-		oldIsSuperAdmin = adminUserModel.IsSuperAdmin
-	}
-	oldAvatar := adminUserModel.Avatar
-	if err := s.authorizeAdminUserMutation(adminUserModel, params); err != nil {
-		return err
-	}
-
-	var err error
-	if params.Id > 0 {
-		err = s.applyUpdateFields(adminUserModel, params)
 	} else {
-		err = s.applyCreateFields(adminUserModel, params)
-	}
-	if err != nil {
-		return err
+		// 先返回明确的权限错误，事务内会再次锁定校验以防授权状态并发变化。
+		if err := s.authorizeAdminUserMutation(adminUserModel, params); err != nil {
+			return err
+		}
+		if err := s.applyCreateFields(adminUserModel, params); err != nil {
+			return err
+		}
 	}
 
 	db, err := adminUserModel.GetDB()
@@ -111,6 +99,28 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 	pendingRevocations := make([]userTokenRevocation, 0, 2)
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
+		oldStatus := adminUserModel.Status
+		oldIsSuperAdmin := adminUserModel.IsSuperAdmin
+		oldAvatar := adminUserModel.Avatar
+		if isUpdate {
+			if err := loadAdminUserForUpdate(tx, adminUserModel, params.Id); err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return e.NewBusinessError(e.UserDoesNotExist)
+				}
+				return err
+			}
+			oldStatus = adminUserModel.Status
+			oldIsSuperAdmin = adminUserModel.IsSuperAdmin
+			oldAvatar = adminUserModel.Avatar
+			if err := s.authorizeAdminUserMutation(adminUserModel, params, tx); err != nil {
+				return err
+			}
+			if err := s.applyUpdateFields(adminUserModel, params); err != nil {
+				return err
+			}
+		} else if err := s.authorizeAdminUserMutation(adminUserModel, params, tx); err != nil {
+			return err
+		}
 
 		validateParams := map[string]interface{}{
 			"username": params.Username,
@@ -122,7 +132,13 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 		if err := s.validateUniqueFieldsWithLock(tx, validateParams, excludeID); err != nil {
 			return err
 		}
-		if err := adminUserModel.Save(); err != nil {
+		if isUpdate {
+			if err := tx.Model(&model.AdminUser{}).
+				Where("id = ? AND deleted_at = 0", adminUserModel.ID).
+				Updates(adminUserUpdateValues(adminUserModel, params)).Error; err != nil {
+				return err
+			}
+		} else if err := adminUserModel.Save(); err != nil {
 			return err
 		}
 		if params.Avatar != nil {
@@ -139,28 +155,11 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 			}
 		}
 
-		if params.Id > 0 && params.Status != nil &&
-			oldStatus == model.AdminUserStatusEnabled &&
-			*params.Status == model.AdminUserStatusDisabled {
-			pendingRevocations = append(pendingRevocations, userTokenRevocation{
-				userID:        adminUserModel.ID,
-				revokedCode:   model.RevokedCodeSystemForce,
-				revokedReason: "系统强制登出（账号被封）",
-			})
-		}
-		if params.Id > 0 && params.Password != nil && *params.Password != "" {
-			pendingRevocations = append(pendingRevocations, userTokenRevocation{
-				userID:        adminUserModel.ID,
-				revokedCode:   model.RevokedCodePasswordChangeAdmin,
-				revokedReason: "管理员修改密码",
-			})
-		}
-		if params.Id > 0 && params.IsSuperAdmin != nil && oldIsSuperAdmin != *params.IsSuperAdmin {
-			pendingRevocations = append(pendingRevocations, userTokenRevocation{
-				userID:        adminUserModel.ID,
-				revokedCode:   model.RevokedCodeOther,
-				revokedReason: "管理员权限变更",
-			})
+		if revocation := adminUserMutationRevocation(adminUserModel.ID, oldStatus, oldIsSuperAdmin, params); revocation != nil {
+			if err := s.prepareUserTokenRevocation(tx, revocation); err != nil {
+				return err
+			}
+			pendingRevocations = append(pendingRevocations, *revocation)
 		}
 
 		if params.DeptIds != nil {
@@ -184,23 +183,89 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 	return s.handleMutationError(revokeErr, mutationFailedCode)
 }
 
+func loadAdminUserForUpdate(tx *gorm.DB, user *model.AdminUser, id uint) error {
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND deleted_at = 0", id).
+		First(user).Error
+}
+
+func adminUserUpdateValues(user *model.AdminUser, params *adminUserEditParams) map[string]any {
+	values := make(map[string]any)
+	if params.Username != nil {
+		values["username"] = user.Username
+	}
+	if params.Nickname != nil {
+		values["nickname"] = user.Nickname
+	}
+	if params.Password != nil && *params.Password != "" {
+		values["password"] = user.Password
+	}
+	if params.PhoneNumber != nil {
+		values["phone_number"] = user.PhoneNumber
+	}
+	if params.PhoneNumber != nil || params.CountryCode != nil {
+		values["country_code"] = user.CountryCode
+		values["full_phone_number"] = user.FullPhoneNumber
+	}
+	if params.Email != nil {
+		values["email"] = user.Email
+	}
+	if params.Status != nil {
+		values["status"] = user.Status
+	}
+	if params.IsSuperAdmin != nil {
+		values["is_super_admin"] = user.IsSuperAdmin
+	}
+	if params.Avatar != nil {
+		values["avatar"] = user.Avatar
+	}
+	return values
+}
+
+func adminUserMutationRevocation(userID uint, oldStatus, oldIsSuperAdmin uint8, params *adminUserEditParams) *userTokenRevocation {
+	if params.Id == 0 {
+		return nil
+	}
+	if params.Status != nil && oldStatus == model.AdminUserStatusEnabled && *params.Status == model.AdminUserStatusDisabled {
+		return &userTokenRevocation{userID: userID, revokedCode: model.RevokedCodeSystemForce, revokedReason: "系统强制登出（账号被封）"}
+	}
+	if params.Password != nil && *params.Password != "" {
+		return &userTokenRevocation{userID: userID, revokedCode: model.RevokedCodePasswordChangeAdmin, revokedReason: "管理员修改密码"}
+	}
+	if params.IsSuperAdmin != nil && oldIsSuperAdmin != *params.IsSuperAdmin {
+		return &userTokenRevocation{userID: userID, revokedCode: model.RevokedCodeOther, revokedReason: "管理员权限变更"}
+	}
+	return nil
+}
+
 // authorizeAdminUserMutation 保护已有超级管理员及超级身份授予，普通账号创建无需超级权限。
-func (s *AdminUserService) authorizeAdminUserMutation(target *model.AdminUser, params *adminUserEditParams) error {
+func (s *AdminUserService) authorizeAdminUserMutation(target *model.AdminUser, params *adminUserEditParams, tx ...*gorm.DB) error {
 	protectedTarget := params.Id > 0 && (target.ID == global.SuperAdminId || target.IsSuperAdmin == global.Yes)
 	changesSuperAdmin := params.IsSuperAdmin != nil && target.IsSuperAdmin != *params.IsSuperAdmin
-	if (protectedTarget || changesSuperAdmin) && !s.actorCanManageSuperAdmin() {
+	if (protectedTarget || changesSuperAdmin) && !s.actorCanManageSuperAdmin(tx...) {
 		return e.NewBusinessError(e.AuthorizationErr)
 	}
 	return nil
 }
 
-func (s *AdminUserService) actorCanManageSuperAdmin() bool {
+func (s *AdminUserService) actorCanManageSuperAdmin(tx ...*gorm.DB) bool {
 	actorID := s.GetAdminUserId()
 	if actorID == global.SuperAdminId {
 		return true
 	}
 	if actorID == 0 {
 		return false
+	}
+	if currentTx := access.FirstTx(tx); currentTx != nil {
+		var actor struct{ IsSuperAdmin uint8 }
+		if err := currentTx.Model(&model.AdminUser{}).
+			Select("is_super_admin").
+			Clauses(clause.Locking{Strength: "SHARE"}).
+			Where("id = ? AND deleted_at = 0", actorID).
+			Take(&actor).Error; err != nil {
+			return false
+		}
+		return actor.IsSuperAdmin == global.Yes
 	}
 	actor := model.NewAdminUsers()
 	loaded, err := loadAdminUserForSuperAdminCheck(actorID)
@@ -332,16 +397,6 @@ func setHashedPassword(adminUserModel *model.AdminUser, plainPassword string) er
 
 // UpdateProfile 更新个人资料。
 func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) error {
-	adminUserModel := model.NewAdminUsers()
-	err := adminUserModel.GetById(uid)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return e.NewBusinessError(e.UserDoesNotExist)
-		}
-		return err
-	}
-	oldAvatar := adminUserModel.Avatar
-
 	passwordChanged := params.Password != nil && *params.Password != ""
 	hasUpdate := params.Nickname != nil ||
 		passwordChanged ||
@@ -353,6 +408,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 		return nil
 	}
 
+	adminUserModel := model.NewAdminUsers()
 	editParams := &adminUserEditParams{
 		Id:          uid,
 		Nickname:    params.Nickname,
@@ -362,10 +418,6 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 		Email:       params.Email,
 		Avatar:      params.Avatar,
 	}
-	if err := s.applyUpdateFields(adminUserModel, editParams); err != nil {
-		return err
-	}
-
 	db, err := adminUserModel.GetDB()
 	if err != nil {
 		return e.NewBusinessError(e.UpdateUserFailed)
@@ -373,6 +425,16 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	pendingRevocations := make([]userTokenRevocation, 0, 1)
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
+		if err := loadAdminUserForUpdate(tx, adminUserModel, uid); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.UserDoesNotExist)
+			}
+			return err
+		}
+		oldAvatar := adminUserModel.Avatar
+		if err := s.applyUpdateFields(adminUserModel, editParams); err != nil {
+			return err
+		}
 
 		validateParams := map[string]interface{}{
 			"email": params.Email,
@@ -383,7 +445,9 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 		if err := s.validateUniqueFieldsWithLock(tx, validateParams, uid); err != nil {
 			return err
 		}
-		if err := adminUserModel.Save(); err != nil {
+		if err := tx.Model(&model.AdminUser{}).
+			Where("id = ? AND deleted_at = 0", uid).
+			Updates(adminUserUpdateValues(adminUserModel, editParams)).Error; err != nil {
 			return err
 		}
 		if params.Avatar != nil {
@@ -400,11 +464,15 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 			}
 		}
 		if passwordChanged {
-			pendingRevocations = append(pendingRevocations, userTokenRevocation{
+			revocation := &userTokenRevocation{
 				userID:        uid,
 				revokedCode:   model.RevokedCodePasswordChangeSelf,
 				revokedReason: "用户自己修改密码",
-			})
+			}
+			if err := s.prepareUserTokenRevocation(tx, revocation); err != nil {
+				return err
+			}
+			pendingRevocations = append(pendingRevocations, *revocation)
 		}
 		return nil
 	})
@@ -476,15 +544,11 @@ func (s *AdminUserService) Delete(id uint) error {
 
 	adminUserModel := model.NewAdminUsers()
 	adminUserDeptMap := model.NewAdminUserDeptMap()
-	deptIds, err := model.ExtractColumnsByCondition[model.AdminUserDeptMap, *model.AdminUserDeptMap, uint](adminUserDeptMap, "dept_id", "uid = ?", id)
-	if err != nil {
-		return e.NewBusinessError(e.QueryUserDeptFailed)
-	}
-
 	db, err := adminUserModel.GetDB()
 	if err != nil {
 		return e.NewBusinessError(e.DeleteUserFailed)
 	}
+	var deptIds []uint
 	pendingRevocations := []userTokenRevocation{{
 		userID:        id,
 		revokedCode:   model.RevokedCodeOther,
@@ -492,6 +556,22 @@ func (s *AdminUserService) Delete(id uint) error {
 	}}
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
+		// 与 login/refresh 及其他账号安全变更保持 user -> session 的加锁顺序。
+		if err := loadAdminUserForUpdate(tx, adminUserModel, id); err != nil {
+			return err
+		}
+		if err := s.authorizeAdminUserMutation(adminUserModel, &adminUserEditParams{Id: id}, tx); err != nil {
+			return err
+		}
+		adminUserDeptMap.SetDB(tx)
+		var queryErr error
+		deptIds, queryErr = model.ExtractColumnsByCondition[model.AdminUserDeptMap, *model.AdminUserDeptMap, uint](adminUserDeptMap, "dept_id", "uid = ?", id)
+		if queryErr != nil {
+			return e.NewBusinessError(e.QueryUserDeptFailed)
+		}
+		if err := s.prepareUserTokenRevocation(tx, &pendingRevocations[0]); err != nil {
+			return err
+		}
 
 		if _, err := adminUserModel.DeleteByID(id); err != nil {
 			return err
@@ -499,7 +579,6 @@ func (s *AdminUserService) Delete(id uint) error {
 		if err := service.NewFileReferenceService(tx).ReleaseReferencesByOwner("admin_user", id, "avatar"); err != nil {
 			return err
 		}
-		adminUserDeptMap.SetDB(tx)
 		if err := adminUserDeptMap.DeleteWhere("uid = ?", id); err != nil {
 			return err
 		}

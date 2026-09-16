@@ -16,6 +16,7 @@ type BaseModelInterface[T any] interface {
 	Count(condition string, args ...any) (int64, error)
 	Paginate(page, perPage int) func(*gorm.DB) *gorm.DB
 	TableName() string
+	GetDB(...any) (*gorm.DB, error)
 	*T
 }
 
@@ -109,7 +110,7 @@ func normalizeSelectFields(fields string) (string, error) {
 }
 
 func buildListQuery[T any, M BaseModelInterface[T]](model M, condition string, args []any, listParams ListOptionalParams) (*gorm.DB, error) {
-	query, err := GetDB(model)
+	query, err := model.GetDB(model)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +215,7 @@ func ListPageE[T any, M BaseModelInterface[T]](model M, page, perPage int, condi
 		listParams = optional[0]
 	}
 
-	baseQuery, err := GetDB(model)
+	baseQuery, err := model.GetDB(model)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -274,7 +275,7 @@ func VerifyExistingIDs[T any, M BaseModelInterface[T]](model M, ids []uint) ([]u
 	}
 
 	var existIds []uint
-	db, err := GetDB(model)
+	db, err := model.GetDB(model)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +296,7 @@ func ExtractColumnsByCondition[T any, M BaseModelInterface[T], R any](model M, c
 		return nil, fmt.Errorf("column name is required")
 	}
 
-	db, err := GetDB(model)
+	db, err := model.GetDB(model)
 	if err != nil {
 		return nil, err
 	}

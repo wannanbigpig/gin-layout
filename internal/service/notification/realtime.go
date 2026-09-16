@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
-	"net"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"uuid"
+
+	"github.com/wannanbigpig/gin-layout/internal/pkg/redisutil"
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
@@ -93,9 +92,11 @@ var (
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return wsOriginChecker(r) },
 	}
-	realtimeSourceID = buildRealtimeSourceID()
-	realtimeRunner   = runRealtimeSubscriber
-	realtimeState    = struct {
+	realtimeSourceID = uuid.New().String()
+	realtimeRunner   = func(ctx context.Context, _ *redis.Client) {
+		runRealtimeSubscriberWithSource(ctx, data.RedisClient, time.Second)
+	}
+	realtimeState = struct {
 		mu      sync.Mutex
 		started bool
 		cancel  context.CancelFunc
@@ -194,6 +195,12 @@ func ServeWebsocket(w http.ResponseWriter, r *http.Request, claims *token.AdminC
 		return nil
 	}
 
+	// 设置 pong 超时：客户端必须在 wsPongWait 内回复 pong，否则连接将被 ReadMessage 错误触发关闭。
+	conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
+
 	go client.keepalive()
 
 	for {
@@ -256,7 +263,7 @@ func PublishEvent(ctx context.Context, event Event) error {
 	}
 	publishCtx, cancel := context.WithTimeout(ctx, realtimePublishTTL)
 	defer cancel()
-	return client.Publish(publishCtx, realtimeChannel, payload).Err()
+	return client.Publish(publishCtx, redisutil.Channel(realtimeChannel), payload).Err()
 }
 
 // PublishSessionControl 派发会话强踢指令：先在本实例立即执行，再按 Redis 开关跨实例广播。
@@ -287,7 +294,7 @@ func PublishSessionControl(ctx context.Context, ctrl auth.SessionControl) {
 	}
 	publishCtx, cancel := context.WithTimeout(ctx, realtimePublishTTL)
 	defer cancel()
-	if err := client.Publish(publishCtx, sessionControlChannel, payload).Err(); err != nil && log.Logger != nil {
+	if err := client.Publish(publishCtx, redisutil.Channel(sessionControlChannel), payload).Err(); err != nil && log.Logger != nil {
 		log.Logger.Warn("发布会话强踢指令失败，跨实例强踢降级为心跳反查兜底",
 			zap.Error(err), zap.Uint("user_id", ctrl.UserID), zap.String("session_id", ctrl.SessionID))
 	}
@@ -318,119 +325,50 @@ func decodeControlEnvelope(raw string) (controlEnvelope, bool) {
 }
 
 func runRealtimeSubscriber(ctx context.Context, client *redis.Client) {
+	runRealtimeSubscriberWithSource(ctx, func() *redis.Client { return client }, time.Second)
+}
+
+func runRealtimeSubscriberWithSource(ctx context.Context, clientSource func() *redis.Client, refreshEvery time.Duration) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
-	backoff := time.Second
-	const maxBackoff = 30 * time.Second
-
+	var subscription redisutil.DynamicSubscription
+	defer subscription.Close()
+	refresh := func() <-chan *redis.Message {
+		return subscription.Refresh(ctx, clientSource(), redisutil.Channel(realtimeChannel), redisutil.Channel(sessionControlChannel))
+	}
+	messages := refresh()
+	ticker := time.NewTicker(refreshEvery)
+	defer ticker.Stop()
 	for {
-		// 每次循环重新订阅，首次和重连均走此路径
-		pubsub := client.Subscribe(ctx, realtimeChannel, sessionControlChannel)
-		stopClosing := closeRealtimePubSubOnContextDone(ctx, pubsub)
-
-		// 等待确认订阅成功
-		if _, err := pubsub.Receive(ctx); err != nil {
-			stopClosing()
-			_ = pubsub.Close()
-			if isRealtimeSubscriberClosing(ctx, err) {
-				return
-			}
-			if log.Logger != nil {
-				log.Logger.Warn("订阅系统消息实时通道失败，准备重试",
-					zap.Error(err), zap.Duration("backoff", backoff))
-			}
-			select {
-			case <-time.After(backoff):
-				backoff = realtimeNextBackoff(backoff, maxBackoff)
-				continue
-			case <-ctx.Done():
-				return
-			}
-		}
-
-		// 订阅成功，重置退避间隔
-		backoff = time.Second
-
-		// 消息接收循环
-		for {
-			message, err := pubsub.ReceiveMessage(ctx)
-			if err != nil {
-				stopClosing()
-				_ = pubsub.Close()
-				if isRealtimeSubscriberClosing(ctx, err) {
-					return
-				}
-				if log.Logger != nil {
-					log.Logger.Warn("系统消息实时订阅中断，准备重连",
-						zap.Error(err), zap.Duration("backoff", backoff))
-				}
-				break // 跳出内层循环，由外层重新订阅
-			}
-			dispatchRealtimeMessage(message.Channel, message.Payload)
-		}
-
-		// 重连前退避等待，同时检查上下文
 		select {
-		case <-time.After(backoff):
-			backoff = realtimeNextBackoff(backoff, maxBackoff)
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			messages = refresh()
+		case message, ok := <-messages:
+			if !ok {
+				subscription.Reset()
+				messages = nil
+				continue
+			}
+			if message != nil {
+				dispatchRealtimeMessage(message.Channel, message.Payload)
+			}
 		}
 	}
-}
-
-func closeRealtimePubSubOnContextDone(ctx context.Context, pubsub *redis.PubSub) func() {
-	if ctx == nil || pubsub == nil {
-		return func() {}
-	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = pubsub.Close()
-		case <-done:
-		}
-	}()
-	return func() { close(done) }
-}
-
-func isRealtimeSubscriberClosing(ctx context.Context, err error) bool {
-	if ctx != nil && ctx.Err() != nil {
-		return true
-	}
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, net.ErrClosed) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "use of closed network connection") || strings.Contains(msg, "redis: client is closed")
-}
-
-// realtimeNextBackoff 计算下一次退避间隔，指数递增至上限，并加随机 jitter 避免雷群效应。
-func realtimeNextBackoff(current, max time.Duration) time.Duration {
-	next := current * 2
-	if next > max {
-		next = max
-	}
-	// 添加随机 jitter：退避 + rand(0, 退避/2)，避免多实例同时重试
-	jitter := time.Duration(rand.Int63n(int64(next/2) + 1))
-	return next + jitter
 }
 
 // dispatchRealtimeMessage 按订阅频道分发消息：实时事件走广播，会话控制走本地强踢。
 func dispatchRealtimeMessage(channel, raw string) {
 	switch channel {
-	case sessionControlChannel:
+	case redisutil.Channel(sessionControlChannel):
 		envelope, ok := decodeControlEnvelope(raw)
 		if !ok || envelope.Source == realtimeSourceID {
 			return
 		}
 		defaultHub.kick(envelope.Control)
-	default:
+	case redisutil.Channel(realtimeChannel):
 		payload, ok := decodeRealtimePayload(raw)
 		if !ok || payload.Source == realtimeSourceID {
 			return
@@ -448,6 +386,9 @@ type GenericMessage struct {
 // canAccessChannel 使用与 HTTP 监控接口相同的服务端权限，每次推送重新检查策略。
 func (c *wsClient) canAccessChannel(channel string) bool {
 	if channel != "monitor" || c.claims == nil || c.userID == 0 {
+		return false
+	}
+	if c.claims.ExpiresAt != nil && !c.claims.ExpiresAt.Time.After(time.Now()) {
 		return false
 	}
 	if c.claims.IsSuperAdmin == global.Yes || c.userID == global.SuperAdminId {
@@ -695,16 +636,16 @@ func (c *wsClient) closeWithCode(code int, reason string) {
 }
 
 func (c *wsClient) keepalive() {
-	// 设置 pong 超时：客户端必须在 wsPongWait 内回复 pong，否则连接将被 ReadMessage 错误触发关闭。
-	c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
-	c.conn.SetPongHandler(func(string) error {
-		return c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
-	})
 
 	ticker := time.NewTicker(realtimePingPeriod)
 	defer ticker.Stop()
 	pings := 0
 	for range ticker.C {
+		if c.claims != nil && c.claims.ExpiresAt != nil && !c.claims.ExpiresAt.Time.After(time.Now()) {
+			c.closeWithCode(auth.SessionControlCodeExpired, "session expired")
+			defaultHub.unregister(c)
+			return
+		}
 		// 周期性主动反查会话有效性：作为 Redis 强踢消息丢失与 token 过期的兜底层。
 		pings++
 		if pings >= realtimeRecheckEveryPings {
@@ -738,14 +679,6 @@ func (c *wsClient) sessionStillValid() bool {
 	return auth.NewLoginService().IsPrincipalValid(c.claims)
 }
 
-func buildRealtimeSourceID() string {
-	host, err := os.Hostname()
-	if err != nil {
-		host = "unknown"
-	}
-	return host + ":" + strconv.Itoa(os.Getpid())
-}
-
 // checkWebSocketOrigin 校验 WebSocket 请求的 Origin 是否在 CORS 白名单内。
 // 无 Origin 头或白名单为空时拒绝，防止跨站 WebSocket 劫持（CSWSH）。
 func checkWebSocketOrigin(r *http.Request) bool {
@@ -763,11 +696,12 @@ func checkWebSocketOrigin(r *http.Request) bool {
 }
 
 // ShutdownRealtimeDispatcher 主动关闭所有活跃的 WebSocket 连接，发送 Close 帧。
-func ShutdownRealtimeDispatcher() {
+// 所有连接共享同一截止时间，避免停服耗时随连接数量线性增长。
+func ShutdownRealtimeDispatcher(timeout ...time.Duration) bool {
 	defaultHub.mu.Lock()
 	if defaultHub.shuttingDown {
 		defaultHub.mu.Unlock()
-		return
+		return true
 	}
 	// 与 register 共用锁，覆盖 Upgrade 已 Hijack、尚未加入连接池的窗口。
 	defaultHub.shuttingDown = true
@@ -776,14 +710,58 @@ func ShutdownRealtimeDispatcher() {
 	defaultHub.totalConns = 0
 	defaultHub.mu.Unlock()
 
-	closeMsg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down")
+	clientsList := make([]*wsClient, 0)
 	for _, userClients := range clients {
 		for client := range userClients {
-			client.mu.Lock()
-			_ = client.conn.SetWriteDeadline(time.Now().Add(realtimeWriteTimeout))
-			_ = client.conn.WriteMessage(websocket.CloseMessage, closeMsg)
-			client.mu.Unlock()
+			clientsList = append(clientsList, client)
+		}
+	}
+	shutdownTimeout := realtimeWriteTimeout
+	if len(timeout) > 0 && timeout[0] > 0 {
+		shutdownTimeout = timeout[0]
+	}
+	closeMsg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down")
+	deadline := time.Now().Add(shutdownTimeout)
+	completed := closeRealtimeClientsWithin(clientsList, shutdownTimeout, func(client *wsClient) {
+		// Gorilla 允许 WriteControl 与其他读写方法并发；无需等待普通写锁。
+		_ = client.conn.WriteControl(websocket.CloseMessage, closeMsg, deadline)
+		client.closeOnce.Do(func() { _ = client.conn.Close() })
+	})
+	if !completed {
+		for _, client := range clientsList {
 			client.closeOnce.Do(func() { _ = client.conn.Close() })
 		}
+	}
+	return completed
+}
+
+func closeRealtimeClientsWithin(clients []*wsClient, timeout time.Duration, closeClient func(*wsClient)) bool {
+	if len(clients) == 0 {
+		return true
+	}
+	var wg sync.WaitGroup
+	wg.Add(len(clients))
+	for _, client := range clients {
+		go func() {
+			defer wg.Done()
+			closeClient(client)
+		}()
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	if timeout <= 0 {
+		<-done
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
 	}
 }

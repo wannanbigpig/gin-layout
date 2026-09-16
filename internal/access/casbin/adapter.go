@@ -3,13 +3,13 @@ package casbinx
 import (
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
+	"github.com/casbin/casbin/v3/persist"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"gorm.io/gorm"
 )
 
 func newEnforcerFromDB(m model.Model, db *gorm.DB) (*casbin.Enforcer, error) {
-	gormadapter.TurnOffAutoMigrate(db)
-	adapter, err := gormadapter.NewAdapterByDB(db)
+	adapter, err := newPolicyAdapter(db)
 	if err != nil {
 		return nil, err
 	}
@@ -20,4 +20,9 @@ func newEnforcerFromDB(m model.Model, db *gorm.DB) (*casbin.Enforcer, error) {
 	}
 	enforcer.EnableAutoSave(true)
 	return enforcer, nil
+}
+
+func newPolicyAdapter(db *gorm.DB) (persist.Adapter, error) {
+	gormadapter.TurnOffAutoMigrate(db)
+	return gormadapter.NewAdapterByDB(db)
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/cmd/bootstrapx"
 	"github.com/wannanbigpig/gin-layout/data"
+	casbinx "github.com/wannanbigpig/gin-layout/internal/access/casbin"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	_ "github.com/wannanbigpig/gin-layout/internal/queue/asynqx"
@@ -31,6 +33,7 @@ const (
 	auditDrainTimeout          = 5 * time.Second
 	loginLogDrainTimeout       = 3 * time.Second
 	realtimeShutdownTimeout    = 5 * time.Second
+	httpRequestDrainTimeout    = 5 * time.Second
 	defaultReadHeaderTimeout   = 5 * time.Second
 	defaultIdleTimeout         = 120 * time.Second
 	defaultMaxHeaderBytes      = 1 << 20
@@ -61,7 +64,9 @@ func registerFlags() {
 }
 
 // run 运行服务器
-func run() error {
+func run() (err error) {
+	requestLifecycle := newHTTPRequestLifecycle()
+	defer func() { err = errors.Join(err, shutdownBackgroundServices(requestLifecycle)) }()
 	// 注入会话强踢发布器：auth 触发强踢时经此派发到 WebSocket 连接池及跨实例广播，
 	// 保持 auth → notification 单向依赖，规避包循环依赖。
 	auth.SessionControlPublisher = notification.PublishSessionControl
@@ -73,8 +78,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("build router failed: %w", err)
 	}
+	casbinx.StartPolicySync()
 	address := fmt.Sprintf("%s:%d", host, port)
-	server := newHTTPServer(address, engine)
+	server := newHTTPServer(address, requestLifecycle.wrap(engine))
 
 	errChan := make(chan error, 1)
 	go func() {
@@ -118,11 +124,24 @@ func waitForShutdown(server *http.Server, errChan <-chan error) error {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shutdown http server failed: %w", err)
+		return errors.Join(fmt.Errorf("shutdown http server failed: %w", err), server.Close())
 	}
+	return nil
+}
+
+// shutdownBackgroundServices 也在监听失败和 HTTP 排空超时时执行，先落审计再关闭数据库。
+func shutdownBackgroundServices(requestLifecycle *httpRequestLifecycle) error {
+	casbinx.StopPolicySync(gracefulShutdownTimout)
 	notification.StopRealtimeSubscriber(realtimeShutdownTimeout)
 	dashboard.StopMonitorPush(gracefulShutdownTimout)
-	notification.ShutdownRealtimeDispatcher()
+	if !notification.ShutdownRealtimeDispatcher(realtimeShutdownTimeout) {
+		log.Logger.Warn("WebSocket 连接未在全局截止时间内完成关闭")
+	}
+	if drained, remaining := requestLifecycle.drainAndWait(httpRequestDrainTimeout); !drained {
+		// 活跃 handler 仍可能提交业务写入或在 defer 中生成审计；此时关闭队列或数据库
+		// 会把可恢复的慢请求转化为确定的数据/审计丢失。保留资源并让进程退出接管最终回收。
+		return fmt.Errorf("http request drain timed out with %d active handlers; audit queues and data resources left open", remaining)
+	}
 	if !middleware.WaitWebSocketAudits(auditDrainTimeout) {
 		log.Logger.Warn("等待 WebSocket 断连审计超时")
 	}

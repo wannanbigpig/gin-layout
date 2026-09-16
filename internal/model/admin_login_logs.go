@@ -135,6 +135,17 @@ func (m *AdminLoginLogs) FindByJwtId(jwtId string) error {
 	return db.Where("jwt_id = ? AND deleted_at = 0", jwtId).First(m).Error
 }
 
+// IsTokenRevokedByJwtID 只读取撤销状态；缺失会话和查询失败均交由认证层拒绝。
+func (m *AdminLoginLogs) IsTokenRevokedByJwtID(jwtID string) (bool, error) {
+	db, err := m.GetDB(m)
+	if err != nil {
+		return false, err
+	}
+	var row struct{ IsRevoked uint8 }
+	err = db.Select("is_revoked").Where("jwt_id = ? AND deleted_at = 0 AND login_status = ?", jwtID, LoginStatusSuccess).Take(&row).Error
+	return row.IsRevoked == IsRevokedYes, err
+}
+
 // FindActiveByRefreshTokenHashForUpdate 根据 refresh token hash 查找活跃会话并加行锁。
 func (m *AdminLoginLogs) FindActiveByRefreshTokenHashForUpdate(refreshTokenHash string, now time.Time) error {
 	db, err := m.GetDB()
@@ -214,4 +225,18 @@ func (m *AdminLoginLogs) FindActiveTokensByUserId(userId uint, now time.Time) ([
 	err = db.Where("uid = ? AND deleted_at = 0 AND is_revoked = ? AND login_status = ? AND ((token_expires IS NOT NULL AND token_expires > ?) OR (refresh_expires IS NOT NULL AND refresh_expires > ?))",
 		userId, IsRevokedNo, LoginStatusSuccess, now, now).Find(&loginLogs).Error
 	return loginLogs, err
+}
+
+// FindActiveTokensByUserIdForUpdate 在账户变更事务内锁定尚有效的会话。
+func (m *AdminLoginLogs) FindActiveTokensByUserIdForUpdate(userID uint, now time.Time) ([]AdminLoginLogs, error) {
+	db, err := m.GetDB()
+	if err != nil {
+		return nil, err
+	}
+	var sessions []AdminLoginLogs
+	err = db.Select("id", "jwt_id", "token_expires", "refresh_expires").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("uid = ? AND deleted_at = 0 AND is_revoked = ? AND login_status = ? AND ((token_expires IS NOT NULL AND token_expires > ?) OR (refresh_expires IS NOT NULL AND refresh_expires > ?))", userID, IsRevokedNo, LoginStatusSuccess, now, now).
+		Find(&sessions).Error
+	return sessions, err
 }

@@ -39,6 +39,26 @@ type uploadFileObjectInput struct {
 	Status        string
 }
 
+type uploadSessionExpiredError struct {
+	session *model.UploadSession
+	cause   *pkgErrors.BusinessError
+}
+
+func newUploadSessionExpiredError(session *model.UploadSession) *uploadSessionExpiredError {
+	return &uploadSessionExpiredError{
+		session: session,
+		cause:   pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "upload session expired; initialize upload again"),
+	}
+}
+
+func (e *uploadSessionExpiredError) Error() string {
+	return e.cause.Error()
+}
+
+func (e *uploadSessionExpiredError) Unwrap() error {
+	return e.cause
+}
+
 func findReusableFileObject(tx *gorm.DB, storageDriver, bucket, hash string, ownerUID uint, isPublic uint8) (*model.UploadFileObject, error) {
 	if hash == "" {
 		return nil, gorm.ErrRecordNotFound
@@ -173,7 +193,7 @@ func consumeUploadSession(tx *gorm.DB, completeToken string, ownerUID uint, allo
 	}
 	tokenHash := uploadCompleteTokenHash(completeToken)
 	if tokenHash == "" {
-		return nil, fmt.Errorf("complete_token is required")
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "complete_token is required")
 	}
 	query := tx.Clauses(clauseLockForUpdate()).Where("complete_token_hash = ? AND owner_uid = ?", tokenHash, ownerUID)
 	if len(allowedTypes) > 0 {
@@ -182,31 +202,26 @@ func consumeUploadSession(tx *gorm.DB, completeToken string, ownerUID uint, allo
 	var session model.UploadSession
 	if err := query.First(&session).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("upload session not found")
+			return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "upload session not found")
 		}
 		return nil, err
 	}
-	if session.Status != model.UploadSessionStatusPending {
-		return nil, fmt.Errorf("upload session is not pending")
+	if (session.Status == model.UploadSessionStatusPending || session.Status == model.UploadSessionStatusCompleting || session.Status == model.UploadSessionStatusExpired) &&
+		!session.ExpiresAt.IsZero() && time.Now().After(session.ExpiresAt.Time) {
+		return nil, newUploadSessionExpiredError(&session)
 	}
-	if !session.ExpiresAt.IsZero() && time.Now().After(session.ExpiresAt.Time) {
-		if err := tx.Model(&model.UploadSession{}).Where("id = ?", session.ID).Updates(map[string]any{
-			"status":     model.UploadSessionStatusExpired,
-			"updated_at": time.Now(),
-		}).Error; err != nil {
-			log.Logger.Warn("更新上传会话过期状态失败", zap.Uint("session_id", session.ID), zap.Error(err))
-		}
-		return nil, fmt.Errorf("upload session expired")
+	if session.Status != model.UploadSessionStatusPending {
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "upload session is not pending")
+	}
+	// 旧版先按客户端 hash 复用的 pending session 无法证明上传者持有内容，必须重新初始化。
+	if session.FileObjectID > 0 {
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "upload session must be initialized again")
 	}
 	return &session, nil
 }
 
 func findPendingUploadSession(tx *gorm.DB, token string, uploadType string, uid uint) (*model.UploadSession, error) {
-	session, err := consumeUploadSession(tx, token, uid, uploadType)
-	if err != nil {
-		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, err.Error())
-	}
-	return session, nil
+	return consumeUploadSession(tx, token, uid, uploadType)
 }
 
 func findCompletingUploadSession(tx *gorm.DB, sessionID uint, uid uint, uploadType string) (*model.UploadSession, error) {
@@ -222,6 +237,9 @@ func findCompletingUploadSession(tx *gorm.DB, sessionID uint, uid uint, uploadTy
 		}
 		return nil, err
 	}
+	if !session.ExpiresAt.IsZero() && !time.Now().Before(session.ExpiresAt.Time) {
+		return nil, newUploadSessionExpiredError(&session)
+	}
 	if session.Status != model.UploadSessionStatusCompleting {
 		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "complete_token is already used")
 	}
@@ -234,7 +252,8 @@ func markUploadSessionCompleted(tx *gorm.DB, session *model.UploadSession, fileI
 	}
 	now := time.Now()
 	res := tx.Model(&model.UploadSession{}).
-		Where("id = ? AND status IN ?", session.ID, []string{model.UploadSessionStatusPending, model.UploadSessionStatusCompleting}).
+		Where("id = ? AND status IN ? AND (expires_at IS NULL OR expires_at > ?)", session.ID,
+			[]string{model.UploadSessionStatusPending, model.UploadSessionStatusCompleting}, now).
 		Updates(map[string]any{
 			"status":         model.UploadSessionStatusCompleted,
 			"file_id":        fileID,
@@ -246,6 +265,9 @@ func markUploadSessionCompleted(tx *gorm.DB, session *model.UploadSession, fileI
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
+		if !session.ExpiresAt.IsZero() && !now.Before(session.ExpiresAt.Time) {
+			return newUploadSessionExpiredError(session)
+		}
 		return pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "complete_token is already used")
 	}
 	return nil
@@ -255,16 +277,20 @@ func claimUploadSessionCompleting(tx *gorm.DB, session *model.UploadSession) err
 	if tx == nil || session == nil {
 		return nil
 	}
+	now := time.Now()
 	res := tx.Model(&model.UploadSession{}).
-		Where("id = ? AND status = ?", session.ID, model.UploadSessionStatusPending).
+		Where("id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", session.ID, model.UploadSessionStatusPending, now).
 		Updates(map[string]any{
 			"status":     model.UploadSessionStatusCompleting,
-			"updated_at": time.Now(),
+			"updated_at": now,
 		})
 	if res.Error != nil {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
+		if !session.ExpiresAt.IsZero() && !now.Before(session.ExpiresAt.Time) {
+			return newUploadSessionExpiredError(session)
+		}
 		return pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "complete_token is already used")
 	}
 	session.Status = model.UploadSessionStatusCompleting
@@ -285,6 +311,23 @@ func restoreUploadSessionPending(ctx context.Context, db *gorm.DB, sessionID uin
 			"updated_at": time.Now(),
 		}).Error; err != nil {
 		log.Logger.Warn("恢复上传会话为 pending 状态失败", zap.Uint("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func expireUploadSession(ctx context.Context, db *gorm.DB, sessionID uint) {
+	if db == nil || sessionID == 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := db.WithContext(ctx).Model(&model.UploadSession{}).
+		Where("id = ? AND status IN ?", sessionID, []string{model.UploadSessionStatusPending, model.UploadSessionStatusCompleting}).
+		Updates(map[string]any{
+			"status":     model.UploadSessionStatusExpired,
+			"updated_at": time.Now(),
+		}).Error; err != nil {
+		log.Logger.Warn("更新上传会话为 expired 状态失败", zap.Uint("session_id", sessionID), zap.Error(err))
 	}
 }
 
@@ -332,7 +375,7 @@ func validateMultipartCompleteSession(session *model.UploadSession, params *form
 	if strings.TrimSpace(params.ObjectKey) != "" && strings.TrimSpace(params.ObjectKey) != session.ObjectKey {
 		return pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "object_key does not match upload session")
 	}
-	if strings.TrimSpace(params.UploadID) != "" && strings.TrimSpace(params.UploadID) != session.UploadID {
+	if strings.TrimSpace(session.UploadID) != "" && strings.TrimSpace(params.UploadID) != "" && strings.TrimSpace(params.UploadID) != session.UploadID {
 		return pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "upload_id does not match upload session")
 	}
 	if params.FileObjectID > 0 && params.FileObjectID != session.FileObjectID {

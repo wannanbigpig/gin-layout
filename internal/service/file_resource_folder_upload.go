@@ -204,12 +204,13 @@ func (s *FileResourceService) DeleteFolder(id uint, deletedBy uint, reason strin
 		}
 		if len(allFolderIDs) > 0 {
 			var fileIDs []uint
-			if err := tx.Model(&model.UploadFiles{}).Where("folder_id IN ?", allFolderIDs).Pluck("id", &fileIDs).Error; err != nil {
+			if err := tx.Clauses(clauseLockForUpdate()).Model(&model.UploadFiles{}).
+				Where("folder_id IN ?", allFolderIDs).Order("id ASC").Pluck("id", &fileIDs).Error; err != nil {
 				return err
 			}
 			if len(fileIDs) > 0 {
 				var refs []*model.UploadFileReference
-				if err := tx.Where("file_id IN ?", fileIDs).Find(&refs).Error; err != nil {
+				if err := tx.Clauses(clauseLockForUpdate()).Where("file_id IN ?", fileIDs).Order("id ASC").Find(&refs).Error; err != nil {
 					return err
 				}
 				if len(refs) > 0 {
@@ -449,47 +450,8 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	if object, err := findReusableFileObject(db, activeDriver, bucket, params.Hash, uid, params.IsPublic); err == nil {
-		completeToken, _, err := createUploadSession(db, uploadSessionInput{
-			UploadType:    model.UploadSessionTypeDirect,
-			StorageDriver: activeDriver,
-			StorageBase:   object.StorageBase,
-			Bucket:        object.Bucket,
-			StoragePath:   object.StoragePath,
-			ObjectKey:     object.ObjectKey,
-			FileObjectID:  object.ID,
-			OwnerUID:      uid,
-			FolderID:      params.FolderID,
-			OriginName:    firstNonEmpty(params.OriginName, params.FileName),
-			Size:          object.Size,
-			Hash:          object.Hash,
-			MimeType:      object.MimeType,
-			ETag:          object.ETag,
-			IsPublic:      params.IsPublic,
-			UploadScene:   params.UploadScene,
-			ExpiresAt:     time.Now().Add(ttl),
-		})
-		if err != nil {
-			return nil, err
-		}
-		return &resources.FileUploadCredentialResources{
-			StorageDriver:   activeDriver,
-			Driver:          activeDriver,
-			Bucket:          object.Bucket,
-			ObjectKey:       object.ObjectKey,
-			Reuse:           true,
-			FileObjectID:    object.ID,
-			Size:            object.Size,
-			Hash:            object.Hash,
-			MimeType:        object.MimeType,
-			ETag:            object.ETag,
-			ObjectStatus:    object.Status,
-			CompleteToken:   completeToken,
-			CompletePayload: buildCredentialCompletePayload(completeToken),
-		}, nil
-	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
+	// 客户端 hash 只用于声明完整性，不能在上传前据此复用服务端对象。
+	// 完成阶段校验真实内容后，ensureFileObject 才执行可信去重。
 	driver, _, err := s.storageDriverByName(context.Background(), activeDriver)
 	if err != nil {
 		return nil, err
@@ -518,14 +480,17 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 		return nil, err
 	}
 	return &resources.FileUploadCredentialResources{
-		StorageDriver:   activeDriver,
-		Driver:          activeDriver,
-		Bucket:          bucket,
-		ObjectKey:       objectKey,
-		UploadURL:       url,
-		URL:             url,
-		Method:          "PUT",
-		Headers:         map[string]string{"Content-Type": params.MimeType},
+		StorageDriver: activeDriver,
+		Driver:        activeDriver,
+		Bucket:        bucket,
+		ObjectKey:     objectKey,
+		UploadURL:     url,
+		URL:           url,
+		Method:        "PUT",
+		Headers: map[string]string{
+			"Content-Type":           params.MimeType,
+			"x-oss-forbid-overwrite": "true",
+		},
 		ExpireAt:        dateutils.FormatDate{Time: time.Now().Add(ttl)},
 		Reuse:           false,
 		Size:            uint(params.Size),
@@ -647,10 +612,16 @@ func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	sniffTarget, err := s.resolveDirectUploadMimeSniffTarget(ctx, params, uid)
+	sniffTarget, err := s.claimDirectUploadMimeSniffTarget(ctx, params, uid)
 	if err != nil {
 		return nil, err
 	}
+	restoreSession := true
+	defer func() {
+		if restoreSession {
+			restoreUploadSessionPending(context.Background(), db, sniffTarget.sessionID)
+		}
+	}()
 	if err := s.validateUploadObjectMime(ctx, "direct upload", sniffTarget.storageDriver, sniffTarget.bucket, sniffTarget.objectKey, sniffTarget.mimeType); err != nil {
 		return nil, err
 	}
@@ -658,13 +629,29 @@ func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, 
 	if err := s.validateActualObjectSize(ctx, sniffTarget.storageDriver, sniffTarget.bucket, sniffTarget.objectKey, sniffTarget.declaredSize); err != nil {
 		return nil, err
 	}
+	if sniffTarget.requiresHashValidation {
+		var rejectUpload bool
+		sniffTarget, rejectUpload, err = s.finalizeDirectUploadObject(ctx, db, sniffTarget)
+		if err != nil {
+			s.terminateExpiredUploadSession(db, err)
+			if rejectUpload {
+				s.rejectUploadedObject(context.Background(), db, sniffTarget)
+				restoreSession = false
+			}
+			return nil, err
+		}
+	}
+	trustedParams := *params
+	trustedParams.Bucket = ""
+	trustedParams.ObjectKey = ""
 	var uploadFile *model.UploadFiles
+	cleanupUploadedObject := false
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
-		session, err := findPendingUploadSession(tx, params.CompleteToken, model.UploadSessionTypeDirect, uid)
+		session, err := findCompletingUploadSession(tx, sniffTarget.sessionID, uid, model.UploadSessionTypeDirect)
 		if err != nil {
 			return err
 		}
-		if err := validateDirectCompleteSession(session, params, uid); err != nil {
+		if err := validateDirectCompleteSession(session, &trustedParams, uid); err != nil {
 			return err
 		}
 		if err := requireUploadSessionObject(session); err != nil {
@@ -705,7 +692,7 @@ func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, 
 				Size:          session.Size,
 				Hash:          session.Hash,
 				MimeType:      session.MimeType,
-				ETag:          params.ETag,
+				ETag:          session.ETag,
 				Status:        model.StorageStatusStored,
 			})
 			if err != nil {
@@ -717,7 +704,7 @@ func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, 
 		size := session.Size
 		hash := session.Hash
 		mimeType := session.MimeType
-		etag := firstNonEmpty(params.ETag, object.ETag)
+		etag := object.ETag
 		fileUUID := params.UUID
 		if fileUUID == "" {
 			fileUUID = strings.ReplaceAll(uuid.New().String(), "-", "")
@@ -770,11 +757,17 @@ func (s *FileResourceService) completeDirectUploadWithPath(ctx context.Context, 
 				log.Warn("清理孤儿 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(delErr))
 			}
 		}
+		cleanupUploadedObject = session.FileObjectID == 0 && (reused || existing)
 		uploadFile = created
 		return nil
 	})
 	if err != nil {
+		s.terminateExpiredUploadSession(db, err)
 		return nil, err
+	}
+	restoreSession = false
+	if cleanupUploadedObject {
+		s.cleanupUploadedObject(context.Background(), sniffTarget)
 	}
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
@@ -1322,46 +1315,7 @@ func (s *FileResourceService) MultipartInit(params *form.FileMultipartInit, uidA
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	if object, err := findReusableFileObject(db, activeDriver, bucket, params.Hash, uid, params.IsPublic); err == nil {
-		completeToken, _, err := createUploadSession(db, uploadSessionInput{
-			UploadType:    model.UploadSessionTypeMultipart,
-			StorageDriver: activeDriver,
-			StorageBase:   object.StorageBase,
-			Bucket:        object.Bucket,
-			StoragePath:   object.StoragePath,
-			ObjectKey:     object.ObjectKey,
-			FileObjectID:  object.ID,
-			OwnerUID:      uid,
-			FolderID:      params.FolderID,
-			OriginName:    params.OriginName,
-			Size:          object.Size,
-			Hash:          object.Hash,
-			MimeType:      object.MimeType,
-			ETag:          object.ETag,
-			IsPublic:      params.IsPublic,
-			ExpiresAt:     time.Now().Add(ttl),
-		})
-		if err != nil {
-			return nil, err
-		}
-		return &resources.MultipartInitResource{
-			UploadID:        "",
-			Bucket:          object.Bucket,
-			ObjectKey:       object.ObjectKey,
-			Parts:           nil,
-			Reuse:           true,
-			FileObjectID:    object.ID,
-			Size:            object.Size,
-			Hash:            object.Hash,
-			MimeType:        object.MimeType,
-			ETag:            object.ETag,
-			ObjectStatus:    object.Status,
-			CompleteToken:   completeToken,
-			CompletePayload: buildMultipartCompletePayload(completeToken),
-		}, nil
-	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
+	// 分片初始化不依据客户端声明的 hash 直接复用；完成后校验真实内容再去重。
 	driver, _, err := s.storageDriverByName(context.Background(), activeDriver)
 	if err != nil {
 		return nil, err
@@ -1473,7 +1427,19 @@ func (s *FileResourceService) MultipartCompleteWithContext(ctx context.Context, 
 		restoreUploadSessionPending(context.Background(), db, sniffTarget.sessionID)
 		return nil, err
 	}
+	if sniffTarget.requiresHashValidation {
+		if err := s.validateUploadObjectHash(ctx, sniffTarget.storageDriver, sniffTarget.bucket, sniffTarget.objectKey, sniffTarget.expectedHash); err != nil {
+			var mismatch *uploadHashMismatchError
+			if errors.As(err, &mismatch) {
+				s.rejectUploadedObject(context.Background(), db, sniffTarget)
+			} else {
+				restoreUploadSessionPending(context.Background(), db, sniffTarget.sessionID)
+			}
+			return nil, err
+		}
+	}
 	var uploadFile *model.UploadFiles
+	cleanupUploadedObject := false
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		session, err := findCompletingUploadSession(tx, sniffTarget.sessionID, uid, model.UploadSessionTypeMultipart)
 		if err != nil {
@@ -1573,20 +1539,18 @@ func (s *FileResourceService) MultipartCompleteWithContext(ctx context.Context, 
 				log.Warn("multipart orphan cleanup: delete UploadFileObject failed",
 					zap.Uint("object_id", object.ID), zap.Error(delErr))
 			}
-			driver, _, drvErr := s.storageDriverByName(context.Background(), storageDriver)
-			if drvErr == nil {
-				if delErr := driver.Delete(context.Background(), session.Bucket, session.ObjectKey); delErr != nil {
-					log.Warn("multipart orphan cleanup: delete object failed",
-						zap.String("bucket", session.Bucket), zap.String("object_key", session.ObjectKey), zap.Error(delErr))
-				}
-			}
 		}
+		cleanupUploadedObject = session.FileObjectID == 0 && (reusedObject || existing)
 		uploadFile = created
 		return nil
 	})
 	if err != nil {
+		s.terminateExpiredUploadSession(db, err)
 		restoreUploadSessionPending(context.Background(), db, sniffTarget.sessionID)
 		return nil, err
+	}
+	if cleanupUploadedObject {
+		s.cleanupUploadedObject(context.Background(), sniffTarget)
 	}
 	s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
 	return resources.NewFileResourceTransformer().ToStruct(uploadFile), nil
@@ -1656,21 +1620,57 @@ func validateMultipartCompleteParts(parts []form.MultipartCompletePart) ([]files
 	return completeParts, nil
 }
 
-// MultipartAbort 分片上传中止。
-func (s *FileResourceService) MultipartAbort(params *form.FileMultipartAbort) error {
-	storageDriver := firstNonEmpty(params.Driver)
-	if storageDriver == "" {
-		return fmt.Errorf("storage driver is required")
+// MultipartAbort 仅接受 session token，存储位置与 upload ID 均从服务端 session 读取。
+func (s *FileResourceService) MultipartAbort(ctx context.Context, params *form.FileMultipartAbort, uid uint) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	driver, _, err := s.storageDriverByName(context.Background(), storageDriver)
+	if params == nil {
+		return pkgErrors.NewBusinessError(pkgErrors.InvalidParameter)
+	}
+	db, err := s.dbOrDefault()
 	if err != nil {
 		return err
 	}
+	var session *model.UploadSession
+	if err := access.RunInTransaction(db.WithContext(ctx), func(tx *gorm.DB) error {
+		var findErr error
+		session, findErr = findPendingUploadSession(tx, params.CompleteToken, model.UploadSessionTypeMultipart, uid)
+		if findErr != nil {
+			return findErr
+		}
+		if err := requireUploadSessionObject(session); err != nil {
+			return err
+		}
+		return claimUploadSessionCompleting(tx, session)
+	}); err != nil {
+		s.terminateExpiredUploadSession(db, err)
+		return err
+	}
+	driver, _, err := s.storageDriverByName(ctx, session.StorageDriver)
+	if err != nil {
+		restoreUploadSessionPending(context.Background(), db, session.ID)
+		return err
+	}
+	if strings.TrimSpace(session.UploadID) == "" {
+		if err := driver.Delete(ctx, session.Bucket, session.ObjectKey); err != nil {
+			restoreUploadSessionPending(context.Background(), db, session.ID)
+			return err
+		}
+		expireUploadSession(context.Background(), db, session.ID)
+		return nil
+	}
 	mp, ok := driver.(filestorage.MultipartCapable)
 	if !ok {
-		return fmt.Errorf("storage driver %q does not support multipart upload", storageDriver)
+		restoreUploadSessionPending(context.Background(), db, session.ID)
+		return fmt.Errorf("storage driver %q does not support multipart upload", session.StorageDriver)
 	}
-	return mp.AbortMultipartUpload(context.Background(), params.Bucket, params.ObjectKey, params.UploadID)
+	if err := mp.AbortMultipartUpload(ctx, session.Bucket, session.ObjectKey, session.UploadID); err != nil {
+		restoreUploadSessionPending(context.Background(), db, session.ID)
+		return err
+	}
+	expireUploadSession(context.Background(), db, session.ID)
+	return nil
 }
 
 // validateFileLimit 验证文件大小与 MIME 类型限制。
@@ -1842,12 +1842,100 @@ func isMimeCompatible(actual, expected string) bool {
 const mimeSniffHeaderSize = 512
 
 type uploadMimeSniffTarget struct {
-	sessionID     uint
-	storageDriver string
-	bucket        string
-	objectKey     string
-	mimeType      string
-	declaredSize  uint
+	sessionID              uint
+	storageDriver          string
+	bucket                 string
+	objectKey              string
+	mimeType               string
+	declaredSize           uint
+	expectedHash           string
+	requiresHashValidation bool
+}
+
+var errUploadSessionClaimLost = errors.New("upload session claim lost")
+
+type uploadHashMismatchError struct {
+	cause *pkgErrors.BusinessError
+}
+
+func (e *uploadHashMismatchError) Error() string {
+	return e.cause.Error()
+}
+
+func (e *uploadHashMismatchError) Unwrap() error {
+	return e.cause
+}
+
+// terminateExpiredUploadSession 仅终结已超过服务端过期时间且尚未生成文件记录的上传。
+// 状态 CAS 先于物理清理；正在运行的旧请求随后无法提交，并负责清理自己刚生成的对象。
+func (s *FileResourceService) terminateExpiredUploadSession(db *gorm.DB, sessionErr error) {
+	var expiredErr *uploadSessionExpiredError
+	if db == nil || !errors.As(sessionErr, &expiredErr) || expiredErr.session == nil {
+		return
+	}
+	snapshot := expiredErr.session
+	now := time.Now()
+	result := db.WithContext(context.Background()).Model(&model.UploadSession{}).
+		Where("id = ? AND file_id = 0 AND status IN ? AND expires_at <= ?", snapshot.ID,
+			[]string{model.UploadSessionStatusPending, model.UploadSessionStatusCompleting, model.UploadSessionStatusExpired}, now).
+		Updates(map[string]any{"status": model.UploadSessionStatusExpired, "updated_at": now})
+	if result.Error != nil {
+		log.Warn("终结过期上传会话失败", zap.Uint("session_id", snapshot.ID), zap.Error(result.Error))
+		return
+	}
+	if result.RowsAffected == 0 {
+		return
+	}
+	var session model.UploadSession
+	if err := db.WithContext(context.Background()).Where("id = ? AND status = ?", snapshot.ID, model.UploadSessionStatusExpired).First(&session).Error; err != nil {
+		log.Warn("读取已终结上传会话失败", zap.Uint("session_id", snapshot.ID), zap.Error(err))
+		return
+	}
+	// 旧版复用 session 指向已被业务记录引用的对象，不做物理删除。
+	if session.FileID > 0 || session.FileObjectID > 0 || strings.TrimSpace(session.ObjectKey) == "" {
+		return
+	}
+	driver, _, err := s.storageDriverByName(context.Background(), session.StorageDriver)
+	if err != nil {
+		log.Warn("清理过期上传会话时解析存储驱动失败", zap.Uint("session_id", session.ID), zap.Error(err))
+		return
+	}
+	if session.UploadType == model.UploadSessionTypeMultipart && strings.TrimSpace(session.UploadID) != "" {
+		if mp, ok := driver.(filestorage.MultipartCapable); ok {
+			if err := mp.AbortMultipartUpload(context.Background(), session.Bucket, session.ObjectKey, session.UploadID); err != nil {
+				log.Warn("中止过期分片上传失败", zap.Uint("session_id", session.ID), zap.Error(err))
+			}
+		}
+	}
+	if err := driver.Delete(context.Background(), session.Bucket, session.ObjectKey); err != nil {
+		log.Warn("删除过期上传对象失败", zap.Uint("session_id", session.ID), zap.String("object_key", session.ObjectKey), zap.Error(err))
+	}
+}
+
+func markMultipartUploadObjectReady(ctx context.Context, db *gorm.DB, session *model.UploadSession) error {
+	if db == nil || session == nil || strings.TrimSpace(session.UploadID) == "" {
+		return nil
+	}
+	now := time.Now()
+	result := db.WithContext(ctx).Model(&model.UploadSession{}).
+		Where("id = ? AND status = ? AND upload_id = ? AND bucket = ? AND object_key = ? AND (expires_at IS NULL OR expires_at > ?)",
+			session.ID, model.UploadSessionStatusCompleting, session.UploadID, session.Bucket, session.ObjectKey, now).
+		Updates(map[string]any{"upload_id": "", "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		var current model.UploadSession
+		if err := db.WithContext(ctx).First(&current, session.ID).Error; err != nil {
+			return err
+		}
+		if !current.ExpiresAt.IsZero() && !now.Before(current.ExpiresAt.Time) {
+			return newUploadSessionExpiredError(&current)
+		}
+		return errUploadSessionClaimLost
+	}
+	session.UploadID = ""
+	return nil
 }
 
 // validateActualObjectSize 从存储驱动读取对象的实际大小，校验：
@@ -1883,38 +1971,49 @@ func (s *FileResourceService) validateActualObjectSize(ctx context.Context, stor
 	return nil
 }
 
-func (s *FileResourceService) resolveDirectUploadMimeSniffTarget(ctx context.Context, params *form.FileUploadComplete, uid uint) (uploadMimeSniffTarget, error) {
+func (s *FileResourceService) claimDirectUploadMimeSniffTarget(ctx context.Context, params *form.FileUploadComplete, uid uint) (uploadMimeSniffTarget, error) {
 	db, err := s.dbOrDefault()
 	if err != nil {
 		return uploadMimeSniffTarget{}, err
 	}
-	session, err := findPendingUploadSession(db.WithContext(ctx), params.CompleteToken, model.UploadSessionTypeDirect, uid)
-	if err != nil {
-		return uploadMimeSniffTarget{}, err
-	}
-	if err := validateDirectCompleteSession(session, params, uid); err != nil {
-		return uploadMimeSniffTarget{}, err
-	}
-	if err := requireUploadSessionObject(session); err != nil {
-		return uploadMimeSniffTarget{}, err
-	}
-	target := uploadMimeSniffTarget{
-		storageDriver: session.StorageDriver,
-		bucket:        session.Bucket,
-		objectKey:     session.ObjectKey,
-		mimeType:      session.MimeType,
-		declaredSize:  session.Size,
-	}
-	if session.FileObjectID > 0 {
-		object, err := findFileObjectByID(db.WithContext(ctx), session.FileObjectID)
+	var target uploadMimeSniffTarget
+	err = access.RunInTransaction(db.WithContext(ctx), func(tx *gorm.DB) error {
+		session, err := findPendingUploadSession(tx, params.CompleteToken, model.UploadSessionTypeDirect, uid)
 		if err != nil {
-			return uploadMimeSniffTarget{}, err
+			return err
 		}
-		if err := validateFileObjectMatchesSession(object, session); err != nil {
-			return uploadMimeSniffTarget{}, err
+		if err := validateDirectCompleteSession(session, params, uid); err != nil {
+			return err
 		}
-		target.bucket = object.Bucket
-		target.objectKey = object.ObjectKey
+		if err := requireUploadSessionObject(session); err != nil {
+			return err
+		}
+		target = uploadMimeSniffTarget{
+			sessionID:              session.ID,
+			storageDriver:          session.StorageDriver,
+			bucket:                 session.Bucket,
+			objectKey:              session.ObjectKey,
+			mimeType:               session.MimeType,
+			declaredSize:           session.Size,
+			expectedHash:           session.Hash,
+			requiresHashValidation: session.FileObjectID == 0,
+		}
+		if session.FileObjectID > 0 {
+			object, err := findFileObjectByID(tx, session.FileObjectID)
+			if err != nil {
+				return err
+			}
+			if err := validateFileObjectMatchesSession(object, session); err != nil {
+				return err
+			}
+			target.bucket = object.Bucket
+			target.objectKey = object.ObjectKey
+		}
+		return claimUploadSessionCompleting(tx, session)
+	})
+	if err != nil {
+		s.terminateExpiredUploadSession(db, err)
+		return uploadMimeSniffTarget{}, err
 	}
 	return target, nil
 }
@@ -1939,6 +2038,7 @@ func (s *FileResourceService) prepareMultipartCompleteObject(ctx context.Context
 		}
 		return claimUploadSessionCompleting(tx, session)
 	}); err != nil {
+		s.terminateExpiredUploadSession(db, err)
 		return uploadMimeSniffTarget{}, err
 	}
 	claimedSessionID := session.ID
@@ -1948,12 +2048,14 @@ func (s *FileResourceService) prepareMultipartCompleteObject(ctx context.Context
 		}
 	}()
 	target = uploadMimeSniffTarget{
-		sessionID:     session.ID,
-		storageDriver: session.StorageDriver,
-		bucket:        session.Bucket,
-		objectKey:     session.ObjectKey,
-		mimeType:      session.MimeType,
-		declaredSize:  session.Size,
+		sessionID:              session.ID,
+		storageDriver:          session.StorageDriver,
+		bucket:                 session.Bucket,
+		objectKey:              session.ObjectKey,
+		mimeType:               session.MimeType,
+		declaredSize:           session.Size,
+		expectedHash:           session.Hash,
+		requiresHashValidation: session.FileObjectID == 0,
 	}
 	if session.FileObjectID > 0 {
 		object, err := findFileObjectByID(db.WithContext(ctx), session.FileObjectID)
@@ -1967,8 +2069,9 @@ func (s *FileResourceService) prepareMultipartCompleteObject(ctx context.Context
 		target.objectKey = object.ObjectKey
 		return target, nil
 	}
+	// upload_id 为空表示对象已由存储服务合并完成；失败重试直接继续校验与业务登记。
 	if strings.TrimSpace(session.UploadID) == "" {
-		return uploadMimeSniffTarget{}, fmt.Errorf("upload_id is required")
+		return target, nil
 	}
 	completeParts, err := validateMultipartCompleteParts(params.Parts)
 	if err != nil {
@@ -1982,7 +2085,18 @@ func (s *FileResourceService) prepareMultipartCompleteObject(ctx context.Context
 	if !ok {
 		return uploadMimeSniffTarget{}, pkgErrors.NewBusinessError(pkgErrors.LocalStorageMultipartUnsupported)
 	}
-	if err := mp.CompleteMultipartUpload(ctx, session.Bucket, session.ObjectKey, session.UploadID, completeParts); err != nil {
+	completeErr := mp.CompleteMultipartUpload(ctx, session.Bucket, session.ObjectKey, session.UploadID, completeParts)
+	if completeErr != nil {
+		exists, existsErr := driver.Exists(ctx, session.Bucket, session.ObjectKey)
+		if existsErr != nil {
+			return uploadMimeSniffTarget{}, fmt.Errorf("complete multipart upload: %w; probe completed object: %v", completeErr, existsErr)
+		}
+		if !exists {
+			return uploadMimeSniffTarget{}, completeErr
+		}
+	}
+	if err := markMultipartUploadObjectReady(ctx, db, session); err != nil {
+		s.terminateExpiredUploadSession(db, err)
 		return uploadMimeSniffTarget{}, err
 	}
 	return target, nil
@@ -1993,7 +2107,7 @@ func (s *FileResourceService) validateUploadObjectMime(ctx context.Context, oper
 	if sniffErr != nil {
 		log.Warn(operation+" MIME sniff failed",
 			zap.String("bucket", bucket), zap.String("object_key", objectKey), zap.Error(sniffErr))
-		return pkgErrors.NewBusinessError(pkgErrors.FileMimeTypeNotAllowed)
+		return fmt.Errorf("%s MIME sniff: %w", operation, sniffErr)
 	}
 	if !valid {
 		log.Warn(operation+" MIME mismatch: declared vs detected",
@@ -2002,6 +2116,117 @@ func (s *FileResourceService) validateUploadObjectMime(ctx context.Context, oper
 		return pkgErrors.NewBusinessError(pkgErrors.FileMimeTypeNotAllowed)
 	}
 	return nil
+}
+
+func (s *FileResourceService) validateUploadObjectHash(ctx context.Context, storageDriver, bucket, objectKey, expectedHash string) error {
+	driver, _, err := s.storageDriverByName(ctx, storageDriver)
+	if err != nil {
+		return fmt.Errorf("resolve storage driver for hash validation: %w", err)
+	}
+	reader, err := driver.Open(ctx, bucket, objectKey)
+	if err != nil {
+		return fmt.Errorf("open object for hash validation: %w", err)
+	}
+	defer reader.Close()
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, reader); err != nil {
+		return fmt.Errorf("read object for hash validation: %w", err)
+	}
+	actualHash := hex.EncodeToString(hasher.Sum(nil))
+	if !strings.EqualFold(actualHash, strings.TrimSpace(expectedHash)) {
+		return &uploadHashMismatchError{cause: pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "actual file hash does not match declared hash")}
+	}
+	return nil
+}
+
+// finalizeDirectUploadObject 将浏览器可写的临时对象流式复制到新的最终 key，
+// 并对同一字节流计算 SHA-256。旧签名即使仍有效，也只能覆盖不再被引用的临时 key。
+func (s *FileResourceService) finalizeDirectUploadObject(ctx context.Context, db *gorm.DB, target uploadMimeSniffTarget) (uploadMimeSniffTarget, bool, error) {
+	driver, _, err := s.storageDriverByName(ctx, target.storageDriver)
+	if err != nil {
+		return target, false, fmt.Errorf("resolve storage driver for upload finalization: %w", err)
+	}
+	reader, err := driver.Open(ctx, target.bucket, target.objectKey)
+	if err != nil {
+		return target, false, fmt.Errorf("open object for upload finalization: %w", err)
+	}
+	defer reader.Close()
+
+	finalObjectKey := buildUploadObjectKey(filepath.Base(target.objectKey))
+	hasher := sha256.New()
+	putResult, err := driver.Put(ctx, filestorage.PutInput{
+		Bucket:      target.bucket,
+		ObjectKey:   finalObjectKey,
+		Reader:      io.TeeReader(reader, hasher),
+		Size:        int64(target.declaredSize),
+		ContentType: target.mimeType,
+	})
+	if err != nil {
+		_ = driver.Delete(context.Background(), target.bucket, finalObjectKey)
+		return target, false, fmt.Errorf("copy direct upload to final object: %w", err)
+	}
+	actualHash := hex.EncodeToString(hasher.Sum(nil))
+	if !strings.EqualFold(actualHash, strings.TrimSpace(target.expectedHash)) {
+		_ = driver.Delete(context.Background(), putResult.Bucket, putResult.ObjectKey)
+		return target, true, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "actual file hash does not match declared hash")
+	}
+	if err := s.validateUploadObjectMime(ctx, "final direct upload", target.storageDriver, putResult.Bucket, putResult.ObjectKey, target.mimeType); err != nil {
+		_ = driver.Delete(context.Background(), putResult.Bucket, putResult.ObjectKey)
+		return target, false, err
+	}
+	if err := s.validateActualObjectSize(ctx, target.storageDriver, putResult.Bucket, putResult.ObjectKey, target.declaredSize); err != nil {
+		_ = driver.Delete(context.Background(), putResult.Bucket, putResult.ObjectKey)
+		return target, false, err
+	}
+
+	now := time.Now()
+	result := db.WithContext(ctx).Model(&model.UploadSession{}).
+		Where("id = ? AND status = ? AND bucket = ? AND object_key = ? AND (expires_at IS NULL OR expires_at > ?)",
+			target.sessionID, model.UploadSessionStatusCompleting, target.bucket, target.objectKey, now).
+		Updates(map[string]any{
+			"bucket":       normalizeFileObjectBucket(target.storageDriver, putResult.Bucket),
+			"storage_path": putResult.ObjectKey,
+			"object_key":   putResult.ObjectKey,
+			"etag":         putResult.ETag,
+			"updated_at":   now,
+		})
+	if result.Error != nil || result.RowsAffected == 0 {
+		_ = driver.Delete(context.Background(), putResult.Bucket, putResult.ObjectKey)
+		if result.Error != nil {
+			return target, false, result.Error
+		}
+		var current model.UploadSession
+		if err := db.WithContext(ctx).First(&current, target.sessionID).Error; err != nil {
+			return target, false, err
+		}
+		if !current.ExpiresAt.IsZero() && !now.Before(current.ExpiresAt.Time) {
+			return target, false, newUploadSessionExpiredError(&current)
+		}
+		return target, false, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "upload session changed during finalization")
+	}
+	if err := driver.Delete(context.Background(), target.bucket, target.objectKey); err != nil {
+		log.Warn("清理直传临时对象失败", zap.Uint("session_id", target.sessionID), zap.String("object_key", target.objectKey), zap.Error(err))
+	}
+	target.bucket = normalizeFileObjectBucket(target.storageDriver, putResult.Bucket)
+	target.objectKey = putResult.ObjectKey
+	target.requiresHashValidation = false
+	return target, false, nil
+}
+
+func (s *FileResourceService) rejectUploadedObject(ctx context.Context, db *gorm.DB, target uploadMimeSniffTarget) {
+	expireUploadSession(ctx, db, target.sessionID)
+	s.cleanupUploadedObject(ctx, target)
+}
+
+func (s *FileResourceService) cleanupUploadedObject(ctx context.Context, target uploadMimeSniffTarget) {
+	driver, _, err := s.storageDriverByName(ctx, target.storageDriver)
+	if err != nil {
+		log.Warn("清理上传对象时解析存储驱动失败", zap.Uint("session_id", target.sessionID), zap.Error(err))
+		return
+	}
+	if err := driver.Delete(ctx, target.bucket, target.objectKey); err != nil {
+		log.Warn("清理上传对象失败", zap.Uint("session_id", target.sessionID), zap.String("object_key", target.objectKey), zap.Error(err))
+	}
 }
 
 // sniffAndValidateMimeType 从已上传对象中读取前 512 字节，使用 http.DetectContentType 嗅探真实 MIME 类型，

@@ -135,3 +135,44 @@ func TestRevokeRefreshAliveSessionWithExpiredOrMissingAccessExpiry(t *testing.T)
 		}
 	}
 }
+
+func TestPrepareUserTokenRevocationParticipatesInCallerTransaction(t *testing.T) {
+	db := newSessionTestDB(t)
+	expires := utils.FormatDate{Time: time.Now().Add(time.Hour)}
+	entry := model.AdminLoginLogs{
+		UID:          30,
+		JwtID:        "transactional-revoke",
+		LoginStatus:  model.LoginStatusSuccess,
+		IsRevoked:    model.IsRevokedNo,
+		TokenExpires: &expires,
+	}
+	if err := db.Create(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	service := NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db})
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	prepared, err := service.PrepareUserTokenRevocation(tx, entry.UID, model.RevokedCodePasswordChangeAdmin, "password changed")
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("prepare revocation failed: %v", err)
+	}
+	if prepared == nil {
+		_ = tx.Rollback()
+		t.Fatal("expected prepared revocation")
+	}
+	if err := tx.Rollback().Error; err != nil {
+		t.Fatalf("rollback failed: %v", err)
+	}
+
+	var stored model.AdminLoginLogs
+	if err := db.First(&stored, entry.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.IsRevoked != model.IsRevokedNo {
+		t.Fatalf("expected rollback to preserve active session, got %d", stored.IsRevoked)
+	}
+}

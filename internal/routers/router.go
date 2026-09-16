@@ -71,6 +71,7 @@ func createEngine() (*gin.Engine, error) {
 		loginRateLimitHandler(),
 		middleware.RequestCostHandler(),
 		middleware.RequestLocaleHandler(),
+		middleware.RequestBodyLimitHandler(),
 		middleware.ParseTokenHandler(),
 	}
 	if debug {

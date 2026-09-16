@@ -8,7 +8,9 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	pkgErrors "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -17,6 +19,17 @@ import (
 // FileResourceController 文件资源管理控制器。
 type FileResourceController struct {
 	controller.Api
+}
+
+type fileAuditMutationService interface {
+	UpdateFileWithAudit(params *form.FileUpdate) (any, service.FileAuditDiff[[]service.FileAuditSnapshot], error)
+	UpdateFolderWithAudit(params *form.FileFolderUpdate, uid uint) (*resources.FileFolderResources, service.FileAuditDiff[*service.FileFolderAuditSnapshot], error)
+	MoveFolderWithAudit(params *form.FileFolderMove, uid uint) (*resources.FileFolderResources, service.FileAuditDiff[*service.FileFolderAuditSnapshot], error)
+	MoveFilesWithAudit(params *form.FileMove) (*resources.FileMoveResult, service.FileAuditDiff[[]service.FileAuditSnapshot], error)
+}
+
+var newFileAuditMutationService = func() fileAuditMutationService {
+	return service.NewFileResourceService()
 }
 
 // FolderStats 查询目录统计信息（文件数和子目录数）。
@@ -37,6 +50,59 @@ func NewFileResourceController() *FileResourceController {
 	return &FileResourceController{}
 }
 
+func setFileAuditResult(c *gin.Context, action string, result any) {
+	middleware.SetAuditChangeDiff(c, nil, gin.H{
+		"action": action,
+		"result": result,
+	})
+}
+
+func setFileAuditChange(c *gin.Context, action string, before any, after any) {
+	middleware.SetAuditChangeDiff(c,
+		gin.H{"action": action, "value": before},
+		gin.H{"action": action, "value": after},
+	)
+}
+
+func fileAuditSummary(file *resources.FileResourceResources) gin.H {
+	if file == nil {
+		return gin.H{}
+	}
+	return gin.H{
+		"id":           file.ID,
+		"uuid":         file.UUID,
+		"display_name": file.DisplayName,
+		"folder_id":    file.FolderID,
+		"is_public":    file.IsPublic,
+	}
+}
+
+func fileAuditBatchSummary(result *resources.FileLocalUploadBatchResult) gin.H {
+	if result == nil {
+		return gin.H{}
+	}
+	ids := make([]uint, 0, len(result.Items))
+	for _, item := range result.Items {
+		if item != nil {
+			ids = append(ids, item.ID)
+		}
+	}
+	return gin.H{"total": result.Total, "success": result.Success, "failed": result.Failed, "file_ids": ids}
+}
+
+func fileAuditCompleteBatchSummary(result *resources.FileUploadCompleteBatchResult) gin.H {
+	if result == nil {
+		return gin.H{}
+	}
+	ids := make([]uint, 0, len(result.Items))
+	for _, item := range result.Items {
+		if item != nil && item.Data != nil {
+			ids = append(ids, item.Data.ID)
+		}
+	}
+	return gin.H{"total": result.Total, "success": result.Success, "failed": result.Failed, "file_ids": ids}
+}
+
 // List 分页查询文件资源列表。
 func (api FileResourceController) List(c *gin.Context) {
 	params := form.NewFileResourceListQuery()
@@ -45,6 +111,16 @@ func (api FileResourceController) List(c *gin.Context) {
 	}
 
 	result, err := service.NewFileResourceService().List(params)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+// UploadOptions 返回当前用户执行上传所需的最小能力配置。
+func (api FileResourceController) UploadOptions(c *gin.Context) {
+	result, err := service.NewFileResourceService().UploadOptions(c.Request.Context())
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -67,6 +143,7 @@ func (api FileResourceController) Export(c *gin.Context) {
 		"is_public":         params.IsPublic,
 		"folder_id":         params.FolderID,
 		"include_subfolder": params.IncludeSubfolder,
+		"include_hidden":    params.IncludeHidden,
 		"storage_driver":    params.StorageDriver,
 		"storage_status":    params.StorageStatus,
 		"is_referenced":     params.IsReferenced,
@@ -106,11 +183,12 @@ func (api FileResourceController) Update(c *gin.Context) {
 		return
 	}
 
-	result, err := service.NewFileResourceService().UpdateFile(params)
+	result, diff, err := newFileAuditMutationService().UpdateFileWithAudit(params)
 	if err != nil {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditChange(c, "update_file", diff.Before, diff.After)
 	api.Success(c, result)
 }
 
@@ -135,6 +213,7 @@ func (api FileResourceController) Delete(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "delete_file", gin.H{"id": params.ID, "deleted_reason": params.DeletedReason})
 	api.Success(c, nil)
 }
 
@@ -149,6 +228,7 @@ func (api FileResourceController) BatchDelete(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "batch_delete_files", result)
 	api.Success(c, result)
 }
 
@@ -176,6 +256,7 @@ func (api FileResourceController) Restore(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "restore_file", gin.H{"id": params.ID})
 	api.Success(c, nil)
 }
 
@@ -188,6 +269,7 @@ func (api FileResourceController) Destroy(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "destroy_file", gin.H{"id": params.ID})
 	api.Success(c, nil)
 }
 
@@ -200,6 +282,7 @@ func (api FileResourceController) BatchRestore(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "batch_restore_files", gin.H{"ids": params.IDs})
 	api.Success(c, nil)
 }
 
@@ -213,6 +296,7 @@ func (api FileResourceController) BatchDestroy(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "batch_destroy_files", result)
 	api.Success(c, result)
 }
 
@@ -253,6 +337,7 @@ func (api FileResourceController) FolderCreate(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "create_file_folder", result)
 	api.Success(c, result)
 }
 
@@ -261,11 +346,12 @@ func (api FileResourceController) FolderUpdate(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().UpdateFolder(params, api.GetCurrentUserID(c))
+	result, diff, err := newFileAuditMutationService().UpdateFolderWithAudit(params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditChange(c, "update_file_folder", diff.Before, diff.After)
 	api.Success(c, result)
 }
 
@@ -288,6 +374,7 @@ func (api FileResourceController) FolderDelete(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "delete_file_folder", gin.H{"id": params.ID, "deleted_reason": params.DeletedReason})
 	api.Success(c, nil)
 }
 
@@ -296,11 +383,12 @@ func (api FileResourceController) FolderMove(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().MoveFolder(params, api.GetCurrentUserID(c))
+	result, diff, err := newFileAuditMutationService().MoveFolderWithAudit(params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditChange(c, "move_file_folder", diff.Before, diff.After)
 	api.Success(c, result)
 }
 
@@ -309,18 +397,19 @@ func (api FileResourceController) Move(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().MoveFiles(params)
+	result, diff, err := newFileAuditMutationService().MoveFilesWithAudit(params)
 	if err != nil {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditChange(c, "move_files", diff.Before, gin.H{"files": diff.After, "result": result})
 	api.Success(c, result)
 }
 
 func (api FileResourceController) UploadLocal(c *gin.Context) {
 	params := form.NewFileLocalUploadForm()
 	if err := c.ShouldBind(params); err != nil {
-		api.FailCode(c, pkgErrors.InvalidParameter)
+		validator.ResponseError(c, err)
 		return
 	}
 	multipartForm, err := c.MultipartForm()
@@ -334,6 +423,7 @@ func (api FileResourceController) UploadLocal(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "upload_files", fileAuditBatchSummary(result))
 	if len(files) <= 1 {
 		if result != nil && len(result.Items) > 0 {
 			api.Success(c, result.Items[0])
@@ -381,6 +471,7 @@ func (api FileResourceController) UploadComplete(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "complete_direct_upload", fileAuditSummary(result))
 	api.Success(c, result)
 }
 
@@ -394,6 +485,7 @@ func (api FileResourceController) UploadCompleteBatch(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "complete_direct_upload_batch", fileAuditCompleteBatchSummary(result))
 	api.Success(c, result)
 }
 
@@ -422,6 +514,7 @@ func (api FileResourceController) MultipartComplete(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "complete_multipart_upload", fileAuditSummary(result))
 	api.Success(c, result)
 }
 
@@ -431,9 +524,10 @@ func (api FileResourceController) MultipartAbort(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	if err := service.NewFileResourceService().MultipartAbort(params); err != nil {
+	if err := service.NewFileResourceService().MultipartAbort(c.Request.Context(), params, api.GetCurrentUserID(c)); err != nil {
 		api.Err(c, err)
 		return
 	}
+	setFileAuditResult(c, "abort_multipart_upload", gin.H{"status": "aborted"})
 	api.Success(c, nil)
 }

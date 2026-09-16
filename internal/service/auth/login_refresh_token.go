@@ -131,29 +131,15 @@ func (s *LoginService) RefreshByToken(refreshToken string, logInfo LoginLogInfo)
 	}
 
 	oldRefreshHash := s.calculateTokenHash(refreshToken)
-	adminUserModel := model.NewAdminUsers()
-	adminUserModel.SetDB(db)
-	if err := adminUserModel.GetById(refreshClaims.UserID); err != nil {
-		return nil, "", e.NewBusinessError(e.RefreshTokenInvalid)
-	}
-	if adminUserModel.Status != model.AdminUserStatusEnabled {
-		return nil, "", e.NewBusinessError(e.RefreshTokenInvalid)
-	}
-	claims := s.newAdminCustomClaims(adminUserModel)
-	accessToken, err := s.generateAccessToken(claims)
-	if err != nil {
-		return nil, "", e.NewBusinessError(e.TokenGenerateFailed)
-	}
-	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
-	newLog, newRefreshToken, err := s.issueRefreshToken(adminUserModel, claims, accessToken, logInfo, model.LoginTypeRefresh)
-	if err != nil {
-		return nil, "", e.NewBusinessError(e.TokenGenerateFailed)
-	}
-
-	// JWT 签名、AES 加密和 hash 构建都在事务外完成；事务内只保留
-	// “锁定旧 refresh 会话 -> 撤销旧会话 -> 插入新会话”这组 DB 操作，
-	// 缩短行锁持有时间，并确保并发 refresh 最多只有一个请求能轮换成功。
+	var claims tokenutil.AdminCustomClaims
+	var accessToken, newRefreshToken string
 	err = db.Transaction(func(tx *gorm.DB) error {
+		// 与账号安全变更统一使用 user -> session 的加锁顺序，确保禁用、改密、
+		// 超级身份变更和 refresh 轮换之间不会产生提交后的新活跃会话。
+		adminUserModel, err := loadAdminUserForAuthentication(tx, refreshClaims.UserID)
+		if err != nil || adminUserModel.Status != model.AdminUserStatusEnabled {
+			return e.NewBusinessError(e.RefreshTokenInvalid)
+		}
 		current := model.NewAdminLoginLogs()
 		current.SetDB(tx)
 		if err := current.FindActiveByRefreshTokenHashForUpdate(oldRefreshHash, now); err != nil {
@@ -165,6 +151,18 @@ func (s *LoginService) RefreshByToken(refreshToken string, logInfo LoginLogInfo)
 		if current.UID != adminUserModel.ID {
 			return e.NewBusinessError(e.RefreshTokenInvalid)
 		}
+
+		claims = s.newAdminCustomClaims(adminUserModel)
+		accessToken, err = s.generateAccessToken(claims)
+		if err != nil {
+			return e.NewBusinessError(e.TokenGenerateFailed)
+		}
+		logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
+		newLog, issuedRefreshToken, issueErr := s.issueRefreshToken(adminUserModel, claims, accessToken, logInfo, model.LoginTypeRefresh)
+		if issueErr != nil {
+			return e.NewBusinessError(e.TokenGenerateFailed)
+		}
+		newRefreshToken = issuedRefreshToken
 
 		revokedAt := utils.FormatDate{Time: now}
 		if rows, err := current.RevokeActiveByRefreshTokenHash(oldRefreshHash, model.RevokedCodeTokenRefresh, "refresh token 轮换", revokedAt); err != nil {

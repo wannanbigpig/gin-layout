@@ -157,6 +157,10 @@ func replacePermissionsInDB(tx *gorm.DB, subjectPolicies map[string][][]string) 
 	if len(subjects) == 0 {
 		return nil
 	}
+	targetVersion, err := defaultPolicyVersionStore.beginMutation(tx)
+	if err != nil {
+		return err
+	}
 	if err := tx.Where("ptype = ? AND v0 IN ?", "p", subjects).Delete(&casbinPolicyRule{}).Error; err != nil {
 		return err
 	}
@@ -174,9 +178,12 @@ func replacePermissionsInDB(tx *gorm.DB, subjectPolicies map[string][][]string) 
 		}
 	}
 	if len(rows) == 0 {
-		return nil
+		return defaultPolicyVersionStore.finishMutation(tx, targetVersion)
 	}
-	return tx.Create(&rows).Error
+	if err := tx.Create(&rows).Error; err != nil {
+		return err
+	}
+	return defaultPolicyVersionStore.finishMutation(tx, targetVersion)
 }
 
 func buildCasbinPolicyRows(subject string, policy [][]string) []casbinPolicyRule {

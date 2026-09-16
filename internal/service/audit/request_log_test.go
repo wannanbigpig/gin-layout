@@ -3,6 +3,9 @@ package audit
 import (
 	"strings"
 	"testing"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestResolveRequestLogOrderByDefaultsToCreatedAtDesc(t *testing.T) {
@@ -44,5 +47,28 @@ func TestBuildRequestLogQueryIncludesExecutionTimeScopeFilter(t *testing.T) {
 	}
 	if len(args) != 1 || args[0] != "stream" {
 		t.Fatalf("unexpected args: %#v", args)
+	}
+}
+
+func TestRequestLogChangeFilterExcludesEmptyDiffs(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE request_logs (id INTEGER PRIMARY KEY, change_diff text)").Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, diff := range []any{nil, "", "[]", " {} ", `[{"field":"name","before":"old","after":"new"}]`} {
+		if err := db.Exec("INSERT INTO request_logs (change_diff) VALUES (?)", diff).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	condition, args := buildRequestLogQuery(requestLogQueryInput{HasChangeDiff: 1}).Build()
+	var ids []uint
+	if err := db.Table("request_logs").Where(condition, args...).Pluck("id", &ids).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != 5 {
+		t.Fatalf("unexpected change records: %v", ids)
 	}
 }
