@@ -47,6 +47,17 @@ func TestExportCenterServiceCreateListDetailAndSuccess(t *testing.T) {
 	if err := svc.MarkSuccess(context.Background(), 101, ExportRecordSuccessInput{File: file}); err != nil {
 		t.Fatalf("mark success failed: %v", err)
 	}
+	completed, err := svc.CompletedRecordForTaskRun(context.Background(), 101)
+	if err != nil {
+		t.Fatalf("query completed record failed: %v", err)
+	}
+	if completed == nil || completed.FileID != file.ID || completed.FileUUID != file.UUID {
+		t.Fatalf("completed record should be reusable for redelivery: %#v", completed)
+	}
+	missing, err := svc.CompletedRecordForTaskRun(context.Background(), 999)
+	if err != nil || missing != nil {
+		t.Fatalf("missing completed record mismatch: record=%#v err=%v", missing, err)
+	}
 
 	list, err := svc.List(&form.ExportRecordList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},

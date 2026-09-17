@@ -39,3 +39,24 @@ func TestCreateAdminUserAllowsRequiredFields(t *testing.T) {
 		t.Fatalf("expected required create fields to pass validation, got %v", err)
 	}
 }
+
+func TestUpdateProfileRequiresCurrentPasswordOnlyWhenChangingPassword(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "ordinary profile update", body: `{"nickname":"新昵称"}`},
+		{name: "password without current password", body: `{"password":"new-password"}`, wantErr: true},
+		{name: "password with current password", body: `{"current_password":"old-password","password":"new-password"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := bindJSONBody(t, tt.body, NewUpdateProfile())
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validation error = %v, wantErr=%v", err, tt.wantErr)
+			}
+		})
+	}
+}

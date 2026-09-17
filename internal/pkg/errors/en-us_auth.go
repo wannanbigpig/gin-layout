@@ -24,6 +24,8 @@ func init() {
 		SuperAdminMustKeepRole:  "Default super admin must keep super admin role",
 		LoginAccountLocked:      "Account is locked, please try again later",
 		RefreshTokenInvalid:     "Refresh token is invalid or expired",
+		CurrentPasswordRequired: "Current password is required when changing password",
+		CurrentPasswordWrong:    "Current password is incorrect",
 	})
 
 	mergeEnUSTextKey(map[string]string{

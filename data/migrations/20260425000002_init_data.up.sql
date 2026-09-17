@@ -70,7 +70,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (25, 'ant-design:delete-outlined', 'department:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 9, 3, '0,2,9', 0, '', @init_time, @init_time, 0),
 (26, 'ant-design:edit-filled', 'api:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 3, 3, '0,2,3', 0, '', @init_time, @init_time, 0),
 (29, 'ep:tickets', '', 'log', '/log', 'RequestLog', 'Log', '', '', '', 0.00, 1, 1, 1, 0, 0, 98, 1, 0, 1, '0', 3, '', @init_time, @init_time, 0),
-(30, 'ep:document', '', 'request-log', '/log/request-log', '', 'RequestLog', 'log:request', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 4, '', @init_time, @init_time, 0),
+(30, 'ep:document', '', 'request-log', '/log/request-log', '', 'RequestLog', 'log:request', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 3, '', @init_time, @init_time, 0),
 (31, 'ep:document', '', 'admin-login-log', '/log/admin-login-log', '', 'AdminLoginLog', 'log:adminLogin', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 29, 2, '0,29', 2, '', @init_time, @init_time, 0),
 (32, 'ep:document', 'adminLoginLog:detail', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', @init_time, @init_time, 0),
 (33, 'ep:document', 'requestLog:detail', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', @init_time, @init_time, 0),
@@ -82,7 +82,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (39, 'ant-design:search-outlined', 'adminLoginLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', @init_time, @init_time, 0),
 (40, 'ant-design:search-outlined', 'requestLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', @init_time, @init_time, 0),
 (42, 'ep:setting', '', 'system', '/system', 'SysConfig', 'System', '', '', '', 0.00, 1, 1, 1, 0, 0, 96, 1, 0, 1, '0', 5, '', @init_time, @init_time, 0),
-(43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system:config', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 8, '', @init_time, @init_time, 0),
+(43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system:config', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 10, '', @init_time, @init_time, 0),
 (44, 'ep:collection-tag', '', 'dict', '/system/dict', '', 'SysDict', 'system:dict', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 42, 2, '0,42', 4, '', @init_time, @init_time, 0),
 (45, 'ant-design:search-outlined', 'sysConfig:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 43, 3, '0,42,43', 0, '', @init_time, @init_time, 0),
 (46, 'ant-design:plus-outlined', 'sysConfig:add', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 43, 3, '0,42,43', 0, '', @init_time, @init_time, 0),
@@ -101,7 +101,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (59, 'ep:circle-close', 'task:cancel', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 55, 3, '0,54,55', 0, '', @init_time, @init_time, 0),
 (60, 'ep:view', 'task:detail', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 60, 3, 55, 3, '0,54,55', 0, '', @init_time, @init_time, 0),
 (61, 'ant-design:search-outlined', 'requestLog:export', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 30, 3, '0,29,30', 0, '', @init_time, @init_time, 0),
-(62, 'ep:setting', 'requestLog:maskConfig', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 30, 3, '0,29,30', 0, '', @init_time, @init_time, 0),
+(62, 'ep:setting', 'requestLog:maskConfig', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 43, 3, '0,42,43', 0, '', @init_time, @init_time, 0),
 (63, 'ep:folder-opened', '', 'file', '/system/file', '', 'FileResource', 'system:file', '', '', 0.00, 1, 1, 1, 0, 0, 80, 2, 42, 2, '0,42', 2, '', @init_time, @init_time, 0),
 (64, 'ant-design:search-outlined', 'file:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 63, 3, '0,42,63', 0, '', @init_time, @init_time, 0),
 (65, 'ant-design:delete-outlined', 'file:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 63, 3, '0,42,63', 0, '', @init_time, @init_time, 0),
@@ -116,9 +116,9 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (74, 'ant-design:delete-filled', 'file:destroy', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 63, 3, '0,42,63', 0, '', @init_time, @init_time, 0),
 (75, 'ant-design:edit-filled', 'file:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 85, 3, 63, 3, '0,42,63', 0, '', @init_time, @init_time, 0),
 (76, 'ant-design:plus-outlined', 'file:create', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 95, 3, 63, 3, '0,42,63', 0, '', @init_time, @init_time, 0),
-(78, 'ep:data-line', 'dashboard:overview', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 1, 2, '0,1', 0, '', @init_time, @init_time, 0),
-(79, 'ep:trend-charts', 'dashboard:statistics', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 1, 2, '0,1', 0, '', @init_time, @init_time, 0),
-(80, 'ep:monitor', 'dashboard:monitor', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 1, 2, '0,1', 0, '', @init_time, @init_time, 0),
+(78, 'ep:data-line', 'dashboard:overview', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 1, 2, '0,1', 0, '全局运营概览 / Global operational overview', @init_time, @init_time, 0),
+(79, 'ep:trend-charts', 'dashboard:statistics', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 1, 2, '0,1', 0, '全局趋势与运行统计 / Global trends and operational statistics', @init_time, @init_time, 0),
+(80, 'ep:monitor', 'dashboard:monitor', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 1, 2, '0,1', 0, '服务器运行状态监控 / Server health monitoring', @init_time, @init_time, 0),
 (81, 'ep:message', '', 'notification-manage', '/system/notification-manage', '', 'NotificationManage', 'system:notificationManage', '', '', 0.00, 1, 1, 1, 0, 0, 55, 2, 42, 2, '0,42', 1, '', @init_time, @init_time, 0),
 (82, 'ep:promotion', 'notification:send', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 81, 3, '0,42,81', 0, '', @init_time, @init_time, 0),
 (83, 'ep:goods', '', 'business', '/business', 'Product', 'Business', '', '', '', 0.00, 1, 1, 1, 0, 0, 95, 1, 0, 1, '0', 1, '产品示例业务分组', @init_time, @init_time, 0),
@@ -126,7 +126,8 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (85, 'ant-design:search-outlined', 'product:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 84, 3, '0,83,84', 0, '', @init_time, @init_time, 0),
 (86, 'ant-design:plus-outlined', 'product:create', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 84, 3, '0,83,84', 0, '', @init_time, @init_time, 0),
 (87, 'ant-design:edit-filled', 'product:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 84, 3, '0,83,84', 0, '', @init_time, @init_time, 0),
-(88, 'ant-design:delete-outlined', 'product:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 84, 3, '0,83,84', 0, '', @init_time, @init_time, 0);
+(88, 'ant-design:delete-outlined', 'product:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 84, 3, '0,83,84', 0, '', @init_time, @init_time, 0),
+(89, 'ep:list', '', 'todo/list', '/todo/list', '', 'TodoList', 'todo:index', '', '', 0.00, 1, 1, 0, 0, 0, 97, 2, 0, 1, '0', 0, '当前登录用户的个人与业务待办', @init_time, @init_time, 0);
 
 INSERT INTO `menu` (`icon`, `code`, `path`, `full_path`, `redirect`, `name`, `component_key`, `animate_enter`, `animate_leave`, `animate_duration`, `is_show`, `status`, `is_auth`, `is_external_links`, `is_new_window`, `sort`, `type`, `pid`, `level`, `pids`, `children_num`, `description`, `created_at`, `updated_at`, `deleted_at`)
 SELECT 'ant-design:setting-outlined', 'task:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 50, 3, parent.`id`, parent.`level` + 1, CONCAT(parent.`pids`, ',', parent.`id`), 0, '', @init_time, @init_time, 0
@@ -261,17 +262,18 @@ SELECT `id`,
            WHEN 74 THEN '硬删除'
            WHEN 75 THEN '编辑'
            WHEN 76 THEN '新增'
-           WHEN 78 THEN '仪表盘概览'
-           WHEN 79 THEN '仪表盘统计'
-           WHEN 80 THEN '服务器监控'
+           WHEN 78 THEN '全局概览'
+           WHEN 79 THEN '全局统计'
+           WHEN 80 THEN '全局服务器监控'
            WHEN 81 THEN '通知管理'
            WHEN 82 THEN '发送通知'
            WHEN 83 THEN '业务管理'
-           WHEN 84 THEN '产品管理'
+           WHEN 84 THEN '产品示例'
            WHEN 85 THEN '列表'
            WHEN 86 THEN '新增'
            WHEN 87 THEN '编辑'
            WHEN 88 THEN '删除'
+           WHEN 89 THEN '我的待办'
            ELSE ''
            END,
        `created_at`,
@@ -370,17 +372,18 @@ SELECT `id`,
            WHEN 74 THEN 'Destroy'
            WHEN 75 THEN 'Edit'
            WHEN 76 THEN 'Create'
-           WHEN 78 THEN 'Dashboard Overview'
-           WHEN 79 THEN 'Dashboard Statistics'
-           WHEN 80 THEN 'Server Monitor'
+           WHEN 78 THEN 'Global Overview'
+           WHEN 79 THEN 'Global Statistics'
+           WHEN 80 THEN 'Global Server Monitor'
            WHEN 81 THEN 'Notification Management'
            WHEN 82 THEN 'Send Notification'
            WHEN 83 THEN 'Business'
-           WHEN 84 THEN 'Products'
+           WHEN 84 THEN 'Reference Products'
            WHEN 85 THEN 'List'
            WHEN 86 THEN 'Create'
            WHEN 87 THEN 'Edit'
            WHEN 88 THEN 'Delete'
+           WHEN 89 THEN 'My Todos'
            ELSE ''
            END,
        `created_at`,

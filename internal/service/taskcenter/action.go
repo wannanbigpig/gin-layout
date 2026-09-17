@@ -48,8 +48,14 @@ var executeCronHandler = func(ctx context.Context, handler string, payload map[s
 
 var notifyTaskDefinitionChanged = NotifyTaskDefinitionChanged
 
+const taskLockReleaseTimeout = 3 * time.Second
+
+type taskLock interface {
+	Release(context.Context) error
+}
+
 // acquireTaskLock 获取高风险任务分布式锁。Redis 不可用时 fail-closed（拒绝执行）。
-var acquireTaskLock = func(ctx context.Context, taskCode string) (*TaskLock, error) {
+var acquireTaskLock = func(ctx context.Context, taskCode string) (taskLock, error) {
 	client := data.RedisClient()
 	if client == nil {
 		return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "Redis 不可用，无法获取高危任务锁")
@@ -62,6 +68,19 @@ var acquireTaskLock = func(ctx context.Context, taskCode string) (*TaskLock, err
 		return nil, e.NewBusinessError(e.ServiceDependencyNotReady, "Redis 不可用，无法获取高危任务锁")
 	}
 	return lock, nil
+}
+
+func releaseTaskLock(ctx context.Context, lock taskLock, taskCode string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskLockReleaseTimeout)
+	defer cancel()
+	if err := lock.Release(releaseCtx); err != nil {
+		log.Logger.Error("高危任务释放分布式锁失败",
+			zap.String("task_code", taskCode),
+			zap.Error(err))
+	}
 }
 
 type exportTaskService interface {
@@ -307,7 +326,7 @@ func (s *TaskCenterService) triggerCronTask(ctx context.Context, definition *mod
 		if lockErr != nil {
 			return nil, lockErr
 		}
-		defer lock.Release(ctx)
+		defer releaseTaskLock(ctx, lock, definition.Code)
 	}
 
 	run, err := NewRunRecorder().Start(ctx, RunStart{

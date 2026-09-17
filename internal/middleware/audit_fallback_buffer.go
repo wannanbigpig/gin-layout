@@ -2,14 +2,14 @@ package middleware
 
 import (
 	"context"
-	"net/http"
+	"errors"
 	"sync"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/config"
-	perrors "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	audit "github.com/wannanbigpig/gin-layout/internal/service/audit"
 )
@@ -34,8 +34,7 @@ type bufferedAuditItem struct {
 //
 // 设计要点：
 //   - 容量来自配置（默认 1024），首次写入时按当时配置初始化 worker。
-//   - 满时优先丢弃“低风险只读 2xx”的最旧条目，腾出空间接纳新条目；
-//     找不到可丢弃条目时返回 false，调用方走同步 INSERT 兜底。
+//   - 满时不驱逐已接收条目，返回 false 由调用方走同步 INSERT 兜底。
 //   - 单个后台 worker 拉取最多 batchSize 条或等待最长 flushInterval 时间后批量落库。
 //   - 退出阶段调用 Stop() 阻塞至缓冲清空或达到 drain 超时。
 type auditFallbackBuffer struct {
@@ -66,59 +65,13 @@ func (b *auditFallbackBuffer) Offer(kind string, snapshot *audit.AuditLogSnapsho
 	b.ensureStartedLocked()
 
 	if len(b.items) >= b.capacity {
-		if !b.dropLowRiskOldestLocked() {
-			b.mu.Unlock()
-			return false
-		}
+		b.mu.Unlock()
+		return false
 	}
 	b.items = append(b.items, &bufferedAuditItem{kind: kind, snapshot: snapshot})
 	b.mu.Unlock()
 
 	b.notifyWorker()
-	return true
-}
-
-// dropLowRiskOldestLocked 从队首扫描丢弃首个低风险只读 2xx 条目，否则返回 false。
-func (b *auditFallbackBuffer) dropLowRiskOldestLocked() bool {
-	for idx, item := range b.items {
-		if item == nil || item.snapshot == nil {
-			continue
-		}
-		if isLowRiskReadOnly2xx(item.snapshot) {
-			snap := item.snapshot
-			log.Warn("Audit fallback buffer full, dropping low-risk oldest entry",
-				zap.String("kind", item.kind),
-				zap.String("request_id", snap.RequestID),
-				zap.String("path", snap.BaseURL),
-				zap.String("method", snap.Method),
-				zap.Int("response_status", snap.ResponseStatus),
-				zap.Int("operation_status", snap.OperationStatus))
-			b.items = append(b.items[:idx], b.items[idx+1:]...)
-			return true
-		}
-	}
-	return false
-}
-
-// isLowRiskReadOnly2xx 判断快照是否为"低风险 + 只读 + HTTP/业务均成功"，用于缓冲满时的丢弃优先级。
-//
-// 新契约下 OperationStatus != 0 表示业务失败，不应被当作低风险可丢弃条目。
-func isLowRiskReadOnly2xx(snapshot *audit.AuditLogSnapshot) bool {
-	if snapshot == nil {
-		return false
-	}
-	if snapshot.IsHighRisk != 0 {
-		return false
-	}
-	if !isReadOnlyMethod(snapshot.Method) {
-		return false
-	}
-	if snapshot.ResponseStatus != 0 && snapshot.ResponseStatus >= http.StatusBadRequest {
-		return false
-	}
-	if snapshot.OperationStatus != 0 {
-		return false
-	}
 	return true
 }
 
@@ -176,8 +129,12 @@ func (b *auditFallbackBuffer) runWorker() {
 
 // drainOnce 单次拉取一批条目并尝试批量落库。
 func (b *auditFallbackBuffer) drainOnce() {
+	if !tryAcquireAuditStorageAttempt() {
+		return
+	}
 	batch := b.takeBatch(b.batchSize)
 	if len(batch) == 0 {
+		storageRecoveryProbe.Store(false)
 		return
 	}
 	b.persistBatch(batch)
@@ -191,7 +148,36 @@ func (b *auditFallbackBuffer) drainAll() {
 			return
 		}
 		b.persistBatch(batch)
+		// 停机时忽略旧的冷却状态并至少探测一次：存储若已恢复则继续排空；
+		// 仍不可用时 persistBatch 会放回当前批次，此处停止避免紧循环。
+		if auditStorageInCooldown() {
+			log.Warn("Audit fallback buffer drain stopped while storage is unavailable",
+				zap.Int("pending", b.pendingCount()))
+			return
+		}
 	}
+}
+
+func (b *auditFallbackBuffer) pendingCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.items)
+}
+
+// restoreBatch 把存储不可用时取出的整批放回队首，等待冷却期后重试。
+// 批次在锁外落库期间可能有新条目入队，因此故障瞬间最多短暂超出一个 batchSize；
+// 后续 Offer 会回退到同步落库，不会无界增长。
+func (b *auditFallbackBuffer) restoreBatch(batch []*bufferedAuditItem) {
+	if len(batch) == 0 {
+		return
+	}
+	b.mu.Lock()
+	restored := make([]*bufferedAuditItem, 0, len(batch)+len(b.items))
+	restored = append(restored, batch...)
+	restored = append(restored, b.items...)
+	b.items = restored
+	b.mu.Unlock()
+	audit.SetFallbackPending(b.pendingCount())
 }
 
 func (b *auditFallbackBuffer) takeBatch(n int) []*bufferedAuditItem {
@@ -205,7 +191,10 @@ func (b *auditFallbackBuffer) takeBatch(n int) []*bufferedAuditItem {
 	}
 	taken := make([]*bufferedAuditItem, n)
 	copy(taken, b.items[:n])
-	b.items = append(b.items[:0], b.items[n:]...)
+	remaining := copy(b.items, b.items[n:])
+	clear(b.items[remaining:])
+	b.items = b.items[:remaining]
+	audit.SetFallbackPending(len(b.items))
 	return taken
 }
 
@@ -225,38 +214,106 @@ func (b *auditFallbackBuffer) persistBatch(batch []*bufferedAuditItem) {
 	defer cancel()
 
 	if err := currentDeps().PersistBatch(ctx, snapshots); err != nil {
-		if perrors.IsDependencyNotReady(err) {
-			if markAuditStorageUnavailable() {
-				log.Warn("Audit log storage unavailable, skip batch persistence",
-					zap.Int("batch_size", len(snapshots)),
-					zap.Error(err))
+		audit.RecordPersistFailure()
+		if isPermanentAuditPersistenceError(err) {
+			log.Error("Audit log batch contains permanently invalid data; isolating records",
+				zap.Int("batch_size", len(snapshots)),
+				zap.Error(err))
+			if b.persistIsolated(ctx, batch) {
+				markAuditStorageAvailable()
 			}
-			// 存储不可用：丢弃这批，避免阻塞 worker；冷却期内后续条目被 enqueueAuditLog 短路，
-			// 冷却期过后放行探测，存储恢复即自动复位。
 			return
 		}
-		log.Error("Batch persist audit log failed, fallback to per-item sync persist",
-			zap.Int("batch_size", len(snapshots)),
-			zap.Error(err))
-		// 批量失败但不是依赖未就绪：逐条同步兜底，最大化保留可写入的数据。
-		for _, item := range batch {
-			if item == nil || item.snapshot == nil {
-				continue
-			}
-			reportAuditPersistenceResult(item.kind, item.snapshot, "sync_fallback_batch_error")
+		if markAuditStorageUnavailable() {
+			log.Warn("Audit log batch persistence failed, defer the atomic batch",
+				zap.Int("batch_size", len(snapshots)),
+				zap.Error(err))
 		}
+		// PersistAuditLogsBatch 使用显式事务，批次要么全部提交、要么全部回滚。
+		// 任何错误都保留原批次并延迟重试，避免连接断开时逐条写放大故障。
+		b.restoreBatch(batch)
 		return
 	}
 
 	markAuditStorageAvailable()
+	audit.RecordPersisted(len(snapshots))
 }
 
-// Stop 触发缓冲停止并等待 worker 完成 drain。drainTimeout<=0 时立即返回不等待。
-func (b *auditFallbackBuffer) Stop(drainTimeout time.Duration) {
+// persistIsolated 仅在数据库明确返回永久行错误时二分批次，保留可写记录并隔离坏记录。
+// 未知错误按临时存储故障处理，避免数据库故障期间发生逐条写放大。
+func (b *auditFallbackBuffer) persistIsolated(ctx context.Context, batch []*bufferedAuditItem) bool {
+	if len(batch) == 0 {
+		return true
+	}
+	snapshots := snapshotsFromBufferedAuditItems(batch)
+	if len(snapshots) == 0 {
+		return true
+	}
+	if err := currentDeps().PersistBatch(ctx, snapshots); err != nil {
+		audit.RecordPersistFailure()
+		if !isPermanentAuditPersistenceError(err) {
+			if markAuditStorageUnavailable() {
+				log.Warn("Audit log storage failed while isolating invalid records",
+					zap.Int("batch_size", len(snapshots)),
+					zap.Error(err))
+			}
+			b.restoreBatch(batch)
+			return false
+		}
+		if len(batch) == 1 {
+			audit.RecordPermanentDrop()
+			log.Error("Drop permanently invalid audit log record",
+				zap.String("request_id", snapshots[0].RequestID),
+				zap.Error(err))
+			return true
+		}
+		middle := len(batch) / 2
+		leftHealthy := b.persistIsolated(ctx, batch[:middle])
+		rightHealthy := b.persistIsolated(ctx, batch[middle:])
+		return leftHealthy && rightHealthy
+	}
+	audit.RecordPersisted(len(snapshots))
+	return true
+}
+
+func snapshotsFromBufferedAuditItems(batch []*bufferedAuditItem) []*audit.AuditLogSnapshot {
+	snapshots := make([]*audit.AuditLogSnapshot, 0, len(batch))
+	for _, item := range batch {
+		if item == nil || item.snapshot == nil {
+			continue
+		}
+		snapshots = append(snapshots, item.snapshot)
+	}
+	return snapshots
+}
+
+func isPermanentAuditPersistenceError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+	switch mysqlErr.Number {
+	case 1048, // column cannot be null
+		1062, // duplicate entry
+		1264, // out of range
+		1292, // incorrect value
+		1366, // incorrect string value
+		1406, // data too long
+		1452, // foreign key constraint
+		3819: // check constraint
+		return true
+	default:
+		return false
+	}
+}
+
+// Stop 触发缓冲停止并等待 worker 完成 drain。
+// 返回 drained=false 时，调用方不得继续关闭 DB，否则会与仍在落库的 worker 竞态。
+func (b *auditFallbackBuffer) Stop(drainTimeout time.Duration) (drained bool, pending int) {
 	b.mu.Lock()
 	if !b.started {
 		b.mu.Unlock()
-		return
+		return true, 0
 	}
 	stopOnce := &b.stopOnce
 	stopCh := b.stopCh
@@ -266,21 +323,24 @@ func (b *auditFallbackBuffer) Stop(drainTimeout time.Duration) {
 	stopOnce.Do(func() { close(stopCh) })
 
 	if drainTimeout <= 0 {
-		return
+		return false, b.pendingCount()
 	}
 	select {
 	case <-doneCh:
+		pending = b.pendingCount()
+		return pending == 0, pending
 	case <-time.After(drainTimeout):
+		return false, b.pendingCount()
 	}
 }
 
-// StopAuditLogQueueDrain 在进程退出前调用以等待降级缓冲清空，建议传入 ≤5s 的超时。
-func StopAuditLogQueueDrain(drainTimeout time.Duration) {
-	fallbackBuffer.Stop(drainTimeout)
+// StopAuditLogQueueDrain 在进程退出前调用以等待降级缓冲清空。
+func StopAuditLogQueueDrain(drainTimeout time.Duration) (drained bool, pending int) {
+	return fallbackBuffer.Stop(drainTimeout)
 }
 
 // resetAuditFallbackBufferForTesting 在单元测试间重置缓冲单例，避免协程泄漏与状态串扰。
 func resetAuditFallbackBufferForTesting() {
-	fallbackBuffer.Stop(time.Second)
+	_, _ = fallbackBuffer.Stop(auditBatchPersistTimeout + time.Second)
 	fallbackBuffer = newAuditFallbackBuffer()
 }

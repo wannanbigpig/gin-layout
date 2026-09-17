@@ -11,8 +11,31 @@ type DashboardController struct {
 	controller.Api
 }
 
+type personalDashboardService interface {
+	SetAdminUserId(uint)
+	Personal() (*dashboard.Personal, error)
+}
+
+var newPersonalDashboardService = func() personalDashboardService {
+	return dashboard.NewOverviewService()
+}
+
 func NewDashboardController() *DashboardController {
 	return &DashboardController{}
+}
+
+// Personal 返回当前登录用户自己的登录摘要与最近操作。
+func (api DashboardController) Personal(c *gin.Context) {
+	service := newPersonalDashboardService()
+	service.SetAdminUserId(api.GetCurrentUserID(c))
+
+	personal, err := service.Personal()
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+
+	api.Success(c, personal)
 }
 
 func (api DashboardController) Overview(c *gin.Context) {

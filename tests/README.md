@@ -2,15 +2,15 @@
 
 `tests` 是项目 HTTP 接口集成测试入口，以 `internal/routers.AppRouteTree()` 为路由真相。
 
-当前非 Release 模式共 `131` 个接口：
+当前非 Release 模式共 `140` 个接口：
 
 - 根路由 `2` 个：`GET /ping`、`GET /health/readiness`
-- 管理端 `/admin/v1` 路由 `129` 个
-- Release 模式不注册 `GET /admin/v1/demo`，因此为 `130` 个
+- 管理端 `/admin/v1` 路由 `138` 个
+- Release 模式不注册 `GET /admin/v1/demo`，因此为 `139` 个
 
 所有声明路由都至少会实际发起一次请求：根路由和公开路由使用显式场景，受保护路由由 `route_coverage_test.go` 自动生成鉴权用例；全部受保护 GET 和写接口还会带认证进入参数或业务处理层。新增路由若没有进入对应覆盖规则，测试会直接失败。
 
-`admin_test/route_scenarios_test.go` 进一步要求每个管理端路由显式归类：按当前实际列表为 `91` 个已有业务成功或状态流（包括 `GET /admin/v1/system/file/upload/options`）、`24` 个覆盖参数、NotFound、权限或幂等契约、`14` 个受 Redis、queue、multipart 文件系统或隔离对象存储约束。新增路由未分类、重复分类或删除路由后遗留分类都会导致测试失败。
+`admin_test/route_scenarios_test.go` 进一步要求每个管理端路由显式归类：按当前实际列表为 `99` 个已有业务成功或状态流（包括个人工作台、个人请求日志、个人待办和 `GET /admin/v1/system/file/upload/options`）、`25` 个覆盖参数、NotFound、权限或幂等契约、`14` 个受 Redis、queue、multipart 文件系统或隔离对象存储约束。新增路由未分类、重复分类或删除路由后遗留分类都会导致测试失败。
 
 ## 真实 MySQL 约束
 

@@ -605,9 +605,11 @@ func buildFileReferenceResources(refs []*model.UploadFileReference) []*resources
 }
 
 func buildFileBatchDeleteFailure(id uint, err error) *FileBatchDeleteFailure {
+	genericErr := e.NewBusinessError(e.ServerErr)
 	failure := &FileBatchDeleteFailure{
 		ID:      id,
-		Message: firstNonEmpty(errMessage(err), e.NewBusinessError(e.FAILURE).GetMessage()),
+		Code:    genericErr.GetCode(),
+		Message: genericErr.GetMessage(),
 	}
 
 	var referencedErr *FileReferencedDeleteError
@@ -624,21 +626,27 @@ func buildFileBatchDeleteFailure(id uint, err error) *FileBatchDeleteFailure {
 	if errors.As(err, &businessErr) {
 		failure.Code = businessErr.GetCode()
 		failure.Message = businessErr.GetMessage()
+	} else {
+		log.Logger.Error("批量删除文件失败", zap.Uint("file_id", id), zap.Error(err))
 	}
 
 	return failure
 }
 
 func buildFileBatchDestroyFailure(id uint, err error) *FileBatchDestroyFailure {
+	genericErr := e.NewBusinessError(e.ServerErr)
 	failure := &FileBatchDestroyFailure{
 		ID:      id,
-		Message: firstNonEmpty(errMessage(err), e.NewBusinessError(e.FAILURE).GetMessage()),
+		Code:    genericErr.GetCode(),
+		Message: genericErr.GetMessage(),
 	}
 
 	var businessErr *e.BusinessError
 	if errors.As(err, &businessErr) {
 		failure.Code = businessErr.GetCode()
 		failure.Message = businessErr.GetMessage()
+	} else {
+		log.Logger.Error("批量彻底删除文件失败", zap.Uint("file_id", id), zap.Error(err))
 	}
 
 	return failure
@@ -695,13 +703,6 @@ func collectRestorableFolderAncestors(tx *gorm.DB, folderID uint, folderCache ma
 		currentID = folder.ParentID
 	}
 	return nil
-}
-
-func errMessage(err error) string {
-	if err == nil {
-		return ""
-	}
-	return strings.TrimSpace(err.Error())
 }
 
 func (s *FileResourceService) findByID(id uint) (*model.UploadFiles, error) {

@@ -15,6 +15,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
+	"github.com/wannanbigpig/gin-layout/internal/service/audit"
 	"github.com/wannanbigpig/gin-layout/internal/service/notification"
 )
 
@@ -81,12 +82,13 @@ type RuntimeInfo struct {
 
 // AppInfo 应用态信息。
 type AppInfo struct {
-	OnlineSessions int64               `json:"online_sessions"`
-	WSOnline       int                 `json:"ws_online"`
-	QueuePending   int64               `json:"queue_pending"`
-	QueueRetrying  int64               `json:"queue_retrying"`
-	QueueRunning   int64               `json:"queue_running"`
-	QueueStats     []*queue.QueueStats `json:"queue_stats"`
+	OnlineSessions int64                        `json:"online_sessions"`
+	WSOnline       int                          `json:"ws_online"`
+	QueuePending   int64                        `json:"queue_pending"`
+	QueueRetrying  int64                        `json:"queue_retrying"`
+	QueueRunning   int64                        `json:"queue_running"`
+	QueueStats     []*queue.QueueStats          `json:"queue_stats"`
+	Audit          audit.RuntimeMetricsSnapshot `json:"audit"`
 }
 
 // MonitorService 服务器监控服务。
@@ -181,7 +183,7 @@ func (s *MonitorService) collectRuntimeInfo() RuntimeInfo {
 }
 
 func (s *MonitorService) collectAppInfo() AppInfo {
-	info := AppInfo{}
+	info := AppInfo{Audit: audit.RuntimeMetrics()}
 
 	// 在线会话数（复用 session 统计）
 	info.OnlineSessions = countOnlineSessions()

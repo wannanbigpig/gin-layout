@@ -40,6 +40,12 @@ type TaskBuilder struct {
 	task *scheduledTask
 }
 
+const taskLockReleaseTimeout = 3 * time.Second
+
+type cronTaskLock interface {
+	Release(context.Context) error
+}
+
 // NewSchedule 创建任务声明器。
 func NewSchedule(logger *cronLogger) *Scheduler {
 	return NewScheduleWithContext(context.Background(), logger)
@@ -201,7 +207,7 @@ func recordedJob(ctx context.Context, task *scheduledTask) cron.Job {
 					zap.Error(lockErr))
 				return
 			}
-			defer lock.Release(ctx)
+			defer releaseCronTaskLock(ctx, lock, task.name, taskCode)
 		}
 
 		run, recordErr := taskcenter.NewRunRecorder().Start(ctx, taskcenter.RunStart{
@@ -315,7 +321,7 @@ func parseTimePart(name, raw string, min, max int) (int, error) {
 
 // acquireCronTaskLock 获取高风险定时任务分布式锁。
 // Redis 不可用时返回 error（fail-closed）。
-var acquireCronTaskLock = func(ctx context.Context, taskCode string) (*taskcenter.TaskLock, error) {
+var acquireCronTaskLock = func(ctx context.Context, taskCode string) (cronTaskLock, error) {
 	client := data.RedisClient()
 	if client == nil {
 		return nil, fmt.Errorf("redis 不可用，无法获取高危任务锁")
@@ -325,4 +331,18 @@ var acquireCronTaskLock = func(ctx context.Context, taskCode string) (*taskcente
 		return nil, err
 	}
 	return lock, nil
+}
+
+func releaseCronTaskLock(ctx context.Context, lock cronTaskLock, taskName, taskCode string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskLockReleaseTimeout)
+	defer cancel()
+	if err := lock.Release(releaseCtx); err != nil {
+		log.Logger.Error("高危定时任务释放分布式锁失败",
+			zap.String("name", taskName),
+			zap.String("task_code", taskCode),
+			zap.Error(err))
+	}
 }

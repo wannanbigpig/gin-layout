@@ -1,6 +1,8 @@
 package product
 
 import (
+	"fmt"
+
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -8,8 +10,11 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/todo"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
+
+const productActivationTodoSource = "product_activation"
 
 var productDiffRules = []auditdiff.FieldRule{
 	{Field: "id", Label: "产品ID"},
@@ -57,6 +62,11 @@ func (s *ProductService) CreateWithAuditDiff(params *form.CreateProduct) (string
 		product.CreatedBy = s.GetAdminUserId()
 		if err := service.CreateWithExplicitFields(tx, product, map[string]any{"status": params.Status}); err != nil {
 			return err
+		}
+		if product.Status == 0 {
+			if err := s.upsertActivationTodo(tx, product, false); err != nil {
+				return err
+			}
 		}
 		changeDiff = buildProductDiff(nil, snapshotProduct(product))
 		return nil
@@ -119,6 +129,15 @@ func (s *ProductService) UpdateWithAuditDiff(params *form.UpdateProduct) (string
 				return e.NewBusinessError(e.NotFound)
 			}
 		}
+		if product.Status == 0 {
+			if err := s.upsertActivationTodo(tx, product, before["status"] == uint8(1)); err != nil {
+				return err
+			}
+		} else if before["status"] == uint8(0) {
+			if err := s.closeActivationTodo(tx, product, model.TodoStatusCompleted); err != nil {
+				return err
+			}
+		}
 		changeDiff = buildProductDiff(before, snapshotProduct(product))
 		return nil
 	})
@@ -147,10 +166,44 @@ func (s *ProductService) DeleteWithAuditDiff(id uint) (string, error) {
 		if result.RowsAffected == 0 {
 			return e.NewBusinessError(e.NotFound)
 		}
+		if product.Status == 0 {
+			if err := s.closeActivationTodo(tx, product, model.TodoStatusCanceled); err != nil {
+				return err
+			}
+		}
 		changeDiff = buildProductDiff(before, nil)
 		return nil
 	})
 	return changeDiff, err
+}
+
+func (s *ProductService) upsertActivationTodo(tx *gorm.DB, product *model.Product, startNewCycle bool) error {
+	_, err := todo.NewServiceWithDB(tx).UpsertBusinessTodo(s.context(), todo.BusinessTodoInput{
+		AssigneeID:    product.CreatedBy,
+		CreatorID:     s.GetAdminUserId(),
+		SourceType:    productActivationTodoSource,
+		SourceKey:     productActivationTodoKey(product.ID),
+		Title:         "启用产品：" + product.Name,
+		Description:   "产品当前处于禁用状态，请检查产品信息后启用。",
+		Priority:      model.TodoPriorityNormal,
+		ActionURL:     "/business/product",
+		StartNewCycle: startNewCycle,
+	})
+	return err
+}
+
+func (s *ProductService) closeActivationTodo(tx *gorm.DB, product *model.Product, status string) error {
+	_, err := todo.NewServiceWithDB(tx).CloseBusinessTodo(s.context(), todo.BusinessTodoCloseInput{
+		AssigneeID: product.CreatedBy,
+		SourceType: productActivationTodoSource,
+		SourceKey:  productActivationTodoKey(product.ID),
+		Status:     status,
+	})
+	return err
+}
+
+func productActivationTodoKey(productID uint) string {
+	return fmt.Sprintf("product:%d", productID)
 }
 
 func snapshotProduct(product *model.Product) map[string]any {

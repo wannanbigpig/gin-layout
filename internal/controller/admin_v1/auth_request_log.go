@@ -6,6 +6,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
+	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service/audit"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -16,9 +17,53 @@ type RequestLogController struct {
 	controller.Api
 }
 
+type selfRequestLogService interface {
+	SetCtx(*gin.Context)
+	SelfList(*form.RequestLogList, uint) (*resources.Collection, error)
+	SelfDetail(uint, uint) (any, error)
+}
+
+var newSelfRequestLogService = func() selfRequestLogService {
+	return audit.NewRequestLogService()
+}
+
 // NewRequestLogController 创建请求日志控制器实例
 func NewRequestLogController() *RequestLogController {
 	return &RequestLogController{}
+}
+
+// SelfList 分页查询当前登录用户自己的请求日志。
+func (api RequestLogController) SelfList(c *gin.Context) {
+	params := form.NewRequestLogListQuery()
+	if err := validator.CheckQueryParams(c, &params); err != nil {
+		return
+	}
+
+	svc := newSelfRequestLogService()
+	svc.SetCtx(c)
+	result, err := svc.SelfList(params, api.GetCurrentUserID(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+// SelfDetail 获取当前登录用户自己的请求日志详情。
+func (api RequestLogController) SelfDetail(c *gin.Context) {
+	query := form.NewIdForm()
+	if err := validator.CheckQueryParams(c, &query); err != nil {
+		return
+	}
+
+	svc := newSelfRequestLogService()
+	svc.SetCtx(c)
+	detail, err := svc.SelfDetail(query.ID, api.GetCurrentUserID(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, detail)
 }
 
 // List 分页查询请求日志列表
@@ -60,6 +105,10 @@ func (api RequestLogController) Detail(c *gin.Context) {
 func (api RequestLogController) Export(c *gin.Context) {
 	params := form.NewRequestLogExportQuery()
 	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	if err := audit.ValidateRequestLogTimeRange(params.StartTime, params.EndTime); err != nil {
+		api.Err(c, err)
 		return
 	}
 

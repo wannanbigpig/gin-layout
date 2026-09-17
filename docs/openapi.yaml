@@ -1,0 +1,2547 @@
+openapi: 3.0.0
+info:
+  title: "go-layout API"
+  version: "0.10.0"
+  description: "由 `go-layout command gen-openapi` 基于声明式路由树自动生成。"
+tags:
+  - name: "adminUser"
+  - name: "auth"
+  - name: "auth_public"
+  - name: "common"
+  - name: "common_ws"
+  - name: "dashboard"
+  - name: "dashboard_personal"
+  - name: "department"
+  - name: "export"
+  - name: "file"
+  - name: "log"
+  - name: "login"
+  - name: "menu"
+  - name: "notification"
+  - name: "other"
+  - name: "permission"
+  - name: "product"
+  - name: "request_log_self"
+  - name: "role"
+  - name: "session"
+  - name: "storage"
+  - name: "sysConfig"
+  - name: "sysDict"
+  - name: "task"
+  - name: "todo_personal"
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "通过 Authorization: Bearer <token> 携带访问令牌"
+    RefreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: "通过 HttpOnly refresh_token Cookie 完成会话刷新或退出"
+    WebSocketTicket:
+      type: apiKey
+      in: query
+      name: ticket
+      description: "通过一次性 ticket 建立 WebSocket 连接"
+  schemas:
+    Response:
+      type: object
+      description: "统一响应包络"
+      required:
+        - code
+        - msg
+        - data
+        - cost
+        - request_id
+      properties:
+        code:
+          type: integer
+          description: "业务状态码（0 表示成功）"
+          example: 0
+        msg:
+          type: string
+          description: "提示信息"
+          example: "success"
+        data:
+          description: "业务数据载荷"
+          nullable: true
+        cost:
+          type: string
+          description: "请求处理耗时"
+          example: "3.2ms"
+        request_id:
+          type: string
+          description: "请求唯一标识"
+          example: "req_20260423_0001"
+paths:
+  "/admin/v1/admin-user/avatar/upload":
+    post:
+      tags:
+        - "adminUser"
+      summary: "上传头像"
+      description: "上传头像"
+      operationId: "post_admin_v1_admin_user_avatar_upload"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/bind-role":
+    post:
+      tags:
+        - "adminUser"
+      summary: "绑定角色"
+      description: "绑定角色"
+      operationId: "post_admin_v1_admin_user_bind_role"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/create":
+    post:
+      tags:
+        - "adminUser"
+      summary: "新增管理员"
+      description: "新增管理员"
+      operationId: "post_admin_v1_admin_user_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/delete":
+    post:
+      tags:
+        - "adminUser"
+      summary: "删除管理员"
+      description: "删除管理员"
+      operationId: "post_admin_v1_admin_user_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/detail":
+    get:
+      tags:
+        - "adminUser"
+      summary: "管理员详情"
+      description: "管理员详情"
+      operationId: "get_admin_v1_admin_user_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/get":
+    get:
+      tags:
+        - "adminUser"
+      summary: "获取当前用户信息"
+      description: "获取当前用户信息"
+      operationId: "get_admin_v1_admin_user_get"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/get-full-email":
+    get:
+      tags:
+        - "adminUser"
+      summary: "获取完整邮箱"
+      description: "脱敏前完整邮箱"
+      operationId: "get_admin_v1_admin_user_get_full_email"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/get-full-phone":
+    get:
+      tags:
+        - "adminUser"
+      summary: "获取完整手机号"
+      description: "脱敏前完整手机号"
+      operationId: "get_admin_v1_admin_user_get_full_phone"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/list":
+    get:
+      tags:
+        - "adminUser"
+      summary: "管理员列表"
+      description: "管理员列表"
+      operationId: "get_admin_v1_admin_user_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/options":
+    get:
+      tags:
+        - "adminUser"
+      summary: "管理员选项"
+      description: "按账号/昵称搜索管理员，供下拉选择器使用"
+      operationId: "get_admin_v1_admin_user_options"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/update":
+    post:
+      tags:
+        - "adminUser"
+      summary: "更新管理员"
+      description: "更新管理员"
+      operationId: "post_admin_v1_admin_user_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/update-profile":
+    post:
+      tags:
+        - "adminUser"
+      summary: "更新个人资料"
+      description: "更新个人资料"
+      operationId: "post_admin_v1_admin_user_update_profile"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/user-menu-info":
+    get:
+      tags:
+        - "adminUser"
+      summary: "获取用户权限信息"
+      description: "获取用户权限信息"
+      operationId: "get_admin_v1_admin_user_user_menu_info"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/auth/check-token":
+    get:
+      tags:
+        - "auth"
+      summary: "检查 Token"
+      description: "验证 Token 有效性"
+      operationId: "get_admin_v1_auth_check_token"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/auth/logout":
+    post:
+      tags:
+        - "auth_public"
+      summary: "退出登录"
+      description: "撤销可用会话凭证并清除 HttpOnly refresh_token Cookie"
+      operationId: "post_admin_v1_auth_logout"
+      security:
+        - RefreshCookie: []
+      x-auth-mode: "none"
+      x-security-policy: "refresh_cookie"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/auth/refresh":
+    post:
+      tags:
+        - "auth_public"
+      summary: "刷新 Token"
+      description: "通过 HttpOnly refresh_token Cookie 刷新访问令牌"
+      operationId: "post_admin_v1_auth_refresh"
+      security:
+        - RefreshCookie: []
+      x-auth-mode: "none"
+      x-security-policy: "refresh_cookie"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/auth/session/list":
+    get:
+      tags:
+        - "session"
+      summary: "在线会话列表"
+      description: "在线会话列表"
+      operationId: "get_admin_v1_auth_session_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/auth/session/revoke":
+    post:
+      tags:
+        - "session"
+      summary: "撤销在线会话"
+      description: "撤销在线会话"
+      operationId: "post_admin_v1_auth_session_revoke"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/common/upload":
+    post:
+      tags:
+        - "common"
+      summary: "上传文件"
+      description: "上传文件"
+      operationId: "post_admin_v1_common_upload"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/common/ws":
+    get:
+      tags:
+        - "common_ws"
+      summary: "通用实时连接 WebSocket"
+      description: "通过一次性 WebSocket ticket 建立认证连接"
+      operationId: "get_admin_v1_common_ws"
+      security:
+        - WebSocketTicket: []
+      x-auth-mode: "none"
+      x-security-policy: "websocket_ticket"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/common/ws-ticket":
+    post:
+      tags:
+        - "common"
+      summary: "生成 WebSocket 临时票据"
+      description: "生成 WebSocket 临时票据"
+      operationId: "post_admin_v1_common_ws_ticket"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/dashboard/monitor":
+    get:
+      tags:
+        - "dashboard"
+      summary: "服务器监控"
+      description: "服务器监控"
+      operationId: "get_admin_v1_dashboard_monitor"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/dashboard/overview":
+    get:
+      tags:
+        - "dashboard"
+      summary: "仪表盘概览"
+      description: "仪表盘概览"
+      operationId: "get_admin_v1_dashboard_overview"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/dashboard/personal":
+    get:
+      tags:
+        - "dashboard_personal"
+      summary: "个人工作台"
+      description: "个人工作台"
+      operationId: "get_admin_v1_dashboard_personal"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/dashboard/statistics":
+    get:
+      tags:
+        - "dashboard"
+      summary: "仪表盘统计"
+      description: "仪表盘统计"
+      operationId: "get_admin_v1_dashboard_statistics"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/department/bind-role":
+    post:
+      tags:
+        - "department"
+      summary: "部门绑定角色"
+      description: "部门绑定角色"
+      operationId: "post_admin_v1_department_bind_role"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/department/create":
+    post:
+      tags:
+        - "department"
+      summary: "新增部门"
+      description: "新增部门"
+      operationId: "post_admin_v1_department_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/department/delete":
+    post:
+      tags:
+        - "department"
+      summary: "删除部门"
+      description: "删除部门"
+      operationId: "post_admin_v1_department_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/department/detail":
+    get:
+      tags:
+        - "department"
+      summary: "部门详情"
+      description: "部门详情"
+      operationId: "get_admin_v1_department_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/department/list":
+    get:
+      tags:
+        - "department"
+      summary: "部门列表"
+      description: "部门列表"
+      operationId: "get_admin_v1_department_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/department/update":
+    post:
+      tags:
+        - "department"
+      summary: "更新部门"
+      description: "更新部门"
+      operationId: "post_admin_v1_department_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/file/{uuid}":
+    get:
+      tags:
+        - "other"
+      summary: "获取文件"
+      description: "获取文件"
+      operationId: "get_admin_v1_file_uuid"
+      parameters:
+        - name: "uuid"
+          in: path
+          required: true
+          description: "路径参数 uuid"
+          schema:
+            type: string
+      security: []
+      x-auth-mode: "none"
+      x-security-policy: "public"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/log/login/detail":
+    get:
+      tags:
+        - "log"
+      summary: "登录日志详情"
+      description: "登录日志详情"
+      operationId: "get_admin_v1_log_login_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/log/login/list":
+    get:
+      tags:
+        - "log"
+      summary: "登录日志列表"
+      description: "登录日志列表"
+      operationId: "get_admin_v1_log_login_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/log/request/detail":
+    get:
+      tags:
+        - "log"
+      summary: "请求日志详情"
+      description: "请求日志详情"
+      operationId: "get_admin_v1_log_request_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/log/request/export":
+    post:
+      tags:
+        - "log"
+      summary: "导出请求日志"
+      description: "导出请求日志"
+      operationId: "post_admin_v1_log_request_export"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/log/request/list":
+    get:
+      tags:
+        - "log"
+      summary: "请求日志列表"
+      description: "请求日志列表"
+      operationId: "get_admin_v1_log_request_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/log/request/mask-config":
+    get:
+      tags:
+        - "log"
+      summary: "获取请求日志脱敏配置"
+      description: "获取请求日志脱敏配置"
+      operationId: "get_admin_v1_log_request_mask_config"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+    post:
+      tags:
+        - "log"
+      summary: "更新请求日志脱敏配置"
+      description: "更新请求日志脱敏配置"
+      operationId: "post_admin_v1_log_request_mask_config"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/log/request/self-detail":
+    get:
+      tags:
+        - "request_log_self"
+      summary: "个人请求日志详情"
+      description: "个人请求日志详情"
+      operationId: "get_admin_v1_log_request_self_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/log/request/self-list":
+    get:
+      tags:
+        - "request_log_self"
+      summary: "个人请求日志列表"
+      description: "个人请求日志列表"
+      operationId: "get_admin_v1_log_request_self_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/login":
+    post:
+      tags:
+        - "login"
+      summary: "登录"
+      description: "用户登录接口"
+      operationId: "post_admin_v1_login"
+      security: []
+      x-auth-mode: "none"
+      x-security-policy: "public"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/login-captcha":
+    get:
+      tags:
+        - "login"
+      summary: "验证码"
+      description: "获取登录验证码"
+      operationId: "get_admin_v1_login_captcha"
+      security: []
+      x-auth-mode: "none"
+      x-security-policy: "public"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/menu/create":
+    post:
+      tags:
+        - "menu"
+      summary: "新增菜单"
+      description: "新增菜单"
+      operationId: "post_admin_v1_menu_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/menu/delete":
+    post:
+      tags:
+        - "menu"
+      summary: "删除菜单"
+      description: "删除菜单"
+      operationId: "post_admin_v1_menu_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/menu/detail":
+    get:
+      tags:
+        - "menu"
+      summary: "菜单详情"
+      description: "菜单详情"
+      operationId: "get_admin_v1_menu_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/menu/list":
+    get:
+      tags:
+        - "menu"
+      summary: "菜单列表"
+      description: "菜单列表"
+      operationId: "get_admin_v1_menu_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/menu/update":
+    post:
+      tags:
+        - "menu"
+      summary: "更新菜单"
+      description: "更新菜单"
+      operationId: "post_admin_v1_menu_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/menu/update-all-menu-permissions":
+    post:
+      tags:
+        - "menu"
+      summary: "刷新菜单权限缓存"
+      description: "刷新菜单权限缓存"
+      operationId: "post_admin_v1_menu_update_all_menu_permissions"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/permission/list":
+    get:
+      tags:
+        - "permission"
+      summary: "接口列表"
+      description: "接口列表"
+      operationId: "get_admin_v1_permission_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/permission/options":
+    get:
+      tags:
+        - "permission"
+      summary: "接口选项"
+      description: "按名称/路由搜索接口权限，供菜单编辑时下拉选择器使用"
+      operationId: "get_admin_v1_permission_options"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/permission/update":
+    post:
+      tags:
+        - "permission"
+      summary: "更新接口"
+      description: "更新接口"
+      operationId: "post_admin_v1_permission_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/product/create":
+    post:
+      tags:
+        - "product"
+      summary: "新增产品"
+      description: "新增产品"
+      operationId: "post_admin_v1_product_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/product/delete":
+    post:
+      tags:
+        - "product"
+      summary: "删除产品"
+      description: "删除产品"
+      operationId: "post_admin_v1_product_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/product/detail":
+    get:
+      tags:
+        - "product"
+      summary: "产品详情"
+      description: "产品详情"
+      operationId: "get_admin_v1_product_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/product/list":
+    get:
+      tags:
+        - "product"
+      summary: "产品列表"
+      description: "产品列表"
+      operationId: "get_admin_v1_product_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/product/update":
+    post:
+      tags:
+        - "product"
+      summary: "更新产品"
+      description: "更新产品"
+      operationId: "post_admin_v1_product_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/role/create":
+    post:
+      tags:
+        - "role"
+      summary: "新增角色"
+      description: "新增角色"
+      operationId: "post_admin_v1_role_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/role/delete":
+    post:
+      tags:
+        - "role"
+      summary: "删除角色"
+      description: "删除角色"
+      operationId: "post_admin_v1_role_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/role/detail":
+    get:
+      tags:
+        - "role"
+      summary: "角色详情"
+      description: "角色详情"
+      operationId: "get_admin_v1_role_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/role/list":
+    get:
+      tags:
+        - "role"
+      summary: "角色列表"
+      description: "角色列表"
+      operationId: "get_admin_v1_role_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/role/options":
+    get:
+      tags:
+        - "role"
+      summary: "角色选项"
+      description: "按名称/编码搜索角色，供下拉选择器使用"
+      operationId: "get_admin_v1_role_options"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/role/update":
+    post:
+      tags:
+        - "role"
+      summary: "更新角色"
+      description: "更新角色"
+      operationId: "post_admin_v1_role_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/config/create":
+    post:
+      tags:
+        - "sysConfig"
+      summary: "新增系统参数"
+      description: "新增系统参数"
+      operationId: "post_admin_v1_system_config_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/config/delete":
+    post:
+      tags:
+        - "sysConfig"
+      summary: "删除系统参数"
+      description: "删除系统参数"
+      operationId: "post_admin_v1_system_config_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/config/detail":
+    get:
+      tags:
+        - "sysConfig"
+      summary: "系统参数详情"
+      description: "系统参数详情"
+      operationId: "get_admin_v1_system_config_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/config/list":
+    get:
+      tags:
+        - "sysConfig"
+      summary: "系统参数列表"
+      description: "系统参数列表"
+      operationId: "get_admin_v1_system_config_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/config/refresh":
+    post:
+      tags:
+        - "sysConfig"
+      summary: "刷新系统参数缓存"
+      description: "刷新系统参数缓存"
+      operationId: "post_admin_v1_system_config_refresh"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/config/update":
+    post:
+      tags:
+        - "sysConfig"
+      summary: "更新系统参数"
+      description: "更新系统参数"
+      operationId: "post_admin_v1_system_config_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/config/value":
+    get:
+      tags:
+        - "sysConfig"
+      summary: "获取系统参数值"
+      description: "获取系统参数值"
+      operationId: "get_admin_v1_system_config_value"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/item/create":
+    post:
+      tags:
+        - "sysDict"
+      summary: "新增字典项"
+      description: "新增字典项"
+      operationId: "post_admin_v1_system_dict_item_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/item/delete":
+    post:
+      tags:
+        - "sysDict"
+      summary: "删除字典项"
+      description: "删除字典项"
+      operationId: "post_admin_v1_system_dict_item_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/item/list":
+    get:
+      tags:
+        - "sysDict"
+      summary: "字典项列表"
+      description: "字典项列表"
+      operationId: "get_admin_v1_system_dict_item_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/item/update":
+    post:
+      tags:
+        - "sysDict"
+      summary: "更新字典项"
+      description: "更新字典项"
+      operationId: "post_admin_v1_system_dict_item_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/options":
+    get:
+      tags:
+        - "sysDict"
+      summary: "字典选项"
+      description: "字典选项"
+      operationId: "get_admin_v1_system_dict_options"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/type/create":
+    post:
+      tags:
+        - "sysDict"
+      summary: "新增字典类型"
+      description: "新增字典类型"
+      operationId: "post_admin_v1_system_dict_type_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/type/delete":
+    post:
+      tags:
+        - "sysDict"
+      summary: "删除字典类型"
+      description: "删除字典类型"
+      operationId: "post_admin_v1_system_dict_type_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/type/detail":
+    get:
+      tags:
+        - "sysDict"
+      summary: "字典类型详情"
+      description: "字典类型详情"
+      operationId: "get_admin_v1_system_dict_type_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/type/list":
+    get:
+      tags:
+        - "sysDict"
+      summary: "字典类型列表"
+      description: "字典类型列表"
+      operationId: "get_admin_v1_system_dict_type_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/dict/type/update":
+    post:
+      tags:
+        - "sysDict"
+      summary: "更新字典类型"
+      description: "更新字典类型"
+      operationId: "post_admin_v1_system_dict_type_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/export/detail":
+    get:
+      tags:
+        - "export"
+      summary: "导出记录详情"
+      description: "导出记录详情"
+      operationId: "get_admin_v1_system_export_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/export/list":
+    get:
+      tags:
+        - "export"
+      summary: "导出记录列表"
+      description: "导出记录列表"
+      operationId: "get_admin_v1_system_export_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/batch-delete":
+    post:
+      tags:
+        - "file"
+      summary: "批量删除文件资源"
+      description: "批量删除文件资源"
+      operationId: "post_admin_v1_system_file_batch_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/delete":
+    post:
+      tags:
+        - "file"
+      summary: "删除文件资源"
+      description: "删除文件资源"
+      operationId: "post_admin_v1_system_file_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/detail":
+    get:
+      tags:
+        - "file"
+      summary: "文件资源详情"
+      description: "文件资源详情"
+      operationId: "get_admin_v1_system_file_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/export":
+    post:
+      tags:
+        - "file"
+      summary: "导出文件资源"
+      description: "导出文件资源"
+      operationId: "post_admin_v1_system_file_export"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/folder/create":
+    post:
+      tags:
+        - "file"
+      summary: "创建文件目录"
+      description: "创建文件目录"
+      operationId: "post_admin_v1_system_file_folder_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/folder/delete":
+    post:
+      tags:
+        - "file"
+      summary: "删除文件目录"
+      description: "删除文件目录"
+      operationId: "post_admin_v1_system_file_folder_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/folder/move":
+    post:
+      tags:
+        - "file"
+      summary: "移动文件目录"
+      description: "移动文件目录"
+      operationId: "post_admin_v1_system_file_folder_move"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/folder/stats":
+    get:
+      tags:
+        - "file"
+      summary: "目录统计信息"
+      description: "目录统计信息"
+      operationId: "get_admin_v1_system_file_folder_stats"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/folder/tree":
+    get:
+      tags:
+        - "file"
+      summary: "文件目录树"
+      description: "文件目录树"
+      operationId: "get_admin_v1_system_file_folder_tree"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/folder/update":
+    post:
+      tags:
+        - "file"
+      summary: "更新文件目录"
+      description: "更新文件目录"
+      operationId: "post_admin_v1_system_file_folder_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/list":
+    get:
+      tags:
+        - "file"
+      summary: "文件资源列表"
+      description: "文件资源列表"
+      operationId: "get_admin_v1_system_file_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/move":
+    post:
+      tags:
+        - "file"
+      summary: "移动文件资源"
+      description: "移动文件资源"
+      operationId: "post_admin_v1_system_file_move"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/references":
+    get:
+      tags:
+        - "file"
+      summary: "文件引用列表"
+      description: "文件引用列表"
+      operationId: "get_admin_v1_system_file_references"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/trash/batch-destroy":
+    post:
+      tags:
+        - "file"
+      summary: "批量硬删除文件资源"
+      description: "批量硬删除文件资源"
+      operationId: "post_admin_v1_system_file_trash_batch_destroy"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/trash/batch-restore":
+    post:
+      tags:
+        - "file"
+      summary: "批量恢复文件资源"
+      description: "批量恢复文件资源"
+      operationId: "post_admin_v1_system_file_trash_batch_restore"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/trash/destroy":
+    post:
+      tags:
+        - "file"
+      summary: "硬删除文件资源"
+      description: "硬删除文件资源"
+      operationId: "post_admin_v1_system_file_trash_destroy"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/trash/list":
+    get:
+      tags:
+        - "file"
+      summary: "文件回收站列表"
+      description: "文件回收站列表"
+      operationId: "get_admin_v1_system_file_trash_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/trash/restore":
+    post:
+      tags:
+        - "file"
+      summary: "恢复文件资源"
+      description: "恢复文件资源"
+      operationId: "post_admin_v1_system_file_trash_restore"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/update":
+    post:
+      tags:
+        - "file"
+      summary: "更新文件资源"
+      description: "更新文件资源"
+      operationId: "post_admin_v1_system_file_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/complete":
+    post:
+      tags:
+        - "file"
+      summary: "完成文件直传登记"
+      description: "完成文件直传登记"
+      operationId: "post_admin_v1_system_file_upload_complete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/complete/batch":
+    post:
+      tags:
+        - "file"
+      summary: "批量完成文件直传登记"
+      description: "批量完成文件直传登记"
+      operationId: "post_admin_v1_system_file_upload_complete_batch"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/credential":
+    post:
+      tags:
+        - "file"
+      summary: "获取文件直传凭证"
+      description: "获取文件直传凭证"
+      operationId: "post_admin_v1_system_file_upload_credential"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/credential/batch":
+    post:
+      tags:
+        - "file"
+      summary: "批量获取文件直传凭证"
+      description: "批量获取文件直传凭证"
+      operationId: "post_admin_v1_system_file_upload_credential_batch"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/local":
+    post:
+      tags:
+        - "file"
+      summary: "本地上传文件资源"
+      description: "本地上传文件资源"
+      operationId: "post_admin_v1_system_file_upload_local"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/multipart/abort":
+    post:
+      tags:
+        - "file"
+      summary: "分片上传中止"
+      description: "分片上传中止"
+      operationId: "post_admin_v1_system_file_upload_multipart_abort"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/multipart/complete":
+    post:
+      tags:
+        - "file"
+      summary: "分片上传完成"
+      description: "分片上传完成"
+      operationId: "post_admin_v1_system_file_upload_multipart_complete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/multipart/init":
+    post:
+      tags:
+        - "file"
+      summary: "分片上传初始化"
+      description: "分片上传初始化"
+      operationId: "post_admin_v1_system_file_upload_multipart_init"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/file/upload/options":
+    get:
+      tags:
+        - "file"
+      summary: "文件上传能力"
+      description: "文件上传能力"
+      operationId: "get_admin_v1_system_file_upload_options"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/notification/list":
+    get:
+      tags:
+        - "notification"
+      summary: "系统消息列表"
+      description: "系统消息列表"
+      operationId: "get_admin_v1_system_notification_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/notification/read":
+    post:
+      tags:
+        - "notification"
+      summary: "标记消息已读"
+      description: "标记消息已读"
+      operationId: "post_admin_v1_system_notification_read"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/notification/read-all":
+    post:
+      tags:
+        - "notification"
+      summary: "全部标记已读"
+      description: "全部标记已读"
+      operationId: "post_admin_v1_system_notification_read_all"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/notification/send":
+    post:
+      tags:
+        - "notification"
+      summary: "发送系统通知"
+      description: "发送系统通知"
+      operationId: "post_admin_v1_system_notification_send"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/notification/unread-count":
+    get:
+      tags:
+        - "notification"
+      summary: "系统消息未读数"
+      description: "系统消息未读数"
+      operationId: "get_admin_v1_system_notification_unread_count"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/storage/config":
+    get:
+      tags:
+        - "storage"
+      summary: "存储配置"
+      description: "存储配置"
+      operationId: "get_admin_v1_system_storage_config"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+    post:
+      tags:
+        - "storage"
+      summary: "保存存储配置"
+      description: "保存存储配置"
+      operationId: "post_admin_v1_system_storage_config"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/storage/secret":
+    get:
+      tags:
+        - "storage"
+      summary: "查看存储敏感信息"
+      description: "查看存储敏感信息"
+      operationId: "get_admin_v1_system_storage_secret"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/storage/test":
+    post:
+      tags:
+        - "storage"
+      summary: "测试存储配置"
+      description: "测试存储配置"
+      operationId: "post_admin_v1_system_storage_test"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/cron/state":
+    get:
+      tags:
+        - "task"
+      summary: "定时任务最近状态"
+      description: "定时任务最近状态"
+      operationId: "get_admin_v1_task_cron_state"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/list":
+    get:
+      tags:
+        - "task"
+      summary: "任务定义列表"
+      description: "任务定义列表"
+      operationId: "get_admin_v1_task_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/operation-config":
+    post:
+      tags:
+        - "task"
+      summary: "更新任务运营配置"
+      description: "更新任务运营配置"
+      operationId: "post_admin_v1_task_operation_config"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/record-policy":
+    post:
+      tags:
+        - "task"
+      summary: "更新任务记录策略"
+      description: "更新任务记录策略"
+      operationId: "post_admin_v1_task_record_policy"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/run/cancel":
+    post:
+      tags:
+        - "task"
+      summary: "取消任务"
+      description: "取消任务"
+      operationId: "post_admin_v1_task_run_cancel"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/run/detail":
+    get:
+      tags:
+        - "task"
+      summary: "任务执行记录详情"
+      description: "任务执行记录详情"
+      operationId: "get_admin_v1_task_run_detail"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/run/events":
+    get:
+      tags:
+        - "task"
+      summary: "任务执行事件列表"
+      description: "任务执行事件列表"
+      operationId: "get_admin_v1_task_run_events"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/run/list":
+    get:
+      tags:
+        - "task"
+      summary: "任务执行记录列表"
+      description: "任务执行记录列表"
+      operationId: "get_admin_v1_task_run_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/run/retry":
+    post:
+      tags:
+        - "task"
+      summary: "重试失败任务"
+      description: "重试失败任务"
+      operationId: "post_admin_v1_task_run_retry"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/run/stats":
+    get:
+      tags:
+        - "task"
+      summary: "任务执行统计"
+      description: "任务执行统计"
+      operationId: "get_admin_v1_task_run_stats"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/run/stats/trend":
+    get:
+      tags:
+        - "task"
+      summary: "任务执行统计趋势"
+      description: "任务执行统计趋势"
+      operationId: "get_admin_v1_task_run_stats_trend"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/task/trigger":
+    post:
+      tags:
+        - "task"
+      summary: "手动触发任务"
+      description: "手动触发任务"
+      operationId: "post_admin_v1_task_trigger"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/create":
+    post:
+      tags:
+        - "todo_personal"
+      summary: "创建个人待办"
+      description: "创建个人待办"
+      operationId: "post_admin_v1_todo_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/delete":
+    post:
+      tags:
+        - "todo_personal"
+      summary: "删除个人待办"
+      description: "删除个人待办"
+      operationId: "post_admin_v1_todo_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/list":
+    get:
+      tags:
+        - "todo_personal"
+      summary: "我的待办列表"
+      description: "我的待办列表"
+      operationId: "get_admin_v1_todo_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/status":
+    post:
+      tags:
+        - "todo_personal"
+      summary: "更新待办状态"
+      description: "更新待办状态"
+      operationId: "post_admin_v1_todo_status"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/summary":
+    get:
+      tags:
+        - "todo_personal"
+      summary: "我的待办摘要"
+      description: "我的待办摘要"
+      operationId: "get_admin_v1_todo_summary"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/update":
+    post:
+      tags:
+        - "todo_personal"
+      summary: "更新个人待办"
+      description: "更新个人待办"
+      operationId: "post_admin_v1_todo_update"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'

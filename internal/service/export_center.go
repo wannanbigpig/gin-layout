@@ -244,6 +244,29 @@ func (s *ExportCenterService) HasRecordForTaskRun(ctx context.Context, taskRunID
 	return count > 0, nil
 }
 
+// CompletedRecordForTaskRun 返回已完成的导出记录，用于 worker 至少一次重投时复用结果。
+func (s *ExportCenterService) CompletedRecordForTaskRun(ctx context.Context, taskRunID uint) (*model.SysExportRecord, error) {
+	if taskRunID == 0 {
+		return nil, nil
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return nil, err
+	}
+	record := model.NewSysExportRecord()
+	err = db.Where("task_run_id = ? AND status = ?", taskRunID, model.TaskRunStatusSuccess).First(record).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return record, nil
+}
+
 // ReassignTaskRun 将已有导出记录改绑到新的 retry run，并重置为待执行状态。
 func (s *ExportCenterService) ReassignTaskRun(ctx context.Context, oldTaskRunID, newTaskRunID uint, queueName string) (bool, error) {
 	if oldTaskRunID == 0 || newTaskRunID == 0 {

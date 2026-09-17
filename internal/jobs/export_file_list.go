@@ -53,6 +53,12 @@ type ExportFileListPayload struct {
 // handler 只负责业务逻辑和写入结果。
 func handleExportFileList(ctx context.Context, payload ExportFileListPayload) error {
 	exportService := service.NewExportCenterService()
+	if completed, err := exportService.CompletedRecordForTaskRun(ctx, payload.TaskRunID); err != nil {
+		return err
+	} else if completed != nil {
+		notifyExportFileListMessage(ctx, payload, model.TaskRunStatusSuccess, exportRecordUploadFile(completed), completed.FileName, nil)
+		return nil
+	}
 
 	limit := payload.Limit
 	if limit > exportFileListMaxLimit {
@@ -115,13 +121,17 @@ func handleExportFileList(ctx context.Context, payload ExportFileListPayload) er
 	}
 	streamErr := <-streamErrCh
 	if streamErr != nil {
-		_ = exportService.MarkFailed(ctx, payload.TaskRunID, streamErr)
-		notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", streamErr)
+		if shouldFinalizeExportFailure(ctx) {
+			_ = exportService.MarkFailed(ctx, payload.TaskRunID, streamErr)
+			notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", streamErr)
+		}
 		return streamErr
 	}
 	if err != nil {
-		_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
-		notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)
+		if shouldFinalizeExportFailure(ctx) {
+			_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
+			notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)
+		}
 		return err
 	}
 
@@ -129,8 +139,10 @@ func handleExportFileList(ctx context.Context, payload ExportFileListPayload) er
 		File:     uploadFile,
 		FileName: fileName,
 	}); err != nil {
-		_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
-		notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, fileName, err)
+		if shouldFinalizeExportFailure(ctx) {
+			_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
+			notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, fileName, err)
+		}
 		return err
 	}
 

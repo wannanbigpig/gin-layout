@@ -27,6 +27,7 @@ build/
 
 # Local config and environment files
 *.yaml
+!docs/openapi.yaml
 *.ini
 .env
 .env.local

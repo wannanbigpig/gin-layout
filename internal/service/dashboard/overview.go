@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 )
@@ -104,16 +105,94 @@ type Overview struct {
 	Storage      *StorageStats      `json:"storage,omitempty"`
 }
 
+// Personal 表示当前登录用户的个人工作台数据。
+type Personal struct {
+	UserLogin  UserLogin       `json:"user_login"`
+	Activities []ActivityItem  `json:"activities"`
+	Summary    PersonalSummary `json:"summary"`
+}
+
+type PersonalSummary struct {
+	TodayOperations     int64 `json:"today_operations"`
+	TodayFailures       int64 `json:"today_failures"`
+	TodayChanges        int64 `json:"today_changes"`
+	UnreadNotifications int64 `json:"unread_notifications"`
+}
+
 type OverviewService struct {
 	service.Base
+	db *gorm.DB
 }
 
 func NewOverviewService() *OverviewService {
 	return &OverviewService{}
 }
 
+func (s *OverviewService) dbOrDefault() (*gorm.DB, error) {
+	if s.db != nil {
+		return s.db, nil
+	}
+	return model.GetDB()
+}
+
+// Personal 返回当前登录用户自己的登录摘要和最近操作，不包含全局统计。
+func (s *OverviewService) Personal() (*Personal, error) {
+	uid := s.GetAdminUserId()
+	if uid == 0 {
+		return nil, e.NewBusinessError(e.NotLogin)
+	}
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	userLogin, err := buildUserLogin(db, uid)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := buildPersonalSummary(db, uid, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	return &Personal{
+		UserLogin:  userLogin,
+		Activities: buildActivities(db, uid),
+		Summary:    summary,
+	}, nil
+}
+
+func buildPersonalSummary(db *gorm.DB, uid uint, now time.Time) (PersonalSummary, error) {
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrowStart := todayStart.AddDate(0, 0, 1)
+	type requestSummary struct {
+		TodayOperations int64
+		TodayFailures   int64
+		TodayChanges    int64
+	}
+	var requests requestSummary
+	if err := db.Table("request_logs").
+		Select(`COUNT(*) AS today_operations,
+			COALESCE(SUM(CASE WHEN operation_status <> 0 THEN 1 ELSE 0 END), 0) AS today_failures,
+			COALESCE(SUM(CASE WHEN change_diff IS NOT NULL AND TRIM(change_diff) NOT IN ('', '[]', '{}') THEN 1 ELSE 0 END), 0) AS today_changes`).
+		Where("operator_id = ? AND created_at >= ? AND created_at < ?", uid, todayStart, tomorrowStart).
+		Where("base_url NOT IN (?, ?)", "/admin/v1/log/request/self-list", "/admin/v1/log/request/self-detail").
+		Scan(&requests).Error; err != nil {
+		return PersonalSummary{}, err
+	}
+
+	var unread int64
+	if err := db.Table("sys_messages").Where("user_id = ? AND is_read = ?", uid, model.MessageUnread).Count(&unread).Error; err != nil {
+		return PersonalSummary{}, err
+	}
+	return PersonalSummary{
+		TodayOperations:     requests.TodayOperations,
+		TodayFailures:       requests.TodayFailures,
+		TodayChanges:        requests.TodayChanges,
+		UnreadNotifications: unread,
+	}, nil
+}
+
 func (s *OverviewService) Overview() (*Overview, error) {
-	db, err := model.GetDB()
+	db, err := s.dbOrDefault()
 	if err != nil {
 		return nil, err
 	}
@@ -146,14 +225,8 @@ func (s *OverviewService) Overview() (*Overview, error) {
 		return nil, err
 	}
 
-	userLogin := UserLogin{}
-	if s.GetAdminUserId() > 0 {
-		var user model.AdminUser
-		if err := db.Table("admin_user").Select("last_login,last_ip").Where("id = ? AND deleted_at = 0", s.GetAdminUserId()).First(&user).Error; err == nil {
-			userLogin.LastLogin = user.LastLogin.String()
-			userLogin.LastIP = user.LastIp
-		}
-	}
+	// 保持原有 overview 容错语义：个人登录信息读取失败不阻断全局概览。
+	userLogin, _ := buildUserLogin(db, s.GetAdminUserId())
 
 	trend, err := buildTrendData(db, todayStart)
 	if err != nil {
@@ -183,6 +256,20 @@ func (s *OverviewService) Overview() (*Overview, error) {
 		ErrorCodes:   errorCodes,
 		Storage:      storage,
 	}, nil
+}
+
+func buildUserLogin(db *gorm.DB, uid uint) (UserLogin, error) {
+	userLogin := UserLogin{}
+	if uid == 0 {
+		return userLogin, nil
+	}
+	var user model.AdminUser
+	if err := db.Table("admin_user").Select("last_login,last_ip").Where("id = ? AND deleted_at = 0", uid).First(&user).Error; err != nil {
+		return userLogin, err
+	}
+	userLogin.LastLogin = user.LastLogin.String()
+	userLogin.LastIP = user.LastIp
+	return userLogin, nil
 }
 
 func requestStatsForRange(db *gorm.DB, start time.Time, end time.Time) (int64, int64, error) {
@@ -251,7 +338,8 @@ func buildActivities(db *gorm.DB, operatorID uint) []ActivityItem {
 		Where("operation_status <> 0 OR is_high_risk = 1 OR (change_diff IS NOT NULL AND change_diff <> '' AND change_diff <> '{}') OR method IN ?", []string{"POST", "PUT", "PATCH", "DELETE"})
 	if operatorID > 0 {
 		// 首页"最近动态"只展示当前登录用户自己的操作记录。
-		query = query.Where("operator_id = ?", operatorID)
+		query = query.Where("operator_id = ?", operatorID).
+			Where("base_url NOT IN (?, ?)", "/admin/v1/log/request/self-list", "/admin/v1/log/request/self-detail")
 	}
 	if err := query.
 		Order("created_at DESC, id DESC").

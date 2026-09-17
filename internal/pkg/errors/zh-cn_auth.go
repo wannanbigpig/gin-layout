@@ -24,6 +24,8 @@ func init() {
 		SuperAdminMustKeepRole:  "系统默认超级管理员必须保留超级管理员角色",
 		LoginAccountLocked:      "账号已被锁定，请稍后重试",
 		RefreshTokenInvalid:     "刷新令牌无效或已过期",
+		CurrentPasswordRequired: "修改密码时必须填写当前密码",
+		CurrentPasswordWrong:    "当前密码错误",
 	})
 
 	mergeZhCNTextKey(map[string]string{

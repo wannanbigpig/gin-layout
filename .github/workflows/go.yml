@@ -49,6 +49,17 @@ jobs:
       - name: Unit tests
         run: go test $(go list ./... | grep -Ev '/tests(/|$)')
 
+      - name: Go vet
+        run: |
+          packages="$(go list ./... | grep -Ev '/tests(/|$)')"
+          go vet $packages
+
+      - name: Verify generated OpenAPI is current
+        run: |
+          cp ./config/config.yaml.example /tmp/go-layout-openapi-config.yaml
+          go run . -c /tmp/go-layout-openapi-config.yaml command gen-openapi
+          git diff --exit-code -- docs/openapi.yaml
+
       - name: Staticcheck targeted packages
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest

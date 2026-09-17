@@ -187,6 +187,89 @@ func TestCreateWithAuditDiffPreservesDisabledStatus(t *testing.T) {
 	assertProductDiff(t, diff, "status", nil, float64(0), "禁用")
 }
 
+func TestDisabledProductTodoLifecycle(t *testing.T) {
+	db, service := newProductTestService(t)
+	seedDepartment(t, db, 4)
+
+	if _, err := service.CreateWithAuditDiff(createProductForm("待启用产品", "初始描述", 1200, 0, 4)); err != nil {
+		t.Fatalf("create disabled product: %v", err)
+	}
+	var product model.Product
+	if err := db.First(&product).Error; err != nil {
+		t.Fatalf("query created product: %v", err)
+	}
+	first := findActiveProductTodo(t, db, product.ID)
+	if first.AssigneeID != 42 || first.CreatorID != 42 || first.Title != "启用产品：待启用产品" || first.ActionURL != "/business/product" {
+		t.Fatalf("unexpected product todo: %#v", first)
+	}
+
+	if _, err := service.UpdateWithAuditDiff(updateProductForm(product.ID, "待启用产品 V2", "更新描述", 1500, 0, 0)); err != nil {
+		t.Fatalf("update disabled product: %v", err)
+	}
+	updated := findActiveProductTodo(t, db, product.ID)
+	if updated.ID != first.ID || updated.Title != "启用产品：待启用产品 V2" {
+		t.Fatalf("disabled product update must refresh the same todo: first=%#v updated=%#v", first, updated)
+	}
+
+	if _, err := service.UpdateWithAuditDiff(updateProductForm(product.ID, "已启用产品", "", 1500, 1, 0)); err != nil {
+		t.Fatalf("enable product: %v", err)
+	}
+	completed := findLatestProductTodo(t, db, product.ID)
+	if completed.ID != first.ID || completed.Status != model.TodoStatusCompleted || completed.CompletedAt == nil {
+		t.Fatalf("enabling product must complete its todo: %#v", completed)
+	}
+
+	if _, err := service.UpdateWithAuditDiff(updateProductForm(product.ID, "再次停用产品", "", 1500, 0, 0)); err != nil {
+		t.Fatalf("disable product again: %v", err)
+	}
+	reopened := findActiveProductTodo(t, db, product.ID)
+	if reopened.ID == first.ID || reopened.Status != model.TodoStatusPending || reopened.Title != "启用产品：再次停用产品" {
+		t.Fatalf("disabling again must create a new active todo: first=%#v reopened=%#v", first, reopened)
+	}
+
+	if _, err := service.DeleteWithAuditDiff(product.ID); err != nil {
+		t.Fatalf("delete disabled product: %v", err)
+	}
+	canceled := findLatestProductTodo(t, db, product.ID)
+	if canceled.ID != reopened.ID || canceled.Status != model.TodoStatusCanceled || canceled.CanceledAt == nil {
+		t.Fatalf("deleting disabled product must cancel its todo: %#v", canceled)
+	}
+}
+
+func TestProductAndActivationTodoCommitAtomically(t *testing.T) {
+	db, service := newProductTestService(t)
+	seedDepartment(t, db, 4)
+	if err := db.Exec("DROP TABLE user_todos").Error; err != nil {
+		t.Fatalf("drop user_todos: %v", err)
+	}
+
+	if _, err := service.CreateWithAuditDiff(createProductForm("不能部分创建", "", 100, 0, 4)); err == nil {
+		t.Fatal("expected todo write failure to abort product creation")
+	}
+	var count int64
+	if err := db.Model(&model.Product{}).Count(&count).Error; err != nil {
+		t.Fatalf("count products: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("product was committed without its business todo, count=%d", count)
+	}
+}
+
+func TestEnabledProductDoesNotCreateActivationTodo(t *testing.T) {
+	db, service := newProductTestService(t)
+	seedDepartment(t, db, 4)
+	if _, err := service.CreateWithAuditDiff(createProductForm("已启用产品", "", 100, 1, 4)); err != nil {
+		t.Fatalf("create enabled product: %v", err)
+	}
+	var count int64
+	if err := db.Model(&model.UserTodo{}).Count(&count).Error; err != nil {
+		t.Fatalf("count product todos: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("enabled product should not create activation todo, count=%d", count)
+	}
+}
+
 func TestProductMutationRejectsBlankAndTooLongNameBeforeDatabaseAccess(t *testing.T) {
 	service := NewProductService()
 	_, err := service.CreateWithAuditDiff(createProductForm(" \t\n ", "", 0, 0, 0))
@@ -271,6 +354,32 @@ func newProductTestService(t *testing.T) (*gorm.DB, *ProductService) {
 	)`).Error; err != nil {
 		t.Fatalf("create product table: %v", err)
 	}
+	if err := db.Exec(`CREATE TABLE user_todos (
+		id integer primary key autoincrement,
+		assignee_id integer not null default 0,
+		creator_id integer not null default 0,
+		source_type text not null default '',
+		source_key text not null default '',
+		title text not null default '',
+		description text,
+		priority text not null default 'normal',
+		status text not null default 'pending',
+		action_url text not null default '',
+		due_at datetime,
+		completed_at datetime,
+		canceled_at datetime,
+		active_source_key text,
+		created_at datetime,
+		updated_at datetime,
+		deleted_at integer not null default 0
+	)`).Error; err != nil {
+		t.Fatalf("create user_todos table: %v", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX user_todos_active_source_key
+		ON user_todos(assignee_id, source_type, source_key)
+		WHERE deleted_at = 0 AND status IN ('pending', 'processing')`).Error; err != nil {
+		t.Fatalf("create active user todo unique index: %v", err)
+	}
 
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(nil)
@@ -280,6 +389,28 @@ func newProductTestService(t *testing.T) (*gorm.DB, *ProductService) {
 	service.SetCtx(ctx)
 	service.SetAdminUserId(42)
 	return db, service
+}
+
+func findActiveProductTodo(t *testing.T, db *gorm.DB, productID uint) model.UserTodo {
+	t.Helper()
+	var item model.UserTodo
+	err := db.Where("source_type = ? AND source_key = ? AND status IN ?", "product_activation", fmt.Sprintf("product:%d", productID), []string{model.TodoStatusPending, model.TodoStatusProcessing}).
+		Order("id DESC").First(&item).Error
+	if err != nil {
+		t.Fatalf("query active product todo: %v", err)
+	}
+	return item
+}
+
+func findLatestProductTodo(t *testing.T, db *gorm.DB, productID uint) model.UserTodo {
+	t.Helper()
+	var item model.UserTodo
+	err := db.Where("source_type = ? AND source_key = ?", "product_activation", fmt.Sprintf("product:%d", productID)).
+		Order("id DESC").First(&item).Error
+	if err != nil {
+		t.Fatalf("query latest product todo: %v", err)
+	}
+	return item
 }
 
 func seedProduct(t *testing.T, db *gorm.DB, product model.Product) {

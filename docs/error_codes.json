@@ -111,6 +111,21 @@
                     "name": "PasswordRequired",
                     "code": 20047,
                     "source": "internal/pkg/errors/code_auth.go"
+                },
+                {
+                    "name": "RefreshTokenInvalid",
+                    "code": 20048,
+                    "source": "internal/pkg/errors/code_auth.go"
+                },
+                {
+                    "name": "CurrentPasswordRequired",
+                    "code": 20049,
+                    "source": "internal/pkg/errors/code_auth.go"
+                },
+                {
+                    "name": "CurrentPasswordWrong",
+                    "code": 20050,
+                    "source": "internal/pkg/errors/code_auth.go"
                 }
             ]
         },

@@ -401,9 +401,11 @@ func (s *FileResourceService) UploadLocal(files []*multipart.FileHeader, params 
 }
 
 func buildLocalUploadFailureItem(index int, file *multipart.FileHeader, err error) *resources.FileUploadBatchFailure {
+	genericErr := pkgErrors.NewBusinessError(pkgErrors.ServerErr)
 	item := &resources.FileUploadBatchFailure{
 		Index:   index,
-		Message: err.Error(),
+		Code:    genericErr.GetCode(),
+		Message: genericErr.GetMessage(),
 	}
 	if file != nil {
 		item.OriginName = file.Filename
@@ -412,6 +414,8 @@ func buildLocalUploadFailureItem(index int, file *multipart.FileHeader, err erro
 	if errors.As(err, &businessErr) {
 		item.Code = businessErr.GetCode()
 		item.Message = businessErr.GetMessage()
+	} else {
+		log.Error("本地批量上传失败", zap.Int("index", index), zap.String("origin_name", item.OriginName), zap.Error(err))
 	}
 	return item
 }
@@ -526,15 +530,19 @@ func normalizeCredentialItem(parent *form.FileUploadCredentialBatch, item form.F
 }
 
 func buildBatchFailure(index int, clientID string, err error) *resources.FileUploadBatchFailure {
+	genericErr := pkgErrors.NewBusinessError(pkgErrors.ServerErr)
 	failure := &resources.FileUploadBatchFailure{
 		ClientID: clientID,
 		Index:    index,
-		Message:  err.Error(),
+		Code:     genericErr.GetCode(),
+		Message:  genericErr.GetMessage(),
 	}
 	var businessErr *pkgErrors.BusinessError
 	if errors.As(err, &businessErr) {
 		failure.Code = businessErr.GetCode()
 		failure.Message = businessErr.GetMessage()
+	} else {
+		log.Error("批量文件处理失败", zap.Int("index", index), zap.String("client_id", clientID), zap.Error(err))
 	}
 	return failure
 }

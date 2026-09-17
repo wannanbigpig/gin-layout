@@ -62,12 +62,13 @@ func NewAdminUserOptionsQuery() *AdminUserOptions {
 }
 
 type UpdateProfile struct {
-	Nickname    *string `form:"nickname" json:"nickname" label:"昵称" binding:"omitempty"`
-	Password    *string `form:"password" json:"password" label:"密码" binding:"omitempty,min=6,max=32"`
-	PhoneNumber *string `form:"phone_number" json:"phone_number" label:"手机号" binding:"omitempty,phone_number"`
-	CountryCode *string `form:"country_code" json:"country_code" label:"国家代码" binding:"omitempty"`
-	Email       *string `form:"email" json:"email" label:"邮箱" binding:"omitempty,email"`
-	Avatar      *string `form:"avatar" json:"avatar" label:"头像" binding:"omitempty"`
+	Nickname        *string `form:"nickname" json:"nickname" label:"昵称" binding:"omitempty"`
+	CurrentPassword *string `form:"current_password" json:"current_password" label:"当前密码" binding:"required_with=Password,omitempty,min=6,max=32"`
+	Password        *string `form:"password" json:"password" label:"密码" binding:"omitempty,min=6,max=32"`
+	PhoneNumber     *string `form:"phone_number" json:"phone_number" label:"手机号" binding:"omitempty,phone_number"`
+	CountryCode     *string `form:"country_code" json:"country_code" label:"国家代码" binding:"omitempty"`
+	Email           *string `form:"email" json:"email" label:"邮箱" binding:"omitempty,email"`
+	Avatar          *string `form:"avatar" json:"avatar" label:"头像" binding:"omitempty"`
 }
 
 func NewUpdateProfile() *UpdateProfile {

@@ -281,7 +281,7 @@ func (s *AdminUserService) actorCanManageSuperAdmin(tx ...*gorm.DB) bool {
 // applyUpdateFields 应用更新场景的字段变更。
 // 只更新非 nil 指针字段，支持部分更新语义。
 // 特殊处理：
-// - 超级管理员不可修改密码
+// - 默认超级管理员只能通过个人资料入口修改自己的密码
 // - 密码相同时拒绝更新
 // - 超级管理员不可禁用
 func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, params *adminUserEditParams) error {
@@ -292,7 +292,7 @@ func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, pa
 		adminUserModel.Nickname = *params.Nickname
 	}
 	if params.Password != nil && *params.Password != "" {
-		if adminUserModel.ID == global.SuperAdminId {
+		if adminUserModel.ID == global.SuperAdminId && !params.allowDefaultSuperAdminPasswordChange {
 			return e.NewBusinessError(e.SuperAdminCannotModify)
 		}
 		if utils2.ComparePasswords(adminUserModel.Password, *params.Password) {
@@ -397,6 +397,9 @@ func setHashedPassword(adminUserModel *model.AdminUser, plainPassword string) er
 
 // UpdateProfile 更新个人资料。
 func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) error {
+	if params == nil {
+		return e.NewBusinessError(e.InvalidParameter)
+	}
 	passwordChanged := params.Password != nil && *params.Password != ""
 	hasUpdate := params.Nickname != nil ||
 		passwordChanged ||
@@ -408,27 +411,36 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 		return nil
 	}
 
-	adminUserModel := model.NewAdminUsers()
-	editParams := &adminUserEditParams{
-		Id:          uid,
-		Nickname:    params.Nickname,
-		Password:    params.Password,
-		PhoneNumber: params.PhoneNumber,
-		CountryCode: params.CountryCode,
-		Email:       params.Email,
-		Avatar:      params.Avatar,
-	}
-	db, err := adminUserModel.GetDB()
+	db, err := model.GetDB()
 	if err != nil {
 		return e.NewBusinessError(e.UpdateUserFailed)
 	}
+	return s.updateProfileWithDB(db, uid, params)
+}
+
+func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *form.UpdateProfile) error {
+	passwordChanged := params.Password != nil && *params.Password != ""
+	adminUserModel := model.NewAdminUsers()
+	editParams := &adminUserEditParams{
+		Id:                                   uid,
+		Nickname:                             params.Nickname,
+		Password:                             params.Password,
+		PhoneNumber:                          params.PhoneNumber,
+		CountryCode:                          params.CountryCode,
+		Email:                                params.Email,
+		Avatar:                               params.Avatar,
+		allowDefaultSuperAdminPasswordChange: uid == global.SuperAdminId,
+	}
 	pendingRevocations := make([]userTokenRevocation, 0, 1)
-	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
+	err := access.RunInTransaction(db, func(tx *gorm.DB) error {
 		adminUserModel.SetDB(tx)
 		if err := loadAdminUserForUpdate(tx, adminUserModel, uid); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return e.NewBusinessError(e.UserDoesNotExist)
 			}
+			return err
+		}
+		if err := verifyProfileCurrentPassword(adminUserModel, params, passwordChanged); err != nil {
 			return err
 		}
 		oldAvatar := adminUserModel.Avatar
@@ -463,12 +475,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 				}
 			}
 		}
-		if passwordChanged {
-			revocation := &userTokenRevocation{
-				userID:        uid,
-				revokedCode:   model.RevokedCodePasswordChangeSelf,
-				revokedReason: "用户自己修改密码",
-			}
+		if revocation := profilePasswordRevocation(uid, passwordChanged); revocation != nil {
 			if err := s.prepareUserTokenRevocation(tx, revocation); err != nil {
 				return err
 			}
@@ -480,6 +487,30 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 		return err
 	}
 	return s.handleMutationError(s.revokeUserTokensAfterCommit(pendingRevocations), e.UpdateUserFailed)
+}
+
+func verifyProfileCurrentPassword(user *model.AdminUser, params *form.UpdateProfile, passwordChanged bool) error {
+	if !passwordChanged {
+		return nil
+	}
+	if params == nil || params.CurrentPassword == nil || *params.CurrentPassword == "" {
+		return e.NewBusinessError(e.CurrentPasswordRequired)
+	}
+	if user == nil || !utils2.ComparePasswords(user.Password, *params.CurrentPassword) {
+		return e.NewBusinessError(e.CurrentPasswordWrong)
+	}
+	return nil
+}
+
+func profilePasswordRevocation(uid uint, passwordChanged bool) *userTokenRevocation {
+	if !passwordChanged {
+		return nil
+	}
+	return &userTokenRevocation{
+		userID:        uid,
+		revokedCode:   model.RevokedCodePasswordChangeSelf,
+		revokedReason: "用户自己修改密码",
+	}
 }
 
 // validateUniqueFieldsWithLock 验证唯一字段（用户名、手机号、邮箱），使用数据库锁防止并发冲突。

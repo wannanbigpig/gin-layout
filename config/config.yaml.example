@@ -98,10 +98,10 @@ queue:
     low: 1
   audit_max_retry: 3
   audit_timeout_seconds: 10
-  audit_fallback_buffer_size: 1024        # 降级路径内存缓冲容量，满时优先丢弃低风险最旧条目
+  audit_fallback_buffer_size: 1024        # 降级缓冲容量；满时存储健康则限时同步落库，存储故障则计数告警并保障业务可用性
   audit_fallback_batch_size: 200          # 批量 INSERT 单批最大条数
   audit_fallback_flush_interval_ms: 1000  # 批量 INSERT 最长等待间隔（毫秒）
-  audit_sample_get_keep_every: 10         # 低风险只读请求保留 1/N，<=1 表示不采样
+  audit_sample_get_keep_every: 10         # 仅未关联登录用户的低风险成功只读请求保留 1/N；已认证请求始终保留
 logger:
   # 日志输出默认为文件，stderr 可选
   output: file

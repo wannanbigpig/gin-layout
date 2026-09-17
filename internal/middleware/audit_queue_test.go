@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-sql-driver/mysql"
 	"go.uber.org/zap"
 
 	"github.com/wannanbigpig/gin-layout/config"
@@ -195,7 +198,7 @@ func TestEnqueueAuditLogHandlesStorageUnavailableWhenQueueDisabled(t *testing.T)
 
 func TestReportAuditPersistenceResultMarksStorageUnavailable(t *testing.T) {
 	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
-		Persist: func(snapshot *auditsvc.AuditLogSnapshot) error {
+		Persist: func(_ context.Context, snapshot *auditsvc.AuditLogSnapshot) error {
 			return model.ErrDBUninitialized
 		},
 	})
@@ -211,7 +214,7 @@ func TestReportAuditPersistenceResultMarksStorageUnavailable(t *testing.T) {
 
 func TestReportAuditPersistenceResultResetsStorageUnavailableAfterSuccess(t *testing.T) {
 	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
-		Persist: func(snapshot *auditsvc.AuditLogSnapshot) error {
+		Persist: func(_ context.Context, snapshot *auditsvc.AuditLogSnapshot) error {
 			return nil
 		},
 	})
@@ -288,6 +291,27 @@ func TestShouldDropBySamplingKeepsOneOutOfN(t *testing.T) {
 	}
 }
 
+func TestShouldDropBySamplingAlwaysKeepsAuthenticatedRequests(t *testing.T) {
+	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.Queue.AuditSampleGetKeepEvery = 1000
+	})
+	defer restoreConfig()
+
+	resetSampleCounterForTesting()
+	snapshot := &auditsvc.AuditLogSnapshot{
+		RequestID:       "req-authenticated",
+		OperatorID:      42,
+		Method:          http.MethodGet,
+		ResponseStatus:  http.StatusOK,
+		OperationStatus: 0,
+	}
+	for i := 0; i < 20; i++ {
+		if shouldDropBySampling(snapshot) {
+			t.Fatalf("authenticated request must not be sampled out (iteration %d)", i)
+		}
+	}
+}
+
 func TestFinalizeRequestLoggingRecordsStatsBeforeAuditSampling(t *testing.T) {
 	restoreConfig := config.UpdateConfigForTesting(func(cfg *config.Conf) {
 		cfg.Queue.Enable = true
@@ -307,7 +331,7 @@ func TestFinalizeRequestLoggingRecordsStatsBeforeAuditSampling(t *testing.T) {
 			enqueued++
 			return nil
 		},
-		RecordStat: func(_ *auditsvc.AuditLogSnapshot) error {
+		RecordStat: func(_ context.Context, _ *auditsvc.AuditLogSnapshot) error {
 			statsCount++
 			return nil
 		},
@@ -333,7 +357,7 @@ func TestFinalizeRequestLoggingRecordsStatsBeforeAuditSampling(t *testing.T) {
 	}
 }
 
-func TestFinalizeRequestLoggingRecordsStatsForSkippedAuditPath(t *testing.T) {
+func TestFinalizeRequestLoggingSkipsStatsAndAuditForProbePath(t *testing.T) {
 	statsCount := 0
 	enqueued := 0
 	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
@@ -341,7 +365,7 @@ func TestFinalizeRequestLoggingRecordsStatsForSkippedAuditPath(t *testing.T) {
 			enqueued++
 			return nil
 		},
-		RecordStat: func(_ *auditsvc.AuditLogSnapshot) error {
+		RecordStat: func(_ context.Context, _ *auditsvc.AuditLogSnapshot) error {
 			statsCount++
 			return nil
 		},
@@ -358,11 +382,43 @@ func TestFinalizeRequestLoggingRecordsStatsForSkippedAuditPath(t *testing.T) {
 	respRecorder := createResponseRecorder(ctx)
 	finalizeRequestLogging(ctx, respRecorder)
 
-	if statsCount != 1 {
-		t.Fatalf("expected skipped audit path to still record stats, got %d", statsCount)
+	if statsCount != 0 {
+		t.Fatalf("expected probe path not to affect business request stats, got %d", statsCount)
 	}
 	if enqueued != 0 {
 		t.Fatalf("expected skipped audit path not to enqueue audit log, got %d", enqueued)
+	}
+}
+
+func TestReadinessPathSkipsBusinessStatsAndAuditLog(t *testing.T) {
+	statsCount := 0
+	enqueued := 0
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Enqueue: func(_ context.Context, _ string, _ *auditsvc.AuditLogSnapshot) error {
+			enqueued++
+			return nil
+		},
+		RecordStat: func(_ context.Context, _ *auditsvc.AuditLogSnapshot) error {
+			statsCount++
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/health/readiness", nil)
+	ctx.Set(global.ContextKeyRequestID, "req-readiness")
+	ctx.Set(global.ContextKeyRequestStartTime, time.Now())
+
+	finalizeRequestLogging(ctx, createResponseRecorder(ctx))
+
+	if statsCount != 0 {
+		t.Fatalf("expected readiness not to affect business request stats, got %d", statsCount)
+	}
+	if enqueued != 0 {
+		t.Fatalf("expected readiness not to enter request logs, got %d", enqueued)
 	}
 }
 
@@ -482,22 +538,29 @@ func TestFallbackBufferBatchesAndDrains(t *testing.T) {
 	}
 }
 
-// TestFallbackBufferDropsLowRiskOldestWhenFull 验证缓冲满时优先丢弃低风险最旧条目，写请求保留。
-func TestFallbackBufferDropsLowRiskOldestWhenFull(t *testing.T) {
+// TestFallbackBufferFallsBackToSyncWithoutEviction 验证缓冲满时不驱逐已接收条目，新条目走同步落库。
+func TestFallbackBufferFallsBackToSyncWithoutEviction(t *testing.T) {
 	resetAuditFallbackBufferForTesting()
 	defer resetAuditFallbackBufferForTesting()
 
 	var (
-		mu        sync.Mutex
-		persisted []string
+		mu             sync.Mutex
+		persistedBatch []string
+		persistedSync  []string
 	)
 	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
 		PersistBatch: func(ctx context.Context, snapshots []*auditsvc.AuditLogSnapshot) error {
 			mu.Lock()
 			defer mu.Unlock()
 			for _, s := range snapshots {
-				persisted = append(persisted, s.RequestID)
+				persistedBatch = append(persistedBatch, s.RequestID)
 			}
+			return nil
+		},
+		Persist: func(_ context.Context, snapshot *auditsvc.AuditLogSnapshot) error {
+			mu.Lock()
+			defer mu.Unlock()
+			persistedSync = append(persistedSync, snapshot.RequestID)
 			return nil
 		},
 	})
@@ -513,12 +576,12 @@ func TestFallbackBufferDropsLowRiskOldestWhenFull(t *testing.T) {
 	defer restoreConfig()
 
 	storageUnavailable.Store(false)
-	// 先塞 2 条低风险 GET（可丢弃），再塞 1 条写请求（不可丢弃），缓冲已满 3 条。
+	// 先塞 2 条低风险 GET 和 1 条写请求，缓冲已满 3 条。
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "lo-1", Method: http.MethodGet, IsHighRisk: 0, ResponseStatus: http.StatusOK})
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "lo-2", Method: http.MethodGet, IsHighRisk: 0, ResponseStatus: http.StatusOK})
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "hi-1", Method: http.MethodPost, IsHighRisk: 1, ResponseStatus: http.StatusOK})
 
-	// 再塞 2 条写请求：因为低风险最旧条目会被驱逐，hi-2/hi-3 应入队成功。
+	// 再塞 2 条写请求：缓冲内容不变，hi-2/hi-3 同步落库。
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "hi-2", Method: http.MethodPost, IsHighRisk: 1})
 	enqueueAuditLog(nil, "request", &auditsvc.AuditLogSnapshot{RequestID: "hi-3", Method: http.MethodPost, IsHighRisk: 1})
 
@@ -526,18 +589,334 @@ func TestFallbackBufferDropsLowRiskOldestWhenFull(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	// 期望最终持久化的条目包含 hi-1/hi-2/hi-3，且 lo-1/lo-2 被驱逐至少一条（容量 3）。
+	// 期望缓冲内 3 条全部批量落库，溢出的 2 条全部同步落库。
 	gotMap := map[string]bool{}
-	for _, id := range persisted {
+	for _, id := range append(persistedBatch, persistedSync...) {
 		gotMap[id] = true
 	}
-	for _, must := range []string{"hi-1", "hi-2", "hi-3"} {
+	for _, must := range []string{"lo-1", "lo-2", "hi-1", "hi-2", "hi-3"} {
 		if !gotMap[must] {
-			t.Fatalf("expected high-risk %s preserved, got persisted=%v", must, persisted)
+			t.Fatalf("expected %s preserved, got batch=%v sync=%v", must, persistedBatch, persistedSync)
 		}
 	}
-	if gotMap["lo-1"] && gotMap["lo-2"] {
-		t.Fatalf("expected at least one low-risk dropped, got persisted=%v", persisted)
+	if len(persistedSync) != 2 {
+		t.Fatalf("expected 2 overflow items persisted synchronously, got %v", persistedSync)
+	}
+}
+
+func TestFallbackBufferRestoresBatchWhenStorageUnavailable(t *testing.T) {
+	markAuditStorageAvailable()
+	defer markAuditStorageAvailable()
+
+	attempts := 0
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		PersistBatch: func(context.Context, []*auditsvc.AuditLogSnapshot) error {
+			attempts++
+			if attempts == 1 {
+				return errors.New("driver: bad connection")
+			}
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	buffer := &auditFallbackBuffer{
+		items: []*bufferedAuditItem{{
+			kind:     "request",
+			snapshot: &auditsvc.AuditLogSnapshot{RequestID: "retry-me"},
+		}},
+		batchSize: 1,
+	}
+	buffer.drainOnce()
+	if pending := buffer.pendingCount(); pending != 1 {
+		t.Fatalf("expected unavailable batch to remain buffered, pending=%d", pending)
+	}
+
+	markAuditStorageAvailable()
+	buffer.drainOnce()
+	if pending := buffer.pendingCount(); pending != 0 {
+		t.Fatalf("expected restored batch to persist after recovery, pending=%d", pending)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 persistence attempts, got %d", attempts)
+	}
+}
+
+func TestFallbackBufferIsolatesPermanentInvalidRecord(t *testing.T) {
+	markAuditStorageAvailable()
+	defer markAuditStorageAvailable()
+
+	var persisted []string
+	attempts := 0
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		PersistBatch: func(_ context.Context, snapshots []*auditsvc.AuditLogSnapshot) error {
+			attempts++
+			for _, snapshot := range snapshots {
+				if snapshot.RequestID == "bad" {
+					return &mysql.MySQLError{Number: 1406, Message: "Data too long"}
+				}
+			}
+			for _, snapshot := range snapshots {
+				persisted = append(persisted, snapshot.RequestID)
+			}
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	buffer := &auditFallbackBuffer{
+		items: []*bufferedAuditItem{
+			{kind: "request", snapshot: &auditsvc.AuditLogSnapshot{RequestID: "good-1"}},
+			{kind: "request", snapshot: &auditsvc.AuditLogSnapshot{RequestID: "bad"}},
+			{kind: "request", snapshot: &auditsvc.AuditLogSnapshot{RequestID: "good-2"}},
+		},
+		batchSize: 3,
+	}
+	buffer.drainOnce()
+
+	if pending := buffer.pendingCount(); pending != 0 {
+		t.Fatalf("permanent invalid record must not poison the queue, pending=%d", pending)
+	}
+	if got := strings.Join(persisted, ","); got != "good-1,good-2" {
+		t.Fatalf("valid records should persist around the isolated record, got %q", got)
+	}
+	if attempts > 7 {
+		t.Fatalf("isolation should remain bounded, attempts=%d", attempts)
+	}
+}
+
+func TestFallbackBufferStopReportsInflightTimeout(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		PersistBatch: func(context.Context, []*auditsvc.AuditLogSnapshot) error {
+			close(started)
+			<-release
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	buffer := newAuditFallbackBuffer()
+	if !buffer.Offer("request", &auditsvc.AuditLogSnapshot{RequestID: "inflight"}) {
+		t.Fatal("expected item to enter fallback buffer")
+	}
+	<-started
+	if drained, _ := buffer.Stop(10 * time.Millisecond); drained {
+		t.Fatal("expected stop to report an in-flight persistence timeout")
+	}
+
+	close(release)
+	if drained, pending := buffer.Stop(time.Second); !drained || pending != 0 {
+		t.Fatalf("expected worker to finish after persistence release, drained=%v pending=%d", drained, pending)
+	}
+}
+
+func TestFallbackBufferShutdownProbesStorageDespiteCooldown(t *testing.T) {
+	markAuditStorageAvailable()
+	defer markAuditStorageAvailable()
+
+	persisted := 0
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		PersistBatch: func(context.Context, []*auditsvc.AuditLogSnapshot) error {
+			persisted++
+			return nil
+		},
+	})
+	defer restoreDeps()
+	markAuditStorageUnavailable()
+
+	buffer := &auditFallbackBuffer{
+		items: []*bufferedAuditItem{{
+			kind:     "request",
+			snapshot: &auditsvc.AuditLogSnapshot{RequestID: "shutdown-probe"},
+		}},
+		batchSize: 1,
+	}
+	buffer.drainAll()
+	if persisted != 1 {
+		t.Fatalf("expected shutdown drain to probe storage once, got %d", persisted)
+	}
+	if pending := buffer.pendingCount(); pending != 0 {
+		t.Fatalf("expected recovered storage to drain pending batch, pending=%d", pending)
+	}
+}
+
+func TestFallbackOverflowDuringCooldownDoesNotBlockOnSyncPersist(t *testing.T) {
+	previousBuffer := fallbackBuffer
+	fallbackBuffer = &auditFallbackBuffer{
+		started:  true,
+		capacity: 1,
+		items: []*bufferedAuditItem{{
+			kind:     "request",
+			snapshot: &auditsvc.AuditLogSnapshot{RequestID: "already-buffered"},
+		}},
+		notify: make(chan struct{}, 1),
+	}
+	defer func() { fallbackBuffer = previousBuffer }()
+
+	persistCalls := 0
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Persist: func(context.Context, *auditsvc.AuditLogSnapshot) error {
+			persistCalls++
+			return nil
+		},
+	})
+	defer restoreDeps()
+	markAuditStorageUnavailable()
+
+	enqueueIntoFallbackBuffer("request", &auditsvc.AuditLogSnapshot{RequestID: "overflow"})
+
+	if persistCalls != 0 {
+		t.Fatalf("expected cooldown overflow not to synchronously hit storage, got %d calls", persistCalls)
+	}
+	if dropped := auditOverflowDropped.Load(); dropped != 1 {
+		t.Fatalf("expected overflow loss to be counted, got %d", dropped)
+	}
+}
+
+func TestSyncFallbackProvidesPersistenceDeadline(t *testing.T) {
+	deadlineSeen := false
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Persist: func(ctx context.Context, _ *auditsvc.AuditLogSnapshot) error {
+			_, deadlineSeen = ctx.Deadline()
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	reportAuditPersistenceResult("request", &auditsvc.AuditLogSnapshot{RequestID: "deadline"}, "test")
+	if !deadlineSeen {
+		t.Fatal("expected synchronous fallback persistence to have a fixed deadline")
+	}
+}
+
+func TestRecordRequestStatUsesDeadlineAndCooldown(t *testing.T) {
+	calls := 0
+	deadlineSeen := false
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		RecordStat: func(ctx context.Context, _ *auditsvc.AuditLogSnapshot) error {
+			calls++
+			_, deadlineSeen = ctx.Deadline()
+			return errors.New("database unavailable")
+		},
+	})
+	defer restoreDeps()
+
+	snapshot := &auditsvc.AuditLogSnapshot{RequestID: "stats-db-down"}
+	recordRequestStat("request", snapshot)
+	recordRequestStat("request", snapshot)
+
+	if !deadlineSeen {
+		t.Fatal("expected daily request stats persistence to have a fixed deadline")
+	}
+	if calls != 1 {
+		t.Fatalf("expected cooldown to suppress repeated stats writes, calls=%d", calls)
+	}
+	if storageUnavailable.Load() {
+		t.Fatal("request stats failure must not trip the request-log storage circuit")
+	}
+}
+
+func TestRequestStatsFailureDoesNotBlockAuditBufferDrain(t *testing.T) {
+	persisted := 0
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		RecordStat: func(context.Context, *auditsvc.AuditLogSnapshot) error {
+			return errors.New("daily stats table unavailable")
+		},
+		PersistBatch: func(context.Context, []*auditsvc.AuditLogSnapshot) error {
+			persisted++
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	recordRequestStat("request", &auditsvc.AuditLogSnapshot{RequestID: "stats-failed"})
+	buffer := &auditFallbackBuffer{
+		items: []*bufferedAuditItem{{
+			kind:     "request",
+			snapshot: &auditsvc.AuditLogSnapshot{RequestID: "audit-still-healthy"},
+		}},
+		batchSize: 1,
+	}
+	buffer.drainOnce()
+
+	if persisted != 1 || buffer.pendingCount() != 0 {
+		t.Fatalf("stats failure must not block request-log drain, persisted=%d pending=%d", persisted, buffer.pendingCount())
+	}
+}
+
+func TestFallbackOverflowAttemptsEverySyncPersistWhileStorageHealthy(t *testing.T) {
+	previousBuffer := fallbackBuffer
+	fallbackBuffer = &auditFallbackBuffer{
+		started:  true,
+		capacity: 1,
+		items: []*bufferedAuditItem{{
+			kind:     "request",
+			snapshot: &auditsvc.AuditLogSnapshot{RequestID: "already-buffered"},
+		}},
+		notify: make(chan struct{}, 1),
+	}
+	defer func() { fallbackBuffer = previousBuffer }()
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	restoreDeps := setAuditQueueDepsForTesting(auditQueueDeps{
+		Persist: func(context.Context, *auditsvc.AuditLogSnapshot) error {
+			calls.Add(1)
+			started <- struct{}{}
+			<-release
+			return nil
+		},
+	})
+	defer restoreDeps()
+
+	var wg sync.WaitGroup
+	for _, requestID := range []string{"sync-1", "sync-2"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			enqueueIntoFallbackBuffer("request", &auditsvc.AuditLogSnapshot{RequestID: requestID})
+		}()
+	}
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("expected every overflow record to attempt synchronous persistence")
+		}
+	}
+	close(release)
+	wg.Wait()
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("expected every overflow record to attempt synchronous persistence, got %d", got)
+	}
+	if dropped := auditOverflowDropped.Load(); dropped != 0 {
+		t.Fatalf("healthy storage must not drop concurrent overflow records, got %d", dropped)
+	}
+}
+
+func TestAuditStorageHalfOpenAllowsSingleProbe(t *testing.T) {
+	markAuditStorageUnavailable()
+	defer markAuditStorageAvailable()
+	storageUnavailableSince.Store(time.Now().Add(-auditStorageRetryCooldown - time.Second).UnixNano())
+	storageRecoveryProbe.Store(false)
+
+	var allowed atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if tryAcquireAuditStorageAttempt() {
+				allowed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := allowed.Load(); got != 1 {
+		t.Fatalf("expected exactly one half-open storage probe, got %d", got)
 	}
 }
 

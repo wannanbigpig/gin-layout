@@ -16,6 +16,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -634,6 +635,153 @@ func TestApplyUpdateFieldsRejectsSuperAdminPasswordChange(t *testing.T) {
 	})
 
 	assertBusinessErrorMessage(t, err, e.SuperAdminCannotModify, "系统默认超级管理员不允许修改密码")
+}
+
+func TestApplyUpdateFieldsAllowsDefaultSuperAdminSelfPasswordChange(t *testing.T) {
+	service := NewAdminUserService()
+	password := "new-password"
+	adminUserModel := &model.AdminUser{
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+			BaseModel: model.BaseModel{ID: global.SuperAdminId},
+		},
+		Password: "$2a$10$FhTic5csc1cK0WqZ.9uB1eT1N2rQTI4Mc4H2Rwo4EKYQk/75EdxmK",
+	}
+
+	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
+		Id:                                   global.SuperAdminId,
+		Password:                             &password,
+		allowDefaultSuperAdminPasswordChange: true,
+	})
+
+	if err != nil {
+		t.Fatalf("expected default super admin self password change to succeed, got %v", err)
+	}
+	if !utils2.ComparePasswords(adminUserModel.Password, password) {
+		t.Fatal("expected the new password to be hashed and stored")
+	}
+}
+
+func TestProfilePasswordRevocationUsesSelfChangeReason(t *testing.T) {
+	revocation := profilePasswordRevocation(global.SuperAdminId, true)
+	if revocation == nil {
+		t.Fatal("expected password change to revoke existing tokens")
+	}
+	if revocation.userID != global.SuperAdminId || revocation.revokedCode != model.RevokedCodePasswordChangeSelf || revocation.revokedReason != "用户自己修改密码" {
+		t.Fatalf("unexpected profile password revocation: %#v", revocation)
+	}
+	if got := profilePasswordRevocation(global.SuperAdminId, false); got != nil {
+		t.Fatalf("expected no revocation without password change, got %#v", got)
+	}
+}
+
+func TestUpdateProfilePasswordVerifiesCurrentPasswordBeforeUpdate(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE admin_user (
+		id integer primary key,
+		nickname text,
+		password text,
+		updated_at datetime,
+		deleted_at integer not null default 0
+	)`).Error; err != nil {
+		t.Fatalf("create admin_user failed: %v", err)
+	}
+	currentPassword := "current-password"
+	currentHash, err := utils2.PasswordHash(currentPassword)
+	if err != nil {
+		t.Fatalf("hash current password: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO admin_user (id, nickname, password, deleted_at) VALUES (?, ?, ?, 0)`, global.SuperAdminId, "admin", currentHash).Error; err != nil {
+		t.Fatalf("insert admin user: %v", err)
+	}
+
+	previousPrepare := prepareUserTokenRevocationFunc
+	previousComplete := completeUserTokenRevocationFunc
+	prepareCalls := 0
+	completeCalls := 0
+	prepareUserTokenRevocationFunc = func(_ *gorm.DB, userID uint, revokedCode uint8, revokedReason string) (*auth.PreparedUserTokenRevocation, error) {
+		prepareCalls++
+		if userID != global.SuperAdminId || revokedCode != model.RevokedCodePasswordChangeSelf || revokedReason != "用户自己修改密码" {
+			t.Fatalf("unexpected revocation input: userID=%d code=%d reason=%q", userID, revokedCode, revokedReason)
+		}
+		return &auth.PreparedUserTokenRevocation{}, nil
+	}
+	completeUserTokenRevocationFunc = func(_ *auth.PreparedUserTokenRevocation) error {
+		completeCalls++
+		return nil
+	}
+	defer func() {
+		prepareUserTokenRevocationFunc = previousPrepare
+		completeUserTokenRevocationFunc = previousComplete
+	}()
+
+	service := NewAdminUserService()
+	newPassword := "new-password"
+	wrongPassword := "wrong-password"
+	err = service.updateProfileWithDB(db, global.SuperAdminId, &form.UpdateProfile{
+		CurrentPassword: &wrongPassword,
+		Password:        &newPassword,
+	})
+	assertBusinessErrorMessage(t, err, e.CurrentPasswordWrong, "当前密码错误")
+	if prepareCalls != 0 || completeCalls != 0 {
+		t.Fatalf("wrong current password must not revoke sessions: prepare=%d complete=%d", prepareCalls, completeCalls)
+	}
+	var passwordAfterWrong string
+	if err := db.Table("admin_user").Where("id = ?", global.SuperAdminId).Pluck("password", &passwordAfterWrong).Error; err != nil {
+		t.Fatalf("read password after rejected update: %v", err)
+	}
+	if passwordAfterWrong != currentHash {
+		t.Fatal("wrong current password must not update stored password")
+	}
+
+	err = service.updateProfileWithDB(db, global.SuperAdminId, &form.UpdateProfile{
+		CurrentPassword: &currentPassword,
+		Password:        &newPassword,
+	})
+	if err != nil {
+		t.Fatalf("change password with current password: %v", err)
+	}
+	if prepareCalls != 1 || completeCalls != 1 {
+		t.Fatalf("successful password change must revoke all sessions: prepare=%d complete=%d", prepareCalls, completeCalls)
+	}
+	var passwordAfterSuccess string
+	if err := db.Table("admin_user").Where("id = ?", global.SuperAdminId).Pluck("password", &passwordAfterSuccess).Error; err != nil {
+		t.Fatalf("read password after successful update: %v", err)
+	}
+	if !utils2.ComparePasswords(passwordAfterSuccess, newPassword) {
+		t.Fatal("expected the new password to be stored as a valid hash")
+	}
+}
+
+func TestUpdateProfileWithoutPasswordDoesNotRequireCurrentPassword(t *testing.T) {
+	user := &model.AdminUser{Password: "unused"}
+	params := &form.UpdateProfile{}
+	if err := verifyProfileCurrentPassword(user, params, false); err != nil {
+		t.Fatalf("ordinary profile update must not require current password: %v", err)
+	}
+}
+
+func TestDefaultSuperAdminProtectionRemainsForDisableAndDelete(t *testing.T) {
+	service := NewAdminUserService()
+	disabled := model.AdminUserStatusDisabled
+	adminUserModel := &model.AdminUser{
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{
+			BaseModel: model.BaseModel{ID: global.SuperAdminId},
+		},
+		Status:       model.AdminUserStatusEnabled,
+		IsSuperAdmin: global.Yes,
+	}
+
+	err := service.applyUpdateFields(adminUserModel, &adminUserEditParams{
+		Id:     global.SuperAdminId,
+		Status: &disabled,
+	})
+	assertBusinessErrorMessage(t, err, e.SuperAdminCannotDisable, "系统默认超级管理员不允许被禁用")
+
+	err = service.Delete(global.SuperAdminId)
+	assertBusinessErrorMessage(t, err, e.SuperAdminCannotDelete, "系统默认超级管理员不允许删除")
 }
 
 func TestApplyCreateFieldsSetsIsSuperAdmin(t *testing.T) {

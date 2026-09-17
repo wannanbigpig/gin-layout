@@ -77,6 +77,9 @@ export const ErrorCode = {
     MenuPathExists: 20045,
     LoginAccountLocked: 20046,
     PasswordRequired: 20047,
+    RefreshTokenInvalid: 20048,
+    CurrentPasswordRequired: 20049,
+    CurrentPasswordWrong: 20050,
 } as const
 
 export type ErrorCodeName = keyof typeof ErrorCode

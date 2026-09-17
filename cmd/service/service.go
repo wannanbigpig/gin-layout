@@ -145,7 +145,11 @@ func shutdownBackgroundServices(requestLifecycle *httpRequestLifecycle) error {
 	if !middleware.WaitWebSocketAudits(auditDrainTimeout) {
 		log.Logger.Warn("等待 WebSocket 断连审计超时")
 	}
-	middleware.StopAuditLogQueueDrain(auditDrainTimeout)
+	if drained, pending := middleware.StopAuditLogQueueDrain(auditDrainTimeout); !drained {
+		// audit worker 可能仍持有 DB 连接；不能再调用 data.Shutdown，
+		// 否则会把 drain 超时转化为资源关闭竞态。进程退出时由 OS 最终回收。
+		return fmt.Errorf("audit log drain timed out with %d buffered records; data resources left open", pending)
+	}
 	auth.StopLoginLogWorker(loginLogDrainTimeout)
 	sys_config.StopSysConfigCacheSyncSubscriber(gracefulShutdownTimout)
 	if err := data.Shutdown(); err != nil {

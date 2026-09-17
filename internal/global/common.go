@@ -18,4 +18,4 @@ const (
 )
 
 // Version 是默认版本号；Release 构建可通过 -ldflags 注入 Git Tag。
-var Version = "0.9.2"
+var Version = "0.10.0"

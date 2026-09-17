@@ -127,6 +127,25 @@ func adminAccessTokenGroup(deps *ControllerDeps) RouteGroupDef {
 			authLoginGroup(deps),
 			adminProfileGroup(deps),
 			notificationLoginGroup(deps),
+			personalTodoGroup(deps),
+			personalDashboardGroup(deps),
+			personalRequestLogGroup(deps),
+		},
+	}
+}
+
+// personalTodoGroup 只允许登录用户管理分配给自己的待办。
+func personalTodoGroup(deps *ControllerDeps) RouteGroupDef {
+	return RouteGroupDef{
+		Prefix:    "todo",
+		GroupCode: "todo_personal",
+		Routes: []RouteDef{
+			GET("list", "我的待办列表", deps.Todo.List),
+			GET("summary", "我的待办摘要", deps.Todo.Summary),
+			POST("create", "创建个人待办", deps.Todo.Create),
+			POST("update", "更新个人待办", deps.Todo.Update),
+			POST("status", "更新待办状态", deps.Todo.Status),
+			POST("delete", "删除个人待办", deps.Todo.Delete),
 		},
 	}
 }
@@ -171,6 +190,34 @@ func dashboardGroup(deps *ControllerDeps) RouteGroupDef {
 			GET("overview", "仪表盘概览", deps.Dashboard.Overview),
 			GET("statistics", "仪表盘统计", deps.Dashboard.Statistics),
 			GET("monitor", "服务器监控", deps.Dashboard.Monitor),
+		},
+	}
+}
+
+// personalDashboardGroup 只返回当前登录用户自己的工作台数据。
+func personalDashboardGroup(deps *ControllerDeps) RouteGroupDef {
+	return RouteGroupDef{
+		Prefix:    "dashboard",
+		GroupCode: "dashboard_personal",
+		Routes: []RouteDef{
+			GET("personal", "个人工作台", deps.Dashboard.Personal),
+		},
+	}
+}
+
+// personalRequestLogGroup 只允许当前登录用户查询自己的请求日志。
+func personalRequestLogGroup(deps *ControllerDeps) RouteGroupDef {
+	return RouteGroupDef{
+		Prefix:    "log",
+		GroupCode: "request_log_self",
+		Children: []RouteGroupDef{
+			{
+				Prefix: "request",
+				Routes: []RouteDef{
+					GET("self-list", "个人请求日志列表", deps.RequestLog.SelfList),
+					GET("self-detail", "个人请求日志详情", deps.RequestLog.SelfDetail),
+				},
+			},
 		},
 	}
 }

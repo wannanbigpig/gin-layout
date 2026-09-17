@@ -121,3 +121,26 @@ func TestRequestLogListRejectsUnknownExecutionTimeScope(t *testing.T) {
 		t.Fatal("expected execution_time_scope=duration to fail validation")
 	}
 }
+
+func TestRequestLogListScopeQueryValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, scope := range []string{"", "regular", "all", "important", "changes", "failed", "high_risk", "self_reads"} {
+		t.Run("valid_"+scope, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest("GET", "/?scope="+scope, nil)
+			params := NewRequestLogListQuery()
+			if err := ctx.ShouldBindQuery(params); err != nil {
+				t.Fatalf("scope %q should be valid: %v", scope, err)
+			}
+			if params.Scope != scope {
+				t.Fatalf("scope = %q, want %q", params.Scope, scope)
+			}
+		})
+	}
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("GET", "/?scope=unknown", nil)
+	if err := ctx.ShouldBindQuery(NewRequestLogListQuery()); err == nil {
+		t.Fatal("unknown scope should be rejected")
+	}
+}

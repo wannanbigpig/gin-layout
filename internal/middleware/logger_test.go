@@ -64,6 +64,38 @@ func TestCacheRequestBodySkipsMultipartRequests(t *testing.T) {
 	}
 }
 
+func TestShouldSkipRequestLoggingOnlySkipsUnmatchedNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	assertSkip := func(t *testing.T, path string, registerRoute bool, want bool) {
+		t.Helper()
+		engine := gin.New()
+		var got bool
+		engine.Use(func(c *gin.Context) {
+			c.Next()
+			got = shouldSkipRequestLogging(c, &responseRecorder{statusCode: c.Writer.Status()})
+		})
+		if registerRoute {
+			engine.GET("/admin/v1/resource/:id", func(c *gin.Context) {
+				c.Status(http.StatusNotFound)
+			})
+		}
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		engine.ServeHTTP(httptest.NewRecorder(), request)
+		if got != want {
+			t.Fatalf("unexpected skip decision for %s: got %v want %v", path, got, want)
+		}
+	}
+
+	t.Run("unmatched route", func(t *testing.T) {
+		assertSkip(t, "/missing-route", false, true)
+	})
+
+	t.Run("matched business route", func(t *testing.T) {
+		assertSkip(t, "/admin/v1/resource/42", true, false)
+	})
+}
+
 // TestParseResponse 验证 JSON 响应解析逻辑。
 func TestParseResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -287,6 +319,25 @@ func TestBuildRequestAuditLogSnapshotUsesAuditRequestBodyOverride(t *testing.T) 
 	}
 	if snapshot.RequestBody != `{"config_value":"******"}` {
 		t.Fatalf("unexpected request body override: %s", snapshot.RequestBody)
+	}
+}
+
+func TestCollectAuditRequestMetaUsesTrustedContextAndIgnoresClientHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/new-route", nil)
+	ctx.Request.Header.Set("X-Operation-Name", "客户端伪造名称")
+	ctx.Set(global.ContextKeyRequestID, "trusted-operation-name")
+	ctx.Set(global.ContextKeyOperationName, "路由声明名称")
+	meta := collectAuditRequestMeta(ctx)
+	if meta == nil || meta.operationName != "路由声明名称" {
+		t.Fatalf("unexpected operation name: %#v", meta)
+	}
+
+	ctx.Set(global.ContextKeyOperationName, "")
+	meta = collectAuditRequestMeta(ctx)
+	if meta == nil || meta.operationName == "客户端伪造名称" {
+		t.Fatalf("client header must not control audit operation name: %#v", meta)
 	}
 }
 

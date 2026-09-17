@@ -110,6 +110,12 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 			duration_total_ms real default 0,
 			duration_max_ms real default 0
 		)`,
+		`CREATE TABLE sys_messages (
+			id integer primary key autoincrement,
+			user_id integer,
+			is_read integer default 0,
+			created_at datetime
+		)`,
 	}
 	for _, statement := range statements {
 		if err := db.Exec(statement).Error; err != nil {

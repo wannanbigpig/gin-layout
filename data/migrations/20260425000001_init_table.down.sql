@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS `sys_dict_type`;
 DROP TABLE IF EXISTS `sys_config`;
 -- 删除每日统计与消息与导出记录表
 DROP TABLE IF EXISTS `daily_request_stats`;
+DROP TABLE IF EXISTS `user_todos`;
 DROP TABLE IF EXISTS `sys_messages`;
 DROP TABLE IF EXISTS `sys_export_records`;
 -- 删除任务中心相关表

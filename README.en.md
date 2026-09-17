@@ -1,4 +1,7 @@
-# <div align="center">gin-layout</div>
+<div align="center">
+  <img src="./docs/images/gin-layout-mark.svg" width="88" height="88" alt="Gin Layout Logo" />
+  <h1>gin-layout</h1>
+</div>
 
 <div align="center">
   <a href="./README.md">中文</a> | <strong>English</strong>
@@ -45,6 +48,7 @@ Most admin projects start with the same goal: get login, permissions, menus, upl
 | RBAC | Admin, role, department, menu, and API permission management |
 | Route Metadata | Declarative route tree generates both Gin routes and API metadata |
 | Logs | Built-in login logs, request logs, and unified response structure |
+| Personal Workspace | Personal dashboard, recent activity, and extensible personal / business todos |
 | File Access | File upload and public / private file access |
 | Task Center | Built-in async jobs, cron task definitions, run records, retries, and operation settings |
 | Realtime | System notifications, WebSocket temporary tickets, and real-time message connections |
@@ -60,6 +64,7 @@ Most admin projects start with the same goal: get login, permissions, menus, upl
 - Demo: [Live Demo](https://x-l-admin.wannanbigpig.com/)
 - Commands and jobs guide: [docs/COMMANDS_AND_TASKS.en.md](./docs/COMMANDS_AND_TASKS.en.md)
 - Migration command guide: [docs/MIGRATE_COMMANDS.en.md](./docs/MIGRATE_COMMANDS.en.md)
+- Frontend/backend compatibility and version policy: [docs/COMPATIBILITY.md](./docs/COMPATIBILITY.md)
 
 ## Quick Start
 
@@ -86,7 +91,7 @@ go run main.go -c ./config.yaml command migrate        # defaults to migrate up
 go run main.go -c ./config.yaml command migrate check
 ```
 
-After migrations finish, a default baseline dataset is inserted, including the super admin account `super_admin / 123456`. It is only recommended for local initialization. Change the password immediately after the first login.
+After migrations finish, a default baseline dataset is inserted, including the super admin account `super_admin / 123456`. It is only recommended for local initialization. Change the password immediately after the first login; a profile password change requires the current password and revokes all existing sessions for that user after success.
 
 For migration file creation, timestamp naming rules, and full `down/goto/force/version` usage, see [docs/MIGRATE_COMMANDS.en.md](./docs/MIGRATE_COMMANDS.en.md).
 
@@ -313,13 +318,13 @@ If requests pass through Nginx, Ingress, or a load balancer, keep `app.trusted_p
 
 - `service`, `worker`, and `cron` are three process roles. Scale the API by adding `service` replicas; they are not three API instances.
 - `service` serves the HTTP API.
-- `worker` consumes Asynq jobs. The current built-ins cover request-audit persistence, request-log export, and file-list export.
+- `worker` consumes Asynq jobs. The current built-ins cover request-audit persistence, request-log export, and file-list export. Multiple workers may consume concurrently when they share the same Redis deployment, `queue.namespace`, and queue configuration; under normal operation one task is delivered to one instance. Asynq still provides at-least-once delivery: request audits upsert on the unique `request_id`; a sequential redelivery of a completed export reuses its existing record; and export notifications deduplicate by task-run ID plus status. Export jobs use stable task IDs to suppress normal duplicate enqueue, but the completed-record check and object upload are not atomic, so exceptional concurrent execution of the same `task_run_id` is not exactly-once. Object storage and the database do not share a transaction either, so a process exit after upload but before the export record commits can leave an invisible orphan object for the file-cleanup job. WebSocket delivery is not a receipt; the message list and export record are the final source of truth.
 - To use exports, `queue.queues` must include a consumable `export` queue and a `worker` must be running; registering a task or starting `service` alone does not consume export jobs.
-- When `queue.enable=false`, you do not need to start `worker`; request audit logs are persisted synchronously, but export-related async capabilities are also unavailable.
+- When `queue.enable=false`, you do not need to start `worker`; the service process writes request audit logs asynchronously in bounded batches. When the buffer is full and storage is healthy, a new entry uses a synchronous insert with a fixed timeout. During a known storage outage, overflow is counted and reported with rate-limited errors instead of repeatedly blocking every business request on the database. Persistence normalizes fields to table widths and isolates explicit permanent row errors so one bad record cannot poison the whole batch. Daily dashboard statistics use a short deadline and an independent failure cooldown, so their failure cannot trip the main audit circuit; they may be incomplete during an outage and are not a billing or compliance source. Export-related async capabilities are unavailable.
 - `cron` owns scheduled jobs. Built-in task definitions are synced into `task_definitions`, and runtime truth comes from operational fields such as `status`, `cron_spec`, `allow_manual`, and `allow_retry`, with recent sync/run state tracked through in-process cache plus `cron_task_states`.
 - The demo cron task is disabled by default after initialization. `reset-system-data` is also disabled by default and logs a high-risk warning when it is enabled for execution.
 - Do not register the same recurring business task in both `cron` and the async worker flow, or it will run twice.
-- High-risk cron tasks use a Redis distributed lock for cross-instance mutual exclusion. Ordinary tasks only have process-local `WithoutOverlapping` protection and may still run concurrently across multiple `cron` instances. Run one `cron` instance until ordinary tasks are idempotent.
+- The current release must run exactly one `cron` instance. Ordinary tasks only have process-local `WithoutOverlapping` protection, so multiple instances can execute or enqueue the same schedule occurrence more than once. The Redis distributed lock covers only cron tasks marked as high risk and provides cross-instance mutual exclusion while a task is running; it does not guarantee one trigger per schedule occurrence. The lock has a fixed 30-minute TTL and no renewal, so a longer task can overlap after expiry. Release checks the owner token so an old holder cannot delete a newer holder's lock. Before running multiple `cron` instances, implement schedule-occurrence deduplication and lock renewal instead of relying on the current high-risk lock alone.
 
 Note: `reset-system-data` currently calls `system.ReinitializeSystemData()`, which drops database objects and rebuilds system data from the current migrations. Keep `task_definitions.status=0` for this task in production, and only enable it temporarily when you explicitly need to rebuild system data.
 
@@ -383,7 +388,20 @@ HTTP integration tests under `tests` use only the root `config.yaml` and require
 
 File-upload contract: `GET /admin/v1/system/file/upload/options` requires `file:create` permission and returns only the minimum current-driver, size/type allowlist, and direct/multipart capability settings; it does not return credentials, `bucket`, or endpoint. Upload initialization creates a server-side session and signs a `complete_token`; complete accepts only server metadata bound to that token, and multipart abort accepts only `complete_token`. On direct-upload completion, the server streams the temporary object into an independent final key and validates the actual content with SHA-256; the client hash is an integrity declaration and is not used for instant server-side reuse. Legacy sessions created for unverified instant reuse are rejected after upgrade; clients must initialize a new upload.
 
-Audit logs use the `request_logs.change_diff` field. Writes with field-level differences can be filtered in list and export APIs with `has_change_diff=1`. Low-risk successful read-only requests may be sampled using `queue.audit_sample_get_keep_every`; writes are not sampled. Queue, database, or shutdown fallback paths do not guarantee zero loss on process crashes, and non-database triggers do not cover manual SQL.
+Audit logs use the `request_logs.change_diff` field. Writes with field-level differences can be filtered in list and export APIs with `has_change_diff=1`. Authenticated back-office business requests are never randomly sampled. `queue.audit_sample_get_keep_every` applies only to low-risk successful read-only traffic that cannot be associated with a signed-in user. `/ping`, `/health/readiness`, and unmatched-route 404 noise are excluded from both request logs and business-facing daily request statistics; a 404 returned by a matched business route is retained. Infrastructure traffic belongs in ingress/Prometheus-style telemetry rather than MySQL audit counters. The in-memory fallback does not evict accepted records, and it restores the current batch for retry after a transient database outage. The pipeline remains best-effort: simultaneous queue and database outages with buffer overflow, shutdown drain timeouts, and process crashes cannot guarantee zero loss. Overflow losses are counted and reported with rate-limited errors instead of repeatedly blocking business requests. Non-database triggers do not cover manual SQL.
+
+The dashboard and logs follow a “personal by default, global by permission” boundary. Every signed-in user may open the personal dashboard and personal request-log pages, but the server always scopes queries to the UID from the current token and never accepts another user ID. Global metrics, server monitoring, and all-user request logs still require the corresponding `dashboard:*` or `requestLog:*` permissions. The personal log defaults to `scope=regular`, which hides reads of its own list and detail endpoints so that searches and pagination do not flood the timeline; users can select `scope=self_reads` or explicitly filter by operation name to retrieve those audit records. Personal list and detail responses never expose JWTs, headers, queries, request or response bodies, or raw JSON differences. Natural-language summaries are generated only for registered user, role, department, menu, dictionary, system-config, profile, Product, file, and folder operations through route, action, and field allowlists; sensitive values stay masked or hidden, and unknown structures are omitted instead of falling back to raw content. Administrator details retain structured JSON for diagnostics and audit. The server-monitor response also exposes process-local audit counters under `app.audit` for accepted, sampled, queued, fallback, persisted, failed, permanently dropped, overflow-dropped, pending-buffer, and storage-unavailable states; aggregate them per instance in multi-replica deployments.
+
+Personal todos, system notifications, and the task center serve different purposes. A todo means that one user still has work to complete, and signed-in users can only read their own `user_todos`. A notification communicates information; marking it as read does not mean the related business action is complete. The task center tracks backend asynchronous or scheduled execution, including run status, retries, and export results. Users may create, edit, change status, and delete manual todos. Business modules upsert business todos idempotently with `assignee_id + source_type + source_key`; users can only follow their internal action link, while completion or cancellation must come from the source module through `CloseBusinessTodo` so todo state cannot diverge from an order or approval record. Business `action_url` values must be internal relative paths. Lists are ordered by overdue state, priority, and due date. The reference Product module now demonstrates the first real lifecycle: a disabled product creates an activation todo for its creator, disabled-state edits refresh that todo, enabling completes it, deletion cancels it, and a later enabled-to-disabled transition explicitly starts a new cycle without allowing ordinary retries to reopen historical terminal records.
+
+### Versioning and upgrade policy
+
+- `v0.10.0` is the first public-release candidate for this iteration. The repository is still in its first-release initialization phase and deployments reset system data, so existing initialization migrations may be consolidated until the formal `v0.10.0` tag.
+- After the first public `vX.Y.Z` tag, published migrations are immutable. Schema, permission, and default-data changes must use new paired `up/down` migrations instead of editing migration history.
+- `docs/openapi.yaml` is versioned with the source. Regenerate it after route, security-policy, or API-metadata changes; CI and Release reject generator drift, and release archives include the generated contract.
+- Releases follow SemVer: during `0.x`, incompatible changes increment the minor version and compatible fixes increment the patch version; after `1.x`, incompatible changes increment the major version, backward-compatible features increment the minor version, and compatible fixes increment the patch version. A tag triggers the release workflow, which verifies that the tag, source version, and CHANGELOG entry agree and runs unit tests, `go vet`, migration checks, and MySQL API integration tests; its archives include the binary, example configuration, RBAC model, migrations, READMEs, CHANGELOG, compatibility notes, LICENSE, and checksums.
+- Upgrade order is: back up database and configuration → `command migrate check` → `command migrate up` → run `api-route -y` / `task sync-definitions` when required by the release notes → coordinate restart of `service/worker/cron` → verify readiness and critical authorization flows.
+- Rollback must evaluate both binary and database state. Roll the database back only when the new migration explicitly provides a safe `down`; prefer a forward fix for data transformations or destructive schema changes. Every formal release should list compatibility boundaries, upgrade commands, rollback limits, and known risks in its release notes.
 
 ## Deployment
 

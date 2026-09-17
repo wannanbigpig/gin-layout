@@ -214,6 +214,8 @@ func MysqlDB() *gorm.DB {
 
 // MysqlInitError 返回 MySQL 初始化阶段记录的错误。
 func MysqlInitError() error {
+	mysqlMu.Lock()
+	defer mysqlMu.Unlock()
 	return mysqlInitError
 }
 
@@ -287,8 +289,8 @@ func getSQLDB(db *gorm.DB) *sql.DB {
 }
 
 func mysqlUnavailableError() error {
-	if mysqlInitError != nil {
-		return mysqlInitError
+	if initErr := MysqlInitError(); initErr != nil {
+		return initErr
 	}
 	return ErrDBUnavailable
 }

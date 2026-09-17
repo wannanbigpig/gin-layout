@@ -88,6 +88,7 @@ func buildAuditLogSnapshot(c *gin.Context, recorder *responseRecorder, operation
 		responseStatus = recorder.statusCode
 	}
 	return &auditsvc.AuditLogSnapshot{
+		OccurredAt:         time.Now(),
 		RequestID:          requestMeta.requestID,
 		JwtID:              operatorMeta.jwtID,
 		OperatorID:         operatorMeta.operatorID,
@@ -139,7 +140,7 @@ func collectAuditRequestMeta(c *gin.Context) *auditRequestMeta {
 		os:              ua.OS(),
 		browser:         browser,
 		requestKind:     requestKind,
-		operationName:   getOperationName(path, method, c.GetHeader("X-Operation-Name")),
+		operationName:   getOperationName(c, path, method),
 		requestHeaders:  sensitive.GetMaskedRequestHeaders(c.Request.Header),
 		requestQuery:    sensitive.MaskQueryString(c.Request.URL.RawQuery),
 		requestBody:     resolveAuditRequestBody(c),
@@ -324,12 +325,14 @@ func operationStatusFromResponse(recorder *responseRecorder, resp *response.Resu
 // getOperationName 获取操作名称。
 var operationNameCache = accesssvc.NewApiRouteCacheService()
 
-func getOperationName(route string, method string, headerOperationName string) string {
+func getOperationName(c *gin.Context, route string, method string) string {
+	if c != nil {
+		if operationName := strings.TrimSpace(c.GetString(global.ContextKeyOperationName)); operationName != "" {
+			return operationName
+		}
+	}
 	if operationName := operationNameCache.GetApiName(route, method); operationName != "" {
 		return operationName
-	}
-	if headerOperationName != "" {
-		return headerOperationName
 	}
 	return route
 }

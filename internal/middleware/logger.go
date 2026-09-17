@@ -17,7 +17,8 @@ const (
 
 // skipLogPaths 集中维护审计日志/响应记录需要跳过的路径，避免在多个判定点散落硬编码字符串。
 var skipLogPaths = map[string]struct{}{
-	"/ping": {},
+	"/ping":             {},
+	"/health/readiness": {},
 }
 
 // websocketLoggingPaths 标识在审计日志中应识别为 WebSocket 长连接的路径。
@@ -64,12 +65,12 @@ func finalizeRequestLogging(c *gin.Context, recorder *responseRecorder) {
 
 	resp := parseResponse(c, recorder)
 	snapshot := buildRequestAuditLogSnapshot(c, recorder, resp)
-	recordRequestStat(jobs.AuditLogKindRequest, snapshot)
 
 	if shouldSkipRequestLogging(c, recorder) {
 		return
 	}
 
+	recordRequestStat(jobs.AuditLogKindRequest, snapshot)
 	enqueueAuditLog(c, jobs.AuditLogKindRequest, snapshot)
 }
 
@@ -90,8 +91,9 @@ func shouldSkipRequestLogging(c *gin.Context, recorder *responseRecorder) bool {
 		return true
 	}
 
-	// 404 请求不记录日志（避免过多无效请求干扰日志分析）
-	return recorder.statusCode == http.StatusNotFound
+	// 仅跳过未匹配路由的 404 扫描噪声。已命中业务路由但资源不存在的 404
+	// 是用户真实访问结果，必须进入个人与系统审计。
+	return recorder.statusCode == http.StatusNotFound && c.FullPath() == ""
 }
 
 // LogWebSocketConnection 记录一次 WebSocket 连接的审计日志。

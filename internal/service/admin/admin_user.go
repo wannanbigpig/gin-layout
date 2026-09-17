@@ -377,17 +377,18 @@ func (s *AdminUserService) userMenuQuery(isSuperAdmin bool, menuIDs []uint) (str
 
 // adminUserEditParams 管理员用户编辑参数，字段使用指针支持部分更新。
 type adminUserEditParams struct {
-	Id           uint    // 用户 ID，0 表示新增
-	Username     *string // 用户名
-	Nickname     *string // 昵称
-	Password     *string // 密码
-	PhoneNumber  *string // 手机号
-	CountryCode  *string // 国家代码
-	Email        *string // 邮箱
-	Status       *uint8  // 状态
-	IsSuperAdmin *uint8  // 是否超级管理员
-	Avatar       *string // 头像
-	DeptIds      *[]uint // 关联的部门 ID 列表
+	Id                                   uint    // 用户 ID，0 表示新增
+	Username                             *string // 用户名
+	Nickname                             *string // 昵称
+	Password                             *string // 密码
+	PhoneNumber                          *string // 手机号
+	CountryCode                          *string // 国家代码
+	Email                                *string // 邮箱
+	Status                               *uint8  // 状态
+	IsSuperAdmin                         *uint8  // 是否超级管理员
+	Avatar                               *string // 头像
+	DeptIds                              *[]uint // 关联的部门 ID 列表
+	allowDefaultSuperAdminPasswordChange bool    // 仅允许默认超级管理员通过个人资料入口修改自己的密码
 }
 
 // UploadAvatar 专门用于上传用户头像。

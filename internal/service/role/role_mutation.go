@@ -10,6 +10,7 @@ import (
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -41,16 +42,6 @@ type roleMutation struct {
 // 6. 同步受影响角色的用户权限缓存
 func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	role := model.NewRole()
-	if params.Id > 0 {
-		if err := role.GetById(params.Id); err != nil || role.ID == 0 {
-			return e.NewBusinessError(e.RoleNotFound)
-		}
-	}
-	// 检查是否为受保护角色（系统默认角色不可修改）
-	if params.Id > 0 && access.NewSystemDefaultsService().IsProtectedRole(role) {
-		return e.NewBusinessError(e.SuperAdminCannotModify)
-	}
-
 	trimmedCode := strings.TrimSpace(params.Code)
 	if params.Id == 0 && trimmedCode != "" {
 		existing := model.NewRole()
@@ -96,13 +87,34 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	coordinator := access.NewPermissionSyncCoordinator()
 	var affectedUserIDs []uint
 	if err := coordinator.RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
-		role.SetDB(tx)
-
 		var err error
+		effectiveDataScope := role.DataScope
 		if params.Id == 0 {
+			role.SetDB(tx)
 			err = service.CreateWithExplicitFields(tx, role, map[string]any{"status": role.Status})
+			effectiveDataScope = role.DataScope
 		} else {
-			err = role.Save()
+			var lockedRole model.Role
+			err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id = ? AND deleted_at = 0", params.Id).
+				First(&lockedRole).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.RoleNotFound)
+			}
+			if err != nil {
+				return err
+			}
+			if lockedRole.ID == 0 {
+				return e.NewBusinessError(e.RoleNotFound)
+			}
+			if access.NewSystemDefaultsService().IsProtectedRole(&lockedRole) {
+				return e.NewBusinessError(e.SuperAdminCannotModify)
+			}
+			role = &lockedRole
+			effectiveDataScope = resolveRoleDataScope(params.DataScope, role.DataScope)
+			err = tx.Model(&model.Role{}).
+				Where("id = ? AND deleted_at = 0", role.ID).
+				Updates(roleMutationUpdateFields(params, effectiveDataScope)).Error
 		}
 		if err != nil {
 			if isRoleCodeDuplicateErr(err) {
@@ -115,7 +127,7 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 			return err
 		}
 		// 更新角色自定义数据权限部门关联
-		if err := s.updateRoleDataScopeDept(role.ID, params.DataScope, params.DeptIds, tx); err != nil {
+		if err := s.updateRoleDataScopeDeptForMutation(role.ID, params, effectiveDataScope, tx); err != nil {
 			return err
 		}
 		// 同步受影响角色的用户权限（纳入事务，与提交一致）
@@ -130,6 +142,33 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	}
 	access.NewDataScopeFilter().InvalidateCache(context.Background(), affectedUserIDs...)
 	return nil
+}
+
+func roleMutationUpdateFields(params *roleMutation, fallbackDataScope uint8) map[string]any {
+	return map[string]any{
+		"name":        params.Name,
+		"description": params.Description,
+		"status":      params.Status,
+		"sort":        params.Sort,
+		"data_scope":  resolveRoleDataScope(params.DataScope, fallbackDataScope),
+	}
+}
+
+func resolveRoleDataScope(requested, fallback uint8) uint8 {
+	if requested != 0 {
+		return requested
+	}
+	if fallback != 0 {
+		return fallback
+	}
+	return access.DataScopeDept
+}
+
+func (s *RoleService) updateRoleDataScopeDeptForMutation(roleID uint, params *roleMutation, effectiveDataScope uint8, tx *gorm.DB) error {
+	if params.Id > 0 && params.DataScope == 0 {
+		return nil
+	}
+	return s.updateRoleDataScopeDept(roleID, effectiveDataScope, params.DeptIds, tx)
 }
 
 func isRoleCodeDuplicateErr(err error) bool {

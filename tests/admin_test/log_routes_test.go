@@ -24,6 +24,11 @@ func TestLogListRoutesWithAuthorization(t *testing.T) {
 			query: &url.Values{"page": {"1"}, "per_page": {"5"}},
 		},
 		{
+			name:  "个人请求日志列表",
+			route: "/admin/v1/log/request/self-list",
+			query: &url.Values{"page": {"1"}, "per_page": {"5"}, "operator_id": {"4294967295"}},
+		},
+		{
 			name:  "登录日志列表",
 			route: "/admin/v1/log/login/list",
 			query: &url.Values{"page": {"1"}, "per_page": {"5"}},
@@ -39,6 +44,14 @@ func TestLogListRoutesWithAuthorization(t *testing.T) {
 			assert.Equal(t, e.SUCCESS, result.Code)
 		})
 	}
+}
+
+func TestSelfRequestLogDetailNotFound(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/log/request/self-detail", &url.Values{"id": {"4294967295"}})
+	assert.Equal(t, http.StatusNotFound, resp.Code)
+	assert.Equal(t, e.NotFound, decodeResult(t, resp).Code)
 }
 
 func TestRequestLogExportRouteWithAuthorization(t *testing.T) {
@@ -101,6 +114,16 @@ func TestLogRoutesRequireLogin(t *testing.T) {
 		{
 			name:  "请求日志详情需要登录",
 			route: "/admin/v1/log/request/detail",
+			query: &url.Values{"id": {"1"}},
+		},
+		{
+			name:  "个人请求日志列表需要登录",
+			route: "/admin/v1/log/request/self-list",
+			query: &url.Values{"page": {"1"}, "per_page": {"5"}},
+		},
+		{
+			name:  "个人请求日志详情需要登录",
+			route: "/admin/v1/log/request/self-detail",
 			query: &url.Values{"id": {"1"}},
 		},
 		{

@@ -123,9 +123,39 @@ func assertRouteGroupAuthMode(t *testing.T, group RouteGroupDef, expected AuthMo
 func TestSetRoutersRegistersPermissionCriticalRoutes(t *testing.T) {
 	routes := CollectRouteMeta(AppRouteTree())
 
+	personalDashboardCode := utils.MD5(http.MethodGet + "_/admin/v1/dashboard/personal")
+	if route, ok := routes[personalDashboardCode]; !ok || route.Auth != AuthModeLogin {
+		t.Fatalf("missing or invalid personal dashboard route: %#v", route)
+	}
+
+	selfRequestLogListCode := utils.MD5(http.MethodGet + "_/admin/v1/log/request/self-list")
+	if route, ok := routes[selfRequestLogListCode]; !ok || route.Auth != AuthModeLogin {
+		t.Fatalf("missing or invalid self request log list route: %#v", route)
+	}
+
+	selfRequestLogDetailCode := utils.MD5(http.MethodGet + "_/admin/v1/log/request/self-detail")
+	if route, ok := routes[selfRequestLogDetailCode]; !ok || route.Auth != AuthModeLogin {
+		t.Fatalf("missing or invalid self request log detail route: %#v", route)
+	}
+
+	dashboardOverviewCode := utils.MD5(http.MethodGet + "_/admin/v1/dashboard/overview")
+	if route, ok := routes[dashboardOverviewCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid dashboard overview route: %#v", route)
+	}
+
 	dashboardStatisticsCode := utils.MD5(http.MethodGet + "_/admin/v1/dashboard/statistics")
 	if route, ok := routes[dashboardStatisticsCode]; !ok || route.Auth != AuthModeAuth {
 		t.Fatalf("missing or invalid dashboard statistics route: %#v", route)
+	}
+
+	requestLogListCode := utils.MD5(http.MethodGet + "_/admin/v1/log/request/list")
+	if route, ok := routes[requestLogListCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid request log list route: %#v", route)
+	}
+
+	requestLogDetailCode := utils.MD5(http.MethodGet + "_/admin/v1/log/request/detail")
+	if route, ok := routes[requestLogDetailCode]; !ok || route.Auth != AuthModeAuth {
+		t.Fatalf("missing or invalid request log detail route: %#v", route)
 	}
 
 	checkTokenCode := utils.MD5(http.MethodGet + "_/admin/v1/auth/check-token")

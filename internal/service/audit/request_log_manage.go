@@ -252,6 +252,9 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ValidateRequestLogTimeRange(params.StartTime, params.EndTime); err != nil {
+		return "", err
+	}
 
 	query := buildRequestLogQuery(requestLogQueryInput{
 		RequestID:          params.RequestID,

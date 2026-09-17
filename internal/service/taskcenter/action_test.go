@@ -545,7 +545,7 @@ func TestTriggerTaskHighRiskCronFailsClosedWhenTaskLockUnavailable(t *testing.T)
 	defer restoreTaskDefinition()
 
 	previousAcquireTaskLock := acquireTaskLock
-	acquireTaskLock = func(ctx context.Context, taskCode string) (*TaskLock, error) {
+	acquireTaskLock = func(ctx context.Context, taskCode string) (taskLock, error) {
 		_ = ctx
 		if taskCode != "cron:demo" {
 			t.Fatalf("unexpected task code: %s", taskCode)

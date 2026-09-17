@@ -14,7 +14,7 @@ type QueueRedisConfig struct {
 
 // QueueConfig 异步任务队列配置。
 type QueueConfig struct {
-	// Enable 是否启用异步队列。false 时同步执行任务（如审计日志直接写库）
+	// Enable 是否启用 Asynq 异步队列。false 时审计日志走 service 进程内有界缓冲，导出等队列能力不可用。
 	Enable bool `mapstructure:"enable" yaml:"enable"`
 	// UseDefaultRedis 是否复用全局 redis 配置。
 	// true: 使用 redis.* 作为队列连接（默认）
@@ -40,9 +40,9 @@ type QueueConfig struct {
 	// 权重决定任务被调度的概率，不是分配的协程数量！
 	// 所有队列共享 Concurrency 个协程，权重越高越容易被优先调度
 	// 调度概率 = 该队列权重 / 所有队列权重之和
-	// 示例（总权重=4+2+2+1=9）：
-	//   critical: 权重 4 → 4/9≈44% 概率被调度（支付回调、短信发送）
-	//   default:  权重 2 → 2/9≈22% 概率被调度（普通异步任务）
+	// 示例（总权重=4+2+2+2+1=11）：
+	//   critical: 权重 4 → 4/11≈36% 概率被调度（支付回调、短信发送）
+	//   default:  权重 2 → 2/11≈18% 概率被调度（普通异步任务）
 	//   audit:    权重 2 → 2/11≈18% 概率被调度（请求日志落库）
 	//   export:   权重 2 → 2/11≈18% 概率被调度（异步导出）
 	//   low:      权重 1 → 1/11≈9% 概率被调度（批量通知）
@@ -52,14 +52,14 @@ type QueueConfig struct {
 	// AuditTimeoutSeconds 审计日志任务的超时时间（秒）
 	AuditTimeoutSeconds int `mapstructure:"audit_timeout_seconds" yaml:"audit_timeout_seconds"`
 	// AuditFallbackBufferSize 队列降级路径的内存缓冲容量。
-	// <=0 时使用默认值 1024。满时优先丢弃低风险的最旧条目，再不能丢弃则同步落库兜底。
+	// <=0 时使用默认值 1024。满时不驱逐已接收条目；存储健康时新条目限时同步落库，存储故障时计数告警并优先保障业务请求。
 	AuditFallbackBufferSize int `mapstructure:"audit_fallback_buffer_size" yaml:"audit_fallback_buffer_size"`
 	// AuditFallbackBatchSize 批量 INSERT 的最大条数。<=0 时使用默认值 200。
 	AuditFallbackBatchSize int `mapstructure:"audit_fallback_batch_size" yaml:"audit_fallback_batch_size"`
 	// AuditFallbackFlushIntervalMs 批量 INSERT 的最长等待间隔（毫秒）。<=0 时使用默认值 1000。
 	AuditFallbackFlushIntervalMs int `mapstructure:"audit_fallback_flush_interval_ms" yaml:"audit_fallback_flush_interval_ms"`
-	// AuditSampleGetKeepEvery 对低风险只读请求（GET 且 2xx 且 is_high_risk=0）保留 1/N 条。
-	// <=1 时表示全量保留（不采样）。默认 10 即保留 1/10。
+	// AuditSampleGetKeepEvery 仅对无法关联已认证用户的低风险成功只读请求保留 1/N 条。
+	// <=1 时表示全量保留（不采样）。默认 10 即保留 1/10；已认证请求始终保留。
 	AuditSampleGetKeepEvery int `mapstructure:"audit_sample_get_keep_every" yaml:"audit_sample_get_keep_every"`
 	// AuditSampleSlowKeepThresholdMs 低风险只读请求即便命中采样，若执行耗时 >= 该阈值（毫秒）也强制保留，
 	// 避免慢请求被采样丢弃而漏掉性能问题线索。<=0 时使用默认值 1000（即 >=1s 的慢请求始终保留）。
@@ -71,7 +71,7 @@ type QueueConfig struct {
 
 // Queue 队列默认配置。
 var Queue = QueueConfig{
-	Enable:          false, // 默认关闭队列，同步执行
+	Enable:          false, // 默认关闭 Asynq；审计日志走 service 进程内缓冲
 	UseDefaultRedis: true,  // 默认复用全局 redis 配置
 	Redis: QueueRedisConfig{
 		Host:     "127.0.0.1",
@@ -89,8 +89,8 @@ var Queue = QueueConfig{
 		// 所有队列共享 8 个协程，权重越高越容易被优先调度
 		// 总权重 = 4+2+2+2+1 = 11
 		// critical 被选中的概率 ≈ 4/11 ≈ 36%
-		"critical": 4, // 权重 4，约 44% 概率被调度（如支付回调）
-		"default":  2, // 权重 2，约 22% 概率被调度（普通任务）
+		"critical": 4, // 权重 4，约 36% 概率被调度（如支付回调）
+		"default":  2, // 权重 2，约 18% 概率被调度（普通任务）
 		"audit":    2, // 权重 2，约 18% 概率被调度（审计日志）
 		"export":   2, // 权重 2，约 18% 概率被调度（导出任务）
 		"low":      1, // 权重 1，约 9% 概率被调度（批量通知）
@@ -102,5 +102,5 @@ var Queue = QueueConfig{
 	AuditFallbackFlushIntervalMs:   1000, // 批量 INSERT 最长等待间隔（毫秒）
 	AuditSampleGetKeepEvery:        10,   // 低风险只读请求保留 1/10
 	AuditSampleSlowKeepThresholdMs: 1000, // 慢请求（>=1s）即便命中采样也强制保留
-	AuditLogRetentionDays:          30,    // 审计日志默认保留 30 天
+	AuditLogRetentionDays:          30,   // 审计日志默认保留 30 天
 }

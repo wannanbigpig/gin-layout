@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title">
+  <title id="title">Gin Layout</title>
+  <defs>
+    <linearGradient id="accent" x1="31" y1="33" x2="43" y2="45" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#56A8FF"/>
+      <stop offset="1" stop-color="#1677FF"/>
+    </linearGradient>
+  </defs>
+  <path d="M38 9H11v30h27V25H25" fill="none" stroke="#172033" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="31" y="32" width="12" height="12" rx="3" fill="url(#accent)"/>
+</svg>

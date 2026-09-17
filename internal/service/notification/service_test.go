@@ -160,6 +160,44 @@ func TestServiceNotifyExportResultBuildsMessage(t *testing.T) {
 	}
 }
 
+func TestNotifyExportResultIsIdempotentPerTaskStatus(t *testing.T) {
+	db := newMessageTestDB(t)
+	dispatched := 0
+	svc := NewServiceWithDeps(ServiceDeps{
+		DB: db,
+		BroadcastFn: func(Event) {
+			dispatched++
+		},
+	})
+	input := ExportResultInput{
+		UserID:    7,
+		Scene:     model.ExportSceneRequestLog,
+		Status:    model.TaskRunStatusSuccess,
+		TaskRunID: 101,
+		FileID:    9,
+		FileUUID:  "file-9",
+		FileName:  "request_logs.csv",
+	}
+	first, err := svc.NotifyExportResult(context.Background(), input)
+	if err != nil {
+		t.Fatalf("first export notification failed: %v", err)
+	}
+	second, err := svc.NotifyExportResult(context.Background(), input)
+	if err != nil {
+		t.Fatalf("duplicate export notification failed: %v", err)
+	}
+	if first.ID == 0 || second.ID != first.ID {
+		t.Fatalf("duplicate notification should reuse one row: first=%d second=%d", first.ID, second.ID)
+	}
+	var count int64
+	if err := db.Model(&model.SysMessage{}).Count(&count).Error; err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if count != 1 || dispatched != 1 {
+		t.Fatalf("expected one row and one dispatch, rows=%d dispatched=%d", count, dispatched)
+	}
+}
+
 func TestServiceSendUsesInjectedDBForRecipients(t *testing.T) {
 	db := newMessageTestDB(t)
 	if err := db.Exec(`INSERT INTO admin_user (id, username, status, deleted_at) VALUES
@@ -230,7 +268,7 @@ func newMessageTestDB(t *testing.T) *gorm.DB {
 		id integer primary key autoincrement,
 		user_id integer,
 		sender_id integer,
-		batch_id text,
+		batch_id text not null,
 		category text,
 		topic text,
 		title text,
@@ -246,7 +284,8 @@ func newMessageTestDB(t *testing.T) *gorm.DB {
 		is_read integer,
 		read_at datetime,
 		created_at datetime,
-		updated_at datetime
+		updated_at datetime,
+		unique(user_id, batch_id)
 	)`).Error; err != nil {
 		t.Fatalf("create sys_messages table failed: %v", err)
 	}

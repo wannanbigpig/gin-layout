@@ -13,6 +13,7 @@ func TestDashboardRoutesWithConfiguredMySQL(t *testing.T) {
 	requireMySQL(t)
 
 	for _, route := range []string{
+		"/admin/v1/dashboard/personal",
 		"/admin/v1/dashboard/overview",
 		"/admin/v1/dashboard/statistics",
 		"/admin/v1/dashboard/monitor",

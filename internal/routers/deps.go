@@ -26,6 +26,7 @@ type ControllerDeps struct {
 	File       *admin_v1.FileResourceController
 	Export     *admin_v1.ExportCenterController
 	Message    *admin_v1.SysMessageController
+	Todo       *admin_v1.UserTodoController
 	Session    *admin_v1.SessionController
 	RequestLog *admin_v1.RequestLogController
 	LoginLog   *admin_v1.AdminLoginLogController
@@ -56,6 +57,7 @@ func DefaultControllerDeps() *ControllerDeps {
 			File:       admin_v1.NewFileResourceController(),
 			Export:     admin_v1.NewExportCenterController(),
 			Message:    admin_v1.NewSysMessageController(),
+			Todo:       admin_v1.NewUserTodoController(),
 			Session:    admin_v1.NewSessionController(),
 			RequestLog: admin_v1.NewRequestLogController(),
 			LoginLog:   admin_v1.NewAdminLoginLogController(),
@@ -117,6 +119,9 @@ func normalizeControllerDeps(deps *ControllerDeps) *ControllerDeps {
 	}
 	if deps.Message == nil {
 		deps.Message = defaultDeps.Message
+	}
+	if deps.Todo == nil {
+		deps.Todo = defaultDeps.Todo
 	}
 	if deps.Session == nil {
 		deps.Session = defaultDeps.Session

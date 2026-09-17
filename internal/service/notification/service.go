@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -54,6 +55,7 @@ type CreateMessageInput struct {
 	ActionURL   string
 	ActionLabel string
 	Payload     map[string]any
+	BatchID     string
 }
 
 // SendInput 表示管理员手动发送通知的输入参数。
@@ -129,6 +131,10 @@ func (s *Service) Create(ctx context.Context, input CreateMessageInput) (*model.
 
 	message := model.NewSysMessage()
 	message.UserID = input.UserID
+	message.BatchID = strings.TrimSpace(input.BatchID)
+	if message.BatchID == "" {
+		message.BatchID = uuid.New().String()
+	}
 	message.Category = strings.TrimSpace(input.Category)
 	message.Topic = strings.TrimSpace(input.Topic)
 	message.Title = strings.TrimSpace(input.Title)
@@ -138,8 +144,16 @@ func (s *Service) Create(ctx context.Context, input CreateMessageInput) (*model.
 	message.Payload = string(payload)
 	message.IsRead = model.MessageUnread
 
-	if err := db.Create(message).Error; err != nil {
-		return nil, err
+	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(message)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		existing := model.NewSysMessage()
+		if err := db.Where("user_id = ? AND batch_id = ?", message.UserID, message.BatchID).First(existing).Error; err != nil {
+			return nil, err
+		}
+		return existing, nil
 	}
 
 	unreadCount, err := s.UnreadCount(ctx, input.UserID)
@@ -166,12 +180,17 @@ func (s *Service) NotifyExportResult(ctx context.Context, input ExportResultInpu
 	if fileUUID != "" {
 		downloadURL = "/admin/v1/file/" + fileUUID
 	}
+	batchID := ""
+	if input.TaskRunID > 0 {
+		batchID = fmt.Sprintf("export:%d:%s", input.TaskRunID, strings.TrimSpace(input.Status))
+	}
 	return s.Create(ctx, CreateMessageInput{
 		UserID:   input.UserID,
 		Category: model.MessageCategoryExport,
 		Topic:    model.MessageTopicExportFinished,
 		Title:    title,
 		Content:  content,
+		BatchID:  batchID,
 		Payload: map[string]any{
 			"user_id":          input.UserID,
 			"scene":            strings.TrimSpace(input.Scene),

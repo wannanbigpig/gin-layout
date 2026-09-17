@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
@@ -85,6 +86,31 @@ func TestCompileRouteTreeResolvesSecurityAndHandlerOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(trace, []string{"root", "child", "endpoint"}) {
 		t.Fatalf("unexpected handler order: %#v", trace)
+	}
+}
+
+func TestRegisterCatalogPublishesTrustedOperationNameBeforeRouteHandlers(t *testing.T) {
+	var operationName string
+	tree := RouteGroupDef{
+		Prefix:   "root",
+		Security: SecurityPublic,
+		Routes: []RouteDef{GET("item", "可信操作名", func(c *gin.Context) {
+			operationName = c.GetString(global.ContextKeyOperationName)
+			c.Status(http.StatusNoContent)
+		})},
+	}
+	catalog, err := CompileRouteTree(tree)
+	if err != nil {
+		t.Fatalf("compile catalog: %v", err)
+	}
+	engine := gin.New()
+	RegisterCatalog(engine, catalog)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/root/item", nil)
+	request.Header.Set("X-Operation-Name", "客户端伪造名称")
+	engine.ServeHTTP(recorder, request)
+	if operationName != "可信操作名" {
+		t.Fatalf("operation name = %q, want catalog title", operationName)
 	}
 }
 

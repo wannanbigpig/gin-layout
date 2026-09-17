@@ -72,3 +72,27 @@ func TestRequestLogChangeFilterExcludesEmptyDiffs(t *testing.T) {
 		t.Fatalf("unexpected change records: %v", ids)
 	}
 }
+
+func TestRequestLogFailureFilterMatchesEveryNonZeroBusinessCode(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE request_logs (id INTEGER PRIMARY KEY, operation_status integer)").Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []int{0, 1, 400, 10001} {
+		if err := db.Exec("INSERT INTO request_logs (operation_status) VALUES (?)", status).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	failure := 1
+	condition, args := buildRequestLogQuery(requestLogQueryInput{OperationStatus: &failure}).Build()
+	var statuses []int
+	if err := db.Table("request_logs").Where(condition, args...).Order("id").Pluck("operation_status", &statuses).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 3 || statuses[0] != 1 || statuses[1] != 400 || statuses[2] != 10001 {
+		t.Fatalf("failure filter statuses = %v, want every non-zero code", statuses)
+	}
+}

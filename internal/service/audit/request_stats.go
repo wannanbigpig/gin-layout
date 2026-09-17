@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -14,12 +15,20 @@ import (
 
 // RecordDailyRequestStat increments the real HTTP request counter before audit-log sampling.
 func RecordDailyRequestStat(snapshot *AuditLogSnapshot) error {
+	return RecordDailyRequestStatContext(context.Background(), snapshot)
+}
+
+// RecordDailyRequestStatContext 在调用方给定的时间预算内更新每日请求统计。
+func RecordDailyRequestStatContext(ctx context.Context, snapshot *AuditLogSnapshot) error {
 	if snapshot == nil || snapshot.RequestID == "" {
 		return nil
 	}
 	db, err := model.GetDB()
 	if err != nil {
 		return err
+	}
+	if ctx != nil {
+		db = db.WithContext(ctx)
 	}
 	return recordDailyRequestStat(db, snapshot, time.Now())
 }

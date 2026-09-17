@@ -1,4 +1,7 @@
-# <div align="center">gin-layout</div>
+<div align="center">
+  <img src="./docs/images/gin-layout-mark.svg" width="88" height="88" alt="Gin Layout Logo" />
+  <h1>gin-layout</h1>
+</div>
 
 <div align="center">
   <strong>中文</strong> | <a href="./README.en.md">English</a>
@@ -45,6 +48,7 @@
 | RBAC | 管理员、角色、部门、菜单、API 权限管理 |
 | Route Metadata | 声明式路由树统一生成 Gin 路由和 API 元数据 |
 | Logs | 内置登录日志、请求日志、统一响应结构 |
+| Personal Workspace | 个人工作台、最近操作与可扩展的个人 / 业务待办 |
 | File Access | 文件上传与公开 / 私有文件访问 |
 | Task Center | 内置异步任务、定时任务定义、运行记录、重试与运营配置 |
 | Realtime | 系统通知、WebSocket 临时票据与实时消息连接 |
@@ -60,6 +64,7 @@
 - 演示地址：[在线演示](https://x-l-admin.wannanbigpig.com/)
 - 命令与任务文档：[docs/COMMANDS_AND_TASKS.md](./docs/COMMANDS_AND_TASKS.md)
 - 迁移命令详解：[docs/MIGRATE_COMMANDS.md](./docs/MIGRATE_COMMANDS.md)
+- 前后端兼容与版本策略：[docs/COMPATIBILITY.md](./docs/COMPATIBILITY.md)
 
 ## 快速开始
 
@@ -86,7 +91,7 @@ go run main.go -c ./config.yaml command migrate        # 默认等价于 migrate
 go run main.go -c ./config.yaml command migrate check
 ```
 
-迁移执行完成后会写入一套默认基础数据，其中包含超级管理员账号 `super_admin / 123456`。仅建议用于本地初始化，首次登录后请立即修改密码。
+迁移执行完成后会写入一套默认基础数据，其中包含超级管理员账号 `super_admin / 123456`。仅建议用于本地初始化，首次登录后请立即修改密码；个人改密必须提供当前密码，成功后会撤销该用户的全部既有会话。
 
 迁移文件创建、时间戳命名规范、`down/goto/force/version` 等详细说明见：[docs/MIGRATE_COMMANDS.md](./docs/MIGRATE_COMMANDS.md)。
 
@@ -333,13 +338,13 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 
 - `service`、`worker`、`cron` 是三类进程角色；扩容 API 时只增加 `service` 实例，不要把它们理解为三个 API 实例。
 - `service` 负责提供 HTTP API。
-- `worker` 负责消费 Asynq 异步任务，当前内置了请求审计日志落库、请求日志导出、文件资源导出 3 类任务。
+- `worker` 负责消费 Asynq 异步任务，当前内置了请求审计日志落库、请求日志导出、文件资源导出 3 类任务。多个 `worker` 可以连接同一 Redis、使用相同 `queue.namespace` 和队列配置并发消费；正常情况下同一任务只交给一个实例。Asynq 仍是至少一次语义：请求审计以 `request_id` 唯一键 upsert；已完成导出的顺序重投会复用既有记录；导出通知以任务执行 ID 和状态组成去重键。导出任务使用稳定 Task ID 抑制正常重复入队，但“检查已完成记录”和上传对象不是一个原子操作，不能把异常情况下同一 `task_run_id` 的并发执行视为 exactly-once。对象存储与数据库也不是同一事务，进程若在对象上传后、导出记录提交前退出，仍可能遗留不可见的孤立对象，应由文件清理任务处理；WebSocket 实时提醒不作为交付凭据，最终状态以消息列表和导出记录为准。
 - 使用导出能力时，`queue.queues` 必须包含可消费的 `export` 队列，并运行 `worker`；仅注册任务或启动 `service` 不会消费导出任务。
-- `queue.enable=false` 时，不需要启动 `worker`，请求审计日志会在当前请求链路同步落库，但导出类异步能力也会随之不可用。
+- `queue.enable=false` 时，不需要启动 `worker`；请求审计日志由 service 进程内的有界缓冲批量异步落库。缓冲满且存储健康时，新条目使用固定超时的同步写入兜底；存储已故障时不会让每个业务请求持续阻塞在 DB 上，而是计数并限频告警溢出丢失。导出类异步能力会随之不可用。
 - `cron` 负责定时任务调度；代码内置任务会同步到 `task_definitions`，后台运营配置中的 `status/cron_spec/allow_manual/allow_retry` 会作为运行时真相，并通过进程缓存和 `cron_task_states` 维护最近同步/执行状态。
 - 演示定时任务初始化默认关闭；`reset-system-data` 默认关闭，启用执行时会输出高风险告警。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
-- 高风险 cron 任务使用 Redis 分布式锁跨实例互斥；普通任务只有进程内 `WithoutOverlapping` 保护，多个 `cron` 实例仍可能并发执行。普通任务完成幂等化前建议只运行一个 `cron` 实例。
+- 当前版本必须只运行一个 `cron` 实例。普通任务只有进程内 `WithoutOverlapping` 保护，多实例会对同一调度周期重复执行或重复入队。Redis 分布式锁仅覆盖标记为高风险的 cron 任务，只提供执行期间的跨实例互斥，不提供每个调度周期的唯一触发保证；锁固定 30 分钟 TTL、没有自动续期，超过 TTL 的长任务也可能再次并发。释放锁会校验持有者 token，避免旧实例删除新持有者的锁。需要多 `cron` 实例前，必须另行实现按调度周期去重和锁续期，不能仅依赖现有高风险任务锁。
 
 注意：`reset-system-data` 当前调用的是 `system.ReinitializeSystemData()`，会清空数据库对象并按当前迁移重建系统数据。生产环境必须保持该任务在 `task_definitions.status=0`，只有在明确需要重建系统数据时才临时启用并及时关闭。
 
@@ -403,7 +408,20 @@ go test ./tests/admin_test
 
 文件上传约定：`GET /admin/v1/system/file/upload/options` 需要 `file:create` 权限，只返回当前驱动、大小和类型白名单、直传/分片能力等最小配置，不返回密钥、`bucket` 或 endpoint。上传初始化由服务端创建 session 并签发 `complete_token`；complete 只接受 token 对应的服务端元数据，multipart abort 只接受 `complete_token`。直传完成时，服务端把临时对象流复制到独立最终 key，并对实际内容计算 SHA-256 后校验；客户端 hash 只用于完整性声明，不再据此执行秒传复用。升级前已创建的旧版秒传复用会话会被拒绝，客户端需重新初始化上传。
 
-审计日志统一落在 `request_logs` 的 `change_diff` 字段；有字段级差异的写操作可通过 `has_change_diff=1` 在列表和导出中筛选。低风险成功只读请求可按 `queue.audit_sample_get_keep_every` 采样，写操作不采样；队列、数据库或进程关闭期间的降级路径不能承诺进程崩溃时零丢失，非数据库触发器也不会覆盖人工 SQL。
+审计日志统一落在 `request_logs` 的 `change_diff` 字段；有字段级差异的写操作可通过 `has_change_diff=1` 在列表和导出中筛选。已认证用户的后台业务请求不参与随机采样；`queue.audit_sample_get_keep_every` 仅用于无法关联登录用户的低风险成功只读流量。`/ping`、`/health/readiness`和未匹配路由的 404 噪声既不写入请求日志，也不进入面向业务的每日请求统计；已命中业务路由的 404 仍保留。基础设施总流量应由 ingress/Prometheus 等监控链路采集，不用 MySQL 审计表代替。每日请求统计写入有短超时和独立故障冷却，不会熔断主审计；数据库故障时统计允许少量缺失，不能作为计费或合规口径。内存缓冲不主动驱逐已接收记录，短暂数据库不可用时保留当前批次并等待重试；字段在持久化边界按表宽归一化，明确的永久行错误会被隔离，避免单条坏记录阻塞整个批次。该链路仍为 best-effort：队列和数据库同时不可用且缓冲溢出、停机 drain 超时或进程崩溃时不承诺零丢失；溢出丢失会计数并限频记录，不会反复阻塞业务请求。非数据库触发器也不会覆盖人工 SQL。
+
+工作台和日志采用“个人可见、全局授权”的边界：所有登录用户可访问个人工作台与个人请求日志，但服务端固定按当前 Token 的 UID 查询，不能传入其他用户 ID；全局指标、服务器监控和全部请求日志仍分别要求 `dashboard:*`、`requestLog:*` 权限。个人日志默认使用 `scope=regular` 隐藏“个人请求日志列表/详情”自身产生的读取记录，避免每次查询和翻页持续制造噪声；用户可选择 `scope=self_reads`，或明确填写操作名称，重新查询这些审计记录。个人列表和详情不返回 JWT、Header、查询参数、请求体、响应体或原始 JSON 差异，只对用户、角色、部门、菜单、字典、系统配置、个人资料、Product 和文件/目录等已登记操作按 route、action、field 三级白名单生成自然语言摘要，敏感值继续脱敏或隐藏；未知结构只显示“已省略”，不会回退展示原文。管理员详情保留结构化 JSON，便于排障和审计。服务器监控响应的 `app.audit` 同时提供进程内接收、采样、入队、降级、持久化、失败、永久丢弃、溢出丢弃、缓冲待处理和存储不可用指标；多实例部署需按实例采集聚合。
+
+个人待办、系统通知和任务中心是三个不同概念：待办表示“某个用户还需要完成的事情”，登录用户始终只能读取自己的 `user_todos`；系统通知表示“需要告知用户的信息”，可以已读但不代表业务已处理；任务中心表示“后端异步或定时执行过程”，用于查看运行状态、重试和导出结果。手工待办可由本人创建、编辑、推进状态和删除；业务待办由业务模块通过 `assignee_id + source_type + source_key` 幂等写入，用户只能跳转到站内业务页面处理，完成或取消必须由业务模块调用 `CloseBusinessTodo`，避免待办状态与订单、审批等业务真相分叉。业务模块的 `action_url` 只允许站内相对路径。列表按“逾期、紧急程度、截止时间”排序。参考 Product 模块已接入首个真实生命周期：禁用产品为创建者生成待启用事项，禁用态编辑刷新同一事项，启用后完成，删除时取消；产品再次由启用变为禁用会显式开启新一轮待办，普通消息重试不会重开历史终态。
+
+### 版本与升级策略
+
+- `v0.10.0` 是本轮首个公开版本候选。当前仍处于首版初始化阶段，部署会重置系统数据，因此 `v0.10.0` 正式 tag 前允许直接收敛现有初始化迁移。
+- 首个公开 `vX.Y.Z` tag 发布后，已发布迁移视为不可变；表结构、权限和默认数据演进必须新增成对的 `up/down` 迁移，不再修改历史迁移。
+- `docs/openapi.yaml` 随源码纳入版本控制；路由、安全策略或 API 元数据变化后必须重新生成，CI 和 Release 会校验生成结果无漂移，发布归档同时携带该文件。
+- 发布版本遵循 SemVer：`0.x` 阶段的破坏兼容调整升级 minor，兼容修复升级 patch；进入 `1.x` 后，破坏兼容调整升级 major，向后兼容功能升级 minor，兼容修复升级 patch。tag 触发 release workflow，并校验 tag、源码版本和 CHANGELOG 条目一致，执行单元测试、`go vet`、迁移检查和 MySQL 接口集成测试；产物包含二进制、示例配置、RBAC 模型、迁移、README、CHANGELOG、兼容说明、LICENSE 和校验和。
+- 升级顺序为：备份数据库与配置 → `command migrate check` → `command migrate up` → 按变更说明执行 `api-route -y` / `task sync-definitions` → 协调重启 `service/worker/cron` → 验证 readiness 与关键权限流程。
+- 回滚必须同时评估二进制与数据库：仅在新迁移明确支持安全 `down` 时回退数据库；涉及数据转换或破坏性结构变更时优先前向修复，不自动降级。每个正式版本应在 release notes 中列出兼容边界、升级命令、回滚限制和已知风险。
 
 ## 部署说明
 

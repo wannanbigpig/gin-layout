@@ -1,6 +1,6 @@
 package errors
 
-// 鉴权与登录相关错误码（20001-20011, 20031-20038, 20046-20048）。
+// 鉴权与登录相关错误码（20001-20011, 20031-20038, 20046-20050）。
 const (
 	UserPasswordWrong       = 20001
 	UserExists              = 20002
@@ -23,9 +23,11 @@ const (
 	QueryUserDeptFailed    = 20037
 	SuperAdminMustKeepRole = 20038
 
-	LoginAccountLocked  = 20046
-	PasswordRequired    = 20047
-	RefreshTokenInvalid = 20048
+	LoginAccountLocked      = 20046
+	PasswordRequired        = 20047
+	RefreshTokenInvalid     = 20048
+	CurrentPasswordRequired = 20049
+	CurrentPasswordWrong    = 20050
 )
 
 // 鉴权相关文案 key。

@@ -49,6 +49,12 @@ type ExportRequestLogPayload struct {
 // handler 只负责业务逻辑和写入结果。
 func handleExportRequestLog(ctx context.Context, payload ExportRequestLogPayload) error {
 	exportService := service.NewExportCenterService()
+	if completed, err := exportService.CompletedRecordForTaskRun(ctx, payload.TaskRunID); err != nil {
+		return err
+	} else if completed != nil {
+		notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusSuccess, exportRecordUploadFile(completed), completed.FileName, nil)
+		return nil
+	}
 
 	params := &form.RequestLogExport{
 		HasChangeDiff:      payload.HasChangeDiff,
@@ -117,13 +123,17 @@ func handleExportRequestLog(ctx context.Context, payload ExportRequestLogPayload
 	// 可能是被 CloseWithError 注入的同一错误，也可能是 EOF。
 	streamErr := <-streamErrCh
 	if streamErr != nil {
-		_ = exportService.MarkFailed(ctx, payload.TaskRunID, streamErr)
-		notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", streamErr)
+		if shouldFinalizeExportFailure(ctx) {
+			_ = exportService.MarkFailed(ctx, payload.TaskRunID, streamErr)
+			notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", streamErr)
+		}
 		return streamErr
 	}
 	if err != nil {
-		_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
-		notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)
+		if shouldFinalizeExportFailure(ctx) {
+			_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
+			notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)
+		}
 		return err
 	}
 
@@ -131,8 +141,10 @@ func handleExportRequestLog(ctx context.Context, payload ExportRequestLogPayload
 		File:     uploadFile,
 		FileName: fileName,
 	}); err != nil {
-		_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
-		notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, fileName, err)
+		if shouldFinalizeExportFailure(ctx) {
+			_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
+			notifyExportRequestLogMessage(ctx, payload, model.TaskRunStatusFailed, nil, fileName, err)
+		}
 		return err
 	}
 

@@ -246,7 +246,13 @@ func isValidHTTPMethod(method string) bool {
 // RegisterCatalog 将编译后的端点直接注册到 Gin，避免再次递归解释路由树。
 func RegisterCatalog(engine *gin.Engine, catalog *Catalog) {
 	for _, route := range catalog.routes {
-		engine.Handle(route.Method, route.Path, route.Handlers...)
+		handlers := make([]gin.HandlerFunc, 0, len(route.Handlers)+1)
+		operationName := route.Title
+		handlers = append(handlers, func(c *gin.Context) {
+			c.Set(global.ContextKeyOperationName, operationName)
+		})
+		handlers = append(handlers, route.Handlers...)
+		engine.Handle(route.Method, route.Path, handlers...)
 	}
 }
 

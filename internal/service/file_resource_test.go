@@ -582,6 +582,48 @@ func TestFileResourceUploadCredentialBatchReturnsPerItemResults(t *testing.T) {
 	}
 }
 
+func TestFileBatchFailuresDoNotExposeTechnicalErrors(t *testing.T) {
+	technicalErr := stderrors.New("dial tcp 10.0.0.8:3306: secret backend unavailable")
+	wantMessage := e.NewBusinessError(e.ServerErr).GetMessage()
+
+	uploadFailure := buildBatchFailure(2, "client-secret", technicalErr)
+	if uploadFailure.Code != e.ServerErr || uploadFailure.Message != wantMessage {
+		t.Fatalf("expected generic upload failure, got %#v", uploadFailure)
+	}
+	if strings.Contains(uploadFailure.Message, "10.0.0.8") || strings.Contains(uploadFailure.Message, "secret") {
+		t.Fatalf("technical upload error leaked to client: %q", uploadFailure.Message)
+	}
+
+	localFailure := buildLocalUploadFailureItem(1, &multipart.FileHeader{Filename: "demo.txt"}, technicalErr)
+	if localFailure.Code != e.ServerErr || localFailure.Message != wantMessage {
+		t.Fatalf("expected generic local upload failure, got %#v", localFailure)
+	}
+
+	deleteFailure := buildFileBatchDeleteFailure(11, technicalErr)
+	if deleteFailure.Code != e.ServerErr || deleteFailure.Message != wantMessage {
+		t.Fatalf("expected generic delete failure, got %#v", deleteFailure)
+	}
+
+	destroyFailure := buildFileBatchDestroyFailure(12, technicalErr)
+	if destroyFailure.Code != e.ServerErr || destroyFailure.Message != wantMessage {
+		t.Fatalf("expected generic destroy failure, got %#v", destroyFailure)
+	}
+}
+
+func TestFileBatchFailuresPreserveBusinessErrors(t *testing.T) {
+	businessErr := e.NewBusinessError(e.FileTooLarge)
+
+	uploadFailure := buildBatchFailure(0, "client-1", businessErr)
+	if uploadFailure.Code != e.FileTooLarge || uploadFailure.Message != businessErr.GetMessage() {
+		t.Fatalf("expected business upload failure, got %#v", uploadFailure)
+	}
+
+	deleteFailure := buildFileBatchDeleteFailure(1, businessErr)
+	if deleteFailure.Code != e.FileTooLarge || deleteFailure.Message != businessErr.GetMessage() {
+		t.Fatalf("expected business delete failure, got %#v", deleteFailure)
+	}
+}
+
 func TestFileResourceCompleteDirectUploadRejectsMultiFileType(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	hash := strings.Repeat("f", 64)

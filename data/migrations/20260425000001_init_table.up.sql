@@ -415,6 +415,7 @@ CREATE TABLE IF NOT EXISTS `request_logs`
     `created_at`      datetime              DEFAULT NULL COMMENT '创建时间',
     `updated_at`      datetime              DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
+    UNIQUE KEY `rl_request_id` (`request_id`),
     KEY `rl_operator_id_created_at` (`operator_id`, `created_at`),
     KEY `rl_base_url_method_created_at` (`base_url`, `method`, `created_at`),
     KEY `rl_operation_status_created_at` (`operation_status`, `created_at`),
@@ -882,10 +883,38 @@ CREATE TABLE IF NOT EXISTS `sys_messages`
     `created_at`       datetime                  DEFAULT NULL,
     `updated_at`       datetime                  DEFAULT NULL,
     PRIMARY KEY (`id`),
+    UNIQUE KEY `sm_user_id_batch_id` (`user_id`, `batch_id`),
     KEY `sm_user_id_is_read_created_at` (`user_id`, `is_read`, `created_at`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='系统消息表';
+
+CREATE TABLE IF NOT EXISTS `user_todos`
+(
+    `id`           bigint unsigned NOT NULL AUTO_INCREMENT,
+    `assignee_id`  bigint unsigned NOT NULL DEFAULT '0' COMMENT '待办所属用户ID',
+    `creator_id`   bigint unsigned NOT NULL DEFAULT '0' COMMENT '创建人或业务触发人ID，系统可为0',
+    `source_type`  varchar(40)     NOT NULL DEFAULT 'manual' COMMENT '来源类型，manual为个人手工待办',
+    `source_key`   varchar(128)    NOT NULL DEFAULT '' COMMENT '来源内幂等键',
+    `title`        varchar(255)    NOT NULL DEFAULT '' COMMENT '待办标题',
+    `description`  text                     DEFAULT NULL COMMENT '待办说明',
+    `priority`     varchar(20)     NOT NULL DEFAULT 'normal' COMMENT '优先级 low/normal/high/urgent',
+    `status`       varchar(20)     NOT NULL DEFAULT 'pending' COMMENT '状态 pending/processing/completed/canceled',
+    `action_url`   varchar(500)    NOT NULL DEFAULT '' COMMENT '业务操作页面',
+    `due_at`       datetime                 DEFAULT NULL COMMENT '截止时间',
+    `completed_at` datetime                 DEFAULT NULL COMMENT '完成时间',
+    `canceled_at`  datetime                 DEFAULT NULL COMMENT '取消时间',
+    `created_at`   datetime                 DEFAULT NULL,
+    `updated_at`   datetime                 DEFAULT NULL,
+    `deleted_at`   int             NOT NULL DEFAULT '0' COMMENT '软删除时间',
+    `active_source_key` varchar(128) GENERATED ALWAYS AS (IF(`deleted_at` = 0 AND `status` IN ('pending', 'processing'), `source_key`, NULL)) STORED COMMENT '仅未结束待办参与幂等约束',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ut_assignee_source_key_active` (`assignee_id`, `source_type`, `active_source_key`),
+    KEY `ut_assignee_deleted_status_due` (`assignee_id`, `deleted_at`, `status`, `due_at`),
+    KEY `ut_assignee_deleted_priority` (`assignee_id`, `deleted_at`, `priority`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='个人与业务待办表';
 
 CREATE TABLE IF NOT EXISTS `daily_request_stats`
 (

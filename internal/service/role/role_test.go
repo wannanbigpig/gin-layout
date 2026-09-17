@@ -65,6 +65,69 @@ func TestUpdateRejectsImmutableCodeBeforeDBLookup(t *testing.T) {
 	}
 }
 
+func TestRoleMutationUpdateFieldsOnlyContainsEditableColumns(t *testing.T) {
+	fields := roleMutationUpdateFields(&roleMutation{
+		Code:        "must-not-change",
+		Name:        "auditor",
+		Description: "read only",
+		Status:      0,
+		Sort:        10,
+		DataScope:   access.DataScopeSelf,
+	}, access.DataScopeDept)
+
+	want := map[string]any{
+		"name":        "auditor",
+		"description": "read only",
+		"status":      uint8(0),
+		"sort":        uint(10),
+		"data_scope":  uint8(access.DataScopeSelf),
+	}
+	if len(fields) != len(want) {
+		t.Fatalf("expected only editable columns, got %#v", fields)
+	}
+	for key, value := range want {
+		if fields[key] != value {
+			t.Fatalf("unexpected %s: got %#v want %#v", key, fields[key], value)
+		}
+	}
+	if _, ok := fields["code"]; ok {
+		t.Fatal("role code must not be updated")
+	}
+	if _, ok := fields["is_system"]; ok {
+		t.Fatal("system marker must not be updated")
+	}
+}
+
+func TestRoleMutationUpdateFieldsKeepsExistingScopeWhenOmitted(t *testing.T) {
+	fields := roleMutationUpdateFields(&roleMutation{}, access.DataScopeCustom)
+	if fields["data_scope"] != uint8(access.DataScopeCustom) {
+		t.Fatalf("expected existing data scope, got %#v", fields["data_scope"])
+	}
+}
+
+func TestRoleMutationKeepsCustomDepartmentMappingsWhenScopeOmitted(t *testing.T) {
+	db := newRoleSQLiteDB(t)
+	if err := db.Create(&[]model.RoleDataScopeDept{
+		{RoleId: 9, DeptId: 11},
+		{RoleId: 9, DeptId: 12},
+	}).Error; err != nil {
+		t.Fatalf("create existing mappings failed: %v", err)
+	}
+
+	params := &roleMutation{Id: 9}
+	if err := NewRoleService().updateRoleDataScopeDeptForMutation(9, params, access.DataScopeCustom, db); err != nil {
+		t.Fatalf("preserve omitted data scope mappings failed: %v", err)
+	}
+
+	var got []uint
+	if err := db.Model(&model.RoleDataScopeDept{}).Where("role_id = ?", 9).Order("dept_id").Pluck("dept_id", &got).Error; err != nil {
+		t.Fatalf("query mappings failed: %v", err)
+	}
+	if len(got) != 2 || got[0] != 11 || got[1] != 12 {
+		t.Fatalf("expected custom mappings unchanged, got %v", got)
+	}
+}
+
 func TestUpdateRoleDataScopeDeptRejectsMissingOrDeletedDepartments(t *testing.T) {
 	db := newRoleSQLiteDB(t)
 	activeDept := model.Department{Name: "active"}

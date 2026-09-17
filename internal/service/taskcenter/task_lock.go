@@ -48,13 +48,13 @@ func (l *TaskLock) Acquire(ctx context.Context) error {
 	return nil
 }
 
-// Release 释放锁，仅当持有者匹配时。失败仅静默忽略，不影响业务。
-func (l *TaskLock) Release(ctx context.Context) {
+// Release 释放锁，仅当持有者匹配时，并将 Redis 异常返回给调用方记录。
+func (l *TaskLock) Release(ctx context.Context) error {
 	script := redis.NewScript(`
 		if redis.call("get", KEYS[1]) == ARGV[1] then
 			return redis.call("del", KEYS[1])
 		end
 		return 0
 	`)
-	_ = script.Run(ctx, l.client, []string{l.key}, l.token)
+	return script.Run(ctx, l.client, []string{l.key}, l.token).Err()
 }
