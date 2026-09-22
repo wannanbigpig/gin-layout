@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,8 +10,29 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 )
+
+func TestLoadRevocableSessionPreservesDatabaseFailure(t *testing.T) {
+	db := newSessionTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db}).loadRevocableSession(1)
+	if err == nil {
+		t.Fatal("expected database error")
+	}
+	var businessErr *e.BusinessError
+	if errors.As(err, &businessErr) && businessErr.GetCode() == e.NotFound {
+		t.Fatalf("database failure must not be reported as NotFound: %v", err)
+	}
+}
 
 func TestRevokeSessionUpdatesDatabaseWhenRedisUnavailable(t *testing.T) {
 	db := newSessionTestDB(t)

@@ -59,7 +59,9 @@ jwt:
   refresh_cookie_domain: ""
   refresh_cookie_secure: false
   refresh_cookie_same_site: Lax
-  secret_key: <YOUR_SECRET_KEY>  # 请替换为随机密钥；启动时会校验非空，生产环境还会拒绝弱占位值和短密钥
+  secret_key: ${JWT_SECRET_KEY}  # JWT 签名密钥；建议使用 32 字节随机值（Base64 约 44 字符），可执行 openssl rand -base64 32 生成；必须与下方凭据加密主密钥不同
+security:
+  credential_encryption_key: ${CREDENTIAL_ENCRYPTION_KEY}  # 短信/OSS 等业务凭据的加密主密钥；建议使用独立的 32 字节随机值（Base64 约 44 字符），同样可执行 openssl rand -base64 32 生成；所有实例保持一致，仅重启生效
 mysql:
   enable: false
   host: 127.0.0.1

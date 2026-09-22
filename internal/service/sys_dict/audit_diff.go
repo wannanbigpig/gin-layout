@@ -1,6 +1,7 @@
 package sys_dict
 
 import (
+	"errors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -152,7 +153,13 @@ func (s *SysDictService) DeleteItemWithAuditDiff(id uint) (string, error) {
 
 func (s *SysDictService) deleteType(id uint) error {
 	dictType := model.NewSysDictType()
-	if err := dictType.GetById(id); err != nil || dictType.ID == 0 {
+	if err := dictType.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.NotFound)
+		}
+		return err
+	}
+	if dictType.ID == 0 {
 		return e.NewBusinessError(e.NotFound)
 	}
 	if dictType.IsProtected() {
@@ -180,7 +187,13 @@ func (s *SysDictService) deleteType(id uint) error {
 
 func (s *SysDictService) deleteItem(id uint) error {
 	item := model.NewSysDictItem()
-	if err := item.GetById(id); err != nil || item.ID == 0 {
+	if err := item.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.NotFound)
+		}
+		return err
+	}
+	if item.ID == 0 {
 		return e.NewBusinessError(e.NotFound)
 	}
 	if item.IsProtected() {
@@ -201,7 +214,13 @@ func (s *SysDictService) deleteItem(id uint) error {
 
 func (s *SysDictService) snapshotTypeByID(id uint) (map[string]any, error) {
 	dictType := model.NewSysDictType()
-	if err := dictType.GetById(id); err != nil || dictType.ID == 0 {
+	if err := dictType.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if dictType.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	return snapshotDictType(dictType)
@@ -234,7 +253,13 @@ func snapshotDictType(dictType *model.SysDictType) (map[string]any, error) {
 
 func (s *SysDictService) snapshotItemByID(id uint) (map[string]any, error) {
 	item := model.NewSysDictItem()
-	if err := item.GetById(id); err != nil || item.ID == 0 {
+	if err := item.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if item.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	return snapshotDictItem(item)

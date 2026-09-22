@@ -164,9 +164,9 @@ func cleanupStoredUpload(path string) {
 	_ = os.Remove(path)
 }
 
-func summarizeImageUploadResults(filesInfo []*utils.FileInfo) ([]*utils.FileInfo, error) {
+func summarizeImageUploadResults(filesInfo []*utils.FileInfo, uploadErrs []error) ([]*utils.FileInfo, error) {
 	if len(filesInfo) == 0 {
-		return filesInfo, nil
+		return filesInfo, e.NewBusinessError(e.InvalidParameter, "请至少上传一个文件")
 	}
 
 	successCount := 0
@@ -179,17 +179,47 @@ func summarizeImageUploadResults(filesInfo []*utils.FileInfo) ([]*utils.FileInfo
 	switch {
 	case successCount == len(filesInfo):
 		return filesInfo, nil
+	case hasTechnicalUploadError(uploadErrs):
+		return filesInfo, e.NewBusinessError(e.ServerErr)
 	case successCount == 0:
-		return filesInfo, e.NewBusinessError(e.FAILURE)
+		for _, err := range uploadErrs {
+			var businessErr *e.BusinessError
+			if errors.As(err, &businessErr) {
+				return filesInfo, businessErr
+			}
+		}
+		return filesInfo, e.NewBusinessError(e.InvalidParameter)
 	default:
 		return filesInfo, e.NewBusinessError(e.FileUploadPartialFail)
 	}
 }
 
+func hasTechnicalUploadError(uploadErrs []error) bool {
+	for _, err := range uploadErrs {
+		if err == nil {
+			continue
+		}
+		var businessErr *e.BusinessError
+		if !errors.As(err, &businessErr) {
+			return true
+		}
+	}
+	return false
+}
+
+// ImageUploadErrorCode 返回上传聚合错误的安全业务码；原始技术错误不会从这里透传。
+func ImageUploadErrorCode(err error) (int, bool) {
+	var businessErr *e.BusinessError
+	if !errors.As(err, &businessErr) {
+		return 0, false
+	}
+	return businessErr.GetCode(), true
+}
+
 // IsPartialImageUploadError 判断是否属于部分图片上传失败错误。
 func IsPartialImageUploadError(err error) bool {
-	var businessErr *e.BusinessError
-	return errors.As(err, &businessErr) && businessErr.GetCode() == e.FileUploadPartialFail
+	code, ok := ImageUploadErrorCode(err)
+	return ok && code == e.FileUploadPartialFail
 }
 
 func initUploadResult(fileHeader *multipart.FileHeader) *utils.FileInfo {

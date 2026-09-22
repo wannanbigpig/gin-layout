@@ -52,6 +52,37 @@ var (
 	bankCardRegex = regexp.MustCompile(`\d{16,19}`)
 )
 
+// immutableRequestBodyFields 是认证凭据和付费渠道密钥的安全基线。
+// audit.sensitive_fields 可以追加业务字段，但不能让这些字段恢复为明文日志。
+var immutableRequestBodyFields = map[string]bool{
+	"access_key_secret": true,
+	"secret_access_key": true,
+	"sms_code":          true,
+	"otp":               true,
+	"captcha":           true,
+	"code_hash":         true,
+	"phone":             true,
+	"mobile":            true,
+	"phone_number":      true,
+	"mobile_number":     true,
+}
+
+var immutableRequestBodyFieldsMu sync.RWMutex
+
+// RegisterImmutableRequestBodyFields lets compile-time provider registries add
+// credential field names that request logging must never expose. Registration
+// is additive so runtime audit configuration cannot remove the safety baseline.
+func RegisterImmutableRequestBodyFields(fields ...string) {
+	immutableRequestBodyFieldsMu.Lock()
+	defer immutableRequestBodyFieldsMu.Unlock()
+	for _, field := range fields {
+		field = strings.ToLower(strings.TrimSpace(field))
+		if field != "" {
+			immutableRequestBodyFields[field] = true
+		}
+	}
+}
+
 func currentFieldsManager() *sensitiveFieldsManager {
 	defaultFieldsManagerOnce.Do(func() {
 		defaultFieldsManagerVal.Store(newSensitiveFieldsManager(defaultSensitiveFieldsConfig()))
@@ -96,6 +127,7 @@ func defaultSensitiveFieldsConfig() SensitiveFieldsConfig {
 			"token", "access_token", "refresh_token",
 			"api_key", "apikey", "apiKey",
 			"pin", "cvv", "cvc", "cvv2", "security_code",
+			"sms_code", "otp", "captcha", "code_hash",
 		},
 		RequestHeader: []string{
 			"authorization", "auth",
@@ -245,7 +277,13 @@ func getRequestHeaderFields() map[string]bool {
 
 func getRequestBodyFields() map[string]bool {
 	manager := currentFieldsManager()
-	return manager.cloneFieldSet(manager.requestBodyFields)
+	fields := manager.cloneFieldSet(manager.requestBodyFields)
+	immutableRequestBodyFieldsMu.RLock()
+	defer immutableRequestBodyFieldsMu.RUnlock()
+	for key := range immutableRequestBodyFields {
+		fields[key] = true
+	}
+	return fields
 }
 
 func getResponseHeaderFields() map[string]bool {

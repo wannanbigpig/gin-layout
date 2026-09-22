@@ -65,15 +65,18 @@ func (p SecurityPolicy) AuthMode() AuthMode {
 
 // RouteDef 定义单条路由。认证策略由所属 RouteGroupDef 继承。
 type RouteDef struct {
-	Method   string
-	Path     string
-	Title    string
-	Desc     string
-	Handlers []gin.HandlerFunc
+	Method    string
+	Path      string
+	Title     string
+	Desc      string
+	TitleI18n map[string]string
+	DescI18n  map[string]string
+	Handlers  []gin.HandlerFunc
 }
 
 func (r RouteDef) WithDesc(desc string) RouteDef {
 	r.Desc = desc
+	r.DescI18n = builtInDescriptionI18n(desc)
 	return r
 }
 
@@ -93,6 +96,8 @@ type RouteMeta struct {
 	Path      string
 	Title     string
 	Desc      string
+	TitleI18n map[string]string
+	DescI18n  map[string]string
 	Auth      AuthMode
 	Security  SecurityPolicy
 	GroupCode string
@@ -119,6 +124,8 @@ func (c *Catalog) Routes() []CompiledRoute {
 	routes := make([]CompiledRoute, len(c.routes))
 	for i, route := range c.routes {
 		routes[i] = route
+		routes[i].TitleI18n = cloneLocalizedText(route.TitleI18n)
+		routes[i].DescI18n = cloneLocalizedText(route.DescI18n)
 		routes[i].Handlers = append([]gin.HandlerFunc(nil), route.Handlers...)
 	}
 	return routes
@@ -131,6 +138,8 @@ func (c *Catalog) MetaMap() RouteMetaMap {
 	meta := make(RouteMetaMap, len(c.meta))
 	for key, route := range c.meta {
 		routeCopy := *route
+		routeCopy.TitleI18n = cloneLocalizedText(route.TitleI18n)
+		routeCopy.DescI18n = cloneLocalizedText(route.DescI18n)
 		meta[key] = &routeCopy
 	}
 	return meta
@@ -203,6 +212,7 @@ func compileRouteGroup(catalog *Catalog, group RouteGroupDef, basePath, inherite
 
 		meta := RouteMeta{
 			Method: route.Method, Path: fullPath, Title: route.Title, Desc: route.Desc,
+			TitleI18n: cloneLocalizedText(route.TitleI18n), DescI18n: cloneLocalizedText(route.DescI18n),
 			Auth: security.AuthMode(), Security: security, GroupCode: groupCode,
 		}
 		compiled := CompiledRoute{RouteMeta: meta, Handlers: append(append([]gin.HandlerFunc(nil), handlers...), route.Handlers...)}

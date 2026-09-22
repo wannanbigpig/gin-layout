@@ -763,6 +763,28 @@ func TestUpdateProfileWithoutPasswordDoesNotRequireCurrentPassword(t *testing.T)
 	}
 }
 
+func TestProfilePhoneChangedOnlyWhenCredentialValueChanges(t *testing.T) {
+	user := &model.AdminUser{PhoneNumber: "13800138000", CountryCode: "86"}
+	samePhone := "13800138000"
+	sameCountryCode := "86"
+	if profilePhoneChanged(user, &form.UpdateProfile{PhoneNumber: &samePhone, CountryCode: &sameCountryCode}) {
+		t.Fatal("unchanged phone fields must not be treated as a credential change")
+	}
+
+	changedPhone := "13900139000"
+	if !profilePhoneChanged(user, &form.UpdateProfile{PhoneNumber: &changedPhone}) {
+		t.Fatal("changed phone number must be treated as a credential change")
+	}
+	changedCountryCode := "852"
+	if !profilePhoneChanged(user, &form.UpdateProfile{CountryCode: &changedCountryCode}) {
+		t.Fatal("changed country code must be treated as a credential change")
+	}
+	prefixedSameCountryCode := "+86"
+	if profilePhoneChanged(user, &form.UpdateProfile{CountryCode: &prefixedSameCountryCode}) {
+		t.Fatal("equivalent +86 country code must not be treated as a credential change")
+	}
+}
+
 func TestDefaultSuperAdminProtectionRemainsForDisableAndDelete(t *testing.T) {
 	service := NewAdminUserService()
 	disabled := model.AdminUserStatusDisabled

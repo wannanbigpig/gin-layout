@@ -1,6 +1,6 @@
 package errors
 
-// 鉴权与登录相关错误码（20001-20011, 20031-20038, 20046-20050）。
+// 鉴权与登录相关错误码（20001-20011, 20031-20038, 20046-20053）。
 const (
 	UserPasswordWrong       = 20001
 	UserExists              = 20002
@@ -28,6 +28,9 @@ const (
 	RefreshTokenInvalid     = 20048
 	CurrentPasswordRequired = 20049
 	CurrentPasswordWrong    = 20050
+	SMSCredentialInvalid    = 20051
+	SMSLoginDisabled        = 20052
+	SMSProviderFailed       = 20053
 )
 
 // 鉴权相关文案 key。

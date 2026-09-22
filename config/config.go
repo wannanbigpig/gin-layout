@@ -12,11 +12,12 @@ import (
 // Conf 配置项主结构体
 type Conf struct {
 	autoload.AppConfig `mapstructure:"app"`
-	Mysql              autoload.MysqlConfig  `mapstructure:"mysql"`
-	Redis              autoload.RedisConfig  `mapstructure:"redis"`
-	Logger             autoload.LoggerConfig `mapstructure:"logger"`
-	Jwt                autoload.JwtConfig    `mapstructure:"jwt"`
-	Queue              autoload.QueueConfig  `mapstructure:"queue"`
+	Mysql              autoload.MysqlConfig    `mapstructure:"mysql"`
+	Redis              autoload.RedisConfig    `mapstructure:"redis"`
+	Logger             autoload.LoggerConfig   `mapstructure:"logger"`
+	Jwt                autoload.JwtConfig      `mapstructure:"jwt"`
+	Security           autoload.SecurityConfig `mapstructure:"security"`
+	Queue              autoload.QueueConfig    `mapstructure:"queue"`
 }
 
 var (
@@ -26,6 +27,7 @@ var (
 		Redis:     autoload.Redis,
 		Logger:    autoload.Logger,
 		Jwt:       autoload.Jwt,
+		Security:  autoload.Security,
 		Queue:     cloneQueueConfig(autoload.Queue),
 	}
 	once        sync.Once
@@ -57,17 +59,18 @@ type ConfigReloadChange struct {
 
 // ConfigDiff 描述配置变更摘要。
 type ConfigDiff struct {
-	LoggerChanged         bool
-	MysqlChanged          bool
-	RedisChanged          bool
-	JWTChanged            bool
-	JWTSecretChanged      bool
-	BaseURLChanged        bool
-	CORSChanged           bool
-	TrustedProxiesChanged bool
-	LightAppChanged       bool
-	RestartRequiredFields []string
-	ChangedFields         []string
+	LoggerChanged                  bool
+	MysqlChanged                   bool
+	RedisChanged                   bool
+	JWTChanged                     bool
+	JWTSecretChanged               bool
+	CredentialEncryptionKeyChanged bool
+	BaseURLChanged                 bool
+	CORSChanged                    bool
+	TrustedProxiesChanged          bool
+	LightAppChanged                bool
+	RestartRequiredFields          []string
+	ChangedFields                  []string
 }
 
 // GetConfig 返回当前生效的配置快照。

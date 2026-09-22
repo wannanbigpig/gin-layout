@@ -2,6 +2,7 @@ package taskcenter
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -99,7 +100,7 @@ func (s *TaskCenterService) ListTaskRuns(params *form.TaskRunList) (*resources.C
 		addLike("source_id", params.SourceID).
 		addEq("status", params.Status).
 		addEq("detail_record_mode", params.DetailRecordMode).
-		addCreatedAtRange(params.StartTime, params.EndTime)
+		addTimeRange(params.TimeBasis, params.StartTime, params.EndTime)
 	condition, args := query.Build()
 
 	runModel := model.NewTaskRun()
@@ -173,7 +174,13 @@ func (s *TaskCenterService) TaskRunDetail(id uint) (any, error) {
 	if s.db != nil {
 		taskRun.SetDB(s.db)
 	}
-	if err := taskRun.GetById(id); err != nil || taskRun.ID == 0 {
+	if err := taskRun.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if taskRun.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	s.fillTaskRunTriggerAccounts(context.Background(), []*model.TaskRun{taskRun})
@@ -280,7 +287,13 @@ func (s *TaskCenterService) fillTaskRunTriggerAccounts(ctx context.Context, runs
 // TaskRunAuditSnapshot 查询任务执行记录的审计快照（用于构建 change_diff）。
 func (s *TaskCenterService) TaskRunAuditSnapshot(id uint) (*TaskRunAuditSnapshot, error) {
 	taskRun, err := loadTaskRunByID(id)
-	if err != nil || taskRun == nil || taskRun.ID == 0 {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if taskRun == nil || taskRun.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	return &TaskRunAuditSnapshot{
@@ -389,10 +402,14 @@ func (s *TaskCenterService) TaskRunStats(params *form.TaskRunStatsQuery) (*resou
 		kind = statsFilter.params.Kind
 		source = statsFilter.params.Source
 	}
+	detailStartTime, detailEndTime := statsFilter.DetailTimeRange()
 	return &resources.TaskRunStatsResources{
 		TaskCode:            taskCode,
 		Kind:                kind,
 		Source:              source,
+		DetailTimeBasis:     form.TaskRunTimeBasisFinishedAt,
+		DetailStartTime:     utils.FormatDate{Time: detailStartTime},
+		DetailEndTime:       utils.FormatDate{Time: detailEndTime},
 		TotalCount:          result.TotalCount,
 		SuccessCount:        result.SuccessCount,
 		FailedCount:         result.FailedCount,
@@ -626,6 +643,17 @@ func (f *statsFilter) Apply(db *gorm.DB) *gorm.DB {
 		return db.Where(condition, args...)
 	}
 	return db
+}
+
+// DetailTimeRange 返回与当前统计窗口完全对应的执行完成时间范围。
+// 统计表以整点为窗口起点，因此范围两端需要按实际纳入的小时窗口对齐。
+func (f *statsFilter) DetailTimeRange() (time.Time, time.Time) {
+	start := f.start.Truncate(taskRunStatsWindow)
+	if f.start.After(start) {
+		start = start.Add(taskRunStatsWindow)
+	}
+	end := f.end.Truncate(taskRunStatsWindow).Add(taskRunStatsWindow - time.Second)
+	return start, end
 }
 
 func normalizeTaskRunStatsRange(params *form.TaskRunStatsQuery, now time.Time) (time.Time, time.Time, error) {

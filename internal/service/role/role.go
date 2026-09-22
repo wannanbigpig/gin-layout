@@ -1,7 +1,10 @@
 package role
 
 import (
+	"errors"
 	"strconv"
+
+	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -26,7 +29,7 @@ func NewRoleService() *RoleService {
 const roleOptionsLimit = 200
 
 // Options 角色选择器：按名称/编码模糊搜索，供前端下拉选择器使用。
-func (s *RoleService) Options(keyword string) []resources.RoleOptionResources {
+func (s *RoleService) Options(keyword string) ([]resources.RoleOptionResources, error) {
 	conditionStr, args := query_builder.New().
 		AddKeywordLike(keyword, "name", "code").
 		Build()
@@ -35,9 +38,9 @@ func (s *RoleService) Options(keyword string) []resources.RoleOptionResources {
 		OrderBy:      "sort desc, id desc",
 	})
 	if err != nil {
-		return []resources.RoleOptionResources{}
+		return nil, err
 	}
-	return resources.ToRoleOptions(collection)
+	return resources.ToRoleOptions(collection), nil
 }
 
 // List 分页查询角色列表。
@@ -98,7 +101,13 @@ func (s *RoleService) Update(params *form.UpdateRole) error {
 // Delete 删除角色。
 func (s *RoleService) Delete(id uint) error {
 	role := model.NewRole()
-	if err := role.GetById(id); err != nil || role.ID == 0 {
+	if err := role.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.RoleNotFound)
+		}
+		return err
+	}
+	if role.ID == 0 {
 		return e.NewBusinessError(e.RoleNotFound)
 	}
 	if access.NewSystemDefaultsService().IsProtectedRole(role) {
@@ -111,7 +120,13 @@ func (s *RoleService) Delete(id uint) error {
 // Detail 获取角色详情。
 func (s *RoleService) Detail(id uint) (any, error) {
 	role := model.NewRole()
-	if err := role.GetAllById(id); err != nil || role.ID == 0 {
+	if err := role.GetAllById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.RoleNotFound)
+		}
+		return nil, err
+	}
+	if role.ID == 0 {
 		return nil, e.NewBusinessError(e.RoleNotFound)
 	}
 	resource := resources.NewRoleTransformer().ToStruct(role)
@@ -127,17 +142,23 @@ func (s *RoleService) Detail(id uint) (any, error) {
 // 调用跨包方法 access.UserPermissionSyncService.RoleMenuIDs 获取菜单 ID，再转换为字符串列表。
 func (s *RoleService) GetRoleMenus(roleId uint) ([]string, error) {
 	role := model.NewRole()
-	if err := role.GetById(roleId); err != nil || role.ID == 0 {
+	if err := role.GetById(roleId); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.RoleNotFound)
+		}
+		return nil, err
+	}
+	if role.ID == 0 {
 		return nil, e.NewBusinessError(e.RoleNotFound)
 	}
 
 	menuIDs, err := access.NewUserPermissionSyncService().RoleMenuIDs([]uint{roleId})
 	if err != nil {
-		return nil, e.NewBusinessError(e.FAILURE)
+		return nil, err
 	}
 	menuIDs, err = access.NewRoleMenuAssignmentService().NormalizeMenuIDs(menuIDs)
 	if err != nil {
-		return nil, e.NewBusinessError(e.FAILURE)
+		return nil, err
 	}
 
 	result := make([]string, 0, len(menuIDs))

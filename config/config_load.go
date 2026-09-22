@@ -59,8 +59,8 @@ func validateJWTSecretKey(cfg *Conf) error {
 	if _, ok := weakSecrets[strings.ToLower(secret)]; ok {
 		return fmt.Errorf("jwt.secret_key uses a weak placeholder value in production")
 	}
-	if len(secret) < 16 {
-		return fmt.Errorf("jwt.secret_key is too short in production, require at least 16 characters")
+	if len(secret) < 32 {
+		return fmt.Errorf("jwt.secret_key is too short in production, require at least 32 characters")
 	}
 
 	return nil
@@ -288,6 +288,7 @@ func resolveEnvVars(cfg *Conf) {
 	cfg.Queue.Redis.Password = resolveEnvVar(cfg.Queue.Redis.Password)
 	cfg.Queue.Redis.Host = resolveEnvVar(cfg.Queue.Redis.Host)
 	cfg.Jwt.SecretKey = resolveEnvVar(cfg.Jwt.SecretKey)
+	cfg.Security.CredentialEncryptionKey = resolveEnvVar(cfg.Security.CredentialEncryptionKey)
 }
 
 func resolveEnvVar(val string) string {

@@ -10,11 +10,13 @@ const (
 // SysExportRecord 统一导出记录。
 type SysExportRecord struct {
 	BaseModel
+	PublicID         string            `json:"public_id"`
 	Scene            string            `json:"scene"`
 	TaskRunID        uint              `json:"task_run_id"`
 	TriggerUserID    uint              `json:"trigger_user_id"`
 	Status           string            `json:"status"`
 	Queue            string            `json:"queue"`
+	ExecutionToken   string            `json:"-"`
 	Progress         uint8             `json:"progress"`
 	TotalCount       uint64            `json:"total_count"`
 	ProcessedCount   uint64            `json:"processed_count"`
@@ -22,6 +24,7 @@ type SysExportRecord struct {
 	FileUUID         string            `json:"file_uuid"`
 	FileName         string            `json:"file_name"`
 	FileSize         uint64            `json:"file_size"`
+	FileExpiresAt    utils.FormatDate  `json:"file_expires_at" gorm:"column:file_expires_at;default:null"`
 	Format           string            `json:"format"`
 	ErrorMessage     string            `json:"error_message"`
 	StartedAt        *utils.FormatDate `json:"started_at"`

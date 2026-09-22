@@ -32,6 +32,8 @@ func TestInferHTTPStatus(t *testing.T) {
 		{"UserPasswordWrong -> 401", UserPasswordWrong, http.StatusUnauthorized},
 		{"UserDoesNotExist -> 401", UserDoesNotExist, http.StatusUnauthorized},
 		{"LoginAccountLocked -> 401", LoginAccountLocked, http.StatusUnauthorized},
+		{"SMSCredentialInvalid -> 401", SMSCredentialInvalid, http.StatusUnauthorized},
+		{"SMSLoginDisabled -> 400", SMSLoginDisabled, http.StatusBadRequest},
 
 		// ---- 服务端技术性故障显式 500 ----
 		{"CasbinInitFailed -> 500", CasbinInitFailed, http.StatusInternalServerError},
@@ -42,11 +44,13 @@ func TestInferHTTPStatus(t *testing.T) {
 		{"UpdateUserFailed -> 500", UpdateUserFailed, http.StatusInternalServerError},
 		{"DeleteUserFailed -> 500", DeleteUserFailed, http.StatusInternalServerError},
 		{"QueryUserDeptFailed -> 500", QueryUserDeptFailed, http.StatusInternalServerError},
+		{"StorageTestFailed -> 500", StorageTestFailed, http.StatusInternalServerError},
+		{"SMSProviderFailed -> 502", SMSProviderFailed, http.StatusBadGateway},
 
 		// ---- fallback：未登记业务码默认 400 ----
 		{"unknown code -> 400", 99999, http.StatusBadRequest},
 		{"FAILURE -> 400", FAILURE, http.StatusBadRequest},
-		{"TooManyRequests -> 400", TooManyRequests, http.StatusBadRequest},
+		{"TooManyRequests -> 429", TooManyRequests, http.StatusTooManyRequests},
 		{"UserDisable -> 400", UserDisable, http.StatusBadRequest},
 		{"negative code -> 400", -1, http.StatusBadRequest},
 

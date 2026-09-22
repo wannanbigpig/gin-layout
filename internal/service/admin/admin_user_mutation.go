@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -102,6 +103,7 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 		oldStatus := adminUserModel.Status
 		oldIsSuperAdmin := adminUserModel.IsSuperAdmin
 		oldAvatar := adminUserModel.Avatar
+		oldFullPhoneNumber := adminUserModel.FullPhoneNumber
 		if isUpdate {
 			if err := loadAdminUserForUpdate(tx, adminUserModel, params.Id); err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -112,6 +114,7 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 			oldStatus = adminUserModel.Status
 			oldIsSuperAdmin = adminUserModel.IsSuperAdmin
 			oldAvatar = adminUserModel.Avatar
+			oldFullPhoneNumber = adminUserModel.FullPhoneNumber
 			if err := s.authorizeAdminUserMutation(adminUserModel, params, tx); err != nil {
 				return err
 			}
@@ -155,7 +158,8 @@ func (s *AdminUserService) saveAdminUserMutation(params *adminUserEditParams) er
 			}
 		}
 
-		if revocation := adminUserMutationRevocation(adminUserModel.ID, oldStatus, oldIsSuperAdmin, params); revocation != nil {
+		phoneChanged := isUpdate && adminUserModel.FullPhoneNumber != oldFullPhoneNumber
+		if revocation := adminUserMutationRevocation(adminUserModel.ID, oldStatus, oldIsSuperAdmin, phoneChanged, params); revocation != nil {
 			if err := s.prepareUserTokenRevocation(tx, revocation); err != nil {
 				return err
 			}
@@ -222,7 +226,7 @@ func adminUserUpdateValues(user *model.AdminUser, params *adminUserEditParams) m
 	return values
 }
 
-func adminUserMutationRevocation(userID uint, oldStatus, oldIsSuperAdmin uint8, params *adminUserEditParams) *userTokenRevocation {
+func adminUserMutationRevocation(userID uint, oldStatus, oldIsSuperAdmin uint8, phoneChanged bool, params *adminUserEditParams) *userTokenRevocation {
 	if params.Id == 0 {
 		return nil
 	}
@@ -231,6 +235,9 @@ func adminUserMutationRevocation(userID uint, oldStatus, oldIsSuperAdmin uint8, 
 	}
 	if params.Password != nil && *params.Password != "" {
 		return &userTokenRevocation{userID: userID, revokedCode: model.RevokedCodePasswordChangeAdmin, revokedReason: "管理员修改密码"}
+	}
+	if phoneChanged {
+		return &userTokenRevocation{userID: userID, revokedCode: model.RevokedCodeOther, revokedReason: "管理员修改登录手机号"}
 	}
 	if params.IsSuperAdmin != nil && oldIsSuperAdmin != *params.IsSuperAdmin {
 		return &userTokenRevocation{userID: userID, revokedCode: model.RevokedCodeOther, revokedReason: "管理员权限变更"}
@@ -306,7 +313,7 @@ func (s *AdminUserService) applyUpdateFields(adminUserModel *model.AdminUser, pa
 		adminUserModel.PhoneNumber = *params.PhoneNumber
 	}
 	if params.CountryCode != nil {
-		adminUserModel.CountryCode = *params.CountryCode
+		adminUserModel.CountryCode = strings.TrimPrefix(strings.TrimSpace(*params.CountryCode), "+")
 	} else if params.PhoneNumber != nil && adminUserModel.CountryCode == "" {
 		// 仅在记录本身尚无国家区号时才默认中国；否则保留既有区号，
 		// 避免「只改手机号、未传 country_code」时把非中国区号误改成 +86。
@@ -360,7 +367,7 @@ func (s *AdminUserService) applyCreateFields(adminUserModel *model.AdminUser, pa
 		adminUserModel.PhoneNumber = *params.PhoneNumber
 	}
 	if params.CountryCode != nil {
-		adminUserModel.CountryCode = *params.CountryCode
+		adminUserModel.CountryCode = strings.TrimPrefix(strings.TrimSpace(*params.CountryCode), "+")
 	} else {
 		adminUserModel.CountryCode = global.ChinaCountryCode
 	}
@@ -420,6 +427,7 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 
 func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *form.UpdateProfile) error {
 	passwordChanged := params.Password != nil && *params.Password != ""
+	phoneChanged := false
 	adminUserModel := model.NewAdminUsers()
 	editParams := &adminUserEditParams{
 		Id:                                   uid,
@@ -440,7 +448,8 @@ func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *fo
 			}
 			return err
 		}
-		if err := verifyProfileCurrentPassword(adminUserModel, params, passwordChanged); err != nil {
+		phoneChanged = profilePhoneChanged(adminUserModel, params)
+		if err := verifyProfileCurrentPassword(adminUserModel, params, passwordChanged || phoneChanged); err != nil {
 			return err
 		}
 		oldAvatar := adminUserModel.Avatar
@@ -475,7 +484,7 @@ func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *fo
 				}
 			}
 		}
-		if revocation := profilePasswordRevocation(uid, passwordChanged); revocation != nil {
+		if revocation := profileCredentialRevocation(uid, passwordChanged, phoneChanged); revocation != nil {
 			if err := s.prepareUserTokenRevocation(tx, revocation); err != nil {
 				return err
 			}
@@ -489,8 +498,16 @@ func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *fo
 	return s.handleMutationError(s.revokeUserTokensAfterCommit(pendingRevocations), e.UpdateUserFailed)
 }
 
-func verifyProfileCurrentPassword(user *model.AdminUser, params *form.UpdateProfile, passwordChanged bool) error {
-	if !passwordChanged {
+func profilePhoneChanged(user *model.AdminUser, params *form.UpdateProfile) bool {
+	if user == nil || params == nil {
+		return false
+	}
+	return (params.PhoneNumber != nil && *params.PhoneNumber != user.PhoneNumber) ||
+		(params.CountryCode != nil && strings.TrimPrefix(strings.TrimSpace(*params.CountryCode), "+") != user.CountryCode)
+}
+
+func verifyProfileCurrentPassword(user *model.AdminUser, params *form.UpdateProfile, credentialChanged bool) error {
+	if !credentialChanged {
 		return nil
 	}
 	if params == nil || params.CurrentPassword == nil || *params.CurrentPassword == "" {
@@ -502,15 +519,24 @@ func verifyProfileCurrentPassword(user *model.AdminUser, params *form.UpdateProf
 	return nil
 }
 
-func profilePasswordRevocation(uid uint, passwordChanged bool) *userTokenRevocation {
-	if !passwordChanged {
+func profileCredentialRevocation(uid uint, passwordChanged, phoneChanged bool) *userTokenRevocation {
+	if !passwordChanged && !phoneChanged {
 		return nil
+	}
+	reason := "用户自己修改登录手机号"
+	if passwordChanged {
+		reason = "用户自己修改密码"
 	}
 	return &userTokenRevocation{
 		userID:        uid,
 		revokedCode:   model.RevokedCodePasswordChangeSelf,
-		revokedReason: "用户自己修改密码",
+		revokedReason: reason,
 	}
+}
+
+// profilePasswordRevocation 保留原有内部测试与调用契约。
+func profilePasswordRevocation(uid uint, passwordChanged bool) *userTokenRevocation {
+	return profileCredentialRevocation(uid, passwordChanged, false)
 }
 
 // validateUniqueFieldsWithLock 验证唯一字段（用户名、手机号、邮箱），使用数据库锁防止并发冲突。

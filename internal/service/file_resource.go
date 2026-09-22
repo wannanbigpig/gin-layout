@@ -166,19 +166,23 @@ func (s *FileResourceService) UploadOptions(ctx context.Context) (*resources.Fil
 		maxFileSizeMB = 10
 	}
 	_, supportsMultipart := driver.(filestorage.MultipartCapable)
+	_, supportsDirect := driver.(filestorage.DirectUploadCapable)
 	return &resources.FileUploadOptionsResources{
 		ActiveDriver:            activeDriver,
 		MaxFileSizeMB:           maxFileSizeMB,
 		AllowedExtensions:       append([]string(nil), cfg.AllowedExtensions...),
 		AllowedMimeTypes:        append([]string(nil), cfg.AllowedMimeTypes...),
-		SupportsDirectUpload:    activeDriver != model.StorageDriverLocal,
+		SupportsDirectUpload:    supportsDirect,
 		SupportsMultipartUpload: supportsMultipart,
 	}, nil
 }
 
 // List 分页查询文件资源列表。
 func (s *FileResourceService) List(params *form.FileResourceList) (*resources.Collection, error) {
-	condition, args := s.buildFileResourceFilter(params)
+	condition, args, err := s.buildFileResourceFilter(params)
+	if err != nil {
+		return nil, err
+	}
 
 	transformer := resources.NewFileResourceTransformer()
 	total, collection, err := s.listUploadFiles(params, condition, args)
@@ -192,7 +196,7 @@ func (s *FileResourceService) List(params *form.FileResourceList) (*resources.Co
 }
 
 // buildFileResourceFilter 是文件列表与导出的共同筛选入口。
-func (s *FileResourceService) buildFileResourceFilter(params *form.FileResourceList) (string, []any) {
+func (s *FileResourceService) buildFileResourceFilter(params *form.FileResourceList) (string, []any, error) {
 	if params == nil {
 		params = &form.FileResourceList{}
 	}
@@ -213,7 +217,10 @@ func (s *FileResourceService) buildFileResourceFilter(params *form.FileResourceL
 	}
 	if params.FolderID != nil {
 		if params.IncludeSubfolder == global.Yes {
-			folderIDs := s.descendantFolderIDs(*params.FolderID)
+			folderIDs, err := s.descendantFolderIDs(*params.FolderID)
+			if err != nil {
+				return "", nil, err
+			}
 			folderIDs = append(folderIDs, *params.FolderID)
 			query.AddCondition("folder_id IN ?", folderIDs)
 		} else {
@@ -236,7 +243,8 @@ func (s *FileResourceService) buildFileResourceFilter(params *form.FileResourceL
 	if params.IncludeHidden == nil || *params.IncludeHidden != global.Yes {
 		query.AddCondition("NOT EXISTS (SELECT 1 FROM upload_file_folders WHERE upload_file_folders.id = upload_files.folder_id AND upload_file_folders.is_hidden = 1)")
 	}
-	return query.Build()
+	condition, args := query.Build()
+	return condition, args, nil
 }
 
 func normalizeFileTypeFilter(value string) []string {
@@ -710,10 +718,14 @@ func (s *FileResourceService) findByID(id uint) (*model.UploadFiles, error) {
 	if s.db != nil {
 		uploadFile.SetDB(s.db)
 	}
-	if err := uploadFile.GetById(id); err != nil || uploadFile.ID == 0 {
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Logger.Error("查询文件资源失败", zap.Error(err), zap.Uint("id", id))
+	if err := uploadFile.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
 		}
+		log.Logger.Error("查询文件资源失败", zap.Error(err), zap.Uint("id", id))
+		return nil, err
+	}
+	if uploadFile.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	return uploadFile, nil
@@ -725,7 +737,13 @@ func (s *FileResourceService) findByIDUnscoped(id uint) (*model.UploadFiles, err
 		return nil, err
 	}
 	var uploadFile model.UploadFiles
-	if err := db.Unscoped().Where("id = ?", id).First(&uploadFile).Error; err != nil || uploadFile.ID == 0 {
+	if err := db.Unscoped().Where("id = ?", id).First(&uploadFile).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if uploadFile.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	return &uploadFile, nil
@@ -774,10 +792,13 @@ func (s *FileResourceService) activeStorageDriver(ctx context.Context) (filestor
 	return NewActiveStorageDriver(ctx)
 }
 
-func (s *FileResourceService) descendantFolderIDs(folderID uint) []uint {
+func (s *FileResourceService) descendantFolderIDs(folderID uint) ([]uint, error) {
 	db, err := s.dbOrDefault()
-	if err != nil || folderID == 0 {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if folderID == 0 {
+		return nil, nil
 	}
 	if db.Dialector.Name() == "mysql" {
 		var ids []uint
@@ -793,7 +814,7 @@ func (s *FileResourceService) descendantFolderIDs(folderID uint) []uint {
 			SELECT id FROM descendants
 		`, folderID).Scan(&ids).Error
 		if err == nil {
-			return ids
+			return ids, nil
 		}
 		log.Logger.Warn("递归查询目录子级失败，回退到逐层查询", zap.Error(err), zap.Uint("folder_id", folderID))
 	}
@@ -801,13 +822,16 @@ func (s *FileResourceService) descendantFolderIDs(folderID uint) []uint {
 	current := []uint{folderID}
 	for len(current) > 0 {
 		var children []uint
-		if err := db.Model(&model.UploadFileFolder{}).Where("parent_id IN ?", current).Pluck("id", &children).Error; err != nil || len(children) == 0 {
+		if err := db.Model(&model.UploadFileFolder{}).Where("parent_id IN ?", current).Pluck("id", &children).Error; err != nil {
+			return nil, err
+		}
+		if len(children) == 0 {
 			break
 		}
 		ids = append(ids, children...)
 		current = children
 	}
-	return ids
+	return ids, nil
 }
 
 func (s *FileResourceService) listUploadFiles(params *form.FileResourceList, condition string, args []any) (int64, []*model.UploadFiles, error) {

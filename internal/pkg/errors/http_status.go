@@ -30,12 +30,15 @@ var codeHTTPStatus = map[int]int{
 	ServiceDependencyNotReady: http.StatusServiceUnavailable,  // 503 - 依赖未就绪
 	InvalidParameter:          http.StatusBadRequest,          // 400 - 参数校验失败（保留显式登记，语义最强）
 	CaptchaErr:                http.StatusBadRequest,          // 400 - 验证码错误
+	TooManyRequests:           http.StatusTooManyRequests,     // 429 - 业务级限流
 
 	// ---- 登录凭证类（前端 401 credential 分流契约依赖，不可删） ----
-	UserPasswordWrong:   http.StatusUnauthorized, // 401 - 登录凭证失败（对外泛化为“账号或密码错误”）
-	UserDoesNotExist:    http.StatusUnauthorized, // 401 - 登录凭证失败（对外不暴露账号存在性）
-	LoginAccountLocked:  http.StatusUnauthorized, // 401 - 登录账号被锁定
-	RefreshTokenInvalid: http.StatusUnauthorized, // 401 - Refresh Token 无效或已过期
+	UserPasswordWrong:    http.StatusUnauthorized, // 401 - 登录凭证失败（对外泛化为“账号或密码错误”）
+	UserDoesNotExist:     http.StatusUnauthorized, // 401 - 登录凭证失败（对外不暴露账号存在性）
+	LoginAccountLocked:   http.StatusUnauthorized, // 401 - 登录账号被锁定
+	RefreshTokenInvalid:  http.StatusUnauthorized, // 401 - Refresh Token 无效或已过期
+	SMSCredentialInvalid: http.StatusUnauthorized, // 401 - 短信登录凭证失败
+	SMSLoginDisabled:     http.StatusBadRequest,   // 400 - 短信登录未启用
 
 	// ---- 服务端技术性故障（被 fallback 误归 4xx 会扭曲监控，必须显式 500） ----
 	CasbinInitFailed:      http.StatusInternalServerError, // 500 - Casbin 初始化失败
@@ -46,6 +49,8 @@ var codeHTTPStatus = map[int]int{
 	UpdateUserFailed:      http.StatusInternalServerError, // 500 - 用户写库失败
 	DeleteUserFailed:      http.StatusInternalServerError, // 500 - 用户写库失败
 	QueryUserDeptFailed:   http.StatusInternalServerError, // 500 - 用户部门查询失败
+	StorageTestFailed:     http.StatusInternalServerError, // 500 - 存储供应商或网络测试失败
+	SMSProviderFailed:     http.StatusBadGateway,          // 502 - 短信供应商调用失败
 }
 
 // InferHTTPStatus 根据业务错误码推断 HTTP 语义状态码。

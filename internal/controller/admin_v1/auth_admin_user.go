@@ -95,7 +95,11 @@ func (api AdminUserController) Options(c *gin.Context) {
 		return
 	}
 
-	result := admin.NewAdminUserService().Options(params.Keyword)
+	result, err := admin.NewAdminUserService().Options(params.Keyword)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

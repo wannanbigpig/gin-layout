@@ -8,10 +8,10 @@ WHERE `menu_id` IN (SELECT `id` FROM `menu` WHERE `code` IN ('task:update', 'tas
 DELETE FROM `menu_i18n`
 WHERE `menu_id` IN (SELECT `id` FROM `menu` WHERE `code` IN ('task:update', 'task:stats'));
 DELETE FROM `menu` WHERE `code` IN ('task:update', 'task:stats');
-DELETE FROM `role_menu_map` WHERE `menu_id` BETWEEN 42 AND 89;
-DELETE FROM `menu_i18n` WHERE `menu_id` BETWEEN 42 AND 89;
-DELETE FROM `menu` WHERE `id` BETWEEN 42 AND 89;
-DELETE FROM `api_group` WHERE `code` IN ('system', 'sysConfig', 'sysDict', 'task', 'file', 'session', 'product');
+DELETE FROM `role_menu_map` WHERE `menu_id` BETWEEN 42 AND 92;
+DELETE FROM `menu_i18n` WHERE `menu_id` BETWEEN 42 AND 92;
+DELETE FROM `menu` WHERE `id` BETWEEN 42 AND 92;
+DELETE FROM `api_group` WHERE `code` IN ('system', 'sysConfig', 'sysDict', 'task', 'file', 'session', 'product', 'sms');
 
 -- 删除系统参数/字典初始化数据
 DELETE FROM `sys_dict_item_i18n`
@@ -32,7 +32,7 @@ DELETE FROM `sys_config_i18n`
 WHERE `config_id` IN (
     SELECT `id`
     FROM `sys_config`
-    WHERE `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config')
+    WHERE `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'todo.reminder_enabled', 'todo.reminder_sms_enabled', 'todo.reminder_lead_minutes', 'todo.reminder_catchup_minutes', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config', 'sms.config')
       AND `deleted_at` = 0
 );
 DELETE FROM `sys_dict_item`
@@ -42,7 +42,7 @@ DELETE FROM `sys_dict_type`
 WHERE `type_code` IN ('common_status', 'yes_no', 'menu_type', 'api_auth_mode', 'http_method', 'task_kind', 'task_source', 'task_run_status', 'task_record_success_mode', 'task_detail_record_mode')
   AND `deleted_at` = 0;
 DELETE FROM `sys_config`
-WHERE `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config')
+WHERE `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'todo.reminder_enabled', 'todo.reminder_sms_enabled', 'todo.reminder_lead_minutes', 'todo.reminder_catchup_minutes', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config', 'sms.config')
   AND `deleted_at` = 0;
 
 -- 删除角色菜单映射

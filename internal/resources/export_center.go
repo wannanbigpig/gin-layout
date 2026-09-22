@@ -2,6 +2,7 @@ package resources
 
 import (
 	"strings"
+	"time"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
@@ -28,6 +29,8 @@ type ExportRecordBaseResources struct {
 	FileUUID         string            `json:"file_uuid"`
 	FileName         string            `json:"file_name"`
 	FileSize         uint64            `json:"file_size"`
+	FileExpiresAt    *utils.FormatDate `json:"file_expires_at"`
+	FileExpired      bool              `json:"file_expired"`
 	FileURL          string            `json:"file_url"`
 	DownloadURL      string            `json:"download_url"`
 	HasFile          bool              `json:"has_file"`
@@ -53,6 +56,63 @@ type ExportRecordResources struct {
 	UpdatedAt utils.FormatDate `json:"updated_at"`
 }
 
+// MyExportRecordResources 仅包含用户查找、识别及下载自己的导出所需的字段。
+// 任务执行 ID、队列与原始异常属于运维诊断数据，不进入个人接口。
+type MyExportRecordResources struct {
+	PublicID       string            `json:"public_id"`
+	ExportName     string            `json:"export_name"`
+	Scene          string            `json:"scene"`
+	Status         string            `json:"status"`
+	Stage          string            `json:"stage"`
+	Progress       uint8             `json:"progress"`
+	TotalCount     uint64            `json:"total_count"`
+	ProcessedCount uint64            `json:"processed_count"`
+	FileUUID       string            `json:"file_uuid"`
+	FileName       string            `json:"file_name"`
+	FileSize       uint64            `json:"file_size"`
+	FileExpiresAt  *utils.FormatDate `json:"file_expires_at"`
+	FileExpired    bool              `json:"file_expired"`
+	DownloadReady  bool              `json:"download_ready"`
+	Format         string            `json:"format"`
+	CreatedAt      utils.FormatDate  `json:"created_at"`
+	FinishedAt     *utils.FormatDate `json:"finished_at"`
+}
+
+func NewMyExportRecordResource(data *model.SysExportRecord) *MyExportRecordResources {
+	base := buildExportRecordBaseResources(data)
+	fileUUID := ""
+	if base.DownloadReady {
+		fileUUID = data.FileUUID
+	}
+	return &MyExportRecordResources{
+		PublicID:       data.PublicID,
+		ExportName:     base.ExportName,
+		Scene:          data.Scene,
+		Status:         data.Status,
+		Stage:          base.Stage,
+		Progress:       data.Progress,
+		TotalCount:     data.TotalCount,
+		ProcessedCount: data.ProcessedCount,
+		FileUUID:       fileUUID,
+		FileName:       data.FileName,
+		FileSize:       data.FileSize,
+		FileExpiresAt:  base.FileExpiresAt,
+		FileExpired:    base.FileExpired,
+		DownloadReady:  base.DownloadReady,
+		Format:         data.Format,
+		CreatedAt:      data.CreatedAt,
+		FinishedAt:     data.FinishedAt,
+	}
+}
+
+func NewMyExportRecordCollection(page, perPage int, total int64, data []*model.SysExportRecord) *Collection {
+	response := make([]any, 0, len(data))
+	for _, item := range data {
+		response = append(response, NewMyExportRecordResource(item))
+	}
+	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
+}
+
 // ExportRecordTransformer 导出记录响应转换器。
 type ExportRecordTransformer struct {
 	BaseResources[*model.SysExportRecord, *ExportRecordResources]
@@ -73,8 +133,18 @@ func buildExportRecordBaseResources(data *model.SysExportRecord) ExportRecordBas
 	taskCode := exportSceneTaskCode(data.Scene)
 	statusName := exportStatusDisplayName(data.Status)
 	hasFile := data.FileID > 0 || strings.TrimSpace(data.FileUUID) != ""
-	stage, stageName := exportRecordStage(data.Status, hasFile)
-	downloadURL := exportRecordDownloadURL(data)
+	fileExpired := hasFile && !data.FileExpiresAt.IsZero() && !data.FileExpiresAt.Time.After(time.Now())
+	downloadReady := data.Status == model.TaskRunStatusSuccess && hasFile && !fileExpired
+	stage, stageName := exportRecordStage(data.Status, downloadReady, fileExpired)
+	downloadURL := ""
+	if downloadReady {
+		downloadURL = exportRecordDownloadURL(data)
+	}
+	var fileExpiresAt *utils.FormatDate
+	if !data.FileExpiresAt.IsZero() {
+		value := data.FileExpiresAt
+		fileExpiresAt = &value
+	}
 	return ExportRecordBaseResources{
 		ID:               data.ID,
 		ExportName:       sceneName,
@@ -95,10 +165,12 @@ func buildExportRecordBaseResources(data *model.SysExportRecord) ExportRecordBas
 		FileUUID:         data.FileUUID,
 		FileName:         data.FileName,
 		FileSize:         data.FileSize,
+		FileExpiresAt:    fileExpiresAt,
+		FileExpired:      fileExpired,
 		FileURL:          downloadURL,
 		DownloadURL:      downloadURL,
 		HasFile:          hasFile,
-		DownloadReady:    hasFile,
+		DownloadReady:    downloadReady,
 		Format:           data.Format,
 		ErrorMessage:     data.ErrorMessage,
 		FailReason:       strings.TrimSpace(data.ErrorMessage),
@@ -152,7 +224,7 @@ func exportStatusDisplayName(status string) string {
 	}
 }
 
-func exportRecordStage(status string, hasFile bool) (string, string) {
+func exportRecordStage(status string, downloadReady, fileExpired bool) (string, string) {
 	switch strings.TrimSpace(status) {
 	case model.TaskRunStatusPending:
 		return "queued", "排队中"
@@ -161,7 +233,10 @@ func exportRecordStage(status string, hasFile bool) (string, string) {
 	case model.TaskRunStatusRunning:
 		return "processing", "生成文件中"
 	case model.TaskRunStatusSuccess:
-		if hasFile {
+		if fileExpired {
+			return "expired", "已过期"
+		}
+		if downloadReady {
 			return "download_ready", "可下载"
 		}
 		return "completed", "已完成"

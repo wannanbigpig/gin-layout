@@ -2,6 +2,7 @@ package dept
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"uuid"
@@ -36,7 +37,13 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 	originPid := uint(0)
 	// 更新场景：加载现有部门数据，记录原始 pids 用于后续级联判断
 	if params.Id > 0 {
-		if err := dept.GetById(params.Id); err != nil || dept.ID == 0 {
+		if err := dept.GetById(params.Id); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, e.NewBusinessError(e.DepartmentNotFound)
+			}
+			return nil, err
+		}
+		if dept.ID == 0 {
 			return nil, e.NewBusinessError(e.DepartmentNotFound)
 		}
 		originPids = dept.Pids
@@ -45,14 +52,20 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 	// 检查是否为受保护部门（系统默认部门只允许修改名称和描述）
 	if params.Id > 0 && access.NewSystemDefaultsService().IsProtectedDepartment(dept) {
 		if params.Pid != dept.Pid || params.Sort != dept.Sort {
-			return nil, e.NewBusinessError(e.FAILURE)
+			return nil, e.NewBusinessError(e.InvalidParameter, "系统内置部门不允许调整层级或排序")
 		}
 	}
 
 	// 处理父部门变更：验证父部门、检测环路、计算层级和路径
 	if params.Pid > 0 && params.Pid != dept.Pid {
 		parentDept := model.NewDepartment()
-		if err := parentDept.GetById(params.Pid); err != nil || parentDept.ID == 0 {
+		if err := parentDept.GetById(params.Pid); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, e.NewBusinessError(e.ParentDeptNotExists)
+			}
+			return nil, err
+		}
+		if parentDept.ID == 0 {
 			return nil, e.NewBusinessError(e.ParentDeptNotExists)
 		}
 
@@ -150,7 +163,7 @@ func (s *DeptService) generateDeptCode() string {
 func (s *DeptService) executeDeleteTransaction(dept *model.Department, id uint) error {
 	db, err := dept.GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.DepartmentCannotDelete)
+		return err
 	}
 	err = access.NewPermissionSyncCoordinator().RunAfterCommitWithCode(db, e.DepartmentCannotDelete, func(tx *gorm.DB) error {
 		dept.SetDB(tx)
@@ -190,7 +203,7 @@ func (s *DeptService) executeDeleteTransaction(dept *model.Department, id uint) 
 		return access.NewPermissionSyncCoordinator().SyncUsers(affectedUserIDs, tx)
 	})
 	if err != nil {
-		return e.NewBusinessError(e.DepartmentCannotDelete)
+		return err
 	}
 	access.NewDataScopeFilter().InvalidateAllCache(context.Background())
 	return nil

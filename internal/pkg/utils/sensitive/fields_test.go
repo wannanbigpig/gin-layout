@@ -72,6 +72,19 @@ func TestLoadSensitiveFieldsConfigAppliesCommonFieldsToRequestScopes(t *testing.
 	}
 }
 
+func TestImmutableSMSFieldsRemainMaskedAfterRuntimeConfigReplacement(t *testing.T) {
+	previous := GetSensitiveFieldsConfig()
+	t.Cleanup(func() { LoadSensitiveFieldsConfig(previous) })
+	LoadSensitiveFieldsConfig(SensitiveFieldsConfig{RequestBody: []string{"email"}})
+
+	masked := GetMaskedRequestBody([]byte(`{"providers":{"aliyun":{"access_key_secret":"aliyun-private-value"}},"phone_number":"13800138000","sms_code":"123456","captcha":"ABCD"}`), "application/json")
+	for _, plaintext := range []string{"aliyun-private-value", "13800138000", "123456", "ABCD"} {
+		if strings.Contains(masked, plaintext) {
+			t.Fatalf("immutable SMS field leaked after runtime mask replacement: %s", masked)
+		}
+	}
+}
+
 // TestDefaultSensitiveFieldsRequestBodyExcludesGenericName 验证默认敏感字段列表收敛后，
 // 通用 name 字段不再纳入默认脱敏；显式的真实姓名字段（real_name / realname）仍然脱敏。
 func TestDefaultSensitiveFieldsRequestBodyExcludesGenericName(t *testing.T) {

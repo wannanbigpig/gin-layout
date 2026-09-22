@@ -20,16 +20,17 @@ func TestSyncBuiltinDefinitionsUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync builtin definitions failed: %v", err)
 	}
-	if report.Total != 8 || report.Inserted != 8 || report.Updated != 0 || report.Unchanged != 0 {
+	if report.Total != 9 || report.Inserted != 9 || report.Updated != 0 || report.Unchanged != 0 {
 		t.Fatalf("unexpected first sync report: %+v", report)
 	}
 
-	assertTaskDefinitionCount(t, db, 8)
+	assertTaskDefinitionCount(t, db, 9)
 	assertTaskStatus(t, db, TaskCodeCronResetSystemData, 0)
 	assertTaskStatus(t, db, TaskCodeCronDemo, 0)
 	assertTaskStatus(t, db, TaskCodeCronFileAccessFlush, 1)
 	assertTaskStatus(t, db, TaskCodeCronCleanExpiredFiles, 1)
 	assertTaskStatus(t, db, TaskCodeCronCleanAuditLogs, 1)
+	assertTaskStatus(t, db, TaskCodeCronTodoReminder, 1)
 	assertTaskStatus(t, db, jobs.AuditLogTaskType, 1)
 	assertTaskStatus(t, db, jobs.TypeExportRequestLog, 1)
 	assertTaskStatus(t, db, jobs.TypeExportFileList, 1)
@@ -40,6 +41,7 @@ func TestSyncBuiltinDefinitionsUpsert(t *testing.T) {
 	assertTaskAllowManual(t, db, TaskCodeCronFileAccessFlush, 1)
 	assertTaskAllowManual(t, db, TaskCodeCronCleanExpiredFiles, 1)
 	assertTaskAllowManual(t, db, TaskCodeCronCleanAuditLogs, 1)
+	assertTaskAllowManual(t, db, TaskCodeCronTodoReminder, 1)
 	assertTaskAllowManual(t, db, jobs.AuditLogTaskType, 0)
 	assertTaskAllowManual(t, db, jobs.TypeExportRequestLog, 0)
 	assertTaskAllowManual(t, db, jobs.TypeExportFileList, 0)
@@ -51,11 +53,11 @@ func TestSyncBuiltinDefinitionsUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync builtin definitions on second run failed: %v", err)
 	}
-	if report.Total != 8 || report.Inserted != 0 || report.Updated != 0 || report.Unchanged != 8 {
+	if report.Total != 9 || report.Inserted != 0 || report.Updated != 0 || report.Unchanged != 9 {
 		t.Fatalf("unexpected second sync report: %+v", report)
 	}
 
-	assertTaskDefinitionCount(t, db, 8)
+	assertTaskDefinitionCount(t, db, 9)
 	assertTaskStatus(t, db, TaskCodeCronResetSystemData, 0)
 }
 
@@ -78,7 +80,7 @@ func TestSyncBuiltinDefinitionsPreservesOperationalConfigAndUpdatesDefinitionFie
 	if err != nil {
 		t.Fatalf("sync builtin definitions failed: %v", err)
 	}
-	if report.Total != 8 || report.Inserted != 7 || report.Updated != 1 || report.Unchanged != 0 {
+	if report.Total != 9 || report.Inserted != 8 || report.Updated != 1 || report.Unchanged != 0 {
 		t.Fatalf("unexpected sync report: %+v", report)
 	}
 

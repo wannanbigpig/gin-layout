@@ -5,6 +5,8 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
 	"github.com/wannanbigpig/gin-layout/internal/service/dashboard"
+	"github.com/wannanbigpig/gin-layout/internal/validator"
+	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
 type DashboardController struct {
@@ -52,10 +54,14 @@ func (api DashboardController) Overview(c *gin.Context) {
 }
 
 func (api DashboardController) Statistics(c *gin.Context) {
+	params := form.NewDashboardStatisticsQuery()
+	if err := validator.CheckQueryParams(c, params); err != nil {
+		return
+	}
 	service := dashboard.NewOverviewService()
 	service.SetAdminUserId(api.GetCurrentUserID(c))
 
-	statistics, err := service.Statistics()
+	statistics, err := service.StatisticsRange(params.StartDate, params.EndDate)
 	if err != nil {
 		api.Err(c, err)
 		return

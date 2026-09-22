@@ -1,6 +1,8 @@
 package admin_v1
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
@@ -111,7 +113,6 @@ func (api RequestLogController) Export(c *gin.Context) {
 		api.Err(c, err)
 		return
 	}
-
 	payload := map[string]any{
 		"request_id":           params.RequestID,
 		"operator_id":          params.OperatorID,
@@ -134,6 +135,9 @@ func (api RequestLogController) Export(c *gin.Context) {
 		taskCode:  jobs.TypeExportRequestLog,
 		queueName: jobs.ExportRequestLogQueue,
 		payload:   payload,
+		hasRows: func(ctx context.Context) (bool, error) {
+			return audit.HasRequestLogExportRows(ctx, params)
+		},
 	})
 }
 

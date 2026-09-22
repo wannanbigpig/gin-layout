@@ -117,7 +117,13 @@ func (s *MenuService) applyMenuMutation(params *menuMutation) (*model.Menu, erro
 	menu := model.NewMenu()
 	editContext := &menuEditContext{originPids: menuRootPid}
 	if params.Id > 0 {
-		if err := menu.GetById(params.Id); err != nil || menu.ID == 0 {
+		if err := menu.GetById(params.Id); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, e.NewBusinessError(e.MenuNotFound)
+			}
+			return nil, err
+		}
+		if menu.ID == 0 {
 			return nil, e.NewBusinessError(e.MenuNotFound)
 		}
 		editContext.originPids = menu.Pids
@@ -228,7 +234,13 @@ func (s *MenuService) resolveMenuHierarchy(menu *model.Menu, params *menuMutatio
 
 	// 验证父菜单是否存在
 	parentMenu := model.NewMenu()
-	if err := parentMenu.GetById(params.Pid); err != nil || parentMenu.ID == 0 {
+	if err := parentMenu.GetById(params.Pid); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.ParentMenuNotExists)
+		}
+		return err
+	}
+	if parentMenu.ID == 0 {
 		return e.NewBusinessError(e.ParentMenuNotExists)
 	}
 	// 父菜单不能是按钮类型

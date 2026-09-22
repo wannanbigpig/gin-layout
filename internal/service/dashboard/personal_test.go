@@ -32,8 +32,10 @@ func TestPersonalReturnsOnlyCurrentUserLoginAndActivities(t *testing.T) {
 		VALUES (?, ?, 'failed', 7, 'user7', 'Failed Action', 'GET', '/failed', 'http', 'request', 400, 400, 0, '', 10),
 		       (?, ?, 'changed', 7, 'user7', 'Changed Action', 'GET', '/changed', 'http', 'request', 200, 0, 0, '[{"field":"name"}]', 10),
 		       (?, ?, 'self-read', 7, 'user7', '个人请求日志列表', 'GET', '/admin/v1/log/request/self-list', 'http', 'request', 500, 500, 1, '[{"field":"name"}]', 10),
+		       (?, ?, 'ws-ticket', 7, 'user7', '生成 WebSocket 临时票据', 'POST', '/admin/v1/common/ws-ticket', 'http', 'request', 200, 0, 1, '', 10),
+		       (?, ?, 'plain-read', 7, 'user7', '普通列表读取', 'GET', '/plain-list', 'http', 'request', 200, 0, 0, '', 10),
 		       (?, ?, 'yesterday', 7, 'user7', 'Old Action', 'POST', '/old', 'http', 'request', 200, 0, 0, '', 10)`,
-		now, now, now, now, now, now, now.AddDate(0, 0, -1), now.AddDate(0, 0, -1)).Error; err != nil {
+		now, now, now, now, now, now, now, now, now, now, now.AddDate(0, 0, -1), now.AddDate(0, 0, -1)).Error; err != nil {
 		t.Fatalf("insert summary logs: %v", err)
 	}
 	if err := db.Exec(`INSERT INTO sys_messages (user_id, is_read, created_at) VALUES (7, 0, ?), (7, 0, ?), (7, 1, ?), (8, 0, ?)`, now, now, now, now).Error; err != nil {

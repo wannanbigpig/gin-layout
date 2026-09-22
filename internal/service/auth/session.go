@@ -110,10 +110,14 @@ func (s *LoginService) loadRevocableSession(id uint) (*model.AdminLoginLogs, err
 	if s.loginLogDB != nil {
 		loginLog.SetDB(s.loginLogDB)
 	}
-	if err := loginLog.GetById(id); err != nil || loginLog.ID == 0 {
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Logger.Error("查询在线会话失败", zap.Error(err), zap.Uint("id", id))
+	if err := loginLog.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
 		}
+		log.Logger.Error("查询在线会话失败", zap.Error(err), zap.Uint("id", id))
+		return nil, err
+	}
+	if loginLog.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	if loginLog.LoginStatus != model.LoginStatusSuccess {

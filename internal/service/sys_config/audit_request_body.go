@@ -51,7 +51,11 @@ func (s *SysConfigService) shouldMaskConfigMutationValue(id uint, params *form.S
 	}
 
 	config := model.NewSysConfig()
-	if err := config.GetById(id); err != nil || config.ID == 0 {
+	if err := config.GetById(id); err != nil {
+		// 审计快照无法读取现有敏感标记时 fail-closed，避免把配置值原文交给通用请求日志。
+		return true
+	}
+	if config.ID == 0 {
 		return false
 	}
 	return config.IsSensitive == 1

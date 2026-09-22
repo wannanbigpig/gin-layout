@@ -82,7 +82,7 @@ func TestExportRecordListRouteWithAuthorization(t *testing.T) {
 func TestExportRecordDetailNotFound(t *testing.T) {
 	requireMySQL(t)
 
-	resp := getRequest("/admin/v1/system/export/detail", &url.Values{"id": {"4294967295"}})
+	resp := getRequest("/admin/v1/system/export/detail", &url.Values{"public_id": {"00000000-0000-4000-8000-000000000000"}})
 	assert.Equal(t, http.StatusNotFound, resp.Code)
 	assert.Equal(t, e.NotFound, decodeResult(t, resp).Code)
 }

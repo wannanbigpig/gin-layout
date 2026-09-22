@@ -1,6 +1,7 @@
 package taskcenter
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -146,6 +147,59 @@ func TestTaskRunStatsTrendAggregatesByDayWhenRangeExceedsOneDay(t *testing.T) {
 	}
 }
 
+func TestTaskRunStatsReturnsMatchingDetailTimeRange(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	service := NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db})
+
+	summary, err := service.TaskRunStats(&form.TaskRunStatsQuery{
+		StartTime: "2026-06-10 08:30:00",
+		EndTime:   "2026-06-10 10:15:00",
+	})
+	if err != nil {
+		t.Fatalf("TaskRunStats returned error: %v", err)
+	}
+	if summary.DetailTimeBasis != "finished_at" {
+		t.Fatalf("expected finished_at detail basis, got %q", summary.DetailTimeBasis)
+	}
+	if got := summary.DetailStartTime.String(); got != "2026-06-10 09:00:00" {
+		t.Fatalf("unexpected detail start: %s", got)
+	}
+	if got := summary.DetailEndTime.String(); got != "2026-06-10 10:59:59" {
+		t.Fatalf("unexpected detail end: %s", got)
+	}
+}
+
+func TestListTaskRunsCanFilterByFinishedAt(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	createdBeforeRange := time.Date(2026, 6, 10, 7, 30, 0, 0, time.Local)
+	createdInsideRange := time.Date(2026, 6, 10, 9, 30, 0, 0, time.Local)
+	insertTaskRun(t, db, 201, 0, "", createdBeforeRange)
+	insertTaskRun(t, db, 202, 0, "", createdInsideRange)
+	if err := db.Model(&model.TaskRun{}).Where("id = ?", 201).Update("finished_at", time.Date(2026, 6, 10, 9, 45, 0, 0, time.Local)).Error; err != nil {
+		t.Fatalf("set first finished_at: %v", err)
+	}
+	if err := db.Model(&model.TaskRun{}).Where("id = ?", 202).Update("finished_at", time.Date(2026, 6, 10, 11, 0, 0, 0, time.Local)).Error; err != nil {
+		t.Fatalf("set second finished_at: %v", err)
+	}
+
+	result, err := NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db}).ListTaskRuns(&form.TaskRunList{
+		Paginate:  form.Paginate{Page: 1, PerPage: 10},
+		TimeBasis: "finished_at",
+		StartTime: "2026-06-10 09:00:00",
+		EndTime:   "2026-06-10 10:59:59",
+	})
+	if err != nil {
+		t.Fatalf("list task runs by finished_at failed: %v", err)
+	}
+	if result.Total != 1 || len(result.Data) != 1 {
+		t.Fatalf("expected one finished run, got %#v", result)
+	}
+	item, ok := result.Data[0].(*resources.TaskRunListResources)
+	if !ok || item.ID != 201 {
+		t.Fatalf("expected run 201, got %#v", result.Data[0])
+	}
+}
+
 func TestListTaskRunsFillsMissingTriggerAccountFromAdminUser(t *testing.T) {
 	db := newTaskCenterTestDB(t)
 	now := time.Now()
@@ -193,6 +247,26 @@ func TestTaskRunDetailFillsMissingTriggerAccountFromAdminUser(t *testing.T) {
 	}
 	if item.TriggerAccount != "super_admin" {
 		t.Fatalf("expected trigger_account to be filled, got %#v", item)
+	}
+}
+
+func TestTaskRunDetailPreservesDatabaseFailure(t *testing.T) {
+	db := newTaskCenterTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close sql db: %v", err)
+	}
+
+	_, err = NewTaskCenterServiceWithDeps(TaskCenterServiceDeps{DB: db}).TaskRunDetail(101)
+	if err == nil {
+		t.Fatal("expected database error")
+	}
+	var businessErr *e.BusinessError
+	if errors.As(err, &businessErr) && businessErr.GetCode() == e.NotFound {
+		t.Fatalf("database failure must not be reported as NotFound: %v", err)
 	}
 }
 

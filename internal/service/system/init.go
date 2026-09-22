@@ -11,6 +11,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/data"
 	taskcron "github.com/wannanbigpig/gin-layout/internal/cron"
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	"github.com/wannanbigpig/gin-layout/internal/routers"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
@@ -91,19 +92,21 @@ func buildApiData(routes []gin.RouteInfo, apiMap routers.RouteMetaMap) ([]map[st
 		}
 
 		apiData = append(apiData, map[string]any{
-			"code":         code,
-			"name":         meta.Title,
-			"route":        route.Path,
-			"method":       route.Method,
-			"func":         extractHandlerName(route.Handler),
-			"func_path":    route.Handler,
-			"is_auth":      int(meta.Auth),
-			"description":  meta.Desc,
-			"sort":         defaultSort,
-			"is_effective": 1,
-			"created_at":   date,
-			"updated_at":   date,
-			"group_code":   meta.GroupCode,
+			"code":             code,
+			"name":             meta.Title,
+			"name_i18n":        i18n.MarshalLocaleMap(meta.TitleI18n),
+			"route":            route.Path,
+			"method":           route.Method,
+			"func":             extractHandlerName(route.Handler),
+			"func_path":        route.Handler,
+			"is_auth":          int(meta.Auth),
+			"description":      meta.Desc,
+			"description_i18n": i18n.MarshalLocaleMap(meta.DescI18n),
+			"sort":             defaultSort,
+			"is_effective":     1,
+			"created_at":       date,
+			"updated_at":       date,
+			"group_code":       meta.GroupCode,
 		})
 	}
 

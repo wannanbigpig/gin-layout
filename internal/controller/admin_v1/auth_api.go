@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/controller"
+	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/service/api_permission"
 	"github.com/wannanbigpig/gin-layout/internal/validator"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -33,7 +34,7 @@ func (api ApiController) List(c *gin.Context) {
 		return
 	}
 
-	result, err := api_permission.NewApiService().ListPage(params)
+	result, err := api_permission.NewApiService().ListPage(params, middleware.LocaleFromContext(c))
 	if err != nil {
 		api.Err(c, err)
 		return
@@ -48,6 +49,10 @@ func (api ApiController) Options(c *gin.Context) {
 		return
 	}
 
-	result := api_permission.NewApiService().Options(params.Keyword, params.IsAuth)
+	result, err := api_permission.NewApiService().Options(params.Keyword, params.IsAuth, middleware.LocaleFromContext(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }

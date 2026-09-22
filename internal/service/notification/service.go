@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"uuid"
 
@@ -31,6 +32,8 @@ type Event struct {
 	Message     *resources.SysMessageResources `json:"message,omitempty"`
 	MessageID   uint                           `json:"message_id,omitempty"`
 	Category    string                         `json:"category,omitempty"`
+	Topic       string                         `json:"topic,omitempty"`
+	Data        map[string]any                 `json:"data,omitempty"`
 	UnreadCount int64                          `json:"unread_count"`
 }
 
@@ -80,6 +83,7 @@ type SendResult struct {
 
 type ExportResultInput struct {
 	UserID         uint
+	PublicID       string
 	Scene          string
 	Status         string
 	ExportRecordID uint
@@ -88,6 +92,17 @@ type ExportResultInput struct {
 	FileUUID       string
 	FileName       string
 	ErrorMessage   string
+}
+
+// ExportProgressInput 表示只用于实时展示的导出进度，不写入站内消息表。
+type ExportProgressInput struct {
+	UserID         uint
+	Scene          string
+	PublicID       string
+	Status         string
+	Progress       uint8
+	ProcessedCount uint64
+	TotalCount     uint64
 }
 
 func NewService() *Service {
@@ -110,23 +125,40 @@ func NewServiceWithDeps(deps ServiceDeps) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, input CreateMessageInput) (*model.SysMessage, error) {
+	message, created, err := s.Persist(ctx, input)
+	if err != nil || !created {
+		return message, err
+	}
+	if err := s.DispatchCreated(ctx, message); err != nil {
+		return nil, err
+	}
+	return message, nil
+}
+
+// Persist 持久化一条通知但不发送实时事件。调用方可把它放在业务事务中，
+// 并在事务成功提交后调用 DispatchCreated，避免业务状态和消息记录分叉。
+func (s *Service) Persist(ctx context.Context, input CreateMessageInput) (*model.SysMessage, bool, error) {
 	if input.UserID == 0 {
-		return nil, fmt.Errorf("message user id is required")
+		return nil, false, fmt.Errorf("message user id is required")
 	}
 	if strings.TrimSpace(input.Title) == "" {
-		return nil, fmt.Errorf("message title is required")
+		return nil, false, fmt.Errorf("message title is required")
+	}
+	actionURL, err := NormalizeActionURL(input.ActionURL)
+	if err != nil {
+		return nil, false, err
 	}
 	db, err := s.dbOrDefault(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := ensureMessageTable(db); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	payload, err := json.Marshal(input.Payload)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	message := model.NewSysMessage()
@@ -139,69 +171,88 @@ func (s *Service) Create(ctx context.Context, input CreateMessageInput) (*model.
 	message.Topic = strings.TrimSpace(input.Topic)
 	message.Title = strings.TrimSpace(input.Title)
 	message.Content = strings.TrimSpace(input.Content)
-	message.ActionURL = strings.TrimSpace(input.ActionURL)
+	message.ActionURL = actionURL
 	message.ActionLabel = strings.TrimSpace(input.ActionLabel)
 	message.Payload = string(payload)
 	message.IsRead = model.MessageUnread
 
 	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(message)
 	if result.Error != nil {
-		return nil, result.Error
+		return nil, false, result.Error
 	}
 	if result.RowsAffected == 0 {
 		existing := model.NewSysMessage()
 		if err := db.Where("user_id = ? AND batch_id = ?", message.UserID, message.BatchID).First(existing).Error; err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return existing, nil
+		return existing, false, nil
 	}
+	return message, true, nil
+}
 
-	unreadCount, err := s.UnreadCount(ctx, input.UserID)
+// DispatchCreated 在消息事务提交后广播实时事件；持久消息仍是最终交付凭据。
+func (s *Service) DispatchCreated(ctx context.Context, message *model.SysMessage) error {
+	if message == nil || message.ID == 0 {
+		return nil
+	}
+	unreadCount, err := s.UnreadCount(ctx, message.UserID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	event := Event{
 		Event:       "message_created",
-		UserID:      input.UserID,
+		UserID:      message.UserID,
 		Message:     resources.NewSysMessageTransformer().ToStruct(message),
 		MessageID:   message.ID,
 		Category:    message.Category,
 		UnreadCount: unreadCount,
 	}
 	s.dispatch(ctx, event)
-
-	return message, nil
+	return nil
 }
 
 func (s *Service) NotifyExportResult(ctx context.Context, input ExportResultInput) (*model.SysMessage, error) {
-	title, content := buildExportMessageText(input.Scene, input.Status, input.ErrorMessage)
-	fileUUID := strings.TrimSpace(input.FileUUID)
-	downloadURL := ""
-	if fileUUID != "" {
-		downloadURL = "/admin/v1/file/" + fileUUID
-	}
+	title, content := buildExportMessageText(input.Scene, input.Status)
 	batchID := ""
 	if input.TaskRunID > 0 {
 		batchID = fmt.Sprintf("export:%d:%s", input.TaskRunID, strings.TrimSpace(input.Status))
 	}
 	return s.Create(ctx, CreateMessageInput{
+		UserID:      input.UserID,
+		Category:    model.MessageCategoryExport,
+		Topic:       model.MessageTopicExportFinished,
+		Title:       title,
+		Content:     content,
+		ActionURL:   "/my-exports",
+		ActionLabel: "查看我的导出",
+		BatchID:     batchID,
+		Payload: map[string]any{
+			"public_id": strings.TrimSpace(input.PublicID),
+			"scene":     strings.TrimSpace(input.Scene),
+			"status":    strings.TrimSpace(input.Status),
+		},
+	})
+}
+
+// PublishExportProgress 发送轻量实时进度。数据库中的导出记录仍是最终事实来源，
+// WebSocket/Redis 不可用时由前端低频轮询兜底，因此推送失败不应中断导出任务。
+func (s *Service) PublishExportProgress(ctx context.Context, input ExportProgressInput) {
+	if input.UserID == 0 || strings.TrimSpace(input.PublicID) == "" {
+		return
+	}
+	s.dispatch(ctx, Event{
+		Event:    "export_progress",
 		UserID:   input.UserID,
 		Category: model.MessageCategoryExport,
-		Topic:    model.MessageTopicExportFinished,
-		Title:    title,
-		Content:  content,
-		BatchID:  batchID,
-		Payload: map[string]any{
-			"user_id":          input.UserID,
-			"scene":            strings.TrimSpace(input.Scene),
-			"status":           strings.TrimSpace(input.Status),
-			"export_record_id": input.ExportRecordID,
-			"task_run_id":      input.TaskRunID,
-			"file_id":          input.FileID,
-			"file_uuid":        fileUUID,
-			"file_name":        strings.TrimSpace(input.FileName),
-			"download_url":     downloadURL,
-			"error_message":    strings.TrimSpace(input.ErrorMessage),
+		Topic:    model.MessageTopicExportProgress,
+		Data: map[string]any{
+			"scene":           strings.TrimSpace(input.Scene),
+			"public_id":       strings.TrimSpace(input.PublicID),
+			"status":          strings.TrimSpace(input.Status),
+			"progress":        input.Progress,
+			"processed_count": input.ProcessedCount,
+			"total_count":     input.TotalCount,
+			"stage":           "processing",
 		},
 	})
 }
@@ -213,6 +264,18 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 	}
 	if strings.TrimSpace(input.Content) == "" {
 		return nil, fmt.Errorf("message content is required")
+	}
+	actionURL, err := NormalizeActionURL(input.ActionURL)
+	if err != nil {
+		return nil, err
+	}
+	input.ActionURL = actionURL
+	input.Category = strings.TrimSpace(input.Category)
+	if input.Category == "" {
+		input.Category = model.MessageCategorySystem
+	}
+	if input.Category == model.MessageCategoryTodo {
+		return nil, fmt.Errorf("message category %q is reserved for todo reminders", input.Category)
 	}
 
 	db, err := s.dbOrDefault(ctx)
@@ -332,6 +395,18 @@ func dedupIDs(ids []uint) []uint {
 		out = append(out, id)
 	}
 	return out
+}
+
+// NormalizeActionURL 只接受站内相对路径，并返回可安全存储的标准值。
+func NormalizeActionURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.Contains(value, `\`) || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", e.NewBusinessError(e.InvalidParameter, "action_url 仅支持站内相对路径")
+	}
+	return value, nil
 }
 
 // unreadCountsByUsers 一次查询批量统计指定用户的未读消息数。
@@ -532,17 +607,13 @@ func ensureMessageTable(db *gorm.DB) error {
 	return e.NewDependencyNotReadyError(ErrMessageTableMissing.Error())
 }
 
-func buildExportMessageText(scene, status, errorMessage string) (string, string) {
+func buildExportMessageText(scene, status string) (string, string) {
 	sceneName := exportSceneName(scene)
 	switch strings.TrimSpace(status) {
 	case model.TaskRunStatusSuccess:
-		return sceneName + "导出完成", sceneName + "导出已完成，可前往任务中心下载。"
+		return sceneName + "导出完成", sceneName + "导出已完成，可前往我的导出下载。"
 	case model.TaskRunStatusFailed:
-		reason := strings.TrimSpace(errorMessage)
-		if reason == "" {
-			reason = "任务执行失败"
-		}
-		return sceneName + "导出失败", sceneName + "导出失败：" + reason
+		return sceneName + "导出失败", sceneName + "导出失败，请重试；如持续失败请联系管理员。"
 	default:
 		return sceneName + "导出状态更新", sceneName + "导出状态已更新。"
 	}

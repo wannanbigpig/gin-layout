@@ -48,8 +48,8 @@ func (api CommonController) Upload(c *gin.Context) {
 	// 执行文件上传
 	result, err := commonService.UploadImages(form.File["files"], path)
 	if err != nil {
-		if service.IsPartialImageUploadError(err) {
-			api.FailCode(c, errors.FileUploadPartialFail, result)
+		if code, ok := service.ImageUploadErrorCode(err); ok {
+			api.FailCode(c, code, result)
 			return
 		}
 		api.Err(c, err)

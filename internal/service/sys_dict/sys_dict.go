@@ -44,7 +44,13 @@ func (s *SysDictService) TypeList(params *form.SysDictTypeList, locale string) (
 
 func (s *SysDictService) TypeDetail(id uint, locale string) (any, error) {
 	dictType := model.NewSysDictType()
-	if err := dictType.GetById(id); err != nil || dictType.ID == 0 {
+	if err := dictType.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if dictType.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	translations, err := model.NewSysDictTypeI18n().LocaleNameMapByTypeID(dictType.ID)
@@ -137,7 +143,13 @@ func (s *SysDictService) applyTypeMutation(id uint, typeCode string, params *for
 
 	dictType := model.NewSysDictType()
 	if id > 0 {
-		if err := dictType.GetById(id); err != nil || dictType.ID == 0 {
+		if err := dictType.GetById(id); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.NotFound)
+			}
+			return err
+		}
+		if dictType.ID == 0 {
 			return e.NewBusinessError(e.NotFound)
 		}
 		typeCode = dictType.TypeCode
@@ -191,7 +203,13 @@ func (s *SysDictService) applyItemMutation(id uint, params *form.SysDictItemPayl
 
 	item := model.NewSysDictItem()
 	if id > 0 {
-		if err := item.GetById(id); err != nil || item.ID == 0 {
+		if err := item.GetById(id); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.NotFound)
+			}
+			return err
+		}
+		if item.ID == 0 {
 			return e.NewBusinessError(e.NotFound)
 		}
 		if item.IsProtected() && (item.TypeCode != params.TypeCode || item.Value != params.Value) {

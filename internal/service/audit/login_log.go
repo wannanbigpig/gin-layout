@@ -1,6 +1,10 @@
 package audit
 
 import (
+	"errors"
+
+	"gorm.io/gorm"
+
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -97,7 +101,13 @@ func (s *AdminLoginLogService) List(params *form.AdminLoginLogList) (*resources.
 // Detail 获取登录日志详情
 func (s *AdminLoginLogService) Detail(id uint) (any, error) {
 	loginLog := model.NewAdminLoginLogs()
-	if err := loginLog.GetById(id); err != nil || loginLog.ID == 0 {
+	if err := loginLog.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if loginLog.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	decryptKey := s.currentConfig().Jwt.SecretKey

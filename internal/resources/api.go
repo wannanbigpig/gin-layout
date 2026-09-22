@@ -2,6 +2,7 @@ package resources
 
 import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 )
 
 // ApiResources 表示接口权限的响应结构。
@@ -39,12 +40,17 @@ func NewApiTransformer() ApiTransformer {
 
 // ToStruct 将 API 模型转换为响应结构。
 func (ApiTransformer) ToStruct(data *model.Api) *ApiResources {
+	return ApiTransformer{}.ToLocalizedStruct(data, i18n.DefaultLocale)
+}
+
+// ToLocalizedStruct 将 API 模型按请求语言转换为响应结构。
+func (ApiTransformer) ToLocalizedStruct(data *model.Api, locale string) *ApiResources {
 	isAuthName := data.IsAuthMap()
 	isEffectiveName := data.IsEffectiveMap()
 	return &ApiResources{
 		ID:              data.ID,
-		Name:            data.Name,
-		Description:     data.Description,
+		Name:            localizedAPIMetadata(data.Name, data.NameI18n, locale),
+		Description:     localizedAPIMetadata(data.Description, data.DescriptionI18n, locale),
 		Method:          data.Method,
 		Route:           data.Route,
 		Func:            data.Func,
@@ -60,9 +66,14 @@ func (ApiTransformer) ToStruct(data *model.Api) *ApiResources {
 
 // ToCollection 将 API 模型集合转换为分页响应。
 func (ApiTransformer) ToCollection(page, perPage int, total int64, data []*model.Api) *Collection {
+	return ApiTransformer{}.ToLocalizedCollection(page, perPage, total, data, i18n.DefaultLocale)
+}
+
+// ToLocalizedCollection 按请求语言转换 API 权限列表。
+func (ApiTransformer) ToLocalizedCollection(page, perPage int, total int64, data []*model.Api, locale string) *Collection {
 	response := make([]any, 0, len(data))
 	for _, v := range data {
-		response = append(response, ApiTransformer{}.ToStruct(v))
+		response = append(response, ApiTransformer{}.ToLocalizedStruct(v, locale))
 	}
 	return NewCollection().SetPaginate(page, perPage, total).ToCollection(response)
 }
@@ -77,7 +88,11 @@ type ApiOptionResources struct {
 }
 
 // ToApiOptions 将 API 模型集合转换为选择器选项列表。
-func ToApiOptions(apis []*model.Api) []ApiOptionResources {
+func ToApiOptions(apis []*model.Api, locale ...string) []ApiOptionResources {
+	requestLocale := i18n.DefaultLocale
+	if len(locale) > 0 {
+		requestLocale = locale[0]
+	}
 	options := make([]ApiOptionResources, 0, len(apis))
 	for _, a := range apis {
 		if a == nil {
@@ -85,11 +100,19 @@ func ToApiOptions(apis []*model.Api) []ApiOptionResources {
 		}
 		options = append(options, ApiOptionResources{
 			ID:     a.ID,
-			Name:   a.Name,
+			Name:   localizedAPIMetadata(a.Name, a.NameI18n, requestLocale),
 			Code:   a.Code,
 			Method: a.Method,
 			Route:  a.Route,
 		})
 	}
 	return options
+}
+
+func localizedAPIMetadata(defaultText, localizedRaw, locale string) string {
+	// name/description 保持为中文编辑兼容字段；其他语言从 Catalog 快照解析。
+	if i18n.NormalizeLocale(locale) == i18n.LocaleZhCN {
+		return defaultText
+	}
+	return i18n.ResolveLocalizedText(defaultText, localizedRaw, locale)
 }

@@ -233,20 +233,23 @@ func NewCronTaskStateTransformer() CronTaskStateTransformer {
 
 // TaskRunStatsResources 任务执行全量统计响应结构。
 type TaskRunStatsResources struct {
-	TaskCode            string  `json:"task_code"`
-	Kind                string  `json:"kind"`
-	Source              string  `json:"source"`
-	TotalCount          uint64  `json:"total_count"`
-	SuccessCount        uint64  `json:"success_count"`
-	FailedCount         uint64  `json:"failed_count"`
-	CanceledCount       uint64  `json:"canceled_count"`
-	TimeoutCount        uint64  `json:"timeout_count"`
-	InterruptedCount    uint64  `json:"interrupted_count"`
-	SampledSuccessCount uint64  `json:"sampled_success_count"`
-	DurationTotalMS     float64 `json:"duration_total_ms"`
-	DurationMaxMS       float64 `json:"duration_max_ms"`
-	DurationAvgMS       float64 `json:"duration_avg_ms"`
-	SuccessRate         float64 `json:"success_rate"`
+	TaskCode            string           `json:"task_code"`
+	Kind                string           `json:"kind"`
+	Source              string           `json:"source"`
+	DetailTimeBasis     string           `json:"detail_time_basis"`
+	DetailStartTime     utils.FormatDate `json:"detail_start_time"`
+	DetailEndTime       utils.FormatDate `json:"detail_end_time"`
+	TotalCount          uint64           `json:"total_count"`
+	SuccessCount        uint64           `json:"success_count"`
+	FailedCount         uint64           `json:"failed_count"`
+	CanceledCount       uint64           `json:"canceled_count"`
+	TimeoutCount        uint64           `json:"timeout_count"`
+	InterruptedCount    uint64           `json:"interrupted_count"`
+	SampledSuccessCount uint64           `json:"sampled_success_count"`
+	DurationTotalMS     float64          `json:"duration_total_ms"`
+	DurationMaxMS       float64          `json:"duration_max_ms"`
+	DurationAvgMS       float64          `json:"duration_avg_ms"`
+	SuccessRate         float64          `json:"success_rate"`
 }
 
 // TaskRunTrendPointResources 任务执行统计趋势单点。

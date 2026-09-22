@@ -79,6 +79,94 @@ func TestFileResourceDeleteReturnsReferencedError(t *testing.T) {
 	}
 }
 
+func TestFileListExportHasRowsUsesExportFilters(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	svc := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
+	params := &form.FileResourceList{OriginName: "missing"}
+	hasRows, err := svc.HasFileListExportRows(context.Background(), params)
+	if err != nil || hasRows {
+		t.Fatalf("empty filter must not be exportable: hasRows=%t err=%v", hasRows, err)
+	}
+
+	if err := db.Create(&model.UploadFiles{OriginName: "matching.csv", UUID: "matching-uuid", StorageDriver: model.StorageDriverLocal, StorageStatus: model.StorageStatusStored}).Error; err != nil {
+		t.Fatal(err)
+	}
+	params.OriginName = "matching"
+	hasRows, err = svc.HasFileListExportRows(context.Background(), params)
+	if err != nil || !hasRows {
+		t.Fatalf("matching filter must be exportable: hasRows=%t err=%v", hasRows, err)
+	}
+	params.OriginName = "missing"
+	hasRows, err = svc.HasFileListExportRows(context.Background(), params)
+	if err != nil || hasRows {
+		t.Fatalf("filter must exclude other files: hasRows=%t err=%v", hasRows, err)
+	}
+}
+
+func TestValidateMultipartCompletePartsReturnsInvalidParameter(t *testing.T) {
+	tests := []struct {
+		name  string
+		parts []form.MultipartCompletePart
+	}{
+		{name: "empty"},
+		{name: "duplicate", parts: []form.MultipartCompletePart{{PartNumber: 1, ETag: "a"}, {PartNumber: 1, ETag: "b"}}},
+		{name: "not continuous", parts: []form.MultipartCompletePart{{PartNumber: 2, ETag: "a"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := validateMultipartCompleteParts(test.parts)
+			var businessErr *e.BusinessError
+			if !stderrors.As(err, &businessErr) || businessErr.GetCode() != e.InvalidParameter {
+				t.Fatalf("expected InvalidParameter, got %T: %v", err, err)
+			}
+		})
+	}
+}
+
+func TestFileResourceSingleLookupPreservesDatabaseFailure(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).findByID(1)
+	if err == nil {
+		t.Fatal("expected database error")
+	}
+	var businessErr *e.BusinessError
+	if stderrors.As(err, &businessErr) && businessErr.GetCode() == e.NotFound {
+		t.Fatalf("database failure must not be reported as NotFound: %v", err)
+	}
+}
+
+func TestFileResourceIncludeSubfolderPreservesDatabaseFailure(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	folderID := uint(1)
+	_, err = NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db}).List(&form.FileResourceList{
+		FolderID:         &folderID,
+		IncludeSubfolder: global.Yes,
+	})
+	if err == nil {
+		t.Fatal("expected database error")
+	}
+	var businessErr *e.BusinessError
+	if stderrors.As(err, &businessErr) {
+		t.Fatalf("database failure must remain a technical error: %v", err)
+	}
+}
+
 func TestFileResourceBatchDeleteReturnsStatsAndReferenceFailures(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{DB: db})
@@ -471,6 +559,52 @@ func TestFileResourceUploadCredentialDoesNotReuseUnverifiedHash(t *testing.T) {
 	}
 	if result.CompleteToken == "" || result.CompletePayload["complete_token"] != result.CompleteToken {
 		t.Fatalf("expected credential to return complete_token, got %#v", result)
+	}
+}
+
+func TestFileResourceUploadCredentialUsesProviderDirectUploadRequest(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	presigned := filestorage.PresignedUpload{
+		URL:      "https://storage.example.com/form-upload",
+		Method:   "POST",
+		Headers:  map[string]string{"x-provider-token": "signed"},
+		FormData: map[string]string{"policy": "encoded-policy"},
+	}
+	driver := fakeFileResourceDriver{name: model.StorageDriverAliyunOSS, presigned: &presigned}
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		DB: db,
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.Config{AliyunOSS: filestorage.AliyunOSSConfig{Bucket: "assets"}}, model.StorageDriverAliyunOSS, nil
+		},
+		StorageDriverResolver: func(context.Context, string) (filestorage.Driver, filestorage.Config, error) {
+			return driver, filestorage.Config{}, nil
+		},
+	})
+	result, err := service.UploadCredential(&form.FileUploadCredential{
+		OriginName: "custom.txt", Hash: strings.Repeat("d", 64), MimeType: "text/plain", Size: 12, IsPublic: global.Yes,
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.UploadURL != presigned.URL || result.Method != "POST" || result.Headers["x-provider-token"] != "signed" || result.FormData["policy"] != "encoded-policy" {
+		t.Fatalf("provider upload request was not preserved: %#v", result)
+	}
+}
+
+func TestFileResourceUploadOptionsUseCapabilitiesInsteadOfDriverName(t *testing.T) {
+	root := t.TempDir()
+	driver := filestorage.NewLocalDriver(filestorage.LocalConfig{PublicBasePath: root, PrivateBasePath: root}, root, root)
+	service := NewFileResourceServiceWithDeps(FileResourceServiceDeps{
+		ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+			return driver, filestorage.DefaultConfig(), "custom_remote", nil
+		},
+	})
+	options, err := service.UploadOptions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.SupportsDirectUpload || options.SupportsMultipartUpload {
+		t.Fatalf("capabilities must come from driver interfaces, got %#v", options)
 	}
 }
 
@@ -2284,6 +2418,7 @@ type fakeFileResourceDriver struct {
 	content             []byte
 	openErr             error
 	putErr              error
+	deleteErr           error
 	readErr             error
 	exists              bool
 	existsErr           error
@@ -2293,6 +2428,7 @@ type fakeFileResourceDriver struct {
 	onDelete            func(bucket, objectKey string)
 	onCompleteMultipart func()
 	onAbortMultipart    func(bucket, objectKey, uploadID string)
+	presigned           *filestorage.PresignedUpload
 }
 
 func testSHA256(content []byte) string {
@@ -2360,7 +2496,7 @@ func (d fakeFileResourceDriver) Delete(_ context.Context, bucket, objectKey stri
 	if d.onDelete != nil {
 		d.onDelete(bucket, objectKey)
 	}
-	return nil
+	return d.deleteErr
 }
 
 type fakeStatFileResourceDriver struct {
@@ -2386,6 +2522,17 @@ func (d fakeFileResourceDriver) SignedURL(context.Context, string, string, time.
 
 func (d fakeFileResourceDriver) PresignPutObject(context.Context, string, string, string, time.Duration) (string, error) {
 	return "", nil
+}
+
+func (d fakeFileResourceDriver) PresignUpload(_ context.Context, _ string, _ string, contentType string, _ time.Duration) (filestorage.PresignedUpload, error) {
+	if d.presigned != nil {
+		return *d.presigned, nil
+	}
+	return filestorage.PresignedUpload{
+		URL:     "https://example.com/upload",
+		Method:  "PUT",
+		Headers: map[string]string{"Content-Type": contentType, "x-oss-forbid-overwrite": "true"},
+	}, nil
 }
 
 func (d fakeFileResourceDriver) InitMultipartUpload(_ context.Context, input filestorage.MultipartUploadInput) (filestorage.MultipartUploadResult, error) {

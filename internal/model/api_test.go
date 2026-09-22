@@ -10,7 +10,7 @@ func TestApiRegisterConflictUpdateColumnsRefreshRouteAuthMode(t *testing.T) {
 		columns[column] = struct{}{}
 	}
 
-	required := []string{"name", "description", "method", "route", "func", "group_code", "func_path", "is_auth", "is_effective", "updated_at"}
+	required := []string{"name", "name_i18n", "description", "description_i18n", "method", "route", "func", "group_code", "func_path", "is_auth", "is_effective", "updated_at"}
 	for _, column := range required {
 		if _, ok := columns[column]; !ok {
 			t.Fatalf("expected api register conflict updates to include %q", column)

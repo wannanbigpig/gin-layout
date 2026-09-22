@@ -145,6 +145,19 @@ func TestCheckJwtSecretKeyRejectsWeakProdSecret(t *testing.T) {
 	}
 }
 
+func TestCheckJwtSecretKeyRejectsShortProdSecret(t *testing.T) {
+	original := GetConfig()
+	testCfg := cloneDefaultConfig()
+	testCfg.AppEnv = "prod"
+	testCfg.Jwt.SecretKey = "random-but-short-secret"
+	setActiveConfig(testCfg)
+	t.Cleanup(func() { setActiveConfig(original) })
+
+	if err := checkJwtSecretKey(); err == nil {
+		t.Fatal("expected production jwt secret shorter than 32 characters to be rejected")
+	}
+}
+
 func TestCheckJwtSecretKeyAllowsLocalWeakSecret(t *testing.T) {
 	original := GetConfig()
 	testCfg := cloneDefaultConfig()
@@ -163,5 +176,17 @@ func TestResolveEnvVarReturnsEmptyWhenMissing(t *testing.T) {
 
 	if got := resolveEnvVar("${MISSING_JWT_SECRET_FOR_TEST}"); got != "" {
 		t.Fatalf("expected missing env placeholder to resolve empty, got %q", got)
+	}
+}
+
+func TestResolveEnvVarsLoadsCredentialEncryptionKey(t *testing.T) {
+	t.Setenv("CREDENTIAL_ENCRYPTION_KEY_FOR_TEST", "resolved-credential-key")
+	cfg := cloneDefaultConfig()
+	cfg.Security.CredentialEncryptionKey = "${CREDENTIAL_ENCRYPTION_KEY_FOR_TEST}"
+
+	resolveEnvVars(cfg)
+
+	if cfg.Security.CredentialEncryptionKey != "resolved-credential-key" {
+		t.Fatalf("expected credential encryption key from environment, got %q", cfg.Security.CredentialEncryptionKey)
 	}
 }

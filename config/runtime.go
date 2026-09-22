@@ -14,6 +14,7 @@ func BuildConfigDiff(oldConfig, newConfig *Conf) ConfigDiff {
 	diff.RedisChanged = !reflect.DeepEqual(oldConfig.Redis, newConfig.Redis)
 	diff.JWTChanged = !reflect.DeepEqual(oldConfig.Jwt, newConfig.Jwt)
 	diff.JWTSecretChanged = oldConfig.Jwt.SecretKey != newConfig.Jwt.SecretKey
+	diff.CredentialEncryptionKeyChanged = oldConfig.Security.CredentialEncryptionKey != newConfig.Security.CredentialEncryptionKey
 	diff.BaseURLChanged = oldConfig.BaseURL != newConfig.BaseURL
 	diff.CORSChanged = !reflect.DeepEqual(oldConfig.CorsOrigins, newConfig.CorsOrigins) ||
 		!reflect.DeepEqual(oldConfig.CorsMethods, newConfig.CorsMethods) ||
@@ -44,6 +45,10 @@ func BuildConfigDiff(oldConfig, newConfig *Conf) ConfigDiff {
 	if diff.JWTSecretChanged {
 		diff.ChangedFields = append(diff.ChangedFields, "jwt.secret_key")
 		diff.RestartRequiredFields = append(diff.RestartRequiredFields, "jwt.secret_key")
+	}
+	if diff.CredentialEncryptionKeyChanged {
+		diff.ChangedFields = append(diff.ChangedFields, "security.credential_encryption_key")
+		diff.RestartRequiredFields = append(diff.RestartRequiredFields, "security.credential_encryption_key")
 	}
 	if diff.BaseURLChanged {
 		diff.ChangedFields = append(diff.ChangedFields, "app.base_url")
@@ -78,6 +83,9 @@ func BuildAppliedConfig(oldConfig, newConfig *Conf, diff ConfigDiff) *Conf {
 
 	if diff.JWTSecretChanged {
 		applied.Jwt.SecretKey = oldConfig.Jwt.SecretKey
+	}
+	if diff.CredentialEncryptionKeyChanged {
+		applied.Security.CredentialEncryptionKey = oldConfig.Security.CredentialEncryptionKey
 	}
 	if diff.TrustedProxiesChanged {
 		applied.TrustedProxies = cloneStringSlice(oldConfig.TrustedProxies)

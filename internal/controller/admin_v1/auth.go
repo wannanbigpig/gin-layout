@@ -85,6 +85,45 @@ func (api LoginController) LoginCaptcha(c *gin.Context) {
 	api.Success(c, result)
 }
 
+// LoginOptions 返回登录页可用的认证方式，不暴露供应商或凭据信息。
+func (api LoginController) LoginOptions(c *gin.Context) {
+	api.Success(c, auth.NewSMSLoginService().Options())
+}
+
+// SendSMSCode 发送短信登录验证码。响应不区分手机号是否存在，避免账号枚举。
+func (api LoginController) SendSMSCode(c *gin.Context) {
+	params := form.NewSMSCodePayload()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	if !captcha.Verify(params.CaptchaID, params.Captcha) {
+		api.FailCode(c, errors.CaptchaErr)
+		return
+	}
+	result, err := auth.NewSMSLoginService().SendCode(c.Request.Context(), params.CountryCode, params.PhoneNumber, c.ClientIP())
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+// SMSLogin 使用一次性短信验证码登录。
+func (api LoginController) SMSLogin(c *gin.Context) {
+	params := form.NewSMSLoginPayload()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	loginService := auth.NewLoginService()
+	result, err := auth.NewSMSLoginService().Login(c.Request.Context(), params.CountryCode, params.PhoneNumber, params.ChallengeID, params.SMSCode, loginService.BuildLoginLogInfo(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	loginService.SetRefreshCookie(c, result.RefreshToken)
+	api.Success(c, result)
+}
+
 // Logout 管理员用户退出登录
 func (api LoginController) Logout(c *gin.Context) {
 	loginService := auth.NewLoginService()

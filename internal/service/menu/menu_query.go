@@ -1,6 +1,8 @@
 package menu
 
 import (
+	"errors"
+
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -42,7 +44,13 @@ func (s *MenuService) List(params *form.ListMenu, locale string) (any, error) {
 // Delete 删除菜单
 func (s *MenuService) Delete(id uint) error {
 	menu := model.NewMenu()
-	if err := menu.GetById(id); err != nil || menu.ID == 0 {
+	if err := menu.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.MenuNotFound)
+		}
+		return err
+	}
+	if menu.ID == 0 {
 		return e.NewBusinessError(e.MenuNotFound)
 	}
 	if menu.ChildrenNum > 0 {
@@ -51,11 +59,11 @@ func (s *MenuService) Delete(id uint) error {
 
 	db, err := menu.GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.MenuCannotDelete)
+		return err
 	}
 	affectedUserIDs, err := access.NewAffectedUsersResolver().Resolve(access.PermissionChangeScope{MenuIDs: []uint{id}})
 	if err != nil {
-		return e.NewBusinessError(e.MenuCannotDelete)
+		return err
 	}
 	coordinator := access.NewPermissionSyncCoordinator()
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
@@ -85,7 +93,7 @@ func (s *MenuService) Delete(id uint) error {
 		return coordinator.SyncUsers(affectedUserIDs, tx)
 	})
 	if err != nil {
-		return e.NewBusinessError(e.MenuCannotDelete)
+		return err
 	}
 	return coordinator.ReloadPolicyCacheWithCode(e.MenuCannotDelete)
 }
@@ -93,7 +101,13 @@ func (s *MenuService) Delete(id uint) error {
 // Detail 获取菜单详情
 func (s *MenuService) Detail(id uint, _ string) (any, error) {
 	menu := model.NewMenu()
-	if err := menu.GetAllById(id); err != nil || menu.ID == 0 {
+	if err := menu.GetAllById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.MenuNotFound)
+		}
+		return nil, err
+	}
+	if menu.ID == 0 {
 		return nil, e.NewBusinessError(e.MenuNotFound)
 	}
 	titleI18n, err := model.NewMenuI18n().LocaleTitleMapByMenuID(menu.ID)

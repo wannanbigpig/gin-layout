@@ -1,6 +1,7 @@
 package admin_v1
 
 import (
+	"context"
 	stderrors "errors"
 
 	"github.com/gin-gonic/gin"
@@ -134,7 +135,6 @@ func (api FileResourceController) Export(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-
 	payload := map[string]any{
 		"origin_name":       params.OriginName,
 		"uuid":              params.UUID,
@@ -158,6 +158,9 @@ func (api FileResourceController) Export(c *gin.Context) {
 		taskCode:  jobs.TypeExportFileList,
 		queueName: jobs.ExportFileListQueue,
 		payload:   payload,
+		hasRows: func(ctx context.Context) (bool, error) {
+			return service.NewFileResourceService().HasFileListExportRows(ctx, params)
+		},
 	})
 }
 

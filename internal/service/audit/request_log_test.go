@@ -1,12 +1,38 @@
 package audit
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
+
+func TestRequestLogDetailPreservesDatabaseFailure(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = (&RequestLogService{db: db}).Detail(1)
+	if err == nil {
+		t.Fatal("expected database error")
+	}
+	var businessErr *e.BusinessError
+	if errors.As(err, &businessErr) && businessErr.GetCode() == e.NotFound {
+		t.Fatalf("database failure must not be reported as NotFound: %v", err)
+	}
+}
 
 func TestResolveRequestLogOrderByDefaultsToCreatedAtDesc(t *testing.T) {
 	orderBy := resolveRequestLogOrderBy("")

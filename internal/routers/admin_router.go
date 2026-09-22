@@ -10,15 +10,15 @@ import (
 
 // 路由构建辅助函数（减少重复代码）
 func GET(path, title string, handlers ...gin.HandlerFunc) RouteDef {
-	return RouteDef{Method: http.MethodGet, Path: path, Title: title, Handlers: handlers}
+	return RouteDef{Method: http.MethodGet, Path: path, Title: title, TitleI18n: builtInTitleI18n(title), Handlers: handlers}
 }
 
 func POST(path, title string, handlers ...gin.HandlerFunc) RouteDef {
-	return RouteDef{Method: http.MethodPost, Path: path, Title: title, Handlers: handlers}
+	return RouteDef{Method: http.MethodPost, Path: path, Title: title, TitleI18n: builtInTitleI18n(title), Handlers: handlers}
 }
 
 func PATCH(path, title string, handlers ...gin.HandlerFunc) RouteDef {
-	return RouteDef{Method: http.MethodPatch, Path: path, Title: title, Handlers: handlers}
+	return RouteDef{Method: http.MethodPatch, Path: path, Title: title, TitleI18n: builtInTitleI18n(title), Handlers: handlers}
 }
 
 // BuildOptions 显式控制构建期条件路由，避免依赖 Gin 进程级 mode。
@@ -65,6 +65,9 @@ func adminPublicGroup(deps *ControllerDeps, options BuildOptions) RouteGroupDef 
 				Routes: []RouteDef{
 					POST("login", "登录", middleware.DatabaseReadyGuard(), deps.Login.Login).WithDesc("用户登录接口"),
 					GET("login-captcha", "验证码", deps.Login.LoginCaptcha).WithDesc("获取登录验证码"),
+					GET("login/options", "登录方式", deps.Login.LoginOptions).WithDesc("获取当前启用的登录方式"),
+					POST("login/sms/send-code", "发送短信登录验证码", middleware.DatabaseReadyGuard(), deps.Login.SendSMSCode),
+					POST("login/sms", "短信验证码登录", middleware.DatabaseReadyGuard(), deps.Login.SMSLogin),
 				},
 			},
 		},
@@ -130,6 +133,18 @@ func adminAccessTokenGroup(deps *ControllerDeps) RouteGroupDef {
 			personalTodoGroup(deps),
 			personalDashboardGroup(deps),
 			personalRequestLogGroup(deps),
+			personalExportGroup(deps),
+		},
+	}
+}
+
+func personalExportGroup(deps *ControllerDeps) RouteGroupDef {
+	return RouteGroupDef{
+		Prefix:    "system/export",
+		GroupCode: "export_personal",
+		Routes: []RouteDef{
+			GET("list", "我的导出列表", deps.Export.List),
+			GET("detail", "我的导出详情", deps.Export.Detail),
 		},
 	}
 }
@@ -142,10 +157,12 @@ func personalTodoGroup(deps *ControllerDeps) RouteGroupDef {
 		Routes: []RouteDef{
 			GET("list", "我的待办列表", deps.Todo.List),
 			GET("summary", "我的待办摘要", deps.Todo.Summary),
+			GET("reminder-preference", "待办提醒偏好", deps.Todo.ReminderPreference),
 			POST("create", "创建个人待办", deps.Todo.Create),
 			POST("update", "更新个人待办", deps.Todo.Update),
 			POST("status", "更新待办状态", deps.Todo.Status),
 			POST("delete", "删除个人待办", deps.Todo.Delete),
+			POST("reminder-preference", "更新待办提醒偏好", deps.Todo.UpdateReminderPreference),
 		},
 	}
 }
@@ -188,7 +205,7 @@ func dashboardGroup(deps *ControllerDeps) RouteGroupDef {
 		GroupCode: "dashboard",
 		Routes: []RouteDef{
 			GET("overview", "仪表盘概览", deps.Dashboard.Overview),
-			GET("statistics", "仪表盘统计", deps.Dashboard.Statistics),
+			GET("statistics", "仪表盘统计", deps.Dashboard.Statistics).WithDesc("默认最近7天；可通过 start_date 和 end_date 查询最多90天的自然日统计"),
 			GET("monitor", "服务器监控", deps.Dashboard.Monitor),
 		},
 	}
@@ -451,14 +468,6 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 				},
 			},
 			{
-				Prefix:    "export",
-				GroupCode: "export",
-				Routes: []RouteDef{
-					GET("list", "导出记录列表", deps.Export.List),
-					GET("detail", "导出记录详情", deps.Export.Detail),
-				},
-			},
-			{
 				Prefix:    "notification",
 				GroupCode: "notification",
 				Routes: []RouteDef{
@@ -473,6 +482,15 @@ func systemGroup(deps *ControllerDeps) RouteGroupDef {
 					GET("secret", "查看存储敏感信息", deps.Storage.Secret),
 					POST("config", "保存存储配置", deps.Storage.Save),
 					POST("test", "测试存储配置", deps.Storage.Test),
+				},
+			},
+			{
+				Prefix:    "sms",
+				GroupCode: "sms",
+				Routes: []RouteDef{
+					GET("config", "短信配置", deps.SMS.Config),
+					POST("config", "保存短信配置", deps.SMS.Save),
+					POST("test", "测试短信发送", deps.SMS.Test).WithDesc("使用当前未保存的短信配置草稿发送测试短信，草稿不会入库"),
 				},
 			},
 		},
@@ -521,8 +539,8 @@ func taskGroup(deps *ControllerDeps) RouteGroupDef {
 			{
 				Prefix: "run",
 				Routes: []RouteDef{
-					GET("list", "任务执行记录列表", deps.TaskCenter.RunList),
-					GET("stats", "任务执行统计", deps.TaskCenter.RunStats),
+					GET("list", "任务执行记录列表", deps.TaskCenter.RunList).WithDesc("time_basis 可选择 created_at 或 finished_at，默认按 created_at 筛选"),
+					GET("stats", "任务执行统计", deps.TaskCenter.RunStats).WithDesc("按完成时间小时桶统计，并返回失败类明细下钻的完成时间范围"),
 					GET("stats/trend", "任务执行统计趋势", deps.TaskCenter.RunStatsTrend),
 					GET("detail", "任务执行记录详情", deps.TaskCenter.RunDetail),
 					GET("events", "任务执行事件列表", deps.TaskCenter.RunEvents),

@@ -28,6 +28,7 @@ const (
 // ExportFileListPayload 表示异步导出文件资源任务 payload。
 // 字段来自 form.FileResourceList 的过滤条件。
 type ExportFileListPayload struct {
+	PublicID         string `json:"public_id"`
 	TaskRunID        uint   `json:"task_run_id"`
 	TriggerUserID    uint   `json:"trigger_user_id"`
 	OriginName       string `json:"origin_name"`
@@ -53,9 +54,11 @@ type ExportFileListPayload struct {
 // handler 只负责业务逻辑和写入结果。
 func handleExportFileList(ctx context.Context, payload ExportFileListPayload) error {
 	exportService := service.NewExportCenterService()
-	if completed, err := exportService.CompletedRecordForTaskRun(ctx, payload.TaskRunID); err != nil {
+	completed, claimed, err := beginExportExecution(ctx, exportService, payload.TaskRunID)
+	if err != nil {
 		return err
-	} else if completed != nil {
+	}
+	if !claimed {
 		notifyExportFileListMessage(ctx, payload, model.TaskRunStatusSuccess, exportRecordUploadFile(completed), completed.FileName, nil)
 		return nil
 	}
@@ -92,11 +95,9 @@ func handleExportFileList(ctx context.Context, payload ExportFileListPayload) er
 	streamErrCh := make(chan error, 1)
 	go func() {
 		err := fileService.StreamFileListExportCSV(ctx, params, pipeWriter, func(processed, total int) error {
-			if !progressStarted {
-				progressStarted = true
-				return exportService.MarkRunningWithTotal(ctx, payload.TaskRunID, uint64(total))
-			}
-			return exportService.UpdateProgress(ctx, payload.TaskRunID, uint64(processed), uint64(total))
+			err := updateExportProgress(ctx, exportService, payload.TriggerUserID, model.ExportSceneFileList, completed.PublicID, payload.TaskRunID, uint64(processed), uint64(total), progressStarted)
+			progressStarted = true
+			return err
 		})
 		if err != nil {
 			_ = pipeWriter.CloseWithError(err)
@@ -121,33 +122,40 @@ func handleExportFileList(ctx context.Context, payload ExportFileListPayload) er
 	}
 	streamErr := <-streamErrCh
 	if streamErr != nil {
-		if shouldFinalizeExportFailure(ctx) {
-			_ = exportService.MarkFailed(ctx, payload.TaskRunID, streamErr)
+		finalAttempt := shouldFinalizeExportFailure(ctx)
+		resultErr := finishExportAttemptFailure(ctx, exportService, payload.TaskRunID, streamErr)
+		if finalAttempt {
 			notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", streamErr)
 		}
-		return streamErr
+		return resultErr
 	}
 	if err != nil {
-		if shouldFinalizeExportFailure(ctx) {
-			_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
+		finalAttempt := shouldFinalizeExportFailure(ctx)
+		resultErr := finishExportAttemptFailure(ctx, exportService, payload.TaskRunID, err)
+		if finalAttempt {
 			notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, "", err)
 		}
-		return err
+		return resultErr
 	}
 
-	if err := exportService.MarkSuccess(ctx, payload.TaskRunID, service.ExportRecordSuccessInput{
+	completed, committed, err := commitGeneratedExport(ctx, exportService, fileService, payload.TaskRunID, service.ExportRecordSuccessInput{
 		File:     uploadFile,
 		FileName: fileName,
-	}); err != nil {
-		if shouldFinalizeExportFailure(ctx) {
-			_ = exportService.MarkFailed(ctx, payload.TaskRunID, err)
+	})
+	if err != nil {
+		finalAttempt := shouldFinalizeExportFailure(ctx)
+		resultErr := finishExportAttemptFailure(ctx, exportService, payload.TaskRunID, err)
+		if finalAttempt {
 			notifyExportFileListMessage(ctx, payload, model.TaskRunStatusFailed, nil, fileName, err)
 		}
-		return err
+		return resultErr
 	}
 
-	recordExportFileListResult(ctx, payload.TaskRunID, uploadFile, fileName)
-	notifyExportFileListMessage(ctx, payload, model.TaskRunStatusSuccess, uploadFile, fileName, nil)
+	winnerFile := exportRecordUploadFile(completed)
+	if committed {
+		recordExportFileListResult(ctx, payload.TaskRunID, winnerFile, completed.FileName)
+	}
+	notifyExportFileListMessage(ctx, payload, model.TaskRunStatusSuccess, winnerFile, completed.FileName, nil)
 
 	return nil
 }
@@ -155,6 +163,7 @@ func handleExportFileList(ctx context.Context, payload ExportFileListPayload) er
 func notifyExportFileListMessage(ctx context.Context, payload ExportFileListPayload, status string, uploadFile *model.UploadFiles, fileName string, taskErr error) {
 	input := notification.ExportResultInput{
 		UserID:       payload.TriggerUserID,
+		PublicID:     payload.PublicID,
 		Scene:        model.ExportSceneFileList,
 		Status:       status,
 		TaskRunID:    payload.TaskRunID,

@@ -18,10 +18,12 @@ func TestPersonalTodoRoutesRequireLoginWithoutPermission(t *testing.T) {
 	}{
 		{http.MethodGet, "/admin/v1/todo/list"},
 		{http.MethodGet, "/admin/v1/todo/summary"},
+		{http.MethodGet, "/admin/v1/todo/reminder-preference"},
 		{http.MethodPost, "/admin/v1/todo/create"},
 		{http.MethodPost, "/admin/v1/todo/update"},
 		{http.MethodPost, "/admin/v1/todo/status"},
 		{http.MethodPost, "/admin/v1/todo/delete"},
+		{http.MethodPost, "/admin/v1/todo/reminder-preference"},
 	} {
 		meta := catalog.MetaMap()[utils.MD5(item.method+"_"+item.path)]
 		if meta == nil {

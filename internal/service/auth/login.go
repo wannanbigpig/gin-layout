@@ -278,6 +278,38 @@ func (s *LoginService) Login(username, password string, logInfo LoginLogInfo) (*
 	}, nil
 }
 
+// LoginWithVerifiedUser 为已通过其他认证因子校验的用户签发登录会话。
+// 调用方必须先完成凭证的一次性校验；这里仍会复查账号锁定、状态及最终数据库快照。
+func (s *LoginService) LoginWithVerifiedUser(adminUser *model.AdminUser, logInfo LoginLogInfo, loginType uint8) (*TokenResponse, error) {
+	startTime := time.Now()
+	if adminUser == nil || adminUser.ID == 0 || adminUser.Username == "" {
+		return nil, e.NewBusinessError(e.LoginFailed)
+	}
+	if err := s.ensureLoginAllowed(adminUser.Username); err != nil {
+		return nil, err
+	}
+	if adminUser.Status != model.AdminUserStatusEnabled {
+		return nil, e.NewBusinessError(e.UserDisable)
+	}
+	claims := s.newAdminCustomClaims(adminUser)
+	accessToken, err := s.generateAccessToken(claims)
+	if err != nil {
+		return nil, e.NewBusinessError(e.TokenGenerateFailed)
+	}
+	logInfo.ExecutionTime = int(time.Since(startTime).Milliseconds())
+	loginLog, refreshToken, err := s.issueRefreshToken(adminUser, claims, accessToken, logInfo, loginType)
+	if err != nil {
+		return nil, e.NewBusinessError(e.TokenGenerateFailed)
+	}
+	if err := s.persistLoginLog(loginLog, true, adminUser); err != nil {
+		return nil, e.NewBusinessError(e.LoginFailed)
+	}
+	if err := s.clearLoginFailState(adminUser.Username); err != nil && !isTableNotFoundErr(err) {
+		log.Logger.Warn("清理登录失败计数失败", zap.String("username", adminUser.Username), zap.Error(err))
+	}
+	return &TokenResponse{AccessToken: accessToken, RefreshToken: refreshToken, TokenType: tokenTypeBearer, ExpiresAt: claims.ExpiresAt.Unix()}, nil
+}
+
 // validateUser 验证用户信息。
 func (s *LoginService) validateUser(username, password string) (*model.AdminUser, error) {
 	adminUser := model.NewAdminUsers()
@@ -369,6 +401,17 @@ func validateAuthenticatedUserSnapshot(tx *gorm.DB, expected *model.AdminUser) e
 		current.Password != expected.Password ||
 		current.IsSuperAdmin != expected.IsSuperAdmin {
 		return e.NewBusinessError(e.NotLogin)
+	}
+	if expected.FullPhoneNumber != "" {
+		var fullPhone string
+		if err := tx.Model(&model.AdminUser{}).
+			Where("id = ? AND deleted_at = 0", expected.ID).
+			Pluck("full_phone_number", &fullPhone).Error; err != nil {
+			return err
+		}
+		if fullPhone != expected.FullPhoneNumber {
+			return e.NewBusinessError(e.NotLogin)
+		}
 	}
 	return nil
 }

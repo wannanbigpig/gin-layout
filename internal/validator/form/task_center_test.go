@@ -16,6 +16,15 @@ func TestTaskRunListAllowsKnownStatus(t *testing.T) {
 	}
 }
 
+func TestTaskRunListValidatesTimeBasis(t *testing.T) {
+	if err := bindJSONBody(t, `{"time_basis":"finished_at"}`, NewTaskRunListQuery()); err != nil {
+		t.Fatalf("expected finished_at time basis to pass validation, got %v", err)
+	}
+	if err := bindJSONBody(t, `{"time_basis":"updated_at"}`, NewTaskRunListQuery()); err == nil {
+		t.Fatal("expected unsupported time basis to fail validation")
+	}
+}
+
 func TestCronTaskStateListRejectsInvalidLastStatus(t *testing.T) {
 	err := bindJSONBody(t, `{"last_status":"succeeded"}`, NewCronTaskStateListQuery())
 	if err == nil {

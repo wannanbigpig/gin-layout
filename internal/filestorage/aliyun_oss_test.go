@@ -52,3 +52,32 @@ func TestPresignPutObjectRequiresForbidOverwriteHeader(t *testing.T) {
 		t.Fatalf("expected signed PUT to require x-oss-forbid-overwrite header: %#v", result.SignedHeaders)
 	}
 }
+
+func TestPresignUploadReturnsCompleteBrowserRequest(t *testing.T) {
+	d := NewAliyunOSSDriver(AliyunOSSConfig{Region: "cn-hangzhou", Endpoint: "https://oss-cn-hangzhou.aliyuncs.com", Bucket: "test-bucket", AccessKeyID: "test-key", AccessKeySecret: "test-secret"})
+	result, err := d.PresignUpload(context.Background(), "", "test.txt", "text/plain", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Method != "PUT" || result.URL == "" {
+		t.Fatalf("unexpected direct upload request: %#v", result)
+	}
+	if result.Headers["X-Oss-Forbid-Overwrite"] != "true" || result.Headers["Content-Type"] != "text/plain" {
+		t.Fatalf("missing signed upload headers: %#v", result.Headers)
+	}
+}
+
+func TestForcePathStyleChangesSignedURLAddressing(t *testing.T) {
+	d := NewAliyunOSSDriver(AliyunOSSConfig{Region: "cn-hangzhou", Endpoint: "https://oss-cn-hangzhou.aliyuncs.com", Bucket: "test-bucket", AccessKeyID: "test-key", AccessKeySecret: "test-secret", ForcePathStyle: true})
+	signed, err := d.SignedURL(context.Background(), "", "test.txt", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(signed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Host != "oss-cn-hangzhou.aliyuncs.com" || u.Path != "/test-bucket/test.txt" {
+		t.Fatalf("path-style configuration was not applied: %s", signed)
+	}
+}

@@ -1,6 +1,7 @@
 package sys_config
 
 import (
+	"errors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -123,7 +124,13 @@ func (s *SysConfigService) DeleteWithAuditDiff(id uint) (string, error) {
 
 func (s *SysConfigService) deleteConfig(id uint) error {
 	config := model.NewSysConfig()
-	if err := config.GetById(id); err != nil || config.ID == 0 {
+	if err := config.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.NotFound)
+		}
+		return err
+	}
+	if config.ID == 0 {
 		return e.NewBusinessError(e.NotFound)
 	}
 	if isDedicatedManagedConfig(config) || isDedicatedManagedConfigKey(config.ConfigKey) {
@@ -150,7 +157,13 @@ func (s *SysConfigService) deleteConfig(id uint) error {
 
 func (s *SysConfigService) snapshotConfigByID(id uint) (map[string]any, error) {
 	config := model.NewSysConfig()
-	if err := config.GetById(id); err != nil || config.ID == 0 {
+	if err := config.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if config.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	return snapshotConfig(config)
@@ -196,7 +209,13 @@ func sensitiveConfigValueWouldChange(id uint, params *form.SysConfigPayload) (bo
 		return false, nil
 	}
 	config := model.NewSysConfig()
-	if err := config.GetById(id); err != nil || config.ID == 0 {
+	if err := config.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, e.NewBusinessError(e.NotFound)
+		}
+		return false, err
+	}
+	if config.ID == 0 {
 		return false, e.NewBusinessError(e.NotFound)
 	}
 	nextSensitive := config.IsSensitive

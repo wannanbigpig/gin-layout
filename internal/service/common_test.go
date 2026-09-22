@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"mime/multipart"
 	"os"
 	"path/filepath"
 	"testing"
@@ -125,7 +126,7 @@ func TestSummarizeImageUploadResults(t *testing.T) {
 		{Status: global.ERROR},
 	}
 
-	result, err := summarizeImageUploadResults(filesInfo)
+	result, err := summarizeImageUploadResults(filesInfo, []error{nil, e.NewBusinessError(e.FileMimeTypeNotAllowed)})
 	assert.Len(t, result, 2)
 	assert.Error(t, err)
 	assert.True(t, IsPartialImageUploadError(err))
@@ -137,9 +138,42 @@ func TestSummarizeImageUploadResultsAllFailed(t *testing.T) {
 		{Status: global.ERROR},
 	}
 
-	_, err := summarizeImageUploadResults(filesInfo)
+	_, err := summarizeImageUploadResults(filesInfo, []error{
+		e.NewBusinessError(e.FileMimeTypeNotAllowed),
+		e.NewBusinessError(e.FileMimeTypeNotAllowed),
+	})
 	assert.Error(t, err)
 	assert.False(t, IsPartialImageUploadError(err))
+	code, ok := ImageUploadErrorCode(err)
+	assert.True(t, ok)
+	assert.Equal(t, e.FileMimeTypeNotAllowed, code)
+}
+
+func TestSummarizeImageUploadResultsTechnicalFailureIsServerError(t *testing.T) {
+	filesInfo := []*utils.FileInfo{{Status: global.ERROR}}
+
+	_, err := summarizeImageUploadResults(filesInfo, []error{errors.New("driver: bad connection")})
+	code, ok := ImageUploadErrorCode(err)
+	assert.True(t, ok)
+	assert.Equal(t, e.ServerErr, code)
+}
+
+func TestSummarizeImageUploadResultsRejectsEmptyUpload(t *testing.T) {
+	_, err := summarizeImageUploadResults(nil, nil)
+	code, ok := ImageUploadErrorCode(err)
+	assert.True(t, ok)
+	assert.Equal(t, e.InvalidParameter, code)
+}
+
+func TestUploadImageRejectsOversizedFileBeforeStorageDependency(t *testing.T) {
+	fileInfo, err := NewCommonService().UploadImage(&multipart.FileHeader{
+		Filename: "large.png",
+		Size:     maxUploadFileSize + 1,
+	}, true, "default")
+	code, ok := ImageUploadErrorCode(err)
+	assert.True(t, ok)
+	assert.Equal(t, e.FileTooLarge, code)
+	assert.Equal(t, global.ERROR, fileInfo.Status)
 }
 
 func TestIsPartialImageUploadError(t *testing.T) {

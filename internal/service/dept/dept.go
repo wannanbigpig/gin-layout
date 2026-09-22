@@ -2,6 +2,7 @@ package dept
 
 import (
 	"context"
+	"errors"
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -81,11 +82,17 @@ func (s *DeptService) Update(params *form.UpdateDept) error {
 // Delete 删除部门。
 func (s *DeptService) Delete(id uint) error {
 	dept := model.NewDepartment()
-	if err := dept.GetById(id); err != nil || dept.ID == 0 {
+	if err := dept.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.DepartmentNotFound)
+		}
+		return err
+	}
+	if dept.ID == 0 {
 		return e.NewBusinessError(e.DepartmentNotFound)
 	}
 	if access.NewSystemDefaultsService().IsProtectedDepartment(dept) {
-		return e.NewBusinessError(e.FAILURE)
+		return e.NewBusinessError(e.DepartmentCannotDelete, "系统内置部门不能删除")
 	}
 	if dept.ChildrenNum > 0 {
 		return e.NewBusinessError(e.DepartmentHasChildren)
@@ -97,7 +104,13 @@ func (s *DeptService) Delete(id uint) error {
 // Detail 获取部门详情。
 func (s *DeptService) Detail(id uint) (any, error) {
 	dept := model.NewDepartment()
-	if err := dept.GetAllById(id); err != nil || dept.ID == 0 {
+	if err := dept.GetAllById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.DepartmentNotFound)
+		}
+		return nil, err
+	}
+	if dept.ID == 0 {
 		return nil, e.NewBusinessError(e.DepartmentNotFound)
 	}
 	return resources.NewDeptTreeTransformer().ToStruct(dept), nil
@@ -106,18 +119,24 @@ func (s *DeptService) Detail(id uint) (any, error) {
 // BindRole 绑定角色到部门。
 func (s *DeptService) BindRole(params *form.DeptBindRole) error {
 	deptModel := model.NewDepartment()
-	if err := deptModel.GetById(params.DeptId); err != nil || deptModel.ID == 0 {
+	if err := deptModel.GetById(params.DeptId); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return e.NewBusinessError(e.DepartmentNotFound)
+		}
+		return err
+	}
+	if deptModel.ID == 0 {
 		return e.NewBusinessError(e.DepartmentNotFound)
 	}
 
 	roleIds, err := model.VerifyExistingIDs(model.NewRole(), params.RoleIds)
 	if err != nil {
-		return e.NewBusinessError(e.RoleNotFound)
+		return err
 	}
 
 	db, err := model.NewDepartment().GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE)
+		return err
 	}
 	var affectedUserIDs []uint
 	err = access.NewPermissionSyncCoordinator().RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
@@ -126,7 +145,7 @@ func (s *DeptService) BindRole(params *form.DeptBindRole) error {
 		return updateErr
 	})
 	if err != nil {
-		return e.NewBusinessError(e.FAILURE)
+		return err
 	}
 	access.NewDataScopeFilter().InvalidateCache(context.Background(), affectedUserIDs...)
 	return nil

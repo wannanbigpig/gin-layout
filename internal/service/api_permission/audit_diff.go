@@ -1,6 +1,10 @@
 package api_permission
 
 import (
+	"errors"
+
+	"gorm.io/gorm"
+
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -36,7 +40,13 @@ func (s *ApiService) UpdateWithAuditDiff(params *form.UpdatePermission) (string,
 
 func (s *ApiService) snapshotAPIPermissionByID(id uint) (map[string]any, error) {
 	apiModel := model.NewApi()
-	if err := apiModel.GetById(id); err != nil || apiModel.ID == 0 {
+	if err := apiModel.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if apiModel.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	return map[string]any{

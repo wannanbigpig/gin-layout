@@ -137,7 +137,13 @@ func (s *LoginService) RefreshByToken(refreshToken string, logInfo LoginLogInfo)
 		// 与账号安全变更统一使用 user -> session 的加锁顺序，确保禁用、改密、
 		// 超级身份变更和 refresh 轮换之间不会产生提交后的新活跃会话。
 		adminUserModel, err := loadAdminUserForAuthentication(tx, refreshClaims.UserID)
-		if err != nil || adminUserModel.Status != model.AdminUserStatusEnabled {
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.RefreshTokenInvalid)
+			}
+			return err
+		}
+		if adminUserModel.Status != model.AdminUserStatusEnabled {
 			return e.NewBusinessError(e.RefreshTokenInvalid)
 		}
 		current := model.NewAdminLoginLogs()

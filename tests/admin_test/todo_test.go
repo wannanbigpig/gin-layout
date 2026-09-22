@@ -84,3 +84,35 @@ func TestPersonalTodoWriteFlowWithConfiguredMySQL(t *testing.T) {
 	}
 	assert.Zero(t, activeCount)
 }
+
+func TestTodoReminderPreferenceFlowWithConfiguredMySQL(t *testing.T) {
+	requireWritableDB(t)
+	db, err := model.GetDB()
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	cleanup := func() {
+		if err := db.Where("user_id = ? AND scene = ?", 1, model.NotificationSceneTodoDue).
+			Delete(&model.NotificationPreference{}).Error; err != nil {
+			t.Errorf("清理待办提醒偏好失败: %v", err)
+		}
+	}
+	cleanup()
+	defer cleanup()
+
+	getResp := getRequest("/admin/v1/todo/reminder-preference", nil)
+	assert.Equal(t, http.StatusOK, getResp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, getResp).Code)
+
+	payload := mustJSONBody(t, map[string]any{"in_app_enabled": false, "sms_enabled": false})
+	updateResp := postRequest("/admin/v1/todo/reminder-preference", &payload)
+	assert.Equal(t, http.StatusOK, updateResp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, updateResp).Code)
+
+	var preference model.NotificationPreference
+	if err := db.Where("user_id = ? AND scene = ?", 1, model.NotificationSceneTodoDue).First(&preference).Error; err != nil {
+		t.Fatalf("回读待办提醒偏好失败: %v", err)
+	}
+	assert.Equal(t, uint8(0), preference.InAppEnabled)
+	assert.Equal(t, uint8(0), preference.SMSEnabled)
+}

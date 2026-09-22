@@ -61,7 +61,7 @@ func TestDedicatedManagedConfigCannotUseGenericMutation(t *testing.T) {
 	if isDedicatedManagedConfig(&model.SysConfig{IsSystem: 1}) {
 		t.Fatal("expected generic protected config without dedicated tab to remain editable")
 	}
-	for _, key := range []string{AuditSensitiveFieldsConfigKey, "storage.active_driver", "storage.config"} {
+	for _, key := range []string{AuditSensitiveFieldsConfigKey, "storage.active_driver", "storage.config", "sms.config"} {
 		if !isDedicatedManagedConfigKey(key) {
 			t.Fatalf("expected dedicated key %q to be reserved", key)
 		}

@@ -11,24 +11,26 @@ import (
 // Api 权限路由表
 type Api struct {
 	ContainsDeleteBaseModel
-	Code        string `json:"code"`         // 权限唯一code
-	GroupCode   string `json:"group_code"`   // 分组code
-	Name        string `json:"name"`         // 权限名称
-	Description string `json:"description"`  // 描述
-	Method      string `json:"method"`       // 接口请求方法
-	Route       string `json:"route"`        // 接口路由
-	Func        string `json:"func"`         // 接口方法
-	FuncPath    string `json:"func_path"`    // 接口方法路径
-	IsAuth      uint8  `json:"is_auth"`      // 接口鉴权模式 0:无需登录 1:需要登录 2:需要登录且需要API权限
-	IsEffective uint8  `json:"is_effective"` // 是否有效 0:否 1:是
-	Sort        int    `json:"sort"`         // 排序，数字越大优先级越高
+	Code            string `json:"code"`         // 权限唯一code
+	GroupCode       string `json:"group_code"`   // 分组code
+	Name            string `json:"name"`         // 权限名称
+	NameI18n        string `json:"-"`            // 内置权限名称多语言快照
+	Description     string `json:"description"`  // 描述
+	DescriptionI18n string `json:"-"`            // 内置权限描述多语言快照
+	Method          string `json:"method"`       // 接口请求方法
+	Route           string `json:"route"`        // 接口路由
+	Func            string `json:"func"`         // 接口方法
+	FuncPath        string `json:"func_path"`    // 接口方法路径
+	IsAuth          uint8  `json:"is_auth"`      // 接口鉴权模式 0:无需登录 1:需要登录 2:需要登录且需要API权限
+	IsEffective     uint8  `json:"is_effective"` // 是否有效 0:否 1:是
+	Sort            int    `json:"sort"`         // 排序，数字越大优先级越高
 }
 
 func NewApi() *Api {
 	return BindModel(&Api{})
 }
 
-var apiRegisterConflictUpdateColumns = []string{"name", "description", "method", "route", "func", "group_code", "func_path", "is_auth", "is_effective", "updated_at"}
+var apiRegisterConflictUpdateColumns = []string{"name", "name_i18n", "description", "description_i18n", "method", "route", "func", "group_code", "func_path", "is_auth", "is_effective", "updated_at"}
 
 // TableName 获取表名
 func (m *Api) TableName() string {

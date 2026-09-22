@@ -11,6 +11,7 @@ func init() {
 		UserDoesNotExist:          "用户不存在",
 		UserDisable:               "用户已被禁用",
 		ServiceDependencyNotReady: "服务暂未配置数据库，请联系管理员",
+		NoExportData:              "暂无需要导出的数据",
 		AuthorizationErr:          "暂无权限",
 		NotLogin:                  "请先登录",
 		CaptchaErr:                "验证码错误",

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wannanbigpig/gin-layout/internal/global"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	"github.com/wannanbigpig/gin-layout/pkg/utils"
 )
 
@@ -129,6 +130,8 @@ func TestApplicationCatalogSecurityProjection(t *testing.T) {
 		{http.MethodPost, "/admin/v1/auth/refresh", SecurityRefreshCookie, AuthModeNone},
 		{http.MethodGet, "/admin/v1/common/ws", SecurityWebSocketTicket, AuthModeNone},
 		{http.MethodGet, "/admin/v1/auth/check-token", SecurityAccessToken, AuthModeLogin},
+		{http.MethodGet, "/admin/v1/system/export/list", SecurityAccessToken, AuthModeLogin},
+		{http.MethodGet, "/admin/v1/system/export/detail", SecurityAccessToken, AuthModeLogin},
 		{http.MethodGet, "/admin/v1/dashboard/overview", SecurityAccessTokenPermission, AuthModeAuth},
 	}
 	for _, tc := range cases {
@@ -164,5 +167,49 @@ func TestDebugCatalogIsReleaseCatalogPlusDemo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(extra, []string{"GET /admin/v1/demo"}) {
 		t.Fatalf("unexpected debug-only routes: %#v", extra)
+	}
+}
+
+func TestApplicationCatalogHasCompleteBuiltInEnglishMetadata(t *testing.T) {
+	catalog, err := CompileRouteTree(AppRouteTreeWithOptions(BuildOptions{Debug: true}))
+	if err != nil {
+		t.Fatalf("compile application catalog: %v", err)
+	}
+	seenTitles := make(map[string]struct{})
+	seenDescriptions := make(map[string]struct{})
+	for _, route := range catalog.Routes() {
+		seenTitles[route.Title] = struct{}{}
+		if route.TitleI18n[i18n.LocaleZhCN] != route.Title {
+			t.Errorf("%s %s Chinese title snapshot = %q, want %q", route.Method, route.Path, route.TitleI18n[i18n.LocaleZhCN], route.Title)
+		}
+		englishTitle := route.TitleI18n[i18n.LocaleEnUS]
+		if englishTitle == "" {
+			t.Errorf("%s %s is missing English title metadata for %q", route.Method, route.Path, route.Title)
+		} else if englishTitle == route.Title {
+			t.Errorf("%s %s English title was not translated from %q", route.Method, route.Path, route.Title)
+		}
+		if route.Desc == "" {
+			continue
+		}
+		seenDescriptions[route.Desc] = struct{}{}
+		if route.DescI18n[i18n.LocaleZhCN] != route.Desc {
+			t.Errorf("%s %s Chinese description snapshot = %q, want %q", route.Method, route.Path, route.DescI18n[i18n.LocaleZhCN], route.Desc)
+		}
+		englishDescription := route.DescI18n[i18n.LocaleEnUS]
+		if englishDescription == "" {
+			t.Errorf("%s %s is missing English description metadata for %q", route.Method, route.Path, route.Desc)
+		} else if englishDescription == route.Desc {
+			t.Errorf("%s %s English description was not translated from %q", route.Method, route.Path, route.Desc)
+		}
+	}
+	for title := range builtInAPIEnglishTitles {
+		if _, ok := seenTitles[title]; !ok {
+			t.Errorf("stale built-in English title mapping: %q", title)
+		}
+	}
+	for description := range builtInAPIEnglishDescriptions {
+		if _, ok := seenDescriptions[description]; !ok {
+			t.Errorf("stale built-in English description mapping: %q", description)
+		}
 	}
 }

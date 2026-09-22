@@ -17,6 +17,7 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
+	"github.com/wannanbigpig/gin-layout/internal/service/notification"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -482,14 +483,7 @@ func parseDueAt(value string) (*utils.FormatDate, error) {
 }
 
 func normalizeActionURL(value string) (string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", nil
-	}
-	if !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.Contains(value, `\`) {
-		return "", e.NewBusinessError(e.InvalidParameter, "action_url 仅支持站内相对路径")
-	}
-	return value, nil
+	return notification.NormalizeActionURL(value)
 }
 
 func normalizePriority(priority string) string {

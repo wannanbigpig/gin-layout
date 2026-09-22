@@ -25,12 +25,14 @@ const (
 	TaskCodeCronFileAccessFlush   = "cron:file-access-flush"
 	TaskCodeCronCleanExpiredFiles = "cron:clean-expired-files"
 	TaskCodeCronCleanAuditLogs    = "cron:clean-audit-logs"
+	TaskCodeCronTodoReminder      = "cron:todo-reminder"
 
 	HandlerCronDemo              = "cron.demo"
 	HandlerCronResetSystemData   = "cron.reset-system-data"
 	HandlerCronFileAccessFlush   = "cron.file-access-flush"
 	HandlerCronCleanExpiredFiles = "cron.clean-expired-files"
 	HandlerCronCleanAuditLogs    = "cron.clean-audit-logs"
+	HandlerCronTodoReminder      = "cron.todo-reminder"
 )
 
 const cronLogTimeFormat = "2006-01-02 15:04:05"
@@ -55,6 +57,7 @@ var (
 		},
 		HandlerCronCleanExpiredFiles: CleanExpiredFilesHandler,
 		HandlerCronCleanAuditLogs:    CleanAuditLogsHandler,
+		HandlerCronTodoReminder:      TodoReminderHandler,
 	}
 )
 
@@ -231,6 +234,24 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 			RecordDetailOnManual:         1,
 			RecordDetailOnFailure:        1,
 			Remark:                       "自动物理清理系统内所有已过期的临时导出/上传文件及物理介质",
+		},
+		{
+			Code:                         TaskCodeCronTodoReminder,
+			Name:                         "待办到期提醒",
+			Kind:                         model.TaskKindCron,
+			Queue:                        "",
+			CronSpec:                     "0 */5 * * * *",
+			Handler:                      HandlerCronTodoReminder,
+			Status:                       model.TaskStatusEnabled,
+			AllowManual:                  model.TaskManualAllowed,
+			AllowRetry:                   model.TaskRetryNotAllowed,
+			IsHighRisk:                   model.TaskNotHighRisk,
+			RecordSuccessMode:            model.TaskRecordSuccessInterval,
+			RecordSuccessRate:            100,
+			RecordSuccessIntervalSeconds: 3600,
+			RecordDetailOnManual:         1,
+			RecordDetailOnFailure:        1,
+			Remark:                       "每 5 分钟扫描临期和逾期待办；站内消息与短信 Outbox 都使用业务唯一键防重，当前仍只支持单 cron 实例",
 		},
 		{
 			Code:                         TaskCodeCronCleanAuditLogs,

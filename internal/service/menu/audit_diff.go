@@ -1,7 +1,10 @@
 package menu
 
 import (
+	"errors"
 	"sort"
+
+	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
@@ -171,7 +174,13 @@ func (s *MenuService) DeleteWithAuditDiff(id uint) (string, error) {
 
 func (s *MenuService) snapshotMenuByID(id uint) (map[string]any, error) {
 	menuModel := model.NewMenu()
-	if err := menuModel.GetById(id); err != nil || menuModel.ID == 0 {
+	if err := menuModel.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.MenuNotFound)
+		}
+		return nil, err
+	}
+	if menuModel.ID == 0 {
 		return nil, e.NewBusinessError(e.MenuNotFound)
 	}
 	titleI18n, err := model.NewMenuI18n().LocaleTitleMapByMenuID(menuModel.ID)

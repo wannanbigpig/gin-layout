@@ -41,7 +41,11 @@ func (api RoleController) Options(c *gin.Context) {
 		return
 	}
 
-	result := role.NewRoleService().Options(params.Keyword)
+	result, err := role.NewRoleService().Options(params.Keyword)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
 	api.Success(c, result)
 }
 

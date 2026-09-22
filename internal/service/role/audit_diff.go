@@ -1,8 +1,11 @@
 package role
 
 import (
+	"errors"
 	"sort"
 	"strings"
+
+	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
@@ -84,7 +87,13 @@ func (s *RoleService) DeleteWithAuditDiff(id uint) (string, error) {
 
 func (s *RoleService) snapshotRoleByCode(code string) (map[string]any, error) {
 	role := model.NewRole()
-	if err := role.FindByCode(strings.TrimSpace(code)); err != nil || role.ID == 0 {
+	if err := role.FindByCode(strings.TrimSpace(code)); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.RoleNotFound)
+		}
+		return nil, err
+	}
+	if role.ID == 0 {
 		return nil, e.NewBusinessError(e.RoleNotFound)
 	}
 	return s.snapshotRoleByID(role.ID)
@@ -92,7 +101,13 @@ func (s *RoleService) snapshotRoleByCode(code string) (map[string]any, error) {
 
 func (s *RoleService) snapshotRoleByID(id uint) (map[string]any, error) {
 	role := model.NewRole()
-	if err := role.GetById(id); err != nil || role.ID == 0 {
+	if err := role.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.RoleNotFound)
+		}
+		return nil, err
+	}
+	if role.ID == 0 {
 		return nil, e.NewBusinessError(e.RoleNotFound)
 	}
 	menuIDs, err := model.NewRoleMenuMap().MenuIdsByRoleIds([]uint{id})

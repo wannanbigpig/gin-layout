@@ -12,6 +12,9 @@ func TestText(t *testing.T) {
 	if errorText.Text(FileReferenced) != "文件存在引用，不能删除" {
 		t.Error("文件引用错误码文案不是预期的")
 	}
+	if errorText.Text(NoExportData) != "暂无需要导出的数据" || NewErrorText("en").Text(NoExportData) != "No data to export" {
+		t.Error("空导出错误码缺少中英文文案")
+	}
 
 	if errorText.Text(1202389) != "unknown error" {
 		t.Error("text 返回 msg 不是预期的")

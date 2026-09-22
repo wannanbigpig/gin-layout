@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/wannanbigpig/gin-layout/internal/filestorage"
 )
 
 var (
@@ -62,6 +63,28 @@ func initCustomRules(validate *validator.Validate) error {
 	err = validate.RegisterValidation("file_type_or_multi", fileTypeOrMultiValidator)
 	if err != nil {
 		return errors.New("注册 file_type_or_multi 校验规则失败")
+	}
+
+	err = validate.RegisterValidation("storage_driver", func(fl validator.FieldLevel) bool {
+		_, ok := filestorage.DefaultRegistry().Definition(fl.Field().String())
+		return ok
+	})
+	if err != nil {
+		return errors.New("注册 storage_driver 校验规则失败")
+	}
+	err = validate.RegisterValidation("storage_direct_driver", func(fl validator.FieldLevel) bool {
+		definition, ok := filestorage.DefaultRegistry().Definition(fl.Field().String())
+		return ok && definition.Capabilities.DirectUpload
+	})
+	if err != nil {
+		return errors.New("注册 storage_direct_driver 校验规则失败")
+	}
+	err = validate.RegisterValidation("storage_multipart_driver", func(fl validator.FieldLevel) bool {
+		definition, ok := filestorage.DefaultRegistry().Definition(fl.Field().String())
+		return ok && definition.Capabilities.MultipartUpload
+	})
+	if err != nil {
+		return errors.New("注册 storage_multipart_driver 校验规则失败")
 	}
 	return nil
 }

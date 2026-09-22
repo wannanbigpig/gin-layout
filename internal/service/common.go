@@ -39,6 +39,7 @@ func (s *CommonService) SetDB(db *gorm.DB) *CommonService {
 // UploadImages 批量上传图片。
 func (s CommonService) UploadImages(files []*multipart.FileHeader, path string) ([]*utils.FileInfo, error) {
 	filesInfo := make([]*utils.FileInfo, 0, len(files))
+	uploadErrs := make([]error, 0, len(files))
 	for _, fileHeader := range files {
 		file, err := s.UploadImage(fileHeader, true, path)
 		if err != nil {
@@ -48,9 +49,10 @@ func (s CommonService) UploadImages(files []*multipart.FileHeader, path string) 
 			)
 		}
 		filesInfo = append(filesInfo, file)
+		uploadErrs = append(uploadErrs, err)
 	}
 
-	return summarizeImageUploadResults(filesInfo)
+	return summarizeImageUploadResults(filesInfo, uploadErrs)
 }
 
 // UploadImage 上传单张图片并保存文件记录。
@@ -65,7 +67,10 @@ func (s CommonService) UploadImageEx(fileHeader *multipart.FileHeader, isPublic 
 	basePath := storageBasePath(isPublic)
 	uploadPath, err := normalizeUploadPath(path)
 	if err != nil {
-		return setFileFailure(fileInfo, "上传目录不合法", err)
+		return setFileFailure(fileInfo, "上传目录不合法", e.NewBusinessError(e.InvalidParameter, "上传目录不合法"))
+	}
+	if fileHeader.Size > maxUploadFileSize {
+		return setFileFailure(fileInfo, "文件大小不能大于10M", e.NewBusinessError(e.FileTooLarge))
 	}
 	driver, storageConfig, activeDriver, err := NewActiveStorageDriver(context.Background())
 	if err != nil {
@@ -76,14 +81,10 @@ func (s CommonService) UploadImageEx(fileHeader *multipart.FileHeader, isPublic 
 		return setFileFailure(fileInfo, "上传目录不合法", err)
 	}
 
-	if fileHeader.Size > maxUploadFileSize {
-		return setFileFailure(fileInfo, "文件大小不能大于10M", nil)
-	}
-
 	result, err := utils.SaveUploadedImageWithUUID(fileHeader, uploadDir)
 	if err != nil {
 		if errors.Is(err, utils.ErrInvalidImageType) {
-			return setFileFailure(fileInfo, "仅支持图片格式", err)
+			return setFileFailure(fileInfo, "仅支持图片格式", e.NewBusinessError(e.FileMimeTypeNotAllowed))
 		}
 		return setFileFailure(fileInfo, "文件保存失败", err)
 	}
@@ -104,6 +105,15 @@ func (s CommonService) UploadImageEx(fileHeader *multipart.FileHeader, isPublic 
 	bucket := bucketForDriver(activeDriver, storageConfig, isPublicFlag)
 	objectKey := result.Path
 	etag := result.Sha256
+	remoteObjectPending := false
+	defer func() {
+		if !remoteObjectPending {
+			return
+		}
+		if deleteErr := driver.Delete(context.Background(), bucket, objectKey); deleteErr != nil {
+			log.Logger.Warn("清理未提交的对象存储文件失败", zap.String("driver", activeDriver), zap.String("bucket", bucket), zap.String("object_key", objectKey), zap.Error(deleteErr))
+		}
+	}()
 	if activeDriver != model.StorageDriverLocal {
 		file, err := os.Open(savedPath)
 		if err != nil {
@@ -130,6 +140,7 @@ func (s CommonService) UploadImageEx(fileHeader *multipart.FileHeader, isPublic 
 		if putResult.ETag != "" {
 			etag = putResult.ETag
 		}
+		remoteObjectPending = true
 	}
 	db, err := model.GetDB()
 	if err != nil {
@@ -190,11 +201,16 @@ func (s CommonService) UploadImageEx(fileHeader *multipart.FileHeader, isPublic 
 	applyObjectToUploadFile(uploadFileModel, object)
 
 	if err := uploadFileModel.Create(); err != nil {
-		if activeDriver == model.StorageDriverLocal && !reused {
-			cleanupStoredUpload(savedPath)
+		if !reused {
 			_ = db.Delete(&model.UploadFileObject{}, object.ID).Error
 		}
+		if activeDriver == model.StorageDriverLocal && !reused {
+			cleanupStoredUpload(savedPath)
+		}
 		return setFileFailure(fileInfo, "保存文件信息失败", err)
+	}
+	if activeDriver != model.StorageDriverLocal && !reused {
+		remoteObjectPending = false
 	}
 
 	fillFileInfoFromUploadResult(fileInfo, result)
@@ -268,14 +284,14 @@ func (s CommonService) GetFileAccessPath(fileUUID string, variant string, checkA
 		if ttl <= 0 {
 			ttl = 5 * time.Minute
 		}
-		if normalizeFileVariant(variant) == fileVariantThumb && isImageMimeType(firstNonEmpty(objectMimeType, uploadFile.MimeType)) && storageDriver == model.StorageDriverAliyunOSS {
-			if aliyunDriver, ok := driver.(*filestorage.AliyunOSSDriver); ok {
-				signedThumbnailURL, thumbErr := aliyunDriver.SignedImageThumbnailURL(context.Background(), bucket, objectKey, ttl)
+		if normalizeFileVariant(variant) == fileVariantThumb && isImageMimeType(firstNonEmpty(objectMimeType, uploadFile.MimeType)) {
+			if thumbnailDriver, ok := driver.(filestorage.ImageThumbnailCapable); ok {
+				signedThumbnailURL, thumbErr := thumbnailDriver.SignedImageThumbnailURL(context.Background(), bucket, objectKey, ttl)
 				if thumbErr == nil {
 					markFileAccessed(uploadFile)
 					return FileAccessResult{RedirectURL: signedThumbnailURL}, nil
 				}
-				log.Logger.Warn("生成 OSS 图片缩略图签名链接失败，回退原图", zap.String("uuid", uploadFile.UUID), zap.Error(thumbErr))
+				log.Logger.Warn("生成对象存储图片缩略图签名链接失败，回退原图", zap.String("driver", storageDriver), zap.String("uuid", uploadFile.UUID), zap.Error(thumbErr))
 			}
 		}
 		signedURL, err := driver.SignedURL(context.Background(), bucket, objectKey, ttl)

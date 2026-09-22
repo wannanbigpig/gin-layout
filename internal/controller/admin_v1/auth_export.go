@@ -1,6 +1,7 @@
 package admin_v1
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"time"
@@ -13,7 +14,6 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
-	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/taskcenter"
 )
@@ -25,12 +25,27 @@ type asyncExportRequest struct {
 	taskCode  string
 	queueName string
 	payload   map[string]any
+	hasRows   func(context.Context) (bool, error)
 }
 
-// submitAsyncExport 统一编排异步导出："任务中心预建运行记录 -> 导出中心建记录 -> 投递队列"，
-// 任一步失败回滚已建状态，并按错误类型写出 HTTP 响应。请求日志导出与文件列表导出共用此流程，
+// submitAsyncExport 统一编排异步导出："检查非空 -> 任务中心预建运行记录 -> 导出中心建记录 -> 投递队列"，
+// 空集不会创建任务；后续步骤失败则记录失败状态并按错误类型写出 HTTP 响应。两种导出共用此流程，
 // 避免两处控制器各自维护一份易漂移的编排副本。
 func submitAsyncExport(api controller.Api, c *gin.Context, req asyncExportRequest) {
+	if req.hasRows == nil {
+		api.FailCode(c, e.ServerErr)
+		return
+	}
+	hasRows, err := req.hasRows(c.Request.Context())
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	if !hasRows {
+		api.FailCode(c, e.NoExportData)
+		return
+	}
+
 	uid := api.GetCurrentUserID(c)
 	account := ""
 	if user := api.GetCurrentAdminUserSnapshot(c); user != nil {
@@ -46,7 +61,7 @@ func submitAsyncExport(api controller.Api, c *gin.Context, req asyncExportReques
 	rawPayload, _ := json.Marshal(req.payload)
 
 	recorder := taskcenter.NewRunRecorder()
-	// 先在任务中心预创建一条运行记录，给导出中心和前端返回稳定的 run_id / 初始状态。
+	// 先在任务中心预创建运行记录，供导出中心关联本次执行。
 	run, err := recorder.Enqueue(c.Request.Context(), taskcenter.RunStart{
 		TaskCode:       req.taskCode,
 		Kind:           model.TaskKindAsync,
@@ -82,10 +97,11 @@ func submitAsyncExport(api controller.Api, c *gin.Context, req asyncExportReques
 	}
 
 	req.payload["task_run_id"] = run.ID
+	req.payload["public_id"] = exportRecord.PublicID
 
 	// 再把真实导出任务投递到异步队列；worker 消费时会回写这条 run 记录的执行状态和结果。
 	// 导出类任务使用保守的重试和超时限制，避免卡住的任务永久占用并发槽。
-	jobInfo, publishErr := queue.PublishJSON(c.Request.Context(), req.taskCode, req.queueName, req.payload,
+	_, publishErr := queue.PublishJSON(c.Request.Context(), req.taskCode, req.queueName, req.payload,
 		queue.WithTaskID(taskID),
 		queue.WithMaxRetry(2),
 		queue.WithTimeout(5*time.Minute),
@@ -106,11 +122,7 @@ func submitAsyncExport(api controller.Api, c *gin.Context, req asyncExportReques
 	}
 
 	api.Success(c, map[string]any{
-		"run_id":           run.ID,
-		"export_record_id": exportRecord.ID,
-		"export_record":    resources.NewExportRecordTransformer().ToStruct(exportRecord),
-		"task_id":          jobInfo.ID,
-		"queue":            jobInfo.Queue,
-		"type":             jobInfo.Type,
+		"public_id": exportRecord.PublicID,
+		"status":    exportRecord.Status,
 	})
 }

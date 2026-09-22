@@ -13,6 +13,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
+	"github.com/wannanbigpig/gin-layout/internal/service/todo"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
@@ -44,14 +45,28 @@ func TestUserTodoControllerUsesCurrentUserID(t *testing.T) {
 	if statusRecorder.Code != http.StatusOK || fake.statusUID != 7 || fake.statusID != 42 || fake.status != model.TodoStatusCompleted {
 		t.Fatalf("status code=%d uid=%d id=%d status=%q body=%s", statusRecorder.Code, fake.statusUID, fake.statusID, fake.status, statusRecorder.Body.String())
 	}
+
+	preferenceRecorder := httptest.NewRecorder()
+	preferenceCtx, _ := gin.CreateTestContext(preferenceRecorder)
+	preferenceCtx.Request = httptest.NewRequest(http.MethodPost, "/admin/v1/todo/reminder-preference", bytes.NewBufferString(`{"in_app_enabled":false,"sms_enabled":false}`))
+	preferenceCtx.Request.Header.Set("Content-Type", "application/json")
+	preferenceCtx.Set(global.ContextKeyUID, uint(7))
+	preferenceCtx.Set(global.ContextKeyRequestStartTime, time.Now())
+	UserTodoController{}.UpdateReminderPreference(preferenceCtx)
+	if preferenceRecorder.Code != http.StatusOK || fake.preferenceUID != 7 || fake.preferenceInApp || fake.preferenceSMS {
+		t.Fatalf("preference status=%d uid=%d in_app=%v sms=%v body=%s", preferenceRecorder.Code, fake.preferenceUID, fake.preferenceInApp, fake.preferenceSMS, preferenceRecorder.Body.String())
+	}
 }
 
 type fakeUserTodoService struct {
-	createUID   uint
-	createTitle string
-	statusUID   uint
-	statusID    uint
-	status      string
+	createUID       uint
+	createTitle     string
+	statusUID       uint
+	statusID        uint
+	status          string
+	preferenceUID   uint
+	preferenceInApp bool
+	preferenceSMS   bool
 }
 
 func (f *fakeUserTodoService) List(context.Context, uint, *form.UserTodoList) (*resources.Collection, error) {
@@ -81,4 +96,15 @@ func (f *fakeUserTodoService) UpdateStatus(_ context.Context, uid, id uint, stat
 
 func (f *fakeUserTodoService) DeleteManual(context.Context, uint, uint) error {
 	return nil
+}
+
+func (f *fakeUserTodoService) GetReminderPreference(context.Context, uint) (*todo.ReminderPreference, error) {
+	return &todo.ReminderPreference{InAppEnabled: true}, nil
+}
+
+func (f *fakeUserTodoService) UpdateReminderPreference(_ context.Context, uid uint, inAppEnabled, smsEnabled bool) (*todo.ReminderPreference, error) {
+	f.preferenceUID = uid
+	f.preferenceInApp = inAppEnabled
+	f.preferenceSMS = smsEnabled
+	return &todo.ReminderPreference{InAppEnabled: inAppEnabled, SMSEnabled: smsEnabled}, nil
 }

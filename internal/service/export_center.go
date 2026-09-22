@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -29,7 +31,10 @@ const (
 	exportManualRetryLimit = 3
 )
 
-var ErrExportRecordTableMissing = errors.New("sys_export_records table is missing")
+var (
+	ErrExportRecordTableMissing = errors.New("sys_export_records table is missing")
+	ErrExportRecordFinalized    = errors.New("export record is already finalized")
+)
 
 // ExportCenterService 统一导出中心服务。
 type ExportCenterService struct {
@@ -102,6 +107,7 @@ func (s *ExportCenterService) CreateRecord(ctx context.Context, input ExportReco
 	}
 
 	record := model.NewSysExportRecord()
+	record.PublicID = uuid.NewString()
 	record.Scene = strings.TrimSpace(input.Scene)
 	record.TaskRunID = input.TaskRunID
 	record.TriggerUserID = input.TriggerUserID
@@ -116,12 +122,104 @@ func (s *ExportCenterService) CreateRecord(ctx context.Context, input ExportReco
 	return record, nil
 }
 
+// ClaimExecution 原子占有一次导出执行。正常并发只能有一个 pending 记录进入 running；
+// 相同 executionToken 的 Asynq 后续重试可接管自身遗留的 running 状态。
+func (s *ExportCenterService) ClaimExecution(ctx context.Context, taskRunID uint, executionToken string) (*model.SysExportRecord, bool, error) {
+	if taskRunID == 0 {
+		return nil, false, nil
+	}
+	executionToken = strings.TrimSpace(executionToken)
+	if executionToken == "" {
+		return nil, false, fmt.Errorf("export execution token is required")
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return nil, false, err
+	}
+
+	now := utils.FormatDate{Time: time.Now()}
+	query := db.Model(&model.SysExportRecord{}).
+		Where("task_run_id = ?", taskRunID).
+		Where("status IN ? OR (status = ? AND execution_token = ?)",
+			[]string{model.TaskRunStatusPending, model.TaskRunStatusRetrying},
+			model.TaskRunStatusRunning,
+			executionToken)
+	result := query.Updates(map[string]any{
+		"status":          model.TaskRunStatusRunning,
+		"execution_token": executionToken,
+		"progress":        exportProgressPending,
+		"processed_count": uint64(0),
+		"started_at":      &now,
+		"finished_at":     nil,
+		"error_message":   "",
+	})
+	if result.Error != nil {
+		return nil, false, result.Error
+	}
+	record := model.NewSysExportRecord()
+	if err := db.Where("task_run_id = ?", taskRunID).First(record).Error; err != nil {
+		return nil, false, err
+	}
+	claimed := result.RowsAffected > 0
+	// MySQL DATETIME 只有秒精度；重试在同一秒接管 running 时各字段可能未变化，
+	// RowsAffected 会是 0。Asynq 不会在上一尝试仍运行时启动其重试，因此该分支可视为已接管。
+	if !claimed && record.Status == model.TaskRunStatusRunning && record.ExecutionToken == executionToken {
+		claimed = true
+	}
+	return record, claimed, nil
+}
+
+// MarkPendingForRetry 释放本次执行占有，让 Asynq 的下一次自动重试重新领取。
+func (s *ExportCenterService) MarkPendingForRetry(ctx context.Context, taskRunID uint, taskErr error) error {
+	if taskRunID == 0 {
+		return nil
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return err
+	}
+	updates := map[string]any{
+		"status":          model.TaskRunStatusPending,
+		"execution_token": "",
+		"finished_at":     nil,
+	}
+	if taskErr != nil {
+		updates["error_message"] = strings.TrimSpace(taskErr.Error())
+	}
+	result := db.Model(&model.SysExportRecord{}).
+		Where("task_run_id = ? AND status = ?", taskRunID, model.TaskRunStatusRunning).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	var record model.SysExportRecord
+	if err := db.Select("status").Where("task_run_id = ?", taskRunID).First(&record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("export record for task run %d not found", taskRunID)
+		}
+		return err
+	}
+	if record.Status != model.TaskRunStatusSuccess && record.Status != model.TaskRunStatusCanceled {
+		return nil
+	}
+	return fmt.Errorf("%w: task run %d", ErrExportRecordFinalized, taskRunID)
+}
+
 func (s *ExportCenterService) MarkRunning(ctx context.Context, taskRunID uint) error {
 	if taskRunID == 0 {
 		return nil
 	}
 	now := utils.FormatDate{Time: time.Now()}
-	return s.updateByTaskRunID(ctx, taskRunID, map[string]any{
+	return s.updateActiveByTaskRunID(ctx, taskRunID, map[string]any{
 		"status":          model.TaskRunStatusRunning,
 		"progress":        exportProgressPending,
 		"processed_count": uint64(0),
@@ -136,7 +234,7 @@ func (s *ExportCenterService) MarkRunningWithTotal(ctx context.Context, taskRunI
 	}
 	now := utils.FormatDate{Time: time.Now()}
 	_, normalizedTotal, progress := normalizeExportProgressCounts(0, totalCount)
-	return s.updateByTaskRunID(ctx, taskRunID, map[string]any{
+	return s.updateActiveByTaskRunID(ctx, taskRunID, map[string]any{
 		"status":          model.TaskRunStatusRunning,
 		"progress":        progress,
 		"total_count":     normalizedTotal,
@@ -151,7 +249,7 @@ func (s *ExportCenterService) UpdateProgress(ctx context.Context, taskRunID uint
 		return nil
 	}
 	normalizedProcessed, normalizedTotal, progress := normalizeExportProgressCounts(processedCount, totalCount)
-	return s.updateByTaskRunID(ctx, taskRunID, map[string]any{
+	return s.updateActiveByTaskRunID(ctx, taskRunID, map[string]any{
 		"progress":        progress,
 		"total_count":     normalizedTotal,
 		"processed_count": normalizedProcessed,
@@ -159,11 +257,25 @@ func (s *ExportCenterService) UpdateProgress(ctx context.Context, taskRunID uint
 }
 
 func (s *ExportCenterService) MarkSuccess(ctx context.Context, taskRunID uint, input ExportRecordSuccessInput) error {
+	_, _, err := s.CommitSuccess(ctx, taskRunID, input)
+	return err
+}
+
+// CommitSuccess 以条件更新提交导出结果。并发 worker 只有第一个提交者获胜，
+// 后续提交复用已完成记录，调用方可据此清理自己生成但未被采用的文件。
+func (s *ExportCenterService) CommitSuccess(ctx context.Context, taskRunID uint, input ExportRecordSuccessInput) (*model.SysExportRecord, bool, error) {
 	if taskRunID == 0 {
-		return nil
+		return nil, false, nil
 	}
 	if input.File == nil || input.File.ID == 0 {
-		return fmt.Errorf("export file is required")
+		return nil, false, fmt.Errorf("export file is required")
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return nil, false, err
 	}
 
 	now := utils.FormatDate{Time: time.Now()}
@@ -172,8 +284,9 @@ func (s *ExportCenterService) MarkSuccess(ctx context.Context, taskRunID uint, i
 		fileName = resolveExportFileName(input.File)
 	}
 
-	return s.updateByTaskRunID(ctx, taskRunID, map[string]any{
+	updates := map[string]any{
 		"status":          model.TaskRunStatusSuccess,
+		"execution_token": "",
 		"progress":        exportProgressDone,
 		"file_id":         input.File.ID,
 		"file_uuid":       input.File.UUID,
@@ -182,7 +295,27 @@ func (s *ExportCenterService) MarkSuccess(ctx context.Context, taskRunID uint, i
 		"error_message":   "",
 		"finished_at":     &now,
 		"processed_count": gorm.Expr("CASE WHEN total_count > 0 THEN total_count ELSE processed_count END"),
-	})
+	}
+	if exportRecordFileExpirySupported(db) {
+		updates["file_expires_at"] = input.File.ExpiresAt
+	}
+	result := db.Model(&model.SysExportRecord{}).
+		Where("task_run_id = ? AND status NOT IN ?", taskRunID, []string{model.TaskRunStatusSuccess, model.TaskRunStatusCanceled}).
+		Updates(updates)
+	if result.Error != nil {
+		return nil, false, result.Error
+	}
+	record := model.NewSysExportRecord()
+	if err := db.Where("task_run_id = ?", taskRunID).First(record).Error; err != nil {
+		return nil, false, err
+	}
+	if result.RowsAffected > 0 {
+		return record, true, nil
+	}
+	if record.Status == model.TaskRunStatusSuccess {
+		return record, false, nil
+	}
+	return record, false, fmt.Errorf("%w: task run %d status is %s", ErrExportRecordFinalized, taskRunID, record.Status)
 }
 
 func (s *ExportCenterService) MarkFailed(ctx context.Context, taskRunID uint, taskErr error) error {
@@ -191,13 +324,37 @@ func (s *ExportCenterService) MarkFailed(ctx context.Context, taskRunID uint, ta
 	}
 	now := utils.FormatDate{Time: time.Now()}
 	updates := map[string]any{
-		"status":      model.TaskRunStatusFailed,
-		"finished_at": &now,
+		"status":          model.TaskRunStatusFailed,
+		"execution_token": "",
+		"finished_at":     &now,
 	}
 	if taskErr != nil {
 		updates["error_message"] = strings.TrimSpace(taskErr.Error())
 	}
-	return s.updateByTaskRunID(ctx, taskRunID, updates)
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return err
+	}
+	result := db.Model(&model.SysExportRecord{}).
+		Where("task_run_id = ? AND status NOT IN ?", taskRunID, []string{model.TaskRunStatusSuccess, model.TaskRunStatusCanceled}).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	var count int64
+	if err := db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", taskRunID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("export record for task run %d not found", taskRunID)
+	}
+	return nil
 }
 
 func (s *ExportCenterService) MarkCanceledIfExists(ctx context.Context, taskRunID uint, cancelReason string) error {
@@ -216,13 +373,16 @@ func (s *ExportCenterService) MarkCanceledIfExists(ctx context.Context, taskRunI
 	}
 	now := utils.FormatDate{Time: time.Now()}
 	updates := map[string]any{
-		"status":      model.TaskRunStatusCanceled,
-		"finished_at": &now,
+		"status":          model.TaskRunStatusCanceled,
+		"execution_token": "",
+		"finished_at":     &now,
 	}
 	if strings.TrimSpace(cancelReason) != "" {
 		updates["error_message"] = strings.TrimSpace(cancelReason)
 	}
-	return db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", taskRunID).Updates(updates).Error
+	return db.Model(&model.SysExportRecord{}).
+		Where("task_run_id = ? AND status <> ?", taskRunID, model.TaskRunStatusSuccess).
+		Updates(updates).Error
 }
 
 // HasRecordForTaskRun 判断指定 task_run_id 是否仍关联导出记录。
@@ -283,6 +443,7 @@ func (s *ExportCenterService) ReassignTaskRun(ctx context.Context, oldTaskRunID,
 	updates := map[string]any{
 		"task_run_id":     newTaskRunID,
 		"status":          model.TaskRunStatusPending,
+		"execution_token": "",
 		"queue":           strings.TrimSpace(queueName),
 		"progress":        exportProgressPending,
 		"total_count":     uint64(0),
@@ -294,6 +455,9 @@ func (s *ExportCenterService) ReassignTaskRun(ctx context.Context, oldTaskRunID,
 		"error_message":   "",
 		"started_at":      nil,
 		"finished_at":     nil,
+	}
+	if exportRecordFileExpirySupported(db) {
+		updates["file_expires_at"] = nil
 	}
 	result := db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", oldTaskRunID).Updates(updates)
 	if result.Error != nil {
@@ -334,6 +498,9 @@ func (s *ExportCenterService) List(params *form.ExportRecordList) (*resources.Co
 		},
 		OrderBy: "created_at DESC, id DESC",
 	}
+	if exportRecordFileExpirySupported(s.db) {
+		listOptionalParams.SelectFields = append(listOptionalParams.SelectFields, "file_expires_at")
+	}
 
 	transformer := resources.NewExportRecordTransformer()
 	if s.db != nil {
@@ -373,6 +540,9 @@ func (s *ExportCenterService) List(params *form.ExportRecordList) (*resources.Co
 	if !exportRecordsTableReady(db) {
 		return nil, ErrExportRecordTableMissing
 	}
+	if exportRecordFileExpirySupported(db) {
+		listOptionalParams.SelectFields = append(listOptionalParams.SelectFields, "file_expires_at")
+	}
 
 	recordModel.SetDB(db)
 	total, collection, err := model.ListPageE(recordModel, params.Page, params.PerPage, condition, args, listOptionalParams)
@@ -383,12 +553,76 @@ func (s *ExportCenterService) List(params *form.ExportRecordList) (*resources.Co
 	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
+// MyList 在查询层强制限定当前用户，避免调用方通过请求参数覆盖数据范围。
+func (s *ExportCenterService) MyList(ctx context.Context, userID uint, params *form.ExportRecordList) (*resources.Collection, error) {
+	if userID == 0 {
+		return nil, e.NewBusinessError(e.NotFound)
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return nil, err
+	}
+	query := db.Model(&model.SysExportRecord{}).Where("trigger_user_id = ?", userID)
+	if scene := strings.TrimSpace(params.Scene); scene != "" {
+		query = query.Where("scene = ?", scene)
+	}
+	if status := strings.TrimSpace(params.Status); status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if publicID := strings.TrimSpace(params.PublicID); publicID != "" {
+		query = query.Where("public_id = ?", publicID)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if total == 0 {
+		return resources.NewMyExportRecordCollection(params.Page, params.PerPage, 0, nil), nil
+	}
+	fields := []string{"public_id", "scene", "status", "progress", "total_count", "processed_count", "file_uuid", "file_name", "file_size", "file_expires_at", "format", "created_at", "finished_at"}
+	rows := make([]*model.SysExportRecord, 0, params.PerPage)
+	if err := query.Select(fields).Order("created_at DESC, id DESC").Scopes(model.NewSysExportRecord().Paginate(params.Page, params.PerPage)).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return resources.NewMyExportRecordCollection(params.Page, params.PerPage, total, rows), nil
+}
+
+func (s *ExportCenterService) MyDetail(ctx context.Context, userID uint, publicID string) (*resources.MyExportRecordResources, error) {
+	if userID == 0 || strings.TrimSpace(publicID) == "" {
+		return nil, e.NewBusinessError(e.NotFound)
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return nil, err
+	}
+	var record model.SysExportRecord
+	if err := db.Where("public_id = ? AND trigger_user_id = ?", strings.TrimSpace(publicID), userID).First(&record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	return resources.NewMyExportRecordResource(&record), nil
+}
+
+// exportRecordFileExpirySupported 兼容开发期已执行过旧版初始迁移的数据库；
+// 新安装会由初始迁移直接创建该字段，旧开发库在重置前仍可读取导出列表。
+func exportRecordFileExpirySupported(db *gorm.DB) bool {
+	return db != nil && db.Migrator().HasColumn(&model.SysExportRecord{}, "file_expires_at")
+}
+
 func (s *ExportCenterService) Detail(id uint) (any, error) {
 	record := model.NewSysExportRecord()
 	var db *gorm.DB
 	if s.db != nil {
 		if err := ensureExportRecordTable(s.db); err != nil {
-			return nil, e.NewBusinessError(e.NotFound)
+			return nil, e.NewDependencyNotReadyError()
 		}
 		db = s.db
 		record.SetDB(s.db)
@@ -399,10 +633,16 @@ func (s *ExportCenterService) Detail(id uint) (any, error) {
 			return nil, err
 		}
 		if err := ensureExportRecordTable(db); err != nil {
-			return nil, e.NewBusinessError(e.NotFound)
+			return nil, e.NewDependencyNotReadyError()
 		}
 	}
-	if err := record.GetById(id); err != nil || record.ID == 0 {
+	if err := record.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if record.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	s.decorateExportRetryState(context.Background(), db, []*model.SysExportRecord{record})
@@ -578,7 +818,7 @@ func evaluateExportRetryState(run *model.TaskRun, definition *model.TaskDefiniti
 	return true, ""
 }
 
-func (s *ExportCenterService) updateByTaskRunID(ctx context.Context, taskRunID uint, updates map[string]any) error {
+func (s *ExportCenterService) updateActiveByTaskRunID(ctx context.Context, taskRunID uint, updates map[string]any) error {
 	db, err := s.dbOrDefault(ctx)
 	if err != nil {
 		return err
@@ -586,14 +826,26 @@ func (s *ExportCenterService) updateByTaskRunID(ctx context.Context, taskRunID u
 	if err := ensureExportRecordTable(db); err != nil {
 		return err
 	}
-	result := db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", taskRunID).Updates(updates)
+	result := db.Model(&model.SysExportRecord{}).
+		Where("task_run_id = ? AND status NOT IN ?", taskRunID, []string{model.TaskRunStatusSuccess, model.TaskRunStatusCanceled}).
+		Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("export record for task run %d not found", taskRunID)
+	if result.RowsAffected > 0 {
+		return nil
 	}
-	return nil
+	var record model.SysExportRecord
+	if err := db.Select("status").Where("task_run_id = ?", taskRunID).First(&record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("export record for task run %d not found", taskRunID)
+		}
+		return err
+	}
+	if record.Status != model.TaskRunStatusSuccess && record.Status != model.TaskRunStatusCanceled {
+		return nil
+	}
+	return fmt.Errorf("%w: task run %d", ErrExportRecordFinalized, taskRunID)
 }
 
 func normalizeExportProgressCounts(processedCount, totalCount uint64) (uint64, uint64, uint8) {
@@ -613,7 +865,7 @@ func normalizeExportProgressCounts(processedCount, totalCount uint64) (uint64, u
 // sys_export_records 表存在性探测使用 sync.Once + atomic.Bool 缓存。
 //
 // 背景：原实现中 ensureExportRecordTable 在每次 CreateRecord / UpdateProgress /
-// MarkSuccess / MarkFailed / List / Detail / updateByTaskRunID 等
+// MarkSuccess / MarkFailed / List / Detail 等
 // 路径都会调用 db.Migrator().HasTable(&model.SysExportRecord{})。在 MySQL 下，
 // 该调用会真实下发一次 INFORMATION_SCHEMA 查询，纯属重复劳动，因为应用启动后
 // 该表是否存在不会再发生变化（不会被在线 drop）。

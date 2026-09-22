@@ -369,7 +369,13 @@ func (s *TaskCenterService) triggerCronTask(ctx context.Context, definition *mod
 // RetryTask 重试失败类任务，重试时会创建一条新的执行记录并挂到同一重试链路下。
 func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUserID uint, triggerAccount string) (map[string]any, error) {
 	runModel, err := loadTaskRunByID(runID)
-	if err != nil || runModel == nil || runModel.ID == 0 {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if runModel == nil || runModel.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	if !isTaskRunRetryableStatus(runModel.Status) {
@@ -562,7 +568,13 @@ func enqueueRetryRunAfterChainCheck(ctx context.Context, db *gorm.DB, recorder R
 // CancelTask 取消待执行或执行中的异步任务。
 func (s *TaskCenterService) CancelTask(ctx context.Context, runID uint, triggerUserID uint, triggerAccount string, cancelReason string) (map[string]any, error) {
 	runModel, err := loadTaskRunByID(runID)
-	if err != nil || runModel == nil || runModel.ID == 0 {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if runModel == nil || runModel.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 

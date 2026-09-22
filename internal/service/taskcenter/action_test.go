@@ -618,6 +618,23 @@ func TestRetryTaskRespectsCurrentDefinition(t *testing.T) {
 	}
 }
 
+func TestRetryAndCancelPreserveTaskRunLoadFailure(t *testing.T) {
+	loadErr := stderrors.New("database unavailable")
+	restoreRun := setTaskRunLoaderForTest(func(uint) (*model.TaskRun, error) {
+		return nil, loadErr
+	})
+	defer restoreRun()
+
+	_, retryErr := NewTaskCenterService().RetryTask(context.Background(), 101, 1, "tester")
+	if !stderrors.Is(retryErr, loadErr) {
+		t.Fatalf("RetryTask should preserve technical load error, got %T: %v", retryErr, retryErr)
+	}
+	_, cancelErr := NewTaskCenterService().CancelTask(context.Background(), 101, 1, "tester", "")
+	if !stderrors.Is(cancelErr, loadErr) {
+		t.Fatalf("CancelTask should preserve technical load error, got %T: %v", cancelErr, cancelErr)
+	}
+}
+
 func TestRetryTaskRejectsSuccessfulRun(t *testing.T) {
 	restoreRun := setTaskRunLoaderForTest(func(runID uint) (*model.TaskRun, error) {
 		return &model.TaskRun{

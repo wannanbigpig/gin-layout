@@ -3,6 +3,7 @@ package taskcenter
 import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
+	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
 
 type listQuery struct {
@@ -23,12 +24,15 @@ func (q *listQuery) addLike(field, value string) *listQuery {
 	return q
 }
 
-func (q *listQuery) addCreatedAtRange(startTime, endTime string) *listQuery {
+func (q *listQuery) addTimeRange(field, startTime, endTime string) *listQuery {
+	if field != form.TaskRunTimeBasisFinishedAt {
+		field = form.TaskRunTimeBasisCreatedAt
+	}
 	if t, ok := utils.ParseTimeBoundary(startTime); ok {
-		q.QueryBuilder.AddCondition("created_at >= ?", t)
+		q.QueryBuilder.AddCondition(field+" >= ?", t)
 	}
 	if t, ok := utils.ParseTimeBoundary(endTime); ok {
-		q.QueryBuilder.AddCondition("created_at <= ?", t)
+		q.QueryBuilder.AddCondition(field+" <= ?", t)
 	}
 	return q
 }

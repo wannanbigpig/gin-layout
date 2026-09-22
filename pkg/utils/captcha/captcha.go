@@ -2,12 +2,13 @@ package captcha
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
-	"uuid"
-
 	"github.com/mojocn/base64Captcha"
+	"github.com/redis/go-redis/v9"
+	"uuid"
 
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
@@ -19,7 +20,7 @@ type Item struct {
 	Answer string `json:"answer"`
 }
 
-// 内存存储（当 Redis 不可用时使用）
+// 内存存储（未启用 Redis 时使用）
 type memoryStore struct {
 	data map[string]string
 	mu   sync.RWMutex
@@ -57,6 +58,17 @@ func (m *memoryStore) Delete(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.data, id)
+}
+
+func (m *memoryStore) VerifyAndDelete(id, value string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	answer, ok := m.data[id]
+	if !ok || !equalIgnoreCase(answer, value) {
+		return false
+	}
+	delete(m.data, id)
+	return true
 }
 
 const (
@@ -104,64 +116,59 @@ func initCaptcha() {
 }
 
 // setCaptchaAnswer 存储验证码答案
-func setCaptchaAnswer(id, answer string) {
+func setCaptchaAnswer(id, answer string) error {
 	cfg := config.GetConfig()
-	redisClient := data.RedisClient()
-	if cfg != nil && cfg.Redis.Enable && redisClient != nil {
-		// 使用 Redis 存储
-		ctx, cancel := withRedisTimeout()
-		defer cancel()
-		key := captchaRedisKeyPrefix + id
-		if err := redisClient.Set(ctx, key, answer, captchaExpiration).Err(); err != nil {
-			// 记录日志但不返回错误，验证码仍可通过内存存储工作
+	if cfg != nil && cfg.Redis.Enable {
+		redisClient := data.RedisClient()
+		if redisClient == nil {
+			if err := data.GetRedisInitError(); err != nil {
+				return fmt.Errorf("store captcha answer in redis: %w", err)
+			}
+			return fmt.Errorf("store captcha answer in redis: %w", data.ErrRedisUnavailable)
 		}
-	} else {
-		// 使用内存存储
-		memStore.Set(id, answer, captchaExpiration)
+		return setCaptchaAnswerInRedis(redisClient, id, answer)
 	}
+	memStore.Set(id, answer, captchaExpiration)
+	return nil
 }
 
-// getCaptchaAnswer 获取验证码答案
-func getCaptchaAnswer(id string) (string, bool) {
-	cfg := config.GetConfig()
-	redisClient := data.RedisClient()
-	if cfg != nil && cfg.Redis.Enable && redisClient != nil {
-		// 从 Redis 获取
-		ctx, cancel := withRedisTimeout()
-		defer cancel()
-		key := captchaRedisKeyPrefix + id
-		answer, err := redisClient.Get(ctx, key).Result()
-		if err != nil {
-			return "", false
-		}
-		return answer, true
+func setCaptchaAnswerInRedis(redisClient *redis.Client, id, answer string) error {
+	if redisClient == nil {
+		return data.ErrRedisUnavailable
 	}
-	// 从内存获取
-	return memStore.Get(id)
+	ctx, cancel := withRedisTimeout()
+	defer cancel()
+	key := captchaRedisKeyPrefix + id
+	if err := redisClient.Set(ctx, key, answer, captchaExpiration).Err(); err != nil {
+		return fmt.Errorf("set captcha answer: %w", err)
+	}
+	return nil
 }
 
-// deleteCaptchaAnswer 删除验证码答案（验证后删除）
-func deleteCaptchaAnswer(id string) {
+// verifyAndConsumeCaptchaAnswer 原子校验并消费验证码。
+// Redis 模式不依赖生成验证码的进程内存，可用于负载均衡后的多实例校验。
+func verifyAndConsumeCaptchaAnswer(id, value string) bool {
 	cfg := config.GetConfig()
 	redisClient := data.RedisClient()
 	if cfg != nil && cfg.Redis.Enable && redisClient != nil {
-		// 从 Redis 删除
 		ctx, cancel := withRedisTimeout()
 		defer cancel()
 		key := captchaRedisKeyPrefix + id
-		if err := redisClient.Del(ctx, key).Err(); err != nil {
-			// 记录日志但不返回错误，验证码仍可通过内存存储工作
-		}
-	} else {
-		// 从内存删除
-		memStore.Delete(id)
+		const script = `local answer=redis.call('GET',KEYS[1]); if not answer then return 0 end; if string.lower(answer)~=string.lower(ARGV[1]) then return 0 end; redis.call('DEL',KEYS[1]); return 1`
+		verified, err := redisClient.Eval(ctx, script, []string{key}, value).Int()
+		return err == nil && verified == 1
 	}
+	return memStore.VerifyAndDelete(id, value)
 }
 
 // Generate 创建验证码
 // 返回验证码 ID、base64 编码的图片和答案（本地环境返回答案，其他环境不返回）
 // 验证码为4位字母数字混合
 func Generate() (item *Item, err error) {
+	return generateWithStore(setCaptchaAnswer)
+}
+
+func generateWithStore(storeAnswer func(string, string) error) (item *Item, err error) {
 	// 初始化验证码实例
 	initCaptcha()
 
@@ -169,16 +176,15 @@ func Generate() (item *Item, err error) {
 	captchaID := uuid.New().String()
 
 	// 生成验证码（返回内部 ID、base64 编码的图片、答案和可能的错误）
-	internalID, b64s, answer, err := captchaInstance.Generate()
+	_, b64s, answer, err := captchaInstance.Generate()
 	if err != nil {
 		return nil, err
 	}
 
 	// 存储验证码答案（使用我们的 UUID 作为 key，存储实际的验证码文本）
-	setCaptchaAnswer(captchaID, answer)
-
-	// 同时存储内部 ID 到 UUID 的映射，以便后续验证时能找到
-	setCaptchaAnswer("internal:"+captchaID, internalID)
+	if err := storeAnswer(captchaID, answer); err != nil {
+		return nil, err
+	}
 
 	// 添加 data URI 前缀（base64Captcha 已经返回了 base64 字符串）
 	if len(b64s) > 0 && b64s[:5] != "data:" {
@@ -201,36 +207,7 @@ func Generate() (item *Item, err error) {
 
 // Verify 校验验证码
 func Verify(id, value string) bool {
-	// 初始化验证码实例
-	initCaptcha()
-
-	// 获取存储的内部验证码 ID
-	internalID, ok := getCaptchaAnswer("internal:" + id)
-	if !ok {
-		// 如果找不到内部 ID，尝试从存储中获取答案进行直接验证
-		answer, ok := getCaptchaAnswer(id)
-		if !ok {
-			return false
-		}
-		// 比较验证码（不区分大小写）
-		if !equalIgnoreCase(answer, value) {
-			return false
-		}
-		// 验证成功后删除
-		deleteCaptchaAnswer(id)
-		return true
-	}
-
-	// 使用 base64Captcha 的验证方法
-	// 第三个参数 true 表示验证后删除
-	if captchaInstance.Verify(internalID, value, true) {
-		// 验证成功后删除我们的存储
-		deleteCaptchaAnswer(id)
-		deleteCaptchaAnswer("internal:" + id)
-		return true
-	}
-
-	return false
+	return verifyAndConsumeCaptchaAnswer(id, value)
 }
 
 // equalIgnoreCase 不区分大小写比较字符串

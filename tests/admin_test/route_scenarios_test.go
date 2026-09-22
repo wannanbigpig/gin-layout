@@ -103,12 +103,15 @@ var businessScenarioRoutes = []string{
 	"GET /admin/v1/task/run/stats",
 	"GET /admin/v1/task/run/stats/trend",
 	"GET /admin/v1/todo/list",
+	"GET /admin/v1/todo/reminder-preference",
 	"GET /admin/v1/todo/summary",
 	"POST /admin/v1/todo/create",
 	"POST /admin/v1/todo/update",
 	"POST /admin/v1/todo/status",
 	"POST /admin/v1/todo/delete",
+	"POST /admin/v1/todo/reminder-preference",
 	"GET /admin/v1/login-captcha",
+	"GET /admin/v1/login/options",
 }
 
 // contractScenarioRoutes 已有明确的参数、NotFound、权限或幂等边界断言，但尚未闭环成功状态流。
@@ -119,6 +122,8 @@ var contractScenarioRoutes = []string{
 	"GET /admin/v1/log/request/detail",
 	"GET /admin/v1/log/request/self-detail",
 	"POST /admin/v1/login",
+	"GET /admin/v1/system/sms/config",
+	"POST /admin/v1/system/sms/config",
 	"POST /admin/v1/permission/update",
 	"GET /admin/v1/system/export/detail",
 	"POST /admin/v1/system/file/batch-delete",
@@ -146,6 +151,8 @@ var dependencyScenarioRoutes = []string{
 	"POST /admin/v1/common/upload",
 	"GET /admin/v1/common/ws",
 	"POST /admin/v1/common/ws-ticket",
+	"POST /admin/v1/login/sms",
+	"POST /admin/v1/login/sms/send-code",
 	"POST /admin/v1/log/request/export",
 	"POST /admin/v1/system/file/export",
 	"POST /admin/v1/system/file/upload/complete",
@@ -156,6 +163,7 @@ var dependencyScenarioRoutes = []string{
 	"POST /admin/v1/system/file/upload/multipart/abort",
 	"POST /admin/v1/system/file/upload/multipart/complete",
 	"POST /admin/v1/system/file/upload/multipart/init",
+	"POST /admin/v1/system/sms/test",
 }
 
 // TestAllAdminRoutesHaveExplicitScenarioClassification 防止新增路由只有自动 smoke 请求，

@@ -129,6 +129,25 @@ func RedisClient() *redis.Client {
 	return currentRedis()
 }
 
+// RedisInitializedClient returns the already initialized client without
+// performing connection attempts from a request path.
+func RedisInitializedClient() *redis.Client {
+	if redisDisabled() {
+		return nil
+	}
+	return currentRedis()
+}
+
+// RedisInitializedReady checks the cached runtime health of an initialized
+// client without triggering lazy initialization when Redis is unavailable.
+func RedisInitializedReady() bool {
+	client := RedisInitializedClient()
+	if client == nil {
+		return false
+	}
+	return redisHealth.Check(func() error { return redisRuntimeProbe(client) }).Ready
+}
+
 // GetRedisInitError 返回 Redis 初始化错误，供外部检查
 func GetRedisInitError() error {
 	return redisInitError

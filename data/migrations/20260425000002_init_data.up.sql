@@ -9,8 +9,8 @@ INSERT INTO `admin_user` (`id`, `nickname`, `username`, `password`, `phone_numbe
                             `country_code`, `email`, `avatar`, `status`,
                             `is_super_admin`,
                             `created_at`, `updated_at`, `deleted_at`)
-VALUES (1, '超级管理员', 'super_admin', '$2a$10$OuKQoJGH7xkCgwFISmDve.euBDbOCnYEJX6R22QMeLxCLwdoJ4iyi', '18888888888',
-        '8618888888888', '86', 'admin@go-layout.com', 'https://avatars.githubusercontent.com/u/48752601?v=4', 1, 1,
+VALUES (1, '超级管理员', 'super_admin', '$2a$10$OuKQoJGH7xkCgwFISmDve.euBDbOCnYEJX6R22QMeLxCLwdoJ4iyi', '',
+        '', '86', 'admin@go-layout.com', 'https://avatars.githubusercontent.com/u/48752601?v=4', 1, 1,
         @init_time, @init_time, 0);
 
 INSERT INTO `department` (`id`, `code`, `is_system`, `pid`, `pids`, `name`, `description`, `level`, `sort`,
@@ -82,7 +82,7 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (39, 'ant-design:search-outlined', 'adminLoginLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 31, 3, '0,29,31', 0, '', @init_time, @init_time, 0),
 (40, 'ant-design:search-outlined', 'requestLog:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 30, 3, '0,29,30', 0, '', @init_time, @init_time, 0),
 (42, 'ep:setting', '', 'system', '/system', 'SysConfig', 'System', '', '', '', 0.00, 1, 1, 1, 0, 0, 96, 1, 0, 1, '0', 5, '', @init_time, @init_time, 0),
-(43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system:config', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 10, '', @init_time, @init_time, 0),
+(43, 'ep:operation', '', 'config', '/system/config', '', 'SysConfig', 'system:config', '', '', 0.00, 1, 1, 1, 0, 0, 100, 2, 42, 2, '0,42', 13, '', @init_time, @init_time, 0),
 (44, 'ep:collection-tag', '', 'dict', '/system/dict', '', 'SysDict', 'system:dict', '', '', 0.00, 1, 1, 1, 0, 0, 90, 2, 42, 2, '0,42', 4, '', @init_time, @init_time, 0),
 (45, 'ant-design:search-outlined', 'sysConfig:list', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 100, 3, 43, 3, '0,42,43', 0, '', @init_time, @init_time, 0),
 (46, 'ant-design:plus-outlined', 'sysConfig:add', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 43, 3, '0,42,43', 0, '', @init_time, @init_time, 0),
@@ -127,7 +127,10 @@ INSERT INTO `menu` (`id`, `icon`, `code`, `path`, `full_path`, `redirect`, `name
 (86, 'ant-design:plus-outlined', 'product:create', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 90, 3, 84, 3, '0,83,84', 0, '', @init_time, @init_time, 0),
 (87, 'ant-design:edit-filled', 'product:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 80, 3, 84, 3, '0,83,84', 0, '', @init_time, @init_time, 0),
 (88, 'ant-design:delete-outlined', 'product:delete', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 70, 3, 84, 3, '0,83,84', 0, '', @init_time, @init_time, 0),
-(89, 'ep:list', '', 'todo/list', '/todo/list', '', 'TodoList', 'todo:index', '', '', 0.00, 1, 1, 0, 0, 0, 97, 2, 0, 1, '0', 0, '当前登录用户的个人与业务待办', @init_time, @init_time, 0);
+(89, 'ep:list', '', 'todo/list', '/todo/list', '', 'TodoList', 'todo:index', '', '', 0.00, 0, 1, 0, 0, 0, 97, 2, 0, 1, '0', 0, '仅从首页待办卡进入的隐藏路由', @init_time, @init_time, 0),
+(90, 'ep:message', 'sms:config', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 55, 3, 43, 3, '0,42,43', 0, '', @init_time, @init_time, 0),
+(91, 'ant-design:edit-filled', 'sms:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 54, 3, 43, 3, '0,42,43', 0, '', @init_time, @init_time, 0),
+(92, 'ep:promotion', 'sms:test', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 53, 3, 43, 3, '0,42,43', 0, '', @init_time, @init_time, 0);
 
 INSERT INTO `menu` (`icon`, `code`, `path`, `full_path`, `redirect`, `name`, `component_key`, `animate_enter`, `animate_leave`, `animate_duration`, `is_show`, `status`, `is_auth`, `is_external_links`, `is_new_window`, `sort`, `type`, `pid`, `level`, `pids`, `children_num`, `description`, `created_at`, `updated_at`, `deleted_at`)
 SELECT 'ant-design:setting-outlined', 'task:update', '', '', '', '', '', '', '', 0.00, 1, 1, 1, 0, 0, 50, 3, parent.`id`, parent.`level` + 1, CONCAT(parent.`pids`, ',', parent.`id`), 0, '', @init_time, @init_time, 0
@@ -240,7 +243,7 @@ SELECT `id`,
            WHEN 52 THEN '编辑'
            WHEN 53 THEN '删除'
            WHEN 54 THEN '任务中心'
-           WHEN 55 THEN '任务管理'
+           WHEN 55 THEN '任务运维'
            WHEN 56 THEN '列表'
            WHEN 57 THEN '触发任务'
            WHEN 58 THEN '重试任务'
@@ -274,6 +277,9 @@ SELECT `id`,
            WHEN 87 THEN '编辑'
            WHEN 88 THEN '删除'
            WHEN 89 THEN '我的待办'
+           WHEN 90 THEN '短信配置'
+           WHEN 91 THEN '更新短信配置'
+           WHEN 92 THEN '测试短信发送'
            ELSE ''
            END,
        `created_at`,
@@ -350,7 +356,7 @@ SELECT `id`,
            WHEN 52 THEN 'Edit'
            WHEN 53 THEN 'Delete'
            WHEN 54 THEN 'Task Center'
-           WHEN 55 THEN 'Task Management'
+           WHEN 55 THEN 'Task Operations'
            WHEN 56 THEN 'List'
            WHEN 57 THEN 'Trigger Task'
            WHEN 58 THEN 'Retry Task'
@@ -384,6 +390,9 @@ SELECT `id`,
            WHEN 87 THEN 'Edit'
            WHEN 88 THEN 'Delete'
            WHEN 89 THEN 'My Todos'
+           WHEN 90 THEN 'SMS Config'
+           WHEN 91 THEN 'Update SMS Config'
+           WHEN 92 THEN 'Test SMS Sending'
            ELSE ''
            END,
        `created_at`,
@@ -433,9 +442,14 @@ VALUES ('auth.login_lock_enabled', 'true', 'bool', 'auth', 1, 0, 1, '', 1, 89, '
        ('auth.login_max_failures', '5', 'number', 'auth', 1, 0, 1, '', 1, 88, '登录连续失败阈值', @init_time, @init_time, 0),
        ('auth.login_lock_minutes', '15', 'number', 'auth', 1, 0, 1, '', 1, 87, '登录锁定时长（分钟）', @init_time, @init_time, 0),
        ('task.cron_demo_enabled', 'false', 'bool', 'task', 1, 0, 1, '', 1, 80, '是否启用演示定时任务，默认关闭', @init_time, @init_time, 0),
-       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code"],"request_header":["authorization","auth","cookie","x-api-key"],"request_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","refresh-exp","cookie"],"response_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '请求日志脱敏字段配置', @init_time, @init_time, 0),
+       ('todo.reminder_enabled', 'true', 'bool', 'todo', 1, 0, 1, '', 1, 79, '是否启用待办临期与逾期提醒', @init_time, @init_time, 0),
+       ('todo.reminder_sms_enabled', 'false', 'bool', 'todo', 1, 0, 1, '', 1, 76, '是否启用待办提醒短信渠道，仍需用户主动开启', @init_time, @init_time, 0),
+       ('todo.reminder_lead_minutes', '1440', 'number', 'todo', 1, 0, 1, '', 1, 78, '待办到期前多少分钟发送站内提醒', @init_time, @init_time, 0),
+       ('todo.reminder_catchup_minutes', '10080', 'number', 'todo', 1, 0, 1, '', 1, 77, 'Cron 停机恢复后补发多少分钟内的逾期提醒', @init_time, @init_time, 0),
+       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code","sms_code","otp","captcha","code_hash"],"request_header":["authorization","auth","cookie","x-api-key"],"request_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","refresh-exp","cookie"],"response_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '请求日志脱敏字段配置', @init_time, @init_time, 0),
        ('storage.active_driver', 'local', 'string', 'storage', 1, 0, 0, 'storage', 1, 90, '当前启用的文件存储驱动', @init_time, @init_time, 0),
-       ('storage.config', '{"local":{},"aliyun_oss":{},"signed_url_ttl_seconds":300,"max_file_size_mb":10,"allowed_mime_types":[]}', 'json', 'storage', 1, 1, 0, 'storage', 1, 80, '文件存储配置', @init_time, @init_time, 0)
+       ('storage.config', '{"local":{},"aliyun_oss":{},"signed_url_ttl_seconds":300,"max_file_size_mb":10,"allowed_mime_types":[]}', 'json', 'storage', 1, 1, 0, 'storage', 1, 80, '文件存储配置', @init_time, @init_time, 0),
+       ('sms.config', '{"enabled":false,"providers":{"aliyun":{"enabled":false,"access_key_id":"","access_key_secret":"","endpoint":"https://dysmsapi.aliyuncs.com"}},"templates":{"aliyun":{"login_otp":{"sign_name":"","template_code":"","variables":["code"]},"todo_due":{"sign_name":"","template_code":"","variables":["title","due_at"]}}},"routes":{"login_otp":{"provider":"aliyun","template":"login_otp"}},"otp":{"ttl_seconds":300,"resend_interval_seconds":60,"max_attempts":5,"ip_limit_per_10_minutes":10,"phone_daily_limit":20,"global_daily_limit":1000}}', 'json', 'sms', 1, 1, 0, 'sms', 1, 70, '短信供应商、模板、场景路由与验证码配置', @init_time, @init_time, 0)
 ON DUPLICATE KEY UPDATE `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_dict_type` (`type_code`, `is_system`, `status`, `sort`, `remark`, `created_at`,
@@ -502,16 +516,21 @@ SELECT `id`,
            WHEN `config_key` = 'auth.login_max_failures' THEN '登录失败锁定阈值'
            WHEN `config_key` = 'auth.login_lock_minutes' THEN '登录失败锁定时长（分钟）'
            WHEN `config_key` = 'task.cron_demo_enabled' THEN '演示定时任务开关'
+           WHEN `config_key` = 'todo.reminder_enabled' THEN '待办到期提醒开关'
+           WHEN `config_key` = 'todo.reminder_sms_enabled' THEN '待办短信提醒开关'
+           WHEN `config_key` = 'todo.reminder_lead_minutes' THEN '待办提前提醒时间（分钟）'
+           WHEN `config_key` = 'todo.reminder_catchup_minutes' THEN '待办逾期补偿窗口（分钟）'
            WHEN `config_key` = 'audit.sensitive_fields' THEN '请求日志脱敏配置'
            WHEN `config_key` = 'storage.active_driver' THEN '当前存储驱动'
            WHEN `config_key` = 'storage.config' THEN '文件存储配置'
+           WHEN `config_key` = 'sms.config' THEN '短信配置'
            ELSE ''
            END,
        @init_time,
        @init_time
 FROM `sys_config`
 WHERE `deleted_at` = 0
-  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config')
+  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'todo.reminder_enabled', 'todo.reminder_sms_enabled', 'todo.reminder_lead_minutes', 'todo.reminder_catchup_minutes', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config', 'sms.config')
 ON DUPLICATE KEY UPDATE `config_name` = VALUES(`config_name`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_config_i18n` (`config_id`, `locale`, `config_name`, `created_at`, `updated_at`)
@@ -522,16 +541,21 @@ SELECT `id`,
            WHEN `config_key` = 'auth.login_max_failures' THEN 'Login Lock Max Failures'
            WHEN `config_key` = 'auth.login_lock_minutes' THEN 'Login Lock Minutes'
            WHEN `config_key` = 'task.cron_demo_enabled' THEN 'Cron Demo Enabled'
+           WHEN `config_key` = 'todo.reminder_enabled' THEN 'Todo Reminder Enabled'
+           WHEN `config_key` = 'todo.reminder_sms_enabled' THEN 'Todo SMS Reminder Enabled'
+           WHEN `config_key` = 'todo.reminder_lead_minutes' THEN 'Todo Reminder Lead Minutes'
+           WHEN `config_key` = 'todo.reminder_catchup_minutes' THEN 'Todo Reminder Catch-up Minutes'
            WHEN `config_key` = 'audit.sensitive_fields' THEN 'Request Log Mask Config'
            WHEN `config_key` = 'storage.active_driver' THEN 'Active Storage Driver'
            WHEN `config_key` = 'storage.config' THEN 'File Storage Config'
+           WHEN `config_key` = 'sms.config' THEN 'SMS Config'
            ELSE ''
            END,
        @init_time,
        @init_time
 FROM `sys_config`
 WHERE `deleted_at` = 0
-  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config')
+  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'todo.reminder_enabled', 'todo.reminder_sms_enabled', 'todo.reminder_lead_minutes', 'todo.reminder_catchup_minutes', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config', 'sms.config')
 ON DUPLICATE KEY UPDATE `config_name` = VALUES(`config_name`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_dict_type_i18n` (`dict_type_id`, `locale`, `type_name`, `created_at`, `updated_at`)
@@ -699,7 +723,8 @@ VALUES (10, 0, 'system', '系统管理模块', @init_time, @init_time),
        (13, 0, 'task', '任务中心模块', @init_time, @init_time),
        (14, 10, 'file', '文件资源模块', @init_time, @init_time),
        (15, 3, 'session', '在线会话模块', @init_time, @init_time),
-       (16, 0, 'product', '产品模块', @init_time, @init_time)
+       (16, 0, 'product', '产品模块', @init_time, @init_time),
+       (17, 10, 'sms', '短信配置模块', @init_time, @init_time)
 ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `updated_at` = VALUES(`updated_at`);
 
 COMMIT;

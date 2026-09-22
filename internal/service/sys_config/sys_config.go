@@ -2,6 +2,7 @@ package sys_config
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -27,6 +28,7 @@ var dedicatedManagedConfigKeys = map[string]struct{}{
 	AuditSensitiveFieldsConfigKey: {},
 	"storage.active_driver":       {},
 	"storage.config":              {},
+	"sms.config":                  {},
 }
 
 func NewSysConfigService() *SysConfigService {
@@ -63,7 +65,13 @@ func (s *SysConfigService) List(params *form.SysConfigList, locale string) (*res
 
 func (s *SysConfigService) Detail(id uint, locale string) (any, error) {
 	config := model.NewSysConfig()
-	if err := config.GetById(id); err != nil || config.ID == 0 {
+	if err := config.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if config.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	translations, err := model.NewSysConfigI18n().LocaleNameMapByConfigID(config.ID)
@@ -165,7 +173,13 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 
 	config := model.NewSysConfig()
 	if id > 0 {
-		if err := config.GetById(id); err != nil || config.ID == 0 {
+		if err := config.GetById(id); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return e.NewBusinessError(e.NotFound)
+			}
+			return err
+		}
+		if config.ID == 0 {
 			return e.NewBusinessError(e.NotFound)
 		}
 		// 专属配置由各自的受权接口维护，禁止通过通用系统参数写接口绕过权限。
@@ -191,6 +205,9 @@ func (s *SysConfigService) applyMutation(id uint, params *form.SysConfigPayload)
 	}
 	configValue := resolveMutationConfigValue(config, params.ConfigValue)
 	if err := validateConfigValue(params.ValueType, configValue); err != nil {
+		return err
+	}
+	if err := validateKnownConfigValue(params.ConfigKey, configValue); err != nil {
 		return err
 	}
 	if exists, err := model.NewSysConfig().ExistsByKeyExcludeID(params.ConfigKey, id); err != nil {
@@ -309,6 +326,17 @@ func validateConfigValue(valueType, value string) error {
 		}
 	default:
 		return e.NewBusinessError(e.InvalidParameter)
+	}
+	return nil
+}
+
+func validateKnownConfigValue(key, value string) error {
+	switch strings.TrimSpace(key) {
+	case TodoReminderLeadMinutesKey, TodoReminderCatchupMinutesKey:
+		minutes, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || minutes < 0 || minutes > TodoReminderMaxMinutes {
+			return e.NewBusinessError(e.InvalidParameter)
+		}
 	}
 	return nil
 }

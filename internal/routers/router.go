@@ -119,7 +119,9 @@ func buildLoginRateLimitConfig() middleware.RateLimitConfig {
 func loginRateLimitHandler() gin.HandlerFunc {
 	handler := middleware.RateLimitHandler(buildLoginRateLimitConfig())
 	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodPost || c.Request.URL.Path != "/admin/v1/login" {
+		path := c.Request.URL.Path
+		isLoginPath := path == "/admin/v1/login" || path == "/admin/v1/login/sms/send-code" || path == "/admin/v1/login/sms"
+		if c.Request.Method != http.MethodPost || !isLoginPath {
 			c.Next()
 			return
 		}
@@ -153,19 +155,23 @@ func AppRouteTreeWithOptions(options BuildOptions) RouteGroupDef {
 		Security: SecurityPublic,
 		Routes: []RouteDef{
 			{
-				Method: http.MethodGet,
-				Path:   "ping",
-				Title:  "ping",
-				Desc:   "服务心跳检测接口",
+				Method:    http.MethodGet,
+				Path:      "ping",
+				Title:     "ping",
+				Desc:      "服务心跳检测接口",
+				TitleI18n: builtInTitleI18n("ping"),
+				DescI18n:  builtInDescriptionI18n("服务心跳检测接口"),
 				Handlers: []gin.HandlerFunc{func(c *gin.Context) {
 					c.String(http.StatusOK, "pong")
 				}},
 			},
 			{
-				Method: http.MethodGet,
-				Path:   "health/readiness",
-				Title:  "readiness",
-				Desc:   "服务依赖就绪状态",
+				Method:    http.MethodGet,
+				Path:      "health/readiness",
+				Title:     "readiness",
+				Desc:      "服务依赖就绪状态",
+				TitleI18n: builtInTitleI18n("readiness"),
+				DescI18n:  builtInDescriptionI18n("服务依赖就绪状态"),
 				Handlers: []gin.HandlerFunc{func(c *gin.Context) {
 					status := buildReadinessStatus()
 					httpCode := http.StatusOK

@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"errors"
 	"sort"
 	"strings"
+
+	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
@@ -152,7 +155,13 @@ func (s *AdminUserService) snapshotAdminUserByUsername(username string) (map[str
 		return nil, e.NewBusinessError(e.InvalidParameter)
 	}
 	user := model.NewAdminUsers()
-	if err := user.GetDetail("username = ? AND deleted_at = 0", username); err != nil || user.ID == 0 {
+	if err := user.GetDetail("username = ? AND deleted_at = 0", username); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.UserDoesNotExist)
+		}
+		return nil, err
+	}
+	if user.ID == 0 {
 		return nil, e.NewBusinessError(e.UserDoesNotExist)
 	}
 	return s.snapshotAdminUserByID(user.ID)
@@ -160,7 +169,13 @@ func (s *AdminUserService) snapshotAdminUserByUsername(username string) (map[str
 
 func (s *AdminUserService) snapshotAdminUserByID(id uint) (map[string]any, error) {
 	user := model.NewAdminUsers()
-	if err := user.GetById(id); err != nil || user.ID == 0 {
+	if err := user.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.UserDoesNotExist)
+		}
+		return nil, err
+	}
+	if user.ID == 0 {
 		return nil, e.NewBusinessError(e.UserDoesNotExist)
 	}
 	deptIDs, err := model.NewAdminUserDeptMap().DeptIdsByUid(user.ID)
@@ -190,7 +205,13 @@ func (s *AdminUserService) snapshotAdminUserByID(id uint) (map[string]any, error
 
 func (s *AdminUserService) snapshotAdminUserRoleBinding(userID uint) (map[string]any, error) {
 	user := model.NewAdminUsers()
-	if err := user.GetById(userID); err != nil || user.ID == 0 {
+	if err := user.GetById(userID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.UserDoesNotExist)
+		}
+		return nil, err
+	}
+	if user.ID == 0 {
 		return nil, e.NewBusinessError(e.UserDoesNotExist)
 	}
 	roleIDs, err := model.NewAdminUserRoleMap().RoleIdsByUid(userID)

@@ -5,9 +5,13 @@ import "github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 const (
 	MessageCategoryExport = "export"
 	MessageCategorySystem = "system"
+	MessageCategoryTodo   = "todo"
 
 	MessageTopicExportFinished = "export.finished"
+	MessageTopicExportProgress = "export.progress"
 	MessageTopicManual         = "manual.notification"
+	MessageTopicTodoDueSoon    = "todo.due_soon"
+	MessageTopicTodoOverdue    = "todo.overdue"
 
 	MessageRecipientTypeAll  = "all"
 	MessageRecipientTypeUser = "user"

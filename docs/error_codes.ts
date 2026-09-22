@@ -14,6 +14,7 @@ export const ErrorCode = {
     UserDoesNotExist: 10001,
     UserDisable: 10002,
     ServiceDependencyNotReady: 10003,
+    NoExportData: 10004,
     TooManyRequests: 10102,
     FileIdentifierInvalid: 11001,
     FilePrivateAuthNeeded: 11002,
@@ -43,12 +44,7 @@ export const ErrorCode = {
     SamePassword: 20011,
     RoleNotFound: 20012,
     RoleExists: 20013,
-    RoleHasChildren: 20014,
-    RoleCannotDelete: 20015,
-    ParentRoleNotExists: 20016,
-    ParentRoleInvalid: 20017,
-    MaxRoleDepth: 20018,
-    MaxChildRoles: 20019,
+    RoleCannotDelete: 20014,
     MenuNotFound: 20020,
     MenuExists: 20021,
     MenuHasChildren: 20022,
@@ -80,6 +76,9 @@ export const ErrorCode = {
     RefreshTokenInvalid: 20048,
     CurrentPasswordRequired: 20049,
     CurrentPasswordWrong: 20050,
+    SMSCredentialInvalid: 20051,
+    SMSLoginDisabled: 20052,
+    SMSProviderFailed: 20053,
 } as const
 
 export type ErrorCodeName = keyof typeof ErrorCode

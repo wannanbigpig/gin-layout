@@ -29,6 +29,7 @@ func TestBuildConfigDiff(t *testing.T) {
 	newCfg.TrustedProxies = []string{"10.0.0.0/8"}
 	newCfg.Jwt.TTL = 999
 	newCfg.Jwt.SecretKey = "new-secret"
+	newCfg.Security.CredentialEncryptionKey = "new-credential-secret"
 	newCfg.Language = "en"
 
 	diff := BuildConfigDiff(oldCfg, newCfg)
@@ -43,6 +44,9 @@ func TestBuildConfigDiff(t *testing.T) {
 	}
 	if !diff.JWTSecretChanged {
 		t.Fatalf("expected jwt secret change")
+	}
+	if !diff.CredentialEncryptionKeyChanged {
+		t.Fatalf("expected credential encryption key change")
 	}
 	if !diff.BaseURLChanged {
 		t.Fatalf("expected base_url change")
@@ -71,6 +75,7 @@ func TestBuildAppliedConfigKeepsUnsupportedFields(t *testing.T) {
 		},
 	}
 	oldCfg.TrustedProxies = []string{"127.0.0.1"}
+	oldCfg.Security.CredentialEncryptionKey = "old-credential-secret"
 	oldCfg.Language = "zh_CN"
 
 	newCfg := &Conf{
@@ -85,6 +90,7 @@ func TestBuildAppliedConfigKeepsUnsupportedFields(t *testing.T) {
 		},
 	}
 	newCfg.TrustedProxies = []string{"10.0.0.0/8"}
+	newCfg.Security.CredentialEncryptionKey = "new-credential-secret"
 	newCfg.Language = "en"
 	newCfg.BaseURL = "https://cdn.example.com"
 
@@ -93,6 +99,9 @@ func TestBuildAppliedConfigKeepsUnsupportedFields(t *testing.T) {
 
 	if applied.Jwt.SecretKey != "old-secret" {
 		t.Fatalf("expected jwt secret to remain old, got %q", applied.Jwt.SecretKey)
+	}
+	if applied.Security.CredentialEncryptionKey != "old-credential-secret" {
+		t.Fatalf("expected credential encryption key to remain old, got %q", applied.Security.CredentialEncryptionKey)
 	}
 	if applied.Language != "zh_CN" {
 		t.Fatalf("expected language to remain old, got %q", applied.Language)

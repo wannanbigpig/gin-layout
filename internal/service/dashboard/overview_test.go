@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -341,6 +342,17 @@ func TestBuildActivitiesReturnsMeaningfulStructuredOperations(t *testing.T) {
 	insertActivity(7, "GET", 500, 0, "", "读取失败", now.Add(-2*time.Minute))
 	insertActivity(7, "GET", 0, 1, "", "查看敏感配置", now.Add(-time.Minute))
 	insertActivity(8, "DELETE", 0, 1, "", "其他用户删除", now)
+	for index := 0; index < 8; index++ {
+		createdAt := now.Add(time.Duration(index) * time.Second)
+		if err := db.Exec(`INSERT INTO request_logs (
+			created_at, updated_at, request_id, operator_id, operator_account, operator_name,
+			operation_name, method, base_url, request_kind, execution_time_scope,
+			response_status, operation_status, is_high_risk, change_diff, execution_time_us
+		) VALUES (?, ?, ?, 7, 'admin', '管理员', '生成 WebSocket 临时票据', 'POST', '/admin/v1/common/ws-ticket', 'http', 'request', 200, 0, 1, '', 1000)`,
+			createdAt, createdAt, fmt.Sprintf("ws-ticket-%d", index)).Error; err != nil {
+			t.Fatalf("insert websocket ticket activity failed: %v", err)
+		}
+	}
 
 	activities := buildActivities(db, 7)
 	if len(activities) != 4 {
@@ -469,6 +481,40 @@ func TestBuildStatisticsAggregatesSummaryAndTrend(t *testing.T) {
 	}
 	if stats.Storage == nil || stats.Storage.TotalCount != 2 {
 		t.Fatalf("unexpected storage stats: %#v", stats.Storage)
+	}
+}
+
+func TestBuildStatisticsSupportsThirtyDayAndCustomRanges(t *testing.T) {
+	db := newDashboardTestDB(t)
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.Local)
+	start := time.Date(2026, 8, 19, 0, 0, 0, 0, time.Local)
+	end := time.Date(2026, 9, 17, 0, 0, 0, 0, time.Local)
+	insertDailyRequestStat(t, db, start, 2, 0)
+	insertDailyRequestStat(t, db, end, 3, 1)
+
+	stats := buildStatisticsRange(db, now, start, end)
+	if stats.WindowDays != 30 || len(stats.Trend.Days) != 30 {
+		t.Fatalf("expected 30-day range, got window=%d points=%d", stats.WindowDays, len(stats.Trend.Days))
+	}
+	if stats.WindowStart != "2026-08-19" || stats.Summary.TotalRequests != 5 || stats.Summary.TotalErrors != 1 {
+		t.Fatalf("unexpected custom statistics: %#v", stats)
+	}
+}
+
+func TestNormalizeStatisticsRange(t *testing.T) {
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.Local)
+	start, end, err := normalizeStatisticsRange("", "", now)
+	if err != nil || start.Format("2006-01-02") != "2026-09-11" || end.Format("2006-01-02") != "2026-09-17" {
+		t.Fatalf("unexpected default range: %s - %s, err=%v", start, end, err)
+	}
+	for _, dates := range [][2]string{
+		{"2026-09-01", ""},
+		{"2026-09-18", "2026-09-17"},
+		{"2026-01-01", "2026-09-17"},
+	} {
+		if _, _, err := normalizeStatisticsRange(dates[0], dates[1], now); err == nil {
+			t.Fatalf("expected invalid range %q - %q to fail", dates[0], dates[1])
+		}
 	}
 }
 

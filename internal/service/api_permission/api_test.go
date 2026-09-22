@@ -19,11 +19,11 @@ func TestApiBuildListCondition(t *testing.T) {
 	}
 
 	condition, args := NewApiService().buildListCondition(params)
-	expected := "(name like ? OR route like ? OR code = ?) AND name like ? AND method = ? AND route like ? AND is_auth = ? AND is_effective = ?"
+	expected := "(name like ? OR name_i18n like ? OR route like ? OR code = ?) AND (name like ? OR name_i18n like ?) AND method = ? AND route like ? AND is_auth = ? AND is_effective = ?"
 	if condition != expected {
 		t.Fatalf("unexpected condition: %s", condition)
 	}
-	if len(args) != 8 {
+	if len(args) != 10 {
 		t.Fatalf("unexpected args len: %d", len(args))
 	}
 }

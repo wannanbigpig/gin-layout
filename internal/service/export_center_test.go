@@ -2,16 +2,65 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 )
+
+func TestMyExportRecordsAreOwnerScopedAndHideDiagnostics(t *testing.T) {
+	db := newExportCenterTestDB(t)
+	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
+	first, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{Scene: model.ExportSceneRequestLog, TaskRunID: 101, TriggerUserID: 9, Queue: "export", Format: "csv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{Scene: model.ExportSceneFileList, TaskRunID: 102, TriggerUserID: 10, Queue: "export", Format: "csv"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.PublicID == "" || second.PublicID == "" || first.PublicID == second.PublicID {
+		t.Fatalf("public identifiers must be unique: %q %q", first.PublicID, second.PublicID)
+	}
+	otherUserID := uint(10)
+	params := &form.ExportRecordList{Paginate: form.Paginate{Page: 1, PerPage: 10}, TriggerUserID: &otherUserID}
+	list, err := svc.MyList(context.Background(), 9, params)
+	if err != nil || list.Total != 1 || len(list.Data) != 1 {
+		t.Fatalf("owner list mismatch: %#v, %v", list, err)
+	}
+	encoded, err := json.Marshal(list.Data[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"\"task_run_id\"", "\"trigger_user_id\"", "\"queue\"", "\"error_message\"", "\"file_id\"", "\"id\""} {
+		if strings.Contains(string(encoded), field) {
+			t.Errorf("user export response exposes %s: %s", field, encoded)
+		}
+	}
+	if !strings.Contains(string(encoded), first.PublicID) {
+		t.Fatalf("public id missing: %s", encoded)
+	}
+	if _, err := svc.MyDetail(context.Background(), 9, second.PublicID); err == nil {
+		t.Fatal("cross-user detail must not be returned")
+	}
+	if detail, err := svc.MyDetail(context.Background(), 9, first.PublicID); err != nil || detail.PublicID != first.PublicID {
+		t.Fatalf("own detail mismatch: %#v, %v", detail, err)
+	} else if detailJSON, err := json.Marshal(detail); err != nil {
+		t.Fatal(err)
+	} else if strings.Contains(string(detailJSON), "task_run_id") || strings.Contains(string(detailJSON), "error_message") {
+		t.Fatalf("own detail exposed diagnostics: %s", detailJSON)
+	}
+}
 
 func TestExportCenterServiceCreateListDetailAndSuccess(t *testing.T) {
 	db := newExportCenterTestDB(t)
@@ -108,6 +157,30 @@ func TestExportCenterServiceCreateListDetailAndSuccess(t *testing.T) {
 	}
 }
 
+func TestExportCenterDetailPreservesDatabaseFailureAfterTableProbe(t *testing.T) {
+	db := newExportCenterTestDB(t)
+	ResetExportRecordsTableCacheForTest()
+	if err := ensureExportRecordTable(db); err != nil {
+		t.Fatalf("probe export table: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db}).Detail(1)
+	if err == nil {
+		t.Fatal("expected database error")
+	}
+	var businessErr *e.BusinessError
+	if errors.As(err, &businessErr) && businessErr.GetCode() == e.NotFound {
+		t.Fatalf("database failure must not be reported as NotFound: %v", err)
+	}
+}
+
 func TestExportCenterServiceMarkFailed(t *testing.T) {
 	db := newExportCenterTestDB(t)
 	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
@@ -156,6 +229,138 @@ func TestExportCenterServiceMarkFailed(t *testing.T) {
 	}
 	if detail.HasFile || detail.DownloadReady || detail.DownloadURL != "" || detail.FileURL != "" {
 		t.Fatalf("failed record should not expose download fields: %#v", detail)
+	}
+}
+
+func TestExportCenterServiceExpiredFileIsNotDownloadable(t *testing.T) {
+	db := newExportCenterTestDB(t)
+	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
+
+	if _, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{
+		Scene: model.ExportSceneRequestLog, TaskRunID: 210, Queue: "export", Format: "csv",
+	}); err != nil {
+		t.Fatalf("create record failed: %v", err)
+	}
+	file := &model.UploadFiles{UUID: "expired-file", Size: 128, ExpiresAt: utils.FormatDate{Time: time.Now().Add(-time.Minute)}}
+	file.ID = 30
+	if err := svc.MarkSuccess(context.Background(), 210, ExportRecordSuccessInput{File: file, FileName: "expired.csv"}); err != nil {
+		t.Fatalf("mark success failed: %v", err)
+	}
+
+	detailAny, err := svc.Detail(1)
+	if err != nil {
+		t.Fatalf("detail failed: %v", err)
+	}
+	detail := detailAny.(*resources.ExportRecordResources)
+	if !detail.FileExpired || detail.DownloadReady || detail.DownloadURL != "" {
+		t.Fatalf("expired file must not be downloadable: %#v", detail)
+	}
+	if detail.Stage != "expired" || detail.StageName != "已过期" || detail.FileExpiresAt == nil {
+		t.Fatalf("unexpected expired file semantics: %#v", detail)
+	}
+	personal := resources.NewMyExportRecordResource(&model.SysExportRecord{
+		Status:        detail.Status,
+		FileUUID:      detail.FileUUID,
+		FileExpiresAt: *detail.FileExpiresAt,
+	})
+	if personal.FileUUID != "" || personal.DownloadReady {
+		t.Fatalf("expired personal export must not expose a download identifier: %#v", personal)
+	}
+}
+
+func TestExportCenterServiceCommitSuccessOnlyFirstFileWins(t *testing.T) {
+	db := newExportCenterTestDB(t)
+	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
+
+	if _, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{
+		Scene:     model.ExportSceneRequestLog,
+		TaskRunID: 211,
+		Queue:     "export",
+		Format:    "csv",
+	}); err != nil {
+		t.Fatalf("create record failed: %v", err)
+	}
+	first := &model.UploadFiles{UUID: "winner", Size: 128}
+	first.ID = 31
+	second := &model.UploadFiles{UUID: "loser", Size: 256}
+	second.ID = 32
+
+	winner, committed, err := svc.CommitSuccess(context.Background(), 211, ExportRecordSuccessInput{File: first, FileName: "first.csv"})
+	if err != nil || !committed {
+		t.Fatalf("first commit failed: committed=%v record=%#v err=%v", committed, winner, err)
+	}
+	winner, committed, err = svc.CommitSuccess(context.Background(), 211, ExportRecordSuccessInput{File: second, FileName: "second.csv"})
+	if err != nil || committed {
+		t.Fatalf("second commit should reuse winner: committed=%v record=%#v err=%v", committed, winner, err)
+	}
+	if winner == nil || winner.FileID != first.ID || winner.FileUUID != first.UUID || winner.FileName != "first.csv" {
+		t.Fatalf("unexpected winning export record: %#v", winner)
+	}
+}
+
+func TestExportCenterServiceClaimExecutionPreventsConcurrentOwners(t *testing.T) {
+	db := newExportCenterTestDB(t)
+	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
+
+	if _, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{
+		Scene:     model.ExportSceneRequestLog,
+		TaskRunID: 213,
+		Queue:     "export",
+		Format:    "csv",
+	}); err != nil {
+		t.Fatalf("create record failed: %v", err)
+	}
+	claimedRecord, claimed, err := svc.ClaimExecution(context.Background(), 213, "task-a")
+	if err != nil || !claimed || claimedRecord == nil || claimedRecord.Status != model.TaskRunStatusRunning {
+		t.Fatalf("first claim failed: claimed=%v record=%#v err=%v", claimed, claimedRecord, err)
+	}
+	claimedRecord, claimed, err = svc.ClaimExecution(context.Background(), 213, "task-b")
+	if err != nil || claimed || claimedRecord == nil || claimedRecord.Status != model.TaskRunStatusRunning {
+		t.Fatalf("concurrent claim should observe active owner: claimed=%v record=%#v err=%v", claimed, claimedRecord, err)
+	}
+	_, claimed, err = svc.ClaimExecution(context.Background(), 213, "task-a")
+	if err != nil || !claimed {
+		t.Fatalf("Asynq retry should take over running state: claimed=%v err=%v", claimed, err)
+	}
+	if err := svc.MarkPendingForRetry(context.Background(), 213, errors.New("temporary failure")); err != nil {
+		t.Fatalf("release for retry failed: %v", err)
+	}
+	_, claimed, err = svc.ClaimExecution(context.Background(), 213, "task-b")
+	if err != nil || !claimed {
+		t.Fatalf("pending retry should be claimable: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestExportCenterServiceLateFailureAndProgressDoNotDowngradeSuccess(t *testing.T) {
+	db := newExportCenterTestDB(t)
+	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
+
+	if _, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{
+		Scene:     model.ExportSceneRequestLog,
+		TaskRunID: 212,
+		Queue:     "export",
+		Format:    "csv",
+	}); err != nil {
+		t.Fatalf("create record failed: %v", err)
+	}
+	file := &model.UploadFiles{UUID: "winner", Size: 128}
+	file.ID = 41
+	if _, committed, err := svc.CommitSuccess(context.Background(), 212, ExportRecordSuccessInput{File: file, FileName: "winner.csv"}); err != nil || !committed {
+		t.Fatalf("commit success failed: committed=%v err=%v", committed, err)
+	}
+	if err := svc.MarkFailed(context.Background(), 212, errors.New("late worker failure")); err != nil {
+		t.Fatalf("late failure should be ignored: %v", err)
+	}
+	if err := svc.UpdateProgress(context.Background(), 212, 1, 10); !errors.Is(err, ErrExportRecordFinalized) {
+		t.Fatalf("late progress should stop with finalized error, got %v", err)
+	}
+
+	var stored model.SysExportRecord
+	if err := db.Where("task_run_id = ?", 212).First(&stored).Error; err != nil {
+		t.Fatalf("query stored record failed: %v", err)
+	}
+	if stored.Status != model.TaskRunStatusSuccess || stored.Progress != exportProgressDone || stored.FileID != file.ID {
+		t.Fatalf("completed export was downgraded: %#v", stored)
 	}
 }
 
@@ -350,11 +555,13 @@ func newExportCenterTestDB(t *testing.T) *gorm.DB {
 	statements := []string{
 		`CREATE TABLE sys_export_records (
 			id integer primary key autoincrement,
+			public_id text unique,
 			scene text,
 			task_run_id integer,
 			trigger_user_id integer,
 			status text,
 			queue text,
+			execution_token text,
 			progress integer,
 			total_count integer,
 			processed_count integer,
@@ -362,6 +569,7 @@ func newExportCenterTestDB(t *testing.T) *gorm.DB {
 			file_uuid text,
 			file_name text,
 			file_size integer,
+			file_expires_at datetime,
 			format text,
 			error_message text,
 			started_at datetime,

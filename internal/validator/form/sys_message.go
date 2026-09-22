@@ -45,7 +45,7 @@ func NewSysMessageManageListQuery() *SysMessageManageList {
 type SysMessageSend struct {
 	Title        string `form:"title" json:"title" binding:"required" label:"消息标题"`
 	Content      string `form:"message" json:"message" binding:"required" label:"消息内容"`
-	Category     string `form:"category" json:"category" label:"消息分类" binding:"omitempty"`
+	Category     string `form:"category" json:"category" label:"消息分类" binding:"omitempty,max=50"`
 	ActionURL    string `form:"action_url" json:"action_url" label:"操作链接" binding:"omitempty,max=500"`
 	ActionLabel  string `form:"action_label" json:"action_label" label:"操作按钮文案" binding:"omitempty,max=100"`
 	AudienceType string `form:"audience_type" json:"audience_type" label:"接收人类型" binding:"required,oneof=all user_ids"`

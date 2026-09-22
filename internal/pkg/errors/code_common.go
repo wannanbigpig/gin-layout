@@ -13,5 +13,6 @@ const (
 	UserDoesNotExist          = 10001
 	UserDisable               = 10002
 	ServiceDependencyNotReady = 10003
+	NoExportData              = 10004
 	TooManyRequests           = 10102
 )

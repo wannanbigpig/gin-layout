@@ -22,16 +22,16 @@
   <img src="./images/wechat_pay.jpg" alt="微信支付收款码" width="280" />
 </div>
 
-## ETH
+## USDT
 
 钱包地址：
 
 ```text
-0xf7bC2dc45f433D1Fa29D337Badc7174fE8251da3
+0x51948560E120F2080B34a5Ae7DE83514DE93F3C3
 ```
 
 <div align="center">
-  <img src="./images/eth.jpg" alt="ETH 收款码" width="280" />
+  <img src="./images/usdt.jpg" alt="USDT 收款码" width="280" />
 </div>
 
 ## 说明

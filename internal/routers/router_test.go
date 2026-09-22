@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -436,6 +437,29 @@ func TestLoginRouteUsesDedicatedRateLimit(t *testing.T) {
 	engine.ServeHTTP(captcha, captchaReq)
 	if captcha.Code != http.StatusOK {
 		t.Fatalf("expected captcha request status %d, got %d", http.StatusOK, captcha.Code)
+	}
+}
+
+func TestSMSLoginRoutesUseDedicatedRateLimit(t *testing.T) {
+	restore := config.UpdateConfigForTesting(func(cfg *config.Conf) {
+		cfg.RateLimitEnabled = false
+		cfg.LoginRateLimitEnabled = true
+		cfg.LoginRateLimitRPS = 1
+		cfg.LoginRateLimitBurst = 1
+	})
+	defer restore()
+
+	for _, route := range []string{"/admin/v1/login/sms/send-code", "/admin/v1/login/sms"} {
+		engine := gin.New()
+		engine.Use(loginRateLimitHandler())
+		engine.POST(route, func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		first := httptest.NewRecorder()
+		engine.ServeHTTP(first, httptest.NewRequest(http.MethodPost, route, nil))
+		second := httptest.NewRecorder()
+		engine.ServeHTTP(second, httptest.NewRequest(http.MethodPost, route, nil))
+		if first.Code != http.StatusNoContent || second.Code != http.StatusTooManyRequests {
+			t.Fatalf("route %s expected 204 then 429, got %d then %d", route, first.Code, second.Code)
+		}
 	}
 }
 

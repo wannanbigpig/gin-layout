@@ -179,6 +179,7 @@ type FileUploadCredentialResources struct {
 	URL             string            `json:"url"`
 	Method          string            `json:"method"`
 	Headers         map[string]string `json:"headers"`
+	FormData        map[string]string `json:"form_data,omitempty"`
 	ExpireAt        utils.FormatDate  `json:"expire_at"`
 	Reuse           bool              `json:"reuse"`
 	FileObjectID    uint              `json:"file_object_id"`

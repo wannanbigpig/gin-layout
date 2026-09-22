@@ -28,10 +28,12 @@ func NewAliyunOSSDriver(config AliyunOSSConfig) *AliyunOSSDriver {
 	cfg := oss.LoadDefaultConfig().
 		WithRegion(config.Region).
 		WithEndpoint(endpoint).
+		WithUsePathStyle(config.ForcePathStyle).
 		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(config.AccessKeyID, config.AccessKeySecret))
 	signingCfg := oss.LoadDefaultConfig().
 		WithRegion(config.Region).
 		WithEndpoint(config.Endpoint).
+		WithUsePathStyle(config.ForcePathStyle).
 		WithAdditionalHeaders([]string{"x-oss-forbid-overwrite"}).
 		WithCredentialsProvider(credentials.NewStaticCredentialsProvider(config.AccessKeyID, config.AccessKeySecret))
 	return &AliyunOSSDriver{
@@ -124,6 +126,11 @@ func (d *AliyunOSSDriver) SignedImageThumbnailURL(ctx context.Context, bucket, o
 }
 
 func (d *AliyunOSSDriver) PresignPutObject(ctx context.Context, bucket, objectKey string, contentType string, ttl time.Duration) (string, error) {
+	result, err := d.PresignUpload(ctx, bucket, objectKey, contentType, ttl)
+	return result.URL, err
+}
+
+func (d *AliyunOSSDriver) PresignUpload(ctx context.Context, bucket, objectKey string, contentType string, ttl time.Duration) (PresignedUpload, error) {
 	request := &oss.PutObjectRequest{
 		Bucket:          oss.Ptr(firstNonEmpty(bucket, d.bucket)),
 		Key:             oss.Ptr(objectKey),
@@ -136,9 +143,16 @@ func (d *AliyunOSSDriver) PresignPutObject(ctx context.Context, bucket, objectKe
 		opts.Expires = ttl
 	})
 	if err != nil {
-		return "", err
+		return PresignedUpload{}, err
 	}
-	return result.URL, nil
+	headers := make(map[string]string, len(result.SignedHeaders)+1)
+	for name, value := range result.SignedHeaders {
+		headers[name] = value
+	}
+	if contentType != "" {
+		headers["Content-Type"] = contentType
+	}
+	return PresignedUpload{URL: result.URL, Method: "PUT", Headers: headers}, nil
 }
 
 func (d *AliyunOSSDriver) InitMultipartUpload(ctx context.Context, input MultipartUploadInput) (MultipartUploadResult, error) {

@@ -243,6 +243,7 @@ Casbin 策略刷新支持多个 `service` 实例。权限策略与全局版本�
 项目会在请求链路读取 `Accept-Language`（当前支持 `zh-CN` / `en-US`），并做归一化与降级处理：
 
 - 错误码文案：按请求语言返回；无法识别时降级到默认语言（`zh-CN`）。
+- 参数无效、配置缺失、资源状态冲突、权限不足等可预期业务错误返回明确且可国际化的安全文案；未分类异常、数据库/SQL 错误、凭据和供应商原始响应只记录到服务端日志，对客户端统一返回通用服务端错误，避免泄露内部信息。
 - 菜单列表/用户菜单树：仅返回 `title`，由后端按请求语言解析后返回。
 - 菜单详情：返回 `title_i18n`（用于前端编辑回填），不返回 `title`。
 - 菜单新增/编辑：写接口使用 `title_i18n`，目前支持 `zh-CN` 与 `en-US`，两者至少一种非空。
@@ -324,12 +325,14 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 | `app.base_url` | 文件访问 URL 前缀，用于生成公开文件地址 |
 | `app.trusted_proxies` | 受信任代理地址或网段，影响 `ClientIP()` 与日志 IP |
 | `jwt.secret_key` | 必填；生产环境不能使用弱占位值 |
+| `security.credential_encryption_key` | 保存短信、OSS 等业务凭据前必填的独立随机主密钥，建议通过 `${CREDENTIAL_ENCRYPTION_KEY}` 注入；各用途使用独立派生密钥，所有实例必须一致，变更需协调重启并迁移 `enc:v1` 密文 |
 | `jwt.ttl` / `jwt.refresh_token_ttl` / `jwt.refresh_cookie_*` | Access Token 生命周期、Refresh Token Cookie 生命周期与浏览器策略；`jwt.refresh_ttl` 已废弃 |
 | `mysql` | 数据库开关与连接信息 |
 | `redis` | 缓存、黑名单和分布式锁配置 |
 | `queue.use_default_redis` | `true` 复用 `redis.*`；`false` 时改用 `queue.redis.*` 独立连接 |
 | `queue` | Asynq 异步任务开关、队列命名空间、并发度、优先级和审计日志重试策略 |
-| `storage.active_driver` / `storage.config` | 运行时文件存储驱动与敏感配置，保存在 `sys_config`，由 `/admin/v1/system/storage/*` 管理 |
+| `storage.active_driver` / `storage.config` | 运行时文件存储驱动与敏感配置，保存在 `sys_config`，由 `/admin/v1/system/storage/*` 管理；OSS AccessKey Secret 以 `enc:v1` AES-256-GCM 密文保存 |
+| `todo.reminder_enabled` / `todo.reminder_sms_enabled` / `todo.reminder_lead_minutes` / `todo.reminder_catchup_minutes` | 待办提醒总开关、短信渠道总开关、提前提醒分钟数和 Cron 停机后的逾期补偿窗口，保存在 `sys_config`；短信默认关闭 |
 | `logger` | 日志输出、切割和保留策略 |
 
 如果通过 Nginx、Ingress 或负载均衡转发请求，需要同步配置 `app.trusted_proxies`，否则客户端 IP 可能记录不准确。
@@ -338,10 +341,13 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 
 - `service`、`worker`、`cron` 是三类进程角色；扩容 API 时只增加 `service` 实例，不要把它们理解为三个 API 实例。
 - `service` 负责提供 HTTP API。
-- `worker` 负责消费 Asynq 异步任务，当前内置了请求审计日志落库、请求日志导出、文件资源导出 3 类任务。多个 `worker` 可以连接同一 Redis、使用相同 `queue.namespace` 和队列配置并发消费；正常情况下同一任务只交给一个实例。Asynq 仍是至少一次语义：请求审计以 `request_id` 唯一键 upsert；已完成导出的顺序重投会复用既有记录；导出通知以任务执行 ID 和状态组成去重键。导出任务使用稳定 Task ID 抑制正常重复入队，但“检查已完成记录”和上传对象不是一个原子操作，不能把异常情况下同一 `task_run_id` 的并发执行视为 exactly-once。对象存储与数据库也不是同一事务，进程若在对象上传后、导出记录提交前退出，仍可能遗留不可见的孤立对象，应由文件清理任务处理；WebSocket 实时提醒不作为交付凭据，最终状态以消息列表和导出记录为准。
+- `worker` 负责消费 Asynq 异步任务，当前内置了请求审计日志落库、请求日志导出、文件资源导出 3 类任务。多个 `worker` 可以连接同一 Redis、使用相同 `queue.namespace` 和队列配置并发消费；正常情况下同一任务只交给一个实例。Asynq 仍是至少一次语义：请求审计以 `request_id` 唯一键 upsert；导出记录通过数据库条件更新和稳定的 Asynq Task ID 领取执行权，同一 `task_run_id` 的异常并发只有一个初始执行者，只有同一 Task ID 的后续重试可接管自身释放或遗留的 `running` 状态；导出结果采用首个成功提交者获胜，未采用的临时文件会立即清理，清理失败则保留带过期时间的文件记录供定时任务重试。完成导出时会在记录中固化文件过期时间，导出列表展示导出总条数和实时已处理条数；到期后接口返回 `file_expired=true`、`download_ready=false`，前端显示“已过期”而不再提供下载。对象上传成功但后续数据库步骤失败时会补偿删除，删除失败的对象行标记为 `delete_failed`。对象存储与数据库仍不是同一事务，进程若恰好在对象上传后、补偿逻辑运行前被强制终止，仍需依赖对象存储生命周期或独立的对象对账能力；当前 `cron:clean-expired-files` 只处理已有 `upload_files.expires_at` 的记录，不能覆盖这个极窄窗口。WebSocket 实时提醒不作为交付凭据，最终状态以消息列表和导出记录为准。
 - 使用导出能力时，`queue.queues` 必须包含可消费的 `export` 队列，并运行 `worker`；仅注册任务或启动 `service` 不会消费导出任务。
+- 导出文件由顶部“我的导出”独立页面承接，不属于任务运维 Tab。`GET /admin/v1/system/export/list` 和 `detail?public_id=<UUID>` 只要求登录并在服务端限定当前用户；提交导出只返回随机 `public_id` 和状态，个人列表/详情、进度推送和结果通知不暴露任务执行 ID、队列或原始异常。任务运维中的执行记录继续供有权限的管理员排障。初版重置部署时，初始化迁移会为 `sys_export_records.public_id` 创建唯一索引；若目标库已执行旧版初始迁移，需先按部署方案重建数据库后再启用本版代码，并执行 `command api-route -y` 同步接口认证元数据。公开编号用于识别和反馈问题，不代替登录及文件所有者校验。
+- 请求日志与文件资源导出提交前会按导出筛选条件检查是否有记录；空集返回业务码 `NoExportData`（`10004`，暂无需要导出的数据），不会创建任务或导出记录。该检查不冻结数据，若记录在提交后发生变化，最终导出仍以 worker 执行时为准。
 - `queue.enable=false` 时，不需要启动 `worker`；请求审计日志由 service 进程内的有界缓冲批量异步落库。缓冲满且存储健康时，新条目使用固定超时的同步写入兜底；存储已故障时不会让每个业务请求持续阻塞在 DB 上，而是计数并限频告警溢出丢失。导出类异步能力会随之不可用。
 - `cron` 负责定时任务调度；代码内置任务会同步到 `task_definitions`，后台运营配置中的 `status/cron_spec/allow_manual/allow_retry` 会作为运行时真相，并通过进程缓存和 `cron_task_states` 维护最近同步/执行状态。
+- `cron:todo-reminder` 默认每 5 分钟扫描临期与最近逾期的待办。站内提醒先持久化到 `sys_messages`，再通过 WebSocket/Redis 通知在线客户端；可选短信先与业务事务一起写入 `sms_deliveries`，再由本次及后续扫描发送。`tdr:v1:{todo_id}:{due_at}:{type}` / `tds:v1:{todo_id}:{due_at}:{type}` 幂等键保证重复扫描不会重复创建同一提醒周期。明确失败最多尝试 3 次；供应商结果未知或进程在发送中断时转为 `unknown`，不自动重试以避免重复计费。`accepted` 只表示供应商 API 已接受，不是手机送达回执。修改截止时间会进入新的提醒周期，完成、取消、关闭短信偏好或手机号失效会停止未发送短信。
 - 演示定时任务初始化默认关闭；`reset-system-data` 默认关闭，启用执行时会输出高风险告警。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
 - 当前版本必须只运行一个 `cron` 实例。普通任务只有进程内 `WithoutOverlapping` 保护，多实例会对同一调度周期重复执行或重复入队。Redis 分布式锁仅覆盖标记为高风险的 cron 任务，只提供执行期间的跨实例互斥，不提供每个调度周期的唯一触发保证；锁固定 30 分钟 TTL、没有自动续期，超过 TTL 的长任务也可能再次并发。释放锁会校验持有者 token，避免旧实例删除新持有者的锁。需要多 `cron` 实例前，必须另行实现按调度周期去重和锁续期，不能仅依赖现有高风险任务锁。
@@ -408,11 +414,63 @@ go test ./tests/admin_test
 
 文件上传约定：`GET /admin/v1/system/file/upload/options` 需要 `file:create` 权限，只返回当前驱动、大小和类型白名单、直传/分片能力等最小配置，不返回密钥、`bucket` 或 endpoint。上传初始化由服务端创建 session 并签发 `complete_token`；complete 只接受 token 对应的服务端元数据，multipart abort 只接受 `complete_token`。直传完成时，服务端把临时对象流复制到独立最终 key，并对实际内容计算 SHA-256 后校验；客户端 hash 只用于完整性声明，不再据此执行秒传复用。升级前已创建的旧版秒传复用会话会被拒绝，客户端需重新初始化上传。
 
+存储驱动通过 `filestorage.DriverDefinition` 编译期注册。二开供应商实现基础 `Driver`，按需实现 `DirectUploadCapable`、`MultipartCapable`、`StatCapable`、`ImageThumbnailCapable`，再调用 `filestorage.RegisterDriver`；业务层不再按驱动名称分支。自定义配置使用 `Config.DecodeProviderConfig` / `SetProviderConfig` 保存在 `config.<driver>`，未知供应商配置会原位保留；顶层字符串密钥通过 `SensitiveFields` 与 `ProviderString` / `SetProviderString` 接入统一的加密、掩码、空值清除、查看权限和审计脱敏。配套前端新增一个供应商表单并调用 `registerStorageProviderForm`，无需修改 `StorageConfigPanel.vue`。驱动 ID 会持久化到文件记录，发布后必须保持稳定，历史对象迁移完成前不能移除旧驱动注册。
+
 审计日志统一落在 `request_logs` 的 `change_diff` 字段；有字段级差异的写操作可通过 `has_change_diff=1` 在列表和导出中筛选。已认证用户的后台业务请求不参与随机采样；`queue.audit_sample_get_keep_every` 仅用于无法关联登录用户的低风险成功只读流量。`/ping`、`/health/readiness`和未匹配路由的 404 噪声既不写入请求日志，也不进入面向业务的每日请求统计；已命中业务路由的 404 仍保留。基础设施总流量应由 ingress/Prometheus 等监控链路采集，不用 MySQL 审计表代替。每日请求统计写入有短超时和独立故障冷却，不会熔断主审计；数据库故障时统计允许少量缺失，不能作为计费或合规口径。内存缓冲不主动驱逐已接收记录，短暂数据库不可用时保留当前批次并等待重试；字段在持久化边界按表宽归一化，明确的永久行错误会被隔离，避免单条坏记录阻塞整个批次。该链路仍为 best-effort：队列和数据库同时不可用且缓冲溢出、停机 drain 超时或进程崩溃时不承诺零丢失；溢出丢失会计数并限频记录，不会反复阻塞业务请求。非数据库触发器也不会覆盖人工 SQL。
 
-工作台和日志采用“个人可见、全局授权”的边界：所有登录用户可访问个人工作台与个人请求日志，但服务端固定按当前 Token 的 UID 查询，不能传入其他用户 ID；全局指标、服务器监控和全部请求日志仍分别要求 `dashboard:*`、`requestLog:*` 权限。个人日志默认使用 `scope=regular` 隐藏“个人请求日志列表/详情”自身产生的读取记录，避免每次查询和翻页持续制造噪声；用户可选择 `scope=self_reads`，或明确填写操作名称，重新查询这些审计记录。个人列表和详情不返回 JWT、Header、查询参数、请求体、响应体或原始 JSON 差异，只对用户、角色、部门、菜单、字典、系统配置、个人资料、Product 和文件/目录等已登记操作按 route、action、field 三级白名单生成自然语言摘要，敏感值继续脱敏或隐藏；未知结构只显示“已省略”，不会回退展示原文。管理员详情保留结构化 JSON，便于排障和审计。服务器监控响应的 `app.audit` 同时提供进程内接收、采样、入队、降级、持久化、失败、永久丢弃、溢出丢弃、缓冲待处理和存储不可用指标；多实例部署需按实例采集聚合。
+工作台和日志采用“个人可见、全局授权”的边界：所有登录用户可访问个人工作台与个人请求日志，但服务端固定按当前 Token 的 UID 查询，不能传入其他用户 ID；全局指标、服务器监控和全部请求日志仍分别要求 `dashboard:*`、`requestLog:*` 权限。首页“今日操作”和“我的最近操作”只统计写操作、失败、高风险或有字段变更的记录，并排除 WebSocket 建连/临时票据及个人日志自查询等后台技术请求，避免连接重建和页面轮询淹没真实业务操作；完整审计记录仍保留在请求日志中。`GET /admin/v1/dashboard/statistics` 默认查询最近 7 个自然日，也接受包含首尾日期的 `start_date` / `end_date`（`YYYY-MM-DD`），最多 90 天，供工作台的 7 天、30 天和自定义范围共用同一真实统计口径。个人日志默认使用 `scope=regular` 隐藏“个人请求日志列表/详情”自身产生的读取记录，避免每次查询和翻页持续制造噪声；用户可选择 `scope=self_reads`，或明确填写操作名称，重新查询这些审计记录。个人列表和详情不返回 JWT、Header、查询参数、请求体、响应体或原始 JSON 差异，只对用户、角色、部门、菜单、字典、系统配置、个人资料、Product 和文件/目录等已登记操作按 route、action、field 三级白名单生成自然语言摘要，敏感值继续脱敏或隐藏；未知结构只显示“已省略”，不会回退展示原文。管理员详情保留结构化 JSON，便于排障和审计。服务器监控响应的 `app.audit` 同时提供进程内接收、采样、入队、降级、持久化、失败、永久丢弃、溢出丢弃、缓冲待处理和存储不可用指标；多实例部署需按实例采集聚合。
 
-个人待办、系统通知和任务中心是三个不同概念：待办表示“某个用户还需要完成的事情”，登录用户始终只能读取自己的 `user_todos`；系统通知表示“需要告知用户的信息”，可以已读但不代表业务已处理；任务中心表示“后端异步或定时执行过程”，用于查看运行状态、重试和导出结果。手工待办可由本人创建、编辑、推进状态和删除；业务待办由业务模块通过 `assignee_id + source_type + source_key` 幂等写入，用户只能跳转到站内业务页面处理，完成或取消必须由业务模块调用 `CloseBusinessTodo`，避免待办状态与订单、审批等业务真相分叉。业务模块的 `action_url` 只允许站内相对路径。列表按“逾期、紧急程度、截止时间”排序。参考 Product 模块已接入首个真实生命周期：禁用产品为创建者生成待启用事项，禁用态编辑刷新同一事项，启用后完成，删除时取消；产品再次由启用变为禁用会显式开启新一轮待办，普通消息重试不会重开历史终态。
+个人待办、系统通知和任务中心是三个不同概念：待办表示“某个用户还需要完成的事情”，登录用户始终只能读取自己的 `user_todos`；系统通知表示“需要告知用户的信息”，可以已读但不代表业务已处理；任务中心表示“后端异步或定时执行过程”，用于查看运行状态、重试和导出结果。任务中心内部继续保持定义、可抽样执行明细、按完成时间聚合的全量统计和 Cron 运行态四层边界；失败、超时、中断、取消明细始终保留，统计响应提供 `detail_time_basis/detail_start_time/detail_end_time`，前端据此按 `finished_at` 精确下钻。成功明细允许采样，因此成功总数不承诺与明细列表逐条对账。待办到期提醒只创建通知，不自动改变待办状态。手工待办可由本人创建、编辑、推进状态和删除；业务待办由业务模块通过 `assignee_id + source_type + source_key` 幂等写入，用户只能跳转到站内业务页面处理，完成或取消必须由业务模块调用 `CloseBusinessTodo`，避免待办状态与订单、审批等业务真相分叉。业务模块和通知的 `action_url` 只允许站内相对路径。列表按“逾期、紧急程度、截止时间”排序。参考 Product 模块已接入首个真实生命周期：禁用产品为创建者生成待启用事项，禁用态编辑刷新同一事项，启用后完成，删除时取消；产品再次由启用变为禁用会显式开启新一轮待办，普通消息重试不会重开历史终态。“我的待办”页面是登录可见的隐藏路由，不出现在侧栏，唯一产品入口为首页待办卡的“查看全部”。
+
+### 短信渠道扩展边界
+
+当前版本已实现可选的阿里云短信验证码登录和待办到期短信提醒，两者均默认关闭。拥有 `sms:config` 的管理员可在“系统配置 → 短信配置”维护供应商、模板、场景路由与验证码限制，`sms:update` 用于保存，`sms:test` 用于向指定号码发送一次受控测试。配置保存到受保护的 `sms.config`，AccessKey Secret 使用 `security.credential_encryption_key` 派生的短信专用密钥进行 AES-256-GCM 加密，读取接口只返回 `********`，请求日志和审计差异不会记录明文密钥、手机号或验证码。
+
+启用条件如下：
+
+- Redis 必须可用；验证码挑战、错误次数、手机号/IP 配额与一次性消费均以 Redis Lua 原子执行，Redis 故障时短信登录 fail-closed，不回退进程内存。
+- 手机号日限额与全局日预算只在通过冷却检查、准备实际发送时原子占用；`sms:test` 另受操作者、目标号码和全局预算限制。
+- 当前首版只接受中国大陆手机号（国家代码 `86`）；初始化表通过生成列唯一索引约束未删除账号的非空完整手机号。
+- 初始化超级管理员不预置示例手机号；手机号必须在已有密码登录态下由本人（需当前密码）或具备用户管理权限的管理员显式配置，随后每次短信登录仍由 OTP 证明当前持有。首版没有开放匿名绑定或注册流程。
+- 登录页先读取 `GET /admin/v1/login/options`，只有 `sms.config.enabled=true` 且配置校验通过才显示“验证码登录”标签；密码登录接口保持兼容。
+- 发送接口同时校验图形验证码并对不存在、禁用或重复手机号返回一致结构，降低账号枚举风险；OTP 使用 HMAC 保存、限制错误次数并在成功时删除。
+- 手机号已经成为登录凭据：个人修改手机号必须验证当前密码，管理员代改或个人改号都会撤销该用户已有会话。
+- 待办短信还必须同时满足 `todo.reminder_enabled=true`、`todo.reminder_sms_enabled=true`、存在有效 `todo_due` 路由、用户已绑定手机号并在 `GET/POST /admin/v1/todo/reminder-preference` 中主动开启短信渠道；默认偏好为站内开启、短信关闭。
+- 短信测试接口接收当前页面的完整草稿配置并仅在内存中校验、发送，不会先写入 `sms.config`；草稿中的 `********` 密钥会安全复用已保存密钥，空值表示明确清除，新密钥只用于本次调用。请求日志会递归脱敏供应商登记的敏感字段、手机号和验证码。阿里云 `endpoint` 是固定的完整官方 URL `https://dysmsapi.aliyuncs.com`，不是 `cn-hangzhou` 这类 Region ID。
+- 阿里云登录验证码 `SendSms` 不自动重试；待办短信的明确拒绝最多重试 3 次，超时或中断属于发送状态未知并永久停止自动重试，避免盲目重发造成重复计费。生产启用前仍应在阿里云侧配置配额/告警，并限制 RAM 凭据权限。
+
+短信扩展采用“场景 → 模板 → 供应商路由”，业务模块只提交 `scene`、接收人和模板变量：
+
+```text
+login_otp  ──> aliyun ──> SMS_OTP_TEMPLATE
+todo_due   ──> aliyun ──> SMS_TODO_TEMPLATE
+```
+
+配置结构按供应商、模板和场景路由分离，不能把 `todo_due_template_code` 一类字段写死在阿里云配置中：
+
+```json
+{
+  "providers": {
+    "aliyun": { "enabled": true, "access_key_id": "...", "access_key_secret": "...", "endpoint": "https://dysmsapi.aliyuncs.com" }
+  },
+  "templates": {
+    "aliyun": {
+      "login_otp": { "sign_name": "示例签名", "template_code": "SMS_OTP_TEMPLATE", "variables": ["code"] },
+      "todo_due": { "sign_name": "示例签名", "template_code": "SMS_TODO_TEMPLATE", "variables": ["title", "due_at"] }
+    }
+  },
+  "routes": {
+    "login_otp": { "provider": "aliyun", "template": "login_otp" },
+    "todo_due": { "provider": "aliyun", "template": "todo_due" }
+  }
+}
+```
+
+- 统一 Provider 契约为 `Send(ctx, input)`，第一方只注册阿里云。新增供应商时实现 Provider 和 Factory，并在 `RegisterBuiltinProviders` 登记 `ProviderDefinition`；顶层密钥字段写入 `SensitiveFields` 后会统一获得掩码保留、空值清除、AES-256-GCM 入库、读取脱敏和审计清理，不再修改 service 分支。供应商代码不能判断 `login_otp`、`todo_due` 等业务场景。Go 使用编译期注册而非动态 `.so` 插件；配套前端在短信供应商表单注册表中增加一个显式 Vue 表单，同时必须原样保留尚未识别的 providers/templates/routes 数据。
+- 场景由代码白名单声明，管理员只能为既有场景选择模板和供应商，不能通过配置创造任意业务场景；模板同时声明允许变量，登录模板必须且只能接收 `code`，待办模板必须且只能接收 `title`、`due_at`。初始化配置预留待办模板但不创建路由，必须配置真实模板后再显式启用。
+- 待办短信使用持久化 `sms_deliveries` Outbox、业务幂等键、Redis 全局日预算和用户渠道偏好；不复用同步 OTP 发送流程。Outbox 不持久化明文手机号，发送前重新读取当前绑定手机号和偏好；已取消、已完成、改期、手机号失效或关闭偏好的待办会取消未发送记录。当前没有供应商送达回执和人工重放 `unknown` 的接口。
+- `security.credential_encryption_key` 必须通过 `${CREDENTIAL_ENCRYPTION_KEY}` 等环境变量提供，并与 `jwt.secret_key` 分离；同一部署的 `service`、`worker`、`cron` 及所有副本必须使用相同值。主密钥按短信凭据、OTP/HMAC、配额 HMAC、OSS 凭据等用途独立派生，不能跨用途复用。它只在进程启动时读取，轮换需要先用旧密钥离线解密现有 `enc:v1` 凭据、用新密钥重加密，再协调重启全部实例；轮换期间混用新旧值会导致部分实例无法解密。后续可迁移到 RAM Role/KMS 与多 key version。
+- 本版仍处于首次发布前，权限和 `sms.config` 已直接收敛到初始化迁移；首个正式 tag 后的短信表结构或默认权限演进必须新增独立成对迁移。
 
 ### 版本与升级策略
 

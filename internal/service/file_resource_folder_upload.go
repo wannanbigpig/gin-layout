@@ -443,7 +443,7 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 		activeDriver = params.Driver
 	}
 	if activeDriver == model.StorageDriverLocal {
-		return nil, fmt.Errorf("local storage does not support direct upload")
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "当前存储驱动不支持直传，请使用本地上传接口")
 	}
 	bucket := bucketForDriver(activeDriver, cfg, params.IsPublic)
 	db, err := s.dbOrDefault()
@@ -461,7 +461,11 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 		return nil, err
 	}
 	objectKey := buildUploadObjectKey(fileName)
-	url, err := driver.PresignPutObject(context.Background(), bucket, objectKey, params.MimeType, ttl)
+	directDriver, ok := driver.(filestorage.DirectUploadCapable)
+	if !ok {
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "当前存储驱动不支持直传，请使用服务端上传接口")
+	}
+	presigned, err := directDriver.PresignUpload(context.Background(), bucket, objectKey, params.MimeType, ttl)
 	if err != nil {
 		return nil, err
 	}
@@ -484,17 +488,15 @@ func (s *FileResourceService) UploadCredential(params *form.FileUploadCredential
 		return nil, err
 	}
 	return &resources.FileUploadCredentialResources{
-		StorageDriver: activeDriver,
-		Driver:        activeDriver,
-		Bucket:        bucket,
-		ObjectKey:     objectKey,
-		UploadURL:     url,
-		URL:           url,
-		Method:        "PUT",
-		Headers: map[string]string{
-			"Content-Type":           params.MimeType,
-			"x-oss-forbid-overwrite": "true",
-		},
+		StorageDriver:   activeDriver,
+		Driver:          activeDriver,
+		Bucket:          bucket,
+		ObjectKey:       objectKey,
+		UploadURL:       presigned.URL,
+		URL:             presigned.URL,
+		Method:          presigned.Method,
+		Headers:         presigned.Headers,
+		FormData:        presigned.FormData,
 		ExpireAt:        dateutils.FormatDate{Time: time.Now().Add(ttl)},
 		Reuse:           false,
 		Size:            uint(params.Size),
@@ -988,20 +990,21 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 			}
 			return nil, err
 		}
-		updates := map[string]any{
-			"bucket":       putResult.Bucket,
-			"storage_path": putResult.ObjectKey,
-			"object_key":   putResult.ObjectKey,
-			"etag":         firstNonEmpty(putResult.ETag, hash),
-			"updated_at":   time.Now(),
-		}
-		if err := db.Model(object).Updates(updates).Error; err != nil {
-			return nil, err
-		}
 		object.Bucket = putResult.Bucket
 		object.StoragePath = putResult.ObjectKey
 		object.ObjectKey = putResult.ObjectKey
 		object.ETag = firstNonEmpty(putResult.ETag, hash)
+		updates := map[string]any{
+			"bucket":       object.Bucket,
+			"storage_path": object.StoragePath,
+			"object_key":   object.ObjectKey,
+			"etag":         object.ETag,
+			"updated_at":   time.Now(),
+		}
+		if err := db.Model(object).Updates(updates).Error; err != nil {
+			cleanupErr := s.cleanupUnreferencedFileObjectWithDriver(ctx, db, driver, object)
+			return nil, errors.Join(err, cleanupErr)
+		}
 	}
 	// 上传完成后立即关闭临时文件句柄，defer 仍负责 Remove。
 	if closeErr := tmpFile.Close(); closeErr != nil {
@@ -1010,6 +1013,10 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 	closed = true
 	logicalPath, err := s.folderLogicalPath(input.FolderID)
 	if err != nil {
+		if !reused {
+			cleanupErr := s.cleanupUnreferencedFileObjectWithDriver(ctx, db, driver, object)
+			return nil, errors.Join(err, cleanupErr)
+		}
 		return nil, err
 	}
 
@@ -1046,13 +1053,17 @@ func (s *FileResourceService) CreateFromReader(ctx context.Context, input Server
 		return uf
 	})
 	if err != nil {
+		if !reused {
+			cleanupErr := s.cleanupUnreferencedFileObjectWithDriver(ctx, db, driver, object)
+			return nil, errors.Join(err, cleanupErr)
+		}
 		return nil, err
 	}
 	if existing {
 		// 命中已存在记录，本次新建的物理对象成为孤儿，需清理（复用对象除外）
 		if !reused {
-			if delErr := db.Delete(&model.UploadFileObject{}, object.ID).Error; delErr != nil {
-				log.Warn("清理孤儿 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(delErr))
+			if cleanupErr := s.cleanupUnreferencedFileObjectWithDriver(ctx, db, driver, object); cleanupErr != nil {
+				log.Warn("清理孤儿 UploadFileObject 失败", zap.Uint("object_id", object.ID), zap.Error(cleanupErr))
 			}
 		}
 		s.fillObjectReuseCounts([]*model.UploadFiles{uploadFile})
@@ -1595,20 +1606,20 @@ func buildMultipartCompletePayload(completeToken string) map[string]any {
 
 func validateMultipartCompleteParts(parts []form.MultipartCompletePart) ([]filestorage.CompletePartInfo, error) {
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("parts is required")
+		return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "parts is required")
 	}
 	completeParts := make([]filestorage.CompletePartInfo, 0, len(parts))
 	seen := make(map[int32]struct{}, len(parts))
 	for _, part := range parts {
 		etag := strings.TrimSpace(part.ETag)
 		if part.PartNumber <= 0 {
-			return nil, fmt.Errorf("part_number must be greater than 0")
+			return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "part_number must be greater than 0")
 		}
 		if etag == "" {
-			return nil, fmt.Errorf("etag is required")
+			return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "etag is required")
 		}
 		if _, ok := seen[part.PartNumber]; ok {
-			return nil, fmt.Errorf("duplicate part_number: %d", part.PartNumber)
+			return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, fmt.Sprintf("duplicate part_number: %d", part.PartNumber))
 		}
 		seen[part.PartNumber] = struct{}{}
 		completeParts = append(completeParts, filestorage.CompletePartInfo{
@@ -1622,7 +1633,7 @@ func validateMultipartCompleteParts(parts []form.MultipartCompletePart) ([]files
 	for i, part := range completeParts {
 		expected := int32(i + 1)
 		if part.PartNumber != expected {
-			return nil, fmt.Errorf("part_number must be continuous from 1")
+			return nil, pkgErrors.NewBusinessError(pkgErrors.InvalidParameter, "part_number must be continuous from 1")
 		}
 	}
 	return completeParts, nil

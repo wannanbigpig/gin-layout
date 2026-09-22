@@ -559,3 +559,52 @@ func (s *FileResourceService) deleteObjectIfUnreferenced(db *gorm.DB, objectID u
 	}
 	return db.Delete(&model.UploadFileObject{}, objectID).Error
 }
+
+const generatedObjectCleanupTimeout = 10 * time.Second
+
+// cleanupUnreferencedFileObjectWithDriver 补偿清理已上传但尚未关联逻辑文件的对象。
+// 删除失败时保留对象行并标记 delete_failed，供运维定位和对象对账处理。
+func (s *FileResourceService) cleanupUnreferencedFileObjectWithDriver(
+	ctx context.Context,
+	db *gorm.DB,
+	driver filestorage.Driver,
+	object *model.UploadFileObject,
+) error {
+	if db == nil || driver == nil || object == nil || object.ID == 0 {
+		return nil
+	}
+	var count int64
+	if err := db.Unscoped().Model(&model.UploadFiles{}).Where("file_object_id = ?", object.ID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), generatedObjectCleanupTimeout)
+	defer cancel()
+	objectKey := firstNonEmpty(object.ObjectKey, object.StoragePath)
+	if objectKey != "" {
+		if err := driver.Delete(cleanupCtx, object.Bucket, objectKey); err != nil {
+			markErr := db.Model(&model.UploadFileObject{}).Where("id = ?", object.ID).Updates(map[string]any{
+				"bucket":       object.Bucket,
+				"storage_path": object.StoragePath,
+				"object_key":   object.ObjectKey,
+				"etag":         object.ETag,
+				"status":       model.StorageStatusDeleteFailed,
+				"updated_at":   time.Now(),
+			}).Error
+			return errors.Join(fmt.Errorf("delete generated physical object: %w", err), markErr)
+		}
+	}
+	if err := db.Delete(&model.UploadFileObject{}, object.ID).Error; err != nil {
+		markErr := db.Model(&model.UploadFileObject{}).Where("id = ?", object.ID).Updates(map[string]any{
+			"status":     model.StorageStatusDeleteFailed,
+			"updated_at": time.Now(),
+		}).Error
+		return errors.Join(err, markErr)
+	}
+	return nil
+}

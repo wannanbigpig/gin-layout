@@ -34,13 +34,16 @@ func TestAllRoutesWithoutUnifiedLoginHaveExplicitScenarios(t *testing.T) {
 	}
 	emptyBody := `{}`
 	scenarios := map[string]scenario{
-		http.MethodGet + " /admin/v1/demo":          {httpStatus: http.StatusOK},
-		http.MethodGet + " /admin/v1/file/:uuid":    {httpStatus: http.StatusBadRequest},
-		http.MethodPost + " /admin/v1/login":        {body: &emptyBody, httpStatus: http.StatusBadRequest},
-		http.MethodGet + " /admin/v1/login-captcha": {httpStatus: http.StatusOK},
-		http.MethodPost + " /admin/v1/auth/refresh": {body: &emptyBody, httpStatus: http.StatusForbidden},
-		http.MethodPost + " /admin/v1/auth/logout":  {body: &emptyBody, httpStatus: http.StatusForbidden},
-		http.MethodGet + " /admin/v1/common/ws":     {httpStatus: http.StatusUnauthorized},
+		http.MethodGet + " /admin/v1/demo":                 {httpStatus: http.StatusOK},
+		http.MethodGet + " /admin/v1/file/:uuid":           {httpStatus: http.StatusBadRequest},
+		http.MethodPost + " /admin/v1/login":               {body: &emptyBody, httpStatus: http.StatusBadRequest},
+		http.MethodGet + " /admin/v1/login-captcha":        {httpStatus: http.StatusOK},
+		http.MethodGet + " /admin/v1/login/options":        {httpStatus: http.StatusOK},
+		http.MethodPost + " /admin/v1/login/sms/send-code": {body: &emptyBody, httpStatus: http.StatusBadRequest},
+		http.MethodPost + " /admin/v1/login/sms":           {body: &emptyBody, httpStatus: http.StatusBadRequest},
+		http.MethodPost + " /admin/v1/auth/refresh":        {body: &emptyBody, httpStatus: http.StatusForbidden},
+		http.MethodPost + " /admin/v1/auth/logout":         {body: &emptyBody, httpStatus: http.StatusForbidden},
+		http.MethodGet + " /admin/v1/common/ws":            {httpStatus: http.StatusUnauthorized},
 	}
 
 	for _, route := range sortedAdminRoutes() {

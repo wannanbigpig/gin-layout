@@ -12,7 +12,7 @@ tags:
   - name: "dashboard"
   - name: "dashboard_personal"
   - name: "department"
-  - name: "export"
+  - name: "export_personal"
   - name: "file"
   - name: "log"
   - name: "login"
@@ -24,6 +24,7 @@ tags:
   - name: "request_log_self"
   - name: "role"
   - name: "session"
+  - name: "sms"
   - name: "storage"
   - name: "sysConfig"
   - name: "sysDict"
@@ -514,7 +515,7 @@ paths:
       tags:
         - "dashboard"
       summary: "仪表盘统计"
-      description: "仪表盘统计"
+      description: "默认最近7天；可通过 start_date 和 end_date 查询最多90天的自然日统计"
       operationId: "get_admin_v1_dashboard_statistics"
       security:
         - BearerAuth: []
@@ -844,6 +845,57 @@ paths:
       summary: "验证码"
       description: "获取登录验证码"
       operationId: "get_admin_v1_login_captcha"
+      security: []
+      x-auth-mode: "none"
+      x-security-policy: "public"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/login/options":
+    get:
+      tags:
+        - "login"
+      summary: "登录方式"
+      description: "获取当前启用的登录方式"
+      operationId: "get_admin_v1_login_options"
+      security: []
+      x-auth-mode: "none"
+      x-security-policy: "public"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/login/sms":
+    post:
+      tags:
+        - "login"
+      summary: "短信验证码登录"
+      description: "短信验证码登录"
+      operationId: "post_admin_v1_login_sms"
+      security: []
+      x-auth-mode: "none"
+      x-security-policy: "public"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/login/sms/send-code":
+    post:
+      tags:
+        - "login"
+      summary: "发送短信登录验证码"
+      description: "发送短信登录验证码"
+      operationId: "post_admin_v1_login_sms_send_code"
       security: []
       x-auth-mode: "none"
       x-security-policy: "public"
@@ -1523,14 +1575,14 @@ paths:
   "/admin/v1/system/export/detail":
     get:
       tags:
-        - "export"
-      summary: "导出记录详情"
-      description: "导出记录详情"
+        - "export_personal"
+      summary: "我的导出详情"
+      description: "我的导出详情"
       operationId: "get_admin_v1_system_export_detail"
       security:
         - BearerAuth: []
-      x-auth-mode: "auth"
-      x-security-policy: "access_token_permission"
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
       responses:
         '200':
           description: OK
@@ -1541,14 +1593,14 @@ paths:
   "/admin/v1/system/export/list":
     get:
       tags:
-        - "export"
-      summary: "导出记录列表"
-      description: "导出记录列表"
+        - "export_personal"
+      summary: "我的导出列表"
+      description: "我的导出列表"
       operationId: "get_admin_v1_system_export_list"
       security:
         - BearerAuth: []
-      x-auth-mode: "auth"
-      x-security-policy: "access_token_permission"
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
       responses:
         '200':
           description: OK
@@ -2150,6 +2202,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Response'
+  "/admin/v1/system/sms/config":
+    get:
+      tags:
+        - "sms"
+      summary: "短信配置"
+      description: "短信配置"
+      operationId: "get_admin_v1_system_sms_config"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+    post:
+      tags:
+        - "sms"
+      summary: "保存短信配置"
+      description: "保存短信配置"
+      operationId: "post_admin_v1_system_sms_config"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/system/sms/test":
+    post:
+      tags:
+        - "sms"
+      summary: "测试短信发送"
+      description: "使用当前未保存的短信配置草稿发送测试短信，草稿不会入库"
+      operationId: "post_admin_v1_system_sms_test"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "auth"
+      x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
   "/admin/v1/system/storage/config":
     get:
       tags:
@@ -2352,7 +2457,7 @@ paths:
       tags:
         - "task"
       summary: "任务执行记录列表"
-      description: "任务执行记录列表"
+      description: "time_basis 可选择 created_at 或 finished_at，默认按 created_at 筛选"
       operationId: "get_admin_v1_task_run_list"
       security:
         - BearerAuth: []
@@ -2388,7 +2493,7 @@ paths:
       tags:
         - "task"
       summary: "任务执行统计"
-      description: "任务执行统计"
+      description: "按完成时间小时桶统计，并返回失败类明细下钻的完成时间范围"
       operationId: "get_admin_v1_task_run_stats"
       security:
         - BearerAuth: []
@@ -2480,6 +2585,41 @@ paths:
       summary: "我的待办列表"
       description: "我的待办列表"
       operationId: "get_admin_v1_todo_list"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/reminder-preference":
+    get:
+      tags:
+        - "todo_personal"
+      summary: "待办提醒偏好"
+      description: "待办提醒偏好"
+      operationId: "get_admin_v1_todo_reminder_preference"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+    post:
+      tags:
+        - "todo_personal"
+      summary: "更新待办提醒偏好"
+      description: "更新待办提醒偏好"
+      operationId: "post_admin_v1_todo_reminder_preference"
       security:
         - BearerAuth: []
       x-auth-mode: "login"

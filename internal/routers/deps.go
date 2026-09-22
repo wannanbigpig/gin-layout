@@ -23,6 +23,7 @@ type ControllerDeps struct {
 	SysConfig  *admin_v1.SysConfigController
 	SysDict    *admin_v1.SysDictController
 	Storage    *admin_v1.StorageConfigController
+	SMS        *admin_v1.SMSConfigController
 	File       *admin_v1.FileResourceController
 	Export     *admin_v1.ExportCenterController
 	Message    *admin_v1.SysMessageController
@@ -54,6 +55,7 @@ func DefaultControllerDeps() *ControllerDeps {
 			SysConfig:  admin_v1.NewSysConfigController(),
 			SysDict:    admin_v1.NewSysDictController(),
 			Storage:    admin_v1.NewStorageConfigController(),
+			SMS:        admin_v1.NewSMSConfigController(),
 			File:       admin_v1.NewFileResourceController(),
 			Export:     admin_v1.NewExportCenterController(),
 			Message:    admin_v1.NewSysMessageController(),
@@ -110,6 +112,9 @@ func normalizeControllerDeps(deps *ControllerDeps) *ControllerDeps {
 	}
 	if deps.Storage == nil {
 		deps.Storage = defaultDeps.Storage
+	}
+	if deps.SMS == nil {
+		deps.SMS = defaultDeps.SMS
 	}
 	if deps.File == nil {
 		deps.File = defaultDeps.File

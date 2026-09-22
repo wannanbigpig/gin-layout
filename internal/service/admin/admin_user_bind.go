@@ -90,7 +90,7 @@ func (s *AdminUserService) BindRole(params *form.BindRole) error {
 
 	ids, err := model.VerifyExistingIDs(model.NewRole(), params.RoleIds)
 	if err != nil {
-		return e.NewBusinessError(e.RoleNotFound)
+		return err
 	}
 	if err := access.NewSystemDefaultsService().RequireSuperAdminRoleForUser(adminUserModel.ID, ids); err != nil {
 		return err

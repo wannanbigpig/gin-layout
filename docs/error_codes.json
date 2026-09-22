@@ -1,11 +1,11 @@
 {
     "generator": "go-layout command gen-error-codes",
     "source": "internal/pkg/errors",
-    "total": 72,
+    "total": 76,
     "groups": [
         {
             "file": "internal/pkg/errors/code_auth.go",
-            "comment": "鉴权与登录相关错误码（20001-20011, 20031-20038, 20046-20047）。",
+            "comment": "鉴权与登录相关错误码（20001-20011, 20031-20038, 20046-20053）。",
             "codes": [
                 {
                     "name": "UserPasswordWrong",
@@ -126,6 +126,21 @@
                     "name": "CurrentPasswordWrong",
                     "code": 20050,
                     "source": "internal/pkg/errors/code_auth.go"
+                },
+                {
+                    "name": "SMSCredentialInvalid",
+                    "code": 20051,
+                    "source": "internal/pkg/errors/code_auth.go"
+                },
+                {
+                    "name": "SMSLoginDisabled",
+                    "code": 20052,
+                    "source": "internal/pkg/errors/code_auth.go"
+                },
+                {
+                    "name": "SMSProviderFailed",
+                    "code": 20053,
+                    "source": "internal/pkg/errors/code_auth.go"
                 }
             ]
         },
@@ -186,6 +201,11 @@
                 {
                     "name": "ServiceDependencyNotReady",
                     "code": 10003,
+                    "source": "internal/pkg/errors/code_common.go"
+                },
+                {
+                    "name": "NoExportData",
+                    "code": 10004,
                     "source": "internal/pkg/errors/code_common.go"
                 },
                 {
@@ -380,7 +400,7 @@
         },
         {
             "file": "internal/pkg/errors/code_role.go",
-            "comment": "角色管理相关错误码（20012-20019）。",
+            "comment": "角色管理相关错误码（20012-20014）。",
             "codes": [
                 {
                     "name": "RoleNotFound",
@@ -393,33 +413,8 @@
                     "source": "internal/pkg/errors/code_role.go"
                 },
                 {
-                    "name": "RoleHasChildren",
-                    "code": 20014,
-                    "source": "internal/pkg/errors/code_role.go"
-                },
-                {
                     "name": "RoleCannotDelete",
-                    "code": 20015,
-                    "source": "internal/pkg/errors/code_role.go"
-                },
-                {
-                    "name": "ParentRoleNotExists",
-                    "code": 20016,
-                    "source": "internal/pkg/errors/code_role.go"
-                },
-                {
-                    "name": "ParentRoleInvalid",
-                    "code": 20017,
-                    "source": "internal/pkg/errors/code_role.go"
-                },
-                {
-                    "name": "MaxRoleDepth",
-                    "code": 20018,
-                    "source": "internal/pkg/errors/code_role.go"
-                },
-                {
-                    "name": "MaxChildRoles",
-                    "code": 20019,
+                    "code": 20014,
                     "source": "internal/pkg/errors/code_role.go"
                 }
             ]

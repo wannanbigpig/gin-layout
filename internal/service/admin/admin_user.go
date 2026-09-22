@@ -344,7 +344,7 @@ func (s *AdminUserService) context() context.Context {
 const adminUserOptionsLimit = 20
 
 // Options 按账号/昵称模糊搜索管理员，供前端用户选择器远程搜索（仅返回最小字段，限量返回）。
-func (s *AdminUserService) Options(keyword string) []resources.AdminUserOptionResources {
+func (s *AdminUserService) Options(keyword string) ([]resources.AdminUserOptionResources, error) {
 	conditionStr, args := query_builder.New().
 		AddKeywordLike(keyword, "username", "nickname").
 		Build()
@@ -354,9 +354,9 @@ func (s *AdminUserService) Options(keyword string) []resources.AdminUserOptionRe
 	})
 	if err != nil {
 		log.Logger.Error("查询管理员选项失败", zap.Error(err))
-		return []resources.AdminUserOptionResources{}
+		return nil, err
 	}
-	return resources.ToAdminUserOptions(collection)
+	return resources.ToAdminUserOptions(collection), nil
 }
 
 // userMenuQuery 构建用户菜单查询条件。

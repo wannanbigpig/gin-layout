@@ -1,5 +1,10 @@
 package form
 
+const (
+	TaskRunTimeBasisCreatedAt  = "created_at"
+	TaskRunTimeBasisFinishedAt = "finished_at"
+)
+
 // TaskDefinitionList 任务定义列表查询参数。
 type TaskDefinitionList struct {
 	Paginate
@@ -25,6 +30,7 @@ type TaskRunList struct {
 	SourceID         string `form:"source_id" json:"source_id" binding:"omitempty"`
 	Status           string `form:"status" json:"status" binding:"omitempty,oneof=pending running success failed canceled retrying timeout interrupted"`
 	DetailRecordMode string `form:"detail_record_mode" json:"detail_record_mode" binding:"omitempty,oneof=all sampled forced none"`
+	TimeBasis        string `form:"time_basis" json:"time_basis" binding:"omitempty,oneof=created_at finished_at"`
 	StartTime        string `form:"start_time" json:"start_time" binding:"omitempty"`
 	EndTime          string `form:"end_time" json:"end_time" binding:"omitempty"`
 }

@@ -14,6 +14,7 @@ import (
 const (
 	LoginTypeLogin   uint8 = 1 // 登录操作
 	LoginTypeRefresh uint8 = 2 // 刷新token
+	LoginTypeSMS     uint8 = 3 // 短信验证码登录
 )
 
 // 登录状态常量
@@ -32,6 +33,7 @@ var LoginStatusDict modelDict.Dict = map[uint8]string{
 var LoginTypeDict modelDict.Dict = map[uint8]string{
 	LoginTypeLogin:   "登录操作",
 	LoginTypeRefresh: "刷新token",
+	LoginTypeSMS:     "短信验证码登录",
 }
 
 // 是否被撤销常量（使用 global.Yes/No，这里定义别名以便使用）

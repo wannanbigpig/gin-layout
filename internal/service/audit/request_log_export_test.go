@@ -90,6 +90,33 @@ func TestStreamExportCSVUsesKeysetPaginationWhenNewRowsInserted(t *testing.T) {
 	}
 }
 
+func TestHasRequestLogExportRowsUsesExportFilters(t *testing.T) {
+	db := newRequestLogExportTestDB(t)
+	restoreGetDB := requestLogGetDB
+	requestLogGetDB = func(model ...any) (*gorm.DB, error) { return db, nil }
+	defer func() { requestLogGetDB = restoreGetDB }()
+
+	params := &form.RequestLogExport{RequestID: "missing", Limit: 1000}
+	hasRows, err := HasRequestLogExportRows(context.Background(), params)
+	if err != nil || hasRows {
+		t.Fatalf("empty filter must not be exportable: hasRows=%t err=%v", hasRows, err)
+	}
+
+	if err := db.Exec(`INSERT INTO request_logs (id, request_id, created_at, updated_at) VALUES (?, ?, ?, ?)`, 1, "matching", time.Now(), time.Now()).Error; err != nil {
+		t.Fatal(err)
+	}
+	params.RequestID = "matching"
+	hasRows, err = HasRequestLogExportRows(context.Background(), params)
+	if err != nil || !hasRows {
+		t.Fatalf("matching filter must be exportable: hasRows=%t err=%v", hasRows, err)
+	}
+	params.HasChangeDiff = 1
+	hasRows, err = HasRequestLogExportRows(context.Background(), params)
+	if err != nil || hasRows {
+		t.Fatalf("change-diff filter must match export semantics: hasRows=%t err=%v", hasRows, err)
+	}
+}
+
 func newRequestLogExportTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 

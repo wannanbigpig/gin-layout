@@ -71,7 +71,7 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	// 验证所有菜单 ID 是否存在，再按真实授权节点规则过滤。
 	menuList, err := model.VerifyExistingIDs(model.NewMenu(), params.MenuList)
 	if err != nil {
-		return e.NewBusinessError(e.MenuNotFound)
+		return err
 	}
 	menuList, err = access.NewRoleMenuAssignmentService().NormalizeMenuIDs(menuList)
 	if err != nil {
@@ -240,11 +240,11 @@ func (s *RoleService) updateRoleMenu(roleId uint, menuList []uint, tx ...*gorm.D
 func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error {
 	db, err := role.GetDB()
 	if err != nil {
-		return e.NewBusinessError(e.RoleCannotDelete)
+		return err
 	}
 	affectedUserIDs, err := access.NewAffectedUsersResolver().Resolve(access.PermissionChangeScope{RoleIDs: []uint{id}})
 	if err != nil {
-		return e.NewBusinessError(e.RoleCannotDelete)
+		return err
 	}
 	coordinator := access.NewPermissionSyncCoordinator()
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
@@ -280,7 +280,7 @@ func (s *RoleService) executeDeleteTransaction(role *model.Role, id uint) error 
 		return coordinator.SyncUsers(affectedUserIDs, tx)
 	})
 	if err != nil {
-		return e.NewBusinessError(e.RoleCannotDelete)
+		return err
 	}
 	// 同步受影响用户的权限缓存
 	if err := coordinator.ReloadPolicyCacheWithCode(e.RoleCannotDelete); err != nil {

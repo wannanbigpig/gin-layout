@@ -58,3 +58,13 @@ type UserTodoDelete struct {
 func NewUserTodoDeleteForm() *UserTodoDelete {
 	return &UserTodoDelete{}
 }
+
+// UserTodoReminderPreference 更新当前用户的待办提醒渠道偏好。
+type UserTodoReminderPreference struct {
+	InAppEnabled *bool `form:"in_app_enabled" json:"in_app_enabled" binding:"required"`
+	SMSEnabled   *bool `form:"sms_enabled" json:"sms_enabled" binding:"required"`
+}
+
+func NewUserTodoReminderPreferenceForm() *UserTodoReminderPreference {
+	return &UserTodoReminderPreference{}
+}

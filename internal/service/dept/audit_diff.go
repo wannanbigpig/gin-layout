@@ -1,7 +1,10 @@
 package dept
 
 import (
+	"errors"
 	"sort"
+
+	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
@@ -101,7 +104,13 @@ func (s *DeptService) BindRoleWithAuditDiff(params *form.DeptBindRole) (string, 
 
 func (s *DeptService) snapshotDeptByID(id uint) (map[string]any, error) {
 	dept := model.NewDepartment()
-	if err := dept.GetById(id); err != nil || dept.ID == 0 {
+	if err := dept.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.DepartmentNotFound)
+		}
+		return nil, err
+	}
+	if dept.ID == 0 {
 		return nil, e.NewBusinessError(e.DepartmentNotFound)
 	}
 	roleIDs, err := model.NewDeptRoleMap().RoleIdsByDeptIds([]uint{id})
@@ -127,7 +136,13 @@ func (s *DeptService) snapshotDeptByID(id uint) (map[string]any, error) {
 
 func (s *DeptService) snapshotDeptRoleBinding(deptID uint) (map[string]any, error) {
 	dept := model.NewDepartment()
-	if err := dept.GetById(deptID); err != nil || dept.ID == 0 {
+	if err := dept.GetById(deptID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.DepartmentNotFound)
+		}
+		return nil, err
+	}
+	if dept.ID == 0 {
 		return nil, e.NewBusinessError(e.DepartmentNotFound)
 	}
 	roleIDs, err := model.NewDeptRoleMap().RoleIdsByDeptIds([]uint{deptID})

@@ -20,6 +20,8 @@ type userTodoService interface {
 	UpdateManual(context.Context, uint, *form.UserTodoUpdate) (*model.UserTodo, error)
 	UpdateStatus(context.Context, uint, uint, string) (*model.UserTodo, error)
 	DeleteManual(context.Context, uint, uint) error
+	GetReminderPreference(context.Context, uint) (*todo.ReminderPreference, error)
+	UpdateReminderPreference(context.Context, uint, bool, bool) (*todo.ReminderPreference, error)
 }
 
 var newUserTodoService = func() userTodoService {
@@ -105,4 +107,28 @@ func (api UserTodoController) Delete(c *gin.Context) {
 		return
 	}
 	api.Success(c, nil)
+}
+
+func (api UserTodoController) ReminderPreference(c *gin.Context) {
+	result, err := newUserTodoService().GetReminderPreference(c.Request.Context(), api.GetCurrentUserID(c))
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+func (api UserTodoController) UpdateReminderPreference(c *gin.Context) {
+	params := form.NewUserTodoReminderPreferenceForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	result, err := newUserTodoService().UpdateReminderPreference(
+		c.Request.Context(), api.GetCurrentUserID(c), *params.InAppEnabled, *params.SMSEnabled,
+	)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
 }

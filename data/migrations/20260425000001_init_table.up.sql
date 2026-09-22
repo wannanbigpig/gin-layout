@@ -19,8 +19,10 @@ CREATE TABLE IF NOT EXISTS `admin_user`
     `created_at`        datetime                                                              DEFAULT NULL,
     `updated_at`        datetime                                                              DEFAULT NULL,
     `deleted_at`        int                                                          NOT NULL DEFAULT '0' COMMENT '删除时间',
+    `active_full_phone_number` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci GENERATED ALWAYS AS (CASE WHEN `deleted_at` = 0 AND `full_phone_number` <> '' THEN `full_phone_number` ELSE NULL END) STORED COMMENT '未删除账号的唯一登录手机号',
     PRIMARY KEY (`id`),
     UNIQUE KEY `adu_u_d` (`username`, `deleted_at`),
+    UNIQUE KEY `adu_phone_active_u` (`active_full_phone_number`),
     KEY `idx_status_deleted_at` (`status`, `deleted_at`),
     KEY `idx_full_phone_number_deleted_at` (`full_phone_number`, `deleted_at`),
     KEY `idx_email_deleted_at` (`email`, `deleted_at`),
@@ -53,7 +55,9 @@ CREATE TABLE IF NOT EXISTS `api`
     `code`         varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '权限唯一code码',
     `group_code`   varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '分组唯一code码',
     `name`         varchar(60) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '权限名称',
+    `name_i18n`    varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '内置权限名称多语言快照',
     `description`  varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '描述',
+    `description_i18n` varchar(2048) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '内置权限描述多语言快照',
     `method`       varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '接口请求方法',
     `route`        varchar(160) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '接口路由',
     `func`         varchar(80) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '接口方法',
@@ -833,11 +837,13 @@ CREATE TABLE IF NOT EXISTS `upload_sessions`
 CREATE TABLE IF NOT EXISTS `sys_export_records`
 (
     `id`              bigint unsigned NOT NULL AUTO_INCREMENT,
+    `public_id`       char(36)        NOT NULL COMMENT '面向用户的随机导出编号',
     `scene`           varchar(60)     NOT NULL DEFAULT '' COMMENT '导出场景',
     `task_run_id`     bigint unsigned NOT NULL DEFAULT '0' COMMENT '任务执行记录ID',
     `trigger_user_id` bigint unsigned NOT NULL DEFAULT '0' COMMENT '触发人ID',
     `status`          varchar(20)     NOT NULL DEFAULT '' COMMENT '导出状态 pending/running/success/failed/canceled/retrying',
     `queue`           varchar(60)     NOT NULL DEFAULT '' COMMENT '队列名称',
+    `execution_token` varchar(160)    NOT NULL DEFAULT '' COMMENT '当前执行者稳定标识，仅用于并发领取和重试接管',
     `progress`        tinyint unsigned NOT NULL DEFAULT '0' COMMENT '进度 0-100',
     `total_count`     bigint unsigned NOT NULL DEFAULT '0' COMMENT '本次导出总记录数',
     `processed_count` bigint unsigned NOT NULL DEFAULT '0' COMMENT '本次导出已处理记录数',
@@ -845,6 +851,7 @@ CREATE TABLE IF NOT EXISTS `sys_export_records`
     `file_uuid`       varchar(64)     NOT NULL DEFAULT '' COMMENT '导出文件UUID',
     `file_name`       varchar(255)    NOT NULL DEFAULT '' COMMENT '导出文件名',
     `file_size`       bigint unsigned NOT NULL DEFAULT '0' COMMENT '导出文件大小',
+    `file_expires_at` datetime                  DEFAULT NULL COMMENT '导出文件过期时间快照',
     `format`          varchar(30)     NOT NULL DEFAULT '' COMMENT '导出格式',
     `error_message`   text                     DEFAULT NULL COMMENT '错误信息',
     `started_at`      datetime                 DEFAULT NULL COMMENT '开始时间',
@@ -852,6 +859,7 @@ CREATE TABLE IF NOT EXISTS `sys_export_records`
     `created_at`      datetime                 DEFAULT NULL,
     `updated_at`      datetime                 DEFAULT NULL,
     PRIMARY KEY (`id`),
+    UNIQUE KEY `ser_public_id` (`public_id`),
     UNIQUE KEY `ser_task_run_id` (`task_run_id`),
     KEY `ser_scene_created_at` (`scene`, `created_at`),
     KEY `ser_status_created_at` (`status`, `created_at`),
@@ -911,10 +919,58 @@ CREATE TABLE IF NOT EXISTS `user_todos`
     PRIMARY KEY (`id`),
     UNIQUE KEY `ut_assignee_source_key_active` (`assignee_id`, `source_type`, `active_source_key`),
     KEY `ut_assignee_deleted_status_due` (`assignee_id`, `deleted_at`, `status`, `due_at`),
+    KEY `ut_deleted_status_due_id` (`deleted_at`, `status`, `due_at`, `id`),
     KEY `ut_assignee_deleted_priority` (`assignee_id`, `deleted_at`, `priority`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='个人与业务待办表';
+
+CREATE TABLE IF NOT EXISTS `notification_preferences`
+(
+    `id`             bigint unsigned NOT NULL AUTO_INCREMENT,
+    `user_id`        bigint unsigned NOT NULL DEFAULT '0' COMMENT '用户ID',
+    `scene`          varchar(40)      NOT NULL DEFAULT '' COMMENT '通知场景',
+    `in_app_enabled` tinyint unsigned NOT NULL DEFAULT '1' COMMENT '站内通知 0关闭 1开启',
+    `sms_enabled`    tinyint unsigned NOT NULL DEFAULT '0' COMMENT '短信通知 0关闭 1开启',
+    `created_at`     datetime                  DEFAULT NULL,
+    `updated_at`     datetime                  DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `np_user_scene` (`user_id`, `scene`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='用户通知渠道偏好';
+
+CREATE TABLE IF NOT EXISTS `sms_deliveries`
+(
+    `id`                    bigint unsigned NOT NULL AUTO_INCREMENT,
+    `idempotency_key`       varchar(160)     NOT NULL DEFAULT '' COMMENT '业务发送幂等键',
+    `scene`                 varchar(40)      NOT NULL DEFAULT '' COMMENT '短信场景',
+    `user_id`               bigint unsigned NOT NULL DEFAULT '0' COMMENT '接收用户ID',
+    `business_type`         varchar(40)      NOT NULL DEFAULT '' COMMENT '业务类型',
+    `business_id`           bigint unsigned NOT NULL DEFAULT '0' COMMENT '业务ID',
+    `business_version`      varchar(80)      NOT NULL DEFAULT '' COMMENT '业务周期版本',
+    `variables`             text                      DEFAULT NULL COMMENT '模板变量 JSON',
+    `recipient_masked`      varchar(32)      NOT NULL DEFAULT '' COMMENT '脱敏接收号码',
+    `status`                varchar(20)      NOT NULL DEFAULT 'pending' COMMENT 'pending/sending/retry_wait/accepted/failed/unknown/canceled',
+    `attempt_count`         int unsigned     NOT NULL DEFAULT '0' COMMENT '已尝试次数',
+    `max_attempts`          int unsigned     NOT NULL DEFAULT '3' COMMENT '最大尝试次数',
+    `next_attempt_at`       datetime                  DEFAULT NULL COMMENT '下次尝试时间',
+    `last_attempt_at`       datetime                  DEFAULT NULL COMMENT '最后尝试时间',
+    `accepted_at`           datetime                  DEFAULT NULL COMMENT '供应商接受时间',
+    `provider`              varchar(40)      NOT NULL DEFAULT '' COMMENT '供应商',
+    `provider_request_id`   varchar(128)     NOT NULL DEFAULT '' COMMENT '供应商请求ID',
+    `provider_message_id`   varchar(128)     NOT NULL DEFAULT '' COMMENT '供应商短信ID',
+    `provider_code`         varchar(80)      NOT NULL DEFAULT '' COMMENT '供应商结果码',
+    `last_error`            varchar(500)     NOT NULL DEFAULT '' COMMENT '脱敏后的最后错误',
+    `created_at`            datetime                  DEFAULT NULL,
+    `updated_at`            datetime                  DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `smsd_idempotency_key` (`idempotency_key`),
+    KEY `smsd_due` (`status`, `next_attempt_at`, `id`),
+    KEY `smsd_user_created` (`user_id`, `created_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='短信发送 Outbox 与状态记录';
 
 CREATE TABLE IF NOT EXISTS `daily_request_stats`
 (

@@ -19,6 +19,13 @@ import (
 
 const notificationWSRequestPath = "/admin/v1/common/ws"
 
+var personalActivityExcludedPaths = []string{
+	notificationWSRequestPath,
+	"/admin/v1/common/ws-ticket",
+	"/admin/v1/log/request/self-list",
+	"/admin/v1/log/request/self-detail",
+}
+
 type Metric struct {
 	Key     string  `json:"key"`
 	Title   string  `json:"title"`
@@ -174,7 +181,8 @@ func buildPersonalSummary(db *gorm.DB, uid uint, now time.Time) (PersonalSummary
 			COALESCE(SUM(CASE WHEN operation_status <> 0 THEN 1 ELSE 0 END), 0) AS today_failures,
 			COALESCE(SUM(CASE WHEN change_diff IS NOT NULL AND TRIM(change_diff) NOT IN ('', '[]', '{}') THEN 1 ELSE 0 END), 0) AS today_changes`).
 		Where("operator_id = ? AND created_at >= ? AND created_at < ?", uid, todayStart, tomorrowStart).
-		Where("base_url NOT IN (?, ?)", "/admin/v1/log/request/self-list", "/admin/v1/log/request/self-detail").
+		Where("base_url NOT IN ?", personalActivityExcludedPaths).
+		Where("operation_status <> 0 OR is_high_risk = 1 OR (change_diff IS NOT NULL AND TRIM(change_diff) NOT IN ('', '[]', '{}')) OR method IN ?", []string{"POST", "PUT", "PATCH", "DELETE"}).
 		Scan(&requests).Error; err != nil {
 		return PersonalSummary{}, err
 	}
@@ -335,11 +343,11 @@ func buildActivities(db *gorm.DB, operatorID uint) []ActivityItem {
 	var rows []row
 	query := db.Table("request_logs").
 		Select("id, request_id, operator_id, operator_account, operator_name, operation_name, method, base_url, created_at, operation_status, is_high_risk, (change_diff IS NOT NULL AND change_diff <> '' AND change_diff <> '{}') AS has_change_diff").
-		Where("operation_status <> 0 OR is_high_risk = 1 OR (change_diff IS NOT NULL AND change_diff <> '' AND change_diff <> '{}') OR method IN ?", []string{"POST", "PUT", "PATCH", "DELETE"})
+		Where("operation_status <> 0 OR is_high_risk = 1 OR (change_diff IS NOT NULL AND change_diff <> '' AND change_diff <> '{}') OR method IN ?", []string{"POST", "PUT", "PATCH", "DELETE"}).
+		Where("base_url NOT IN ?", personalActivityExcludedPaths)
 	if operatorID > 0 {
 		// 首页"最近动态"只展示当前登录用户自己的操作记录。
-		query = query.Where("operator_id = ?", operatorID).
-			Where("base_url NOT IN (?, ?)", "/admin/v1/log/request/self-list", "/admin/v1/log/request/self-detail")
+		query = query.Where("operator_id = ?", operatorID)
 	}
 	if err := query.
 		Order("created_at DESC, id DESC").
@@ -404,12 +412,19 @@ func changeType(current int64, previous int64) string {
 }
 
 func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
-	sevenDaysAgo := todayStart.AddDate(0, 0, -6)
+	return buildTrendDataRange(db, todayStart.AddDate(0, 0, -6), todayStart.AddDate(0, 0, 1))
+}
+
+func buildTrendDataRange(db *gorm.DB, start time.Time, end time.Time) (*TrendData, error) {
+	days := calendarDays(start, end)
+	if days <= 0 {
+		return &TrendData{Dates: []string{}, Requests: []int64{}, Errors: []int64{}, Logins: []int64{}}, nil
+	}
 
 	// 构建日期列表
-	dates := make([]string, 7)
-	for i := 0; i < 7; i++ {
-		dates[i] = sevenDaysAgo.AddDate(0, 0, i).Format("01-02")
+	dates := make([]string, days)
+	for i := 0; i < days; i++ {
+		dates[i] = start.AddDate(0, 0, i).Format("01-02")
 	}
 
 	type dayCount struct {
@@ -417,7 +432,7 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 		Count int64
 	}
 
-	requestMap, errorMap, err := requestTrendFromStats(db, sevenDaysAgo, todayStart.AddDate(0, 0, 1))
+	requestMap, errorMap, err := requestTrendFromStats(db, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +443,7 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 	var loginCounts []dayCount
 	if err := db.Table("admin_login_logs").
 		Select(dateExpr+" AS date, COUNT(*) AS count").
-		Where("deleted_at = 0 AND login_status = ? AND uid > 0 AND created_at >= ? AND created_at < ?", model.LoginStatusSuccess, sevenDaysAgo, todayStart.AddDate(0, 0, 1)).
+		Where("deleted_at = 0 AND login_status = ? AND uid > 0 AND created_at >= ? AND created_at < ?", model.LoginStatusSuccess, start, end).
 		Group(dateExpr).
 		Order("date ASC").
 		Scan(&loginCounts).Error; err != nil {
@@ -440,11 +455,11 @@ func buildTrendData(db *gorm.DB, todayStart time.Time) (*TrendData, error) {
 		loginMap[c.Date] = c.Count
 	}
 
-	requests := make([]int64, 7)
-	errors := make([]int64, 7)
-	logins := make([]int64, 7)
-	for i := 0; i < 7; i++ {
-		dateKey := sevenDaysAgo.AddDate(0, 0, i).Format("2006-01-02")
+	requests := make([]int64, days)
+	errors := make([]int64, days)
+	logins := make([]int64, days)
+	for i := 0; i < days; i++ {
+		dateKey := start.AddDate(0, 0, i).Format("2006-01-02")
 		requests[i] = requestMap[dateKey]
 		errors[i] = errorMap[dateKey]
 		logins[i] = loginMap[dateKey]

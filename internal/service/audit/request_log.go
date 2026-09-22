@@ -215,7 +215,13 @@ func (s *RequestLogService) Detail(id uint) (any, error) {
 	if s.db != nil {
 		requestLog.SetDB(s.db)
 	}
-	if err := requestLog.GetById(id); err != nil || requestLog.ID == 0 {
+	if err := requestLog.GetById(id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, e.NewBusinessError(e.NotFound)
+		}
+		return nil, err
+	}
+	if requestLog.ID == 0 {
 		return nil, e.NewBusinessError(e.NotFound)
 	}
 	// 使用资源类转换，详情包含所有字段

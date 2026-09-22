@@ -112,6 +112,23 @@ func TestRecordLoginLogRejectsStaleAuthenticatedUserSnapshot(t *testing.T) {
 	}
 }
 
+func TestRecordSMSLoginRejectsChangedPhoneSnapshot(t *testing.T) {
+	db := newLoginRecordTestDB(t, true)
+	if err := db.Exec(`INSERT INTO admin_user(id, deleted_at, username, password, full_phone_number, status, is_super_admin, last_ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, 0, "admin", "hash", "8613900000000", model.AdminUserStatusEnabled, 0, "").Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewLoginServiceWithDeps(LoginServiceDeps{LoginLogDB: db})
+	staleUser := &model.AdminUser{
+		ContainsDeleteBaseModel: model.ContainsDeleteBaseModel{BaseModel: model.BaseModel{ID: 1}},
+		Username:                "admin", Password: "hash", FullPhoneNumber: "8613800000000", Status: model.AdminUserStatusEnabled,
+	}
+	claims := token.AdminCustomClaims{RegisteredClaims: jwt.RegisteredClaims{ID: "jwt-stale-phone", ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))}}
+	if err := service.recordLoginLog(staleUser, claims, "access-token", "", LoginLogInfo{}, model.LoginTypeSMS); err == nil {
+		t.Fatal("expected changed phone snapshot to be rejected")
+	}
+}
+
 func TestEnqueueLoginLogAfterStopFallsBackWithoutPanic(t *testing.T) {
 	resetLoginLogWorkerForTest()
 	StopLoginLogWorker(time.Second)
@@ -159,6 +176,7 @@ func newLoginRecordTestDB(t *testing.T, withLastLoginColumn bool) *gorm.DB {
 		deleted_at integer not null default 0,
 		username text,
 		password text,
+		full_phone_number text,
 		status integer,
 		is_super_admin integer,
 		last_ip text,

@@ -23,6 +23,46 @@ const (
 
 type fileExportProgressReporter func(processed, total int) error
 
+// HasFileListExportRows 使用与流式导出相同的过滤条件，在创建异步任务前快速判断是否为空。
+func (s *FileResourceService) HasFileListExportRows(ctx context.Context, params *form.FileResourceList) (bool, error) {
+	query, err := s.fileListExportQuery(ctx, params)
+	if err != nil {
+		return false, err
+	}
+	var rows []model.UploadFiles
+	result := query.Select("upload_files.id").Limit(1).Find(&rows)
+	return result.RowsAffected > 0, result.Error
+}
+
+func (s *FileResourceService) fileListExportQuery(ctx context.Context, params *form.FileResourceList) (*gorm.DB, error) {
+	if params == nil {
+		params = &form.FileResourceList{}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	condition, args, err := s.buildFileResourceFilter(params)
+	if err != nil {
+		return nil, err
+	}
+	db, err := s.dbOrDefault()
+	if err != nil {
+		return nil, err
+	}
+	query := db.WithContext(ctx).Model(&model.UploadFiles{})
+	isDeleted := uint8(0)
+	if params.IsDeleted != nil {
+		isDeleted = *params.IsDeleted
+	}
+	if isDeleted == global.Yes {
+		query = query.Unscoped().Where("upload_files.deleted_at <> 0")
+	}
+	if condition != "" {
+		query = query.Where(condition, args...)
+	}
+	return query, nil
+}
+
 // GenerateFileListExportCSV 生成文件资源 CSV 数据（供异步导出任务使用）。
 // 复用 FileResourceService.List 的过滤维度，但不分页，按 Limit 限制单次导出条数。
 func (s *FileResourceService) GenerateFileListExportCSV(params *form.FileResourceList) ([]byte, string, error) {
@@ -54,25 +94,12 @@ func (s *FileResourceService) StreamFileListExportCSV(ctx context.Context, param
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	condition, args := s.buildFileResourceFilter(params)
-
-	limit := normalizeFileListExportLimit(params.Limit)
-
-	db, err := s.dbOrDefault()
+	q, err := s.fileListExportQuery(ctx, params)
 	if err != nil {
 		return err
 	}
-	q := db.WithContext(ctx).Model(&model.UploadFiles{})
-	isDeleted := uint8(0)
-	if params.IsDeleted != nil {
-		isDeleted = *params.IsDeleted
-	}
-	if isDeleted == global.Yes {
-		q = q.Unscoped().Where("upload_files.deleted_at <> 0")
-	}
-	if condition != "" {
-		q = q.Where(condition, args...)
-	}
+
+	limit := normalizeFileListExportLimit(params.Limit)
 
 	var totalRows int64
 	if err := q.Count(&totalRows).Error; err != nil {

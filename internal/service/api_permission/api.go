@@ -29,22 +29,22 @@ func NewApiService() *ApiService {
 const apiOptionsLimit = 500
 
 // Options 接口权限选择器：按名称/路由模糊搜索，供菜单编辑时下拉选择器使用。
-func (s *ApiService) Options(keyword string, isAuth *int8) []resources.ApiOptionResources {
+func (s *ApiService) Options(keyword string, isAuth *int8, locale ...string) ([]resources.ApiOptionResources, error) {
 	qb := query_builder.New()
 	if keyword != "" {
-		qb.AddCondition("(name like ? OR route like ? OR code = ?)", "%"+keyword+"%", "%"+keyword+"%", keyword)
+		qb.AddCondition("(name like ? OR name_i18n like ? OR route like ? OR code = ?)", "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", keyword)
 	}
 	qb.AddEq("is_auth", isAuth)
 	conditionStr, args := qb.Build()
 
 	_, collection, err := model.ListPageE(model.NewApi(), 1, apiOptionsLimit, conditionStr, args, model.ListOptionalParams{
-		SelectFields: []string{"id", "name", "code", "method", "route"},
+		SelectFields: []string{"id", "name", "name_i18n", "code", "method", "route"},
 		OrderBy:      "sort desc, id desc",
 	})
 	if err != nil {
-		return []resources.ApiOptionResources{}
+		return nil, err
 	}
-	return resources.ToApiOptions(collection)
+	return resources.ToApiOptions(collection, locale...), nil
 }
 
 // Update 更新 API 权限。
@@ -91,7 +91,7 @@ func validateAuthModeUpdate(current uint8, requested *int8) error {
 }
 
 // ListPage 分页查询 API 权限列表。
-func (s *ApiService) ListPage(params *form.ListPermission) (*resources.Collection, error) {
+func (s *ApiService) ListPage(params *form.ListPermission, locale ...string) (*resources.Collection, error) {
 	condition, args := s.buildListCondition(params)
 
 	apiModel := model.NewApi()
@@ -109,18 +109,24 @@ func (s *ApiService) ListPage(params *form.ListPermission) (*resources.Collectio
 		return nil, err
 	}
 
-	return resources.NewApiTransformer().ToCollection(params.Page, params.PerPage, total, collection), nil
+	requestLocale := ""
+	if len(locale) > 0 {
+		requestLocale = locale[0]
+	}
+	return resources.NewApiTransformer().ToLocalizedCollection(params.Page, params.PerPage, total, collection, requestLocale), nil
 }
 
 // buildListCondition 构建 API 权限列表查询条件。
 func (s *ApiService) buildListCondition(params *form.ListPermission) (string, []any) {
 	qb := query_builder.New()
 	if params.Keyword != "" {
-		qb.AddCondition("(name like ? OR route like ? OR code = ?)", "%"+params.Keyword+"%", "%"+params.Keyword+"%", params.Keyword)
+		qb.AddCondition("(name like ? OR name_i18n like ? OR route like ? OR code = ?)", "%"+params.Keyword+"%", "%"+params.Keyword+"%", "%"+params.Keyword+"%", params.Keyword)
 	}
 
-	qb.AddLike("name", params.Name).
-		AddEq("method", params.Method).
+	if params.Name != "" {
+		qb.AddCondition("(name like ? OR name_i18n like ?)", "%"+params.Name+"%", "%"+params.Name+"%")
+	}
+	qb.AddEq("method", params.Method).
 		AddLike("route", params.Route).
 		AddEq("is_auth", params.IsAuth).
 		AddEq("is_effective", params.IsEffective)

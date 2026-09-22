@@ -20,6 +20,7 @@ func cloneDefaultConfig() *Conf {
 		Redis:     autoload.Redis,
 		Logger:    autoload.Logger,
 		Jwt:       autoload.Jwt,
+		Security:  autoload.Security,
 		Queue:     cloneQueueConfig(autoload.Queue),
 	}
 }

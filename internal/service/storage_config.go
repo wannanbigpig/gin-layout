@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	c "github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/internal/filestorage"
 	"github.com/wannanbigpig/gin-layout/internal/global"
@@ -16,7 +17,11 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/security/credential"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	cryptox "github.com/wannanbigpig/gin-layout/pkg/utils/crypto"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -24,12 +29,29 @@ const (
 	StorageActiveDriverConfigKey = "storage.active_driver"
 	StorageConfigConfigKey       = "storage.config"
 	storageConfigManageTab       = "storage"
+	storageEncryptedPrefix       = "enc:v1:"
 )
 
-type StorageConfigService struct{}
+type StorageConfigService struct {
+	registry *filestorage.Registry
+}
 
 func NewStorageConfigService() *StorageConfigService {
-	return &StorageConfigService{}
+	return &StorageConfigService{registry: filestorage.DefaultRegistry()}
+}
+
+func newStorageConfigServiceWithRegistry(registry *filestorage.Registry) *StorageConfigService {
+	if registry == nil {
+		registry = filestorage.DefaultRegistry()
+	}
+	return &StorageConfigService{registry: registry}
+}
+
+func (s *StorageConfigService) driverRegistry() *filestorage.Registry {
+	if s != nil && s.registry != nil {
+		return s.registry
+	}
+	return filestorage.DefaultRegistry()
 }
 
 type StorageSettings struct {
@@ -48,6 +70,11 @@ func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) 
 		if unmarshalErr := json.Unmarshal([]byte(value), &settings.Config); unmarshalErr != nil {
 			return StorageSettings{}, fmt.Errorf("invalid storage configuration: %w", unmarshalErr)
 		}
+		if maskSensitive {
+			maskStorageSecretWithRegistry(&settings.Config, s.driverRegistry())
+		} else if decryptErr := decryptStorageSecretWithRegistry(&settings.Config, s.driverRegistry()); decryptErr != nil {
+			return StorageSettings{}, decryptErr
+		}
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return StorageSettings{}, err
 	}
@@ -58,11 +85,6 @@ func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) 
 		settings.Config.MaxFileSizeMB = 10
 	}
 	applyLocalStorageDefaults(&settings)
-	if maskSensitive {
-		if strings.TrimSpace(settings.Config.AliyunOSS.AccessKeySecret) != "" {
-			settings.Config.AliyunOSS.AccessKeySecret = filestorage.MaskPlaceholder
-		}
-	}
 	return settings, nil
 }
 
@@ -72,15 +94,23 @@ func (s *StorageConfigService) Save(next StorageSettings) error {
 }
 
 func (s *StorageConfigService) SaveWithAuditDiff(next StorageSettings) (string, error) {
-	if err := validateStorageDriver(next.ActiveDriver); err != nil {
+	if err := validateStorageDriverWithRegistry(s.driverRegistry(), next.ActiveDriver); err != nil {
 		return "", err
 	}
 	current, err := s.Get(false)
 	if err != nil {
 		return "", err
 	}
-	mergeSensitiveStorageConfig(&next.Config, current.Config)
-	payload, err := json.Marshal(next.Config)
+	mergeSensitiveStorageConfigWithRegistry(&next.Config, current.Config, s.driverRegistry())
+	applyLocalStorageDefaults(&next)
+	if err := s.driverRegistry().Validate(next.ActiveDriver, next.Config); err != nil {
+		return "", newStorageConfigInputError(err.Error(), err)
+	}
+	persisted := next.Config
+	if err := encryptStorageSecretWithRegistry(&persisted, s.driverRegistry()); err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(persisted)
 	if err != nil {
 		return "", err
 	}
@@ -103,19 +133,45 @@ func (s *StorageConfigService) SaveWithAuditDiff(next StorageSettings) (string, 
 	if err != nil {
 		return "", err
 	}
-	return storageSettingsAuditDiff(current, next), nil
+	return storageSettingsAuditDiffWithRegistry(current, next, s.driverRegistry()), nil
 }
 
 func storageSettingsAuditDiff(before, after StorageSettings) string {
-	secretChanged := before.Config.AliyunOSS.AccessKeySecret != after.Config.AliyunOSS.AccessKeySecret
-	before.Config.AliyunOSS.AccessKeySecret, after.Config.AliyunOSS.AccessKeySecret = "", ""
+	return storageSettingsAuditDiffWithRegistry(before, after, filestorage.DefaultRegistry())
+}
+
+func storageSettingsAuditDiffWithRegistry(before, after StorageSettings, registry *filestorage.Registry) string {
+	type changedSecret struct {
+		field string
+		label string
+	}
+	changedSecrets := make([]changedSecret, 0)
+	if registry == nil {
+		registry = filestorage.DefaultRegistry()
+	}
+	for _, driverName := range registry.Names() {
+		fields, err := registry.SensitiveFields(driverName)
+		if err != nil {
+			continue
+		}
+		for _, field := range fields {
+			if field.Get == nil || field.Set == nil {
+				continue
+			}
+			if field.Get(before.Config) != field.Get(after.Config) {
+				changedSecrets = append(changedSecrets, changedSecret{field: driverName + "." + field.Name, label: field.Label})
+			}
+			field.Set(&before.Config, "")
+			field.Set(&after.Config, "")
+		}
+	}
 	items := auditdiff.BuildFieldDiff(
 		map[string]any{"active_driver": before.ActiveDriver, "config": before.Config},
 		map[string]any{"active_driver": after.ActiveDriver, "config": after.Config},
 		[]auditdiff.FieldRule{{Field: "active_driver", Label: "存储驱动"}, {Field: "config", Label: "存储参数"}},
 	)
-	if secretChanged {
-		items = append(items, auditdiff.ChangeDiffItem{Field: "access_key_secret", Label: "存储密钥", Before: "[REDACTED]", After: "[CHANGED]"})
+	for _, secret := range changedSecrets {
+		items = append(items, auditdiff.ChangeDiffItem{Field: secret.field, Label: secret.label, Before: "[REDACTED]", After: "[CHANGED]"})
 	}
 	return auditdiff.Marshal(items)
 }
@@ -136,16 +192,28 @@ func (s *StorageConfigService) Test(ctx context.Context, settings StorageSetting
 	if err != nil {
 		return err
 	}
-	mergeSensitiveStorageConfig(&settings.Config, current.Config)
-	driver, err := buildStorageDriver(ctx, settings.ActiveDriver, settings.Config)
+	mergeSensitiveStorageConfigWithRegistry(&settings.Config, current.Config, s.driverRegistry())
+	applyLocalStorageDefaults(&settings)
+	driver, err := buildStorageDriverWithRegistry(ctx, s.driverRegistry(), settings.ActiveDriver, settings.Config)
 	if err != nil {
 		return newStorageTestBusinessError("init", err)
 	}
-	key := "storage-test/" + time.Now().Format("20060102150405") + ".txt"
-	bucket := bucketForDriver(settings.ActiveDriver, settings.Config, global.Yes)
+	key := "storage-test/" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".txt"
+	bucket, err := s.driverRegistry().ResolveBucket(settings.ActiveDriver, settings.Config, true)
+	if err != nil {
+		return newStorageTestBusinessError("init", err)
+	}
 	if _, err := driver.Put(ctx, filestorage.PutInput{Bucket: bucket, ObjectKey: key, Reader: strings.NewReader("ok"), Size: 2, ContentType: "text/plain"}); err != nil {
 		return newStorageTestBusinessError("upload", err)
 	}
+	cleanupNeeded := true
+	defer func() {
+		if cleanupNeeded {
+			if cleanupErr := driver.Delete(context.Background(), bucket, key); cleanupErr != nil {
+				log.Logger.Warn("清理存储测试文件失败", zap.String("driver", settings.ActiveDriver), zap.String("bucket", bucket), zap.String("object_key", key), zap.Error(cleanupErr))
+			}
+		}
+	}()
 	exists, err := driver.Exists(ctx, bucket, key)
 	if err != nil {
 		return newStorageTestBusinessError("exists", err)
@@ -159,6 +227,7 @@ func (s *StorageConfigService) Test(ctx context.Context, settings StorageSetting
 	if err := driver.Delete(ctx, bucket, key); err != nil {
 		return newStorageTestBusinessError("delete", err)
 	}
+	cleanupNeeded = false
 	return nil
 }
 
@@ -229,38 +298,33 @@ func NewStorageDriverByName(ctx context.Context, driverName string) (filestorage
 }
 
 func buildStorageDriver(ctx context.Context, driverName string, config filestorage.Config) (filestorage.Driver, error) {
-	if err := validateStorageDriver(driverName); err != nil {
-		return nil, err
+	return buildStorageDriverWithRegistry(ctx, filestorage.DefaultRegistry(), driverName, config)
+}
+
+func buildStorageDriverWithRegistry(ctx context.Context, registry *filestorage.Registry, driverName string, config filestorage.Config) (filestorage.Driver, error) {
+	if registry == nil {
+		registry = filestorage.DefaultRegistry()
 	}
-	switch driverName {
-	case model.StorageDriverLocal:
-		return filestorage.NewLocalDriver(config.Local, storageBasePath(true), storageBasePath(false)), nil
-	case model.StorageDriverAliyunOSS:
-		return filestorage.NewAliyunOSSDriver(config.AliyunOSS), nil
-	default:
-		return nil, fmt.Errorf("unsupported storage driver: %s", driverName)
-	}
+	return registry.Build(ctx, driverName, config)
 }
 
 func bucketForDriver(driverName string, config filestorage.Config, isPublic uint8) string {
-	switch driverName {
-	case model.StorageDriverAliyunOSS:
-		return config.AliyunOSS.Bucket
-	default:
-		if isPublic == global.Yes {
-			return "public"
-		}
-		return "private"
-	}
+	bucket, _ := filestorage.DefaultRegistry().ResolveBucket(driverName, config, isPublic == global.Yes)
+	return bucket
 }
 
 func validateStorageDriver(driverName string) error {
-	switch driverName {
-	case model.StorageDriverLocal, model.StorageDriverAliyunOSS:
-		return nil
-	default:
-		return fmt.Errorf("unsupported storage driver: %s", driverName)
+	return validateStorageDriverWithRegistry(filestorage.DefaultRegistry(), driverName)
+}
+
+func validateStorageDriverWithRegistry(registry *filestorage.Registry, driverName string) error {
+	if registry == nil {
+		registry = filestorage.DefaultRegistry()
 	}
+	if _, ok := registry.Definition(driverName); !ok {
+		return newStorageConfigInputError("不支持的存储驱动: "+strings.TrimSpace(driverName), nil)
+	}
+	return nil
 }
 
 func upsertStorageSysConfig(tx *gorm.DB, key, value, valueType string, sensitive uint8, remark string, names map[string]string) error {
@@ -290,10 +354,124 @@ func upsertStorageSysConfig(tx *gorm.DB, key, value, valueType string, sensitive
 }
 
 func mergeSensitiveStorageConfig(next *filestorage.Config, current filestorage.Config) {
-	secret := strings.TrimSpace(next.AliyunOSS.AccessKeySecret)
-	if secret == "" || secret == filestorage.MaskPlaceholder {
-		next.AliyunOSS.AccessKeySecret = current.AliyunOSS.AccessKeySecret
+	mergeSensitiveStorageConfigWithRegistry(next, current, filestorage.DefaultRegistry())
+}
+
+func mergeSensitiveStorageConfigWithRegistry(next *filestorage.Config, current filestorage.Config, registry *filestorage.Registry) {
+	if next == nil {
+		return
 	}
+	if registry == nil {
+		registry = filestorage.DefaultRegistry()
+	}
+	for _, driverName := range registry.Names() {
+		fields, err := registry.SensitiveFields(driverName)
+		if err != nil {
+			continue
+		}
+		for _, field := range fields {
+			if field.Get != nil && field.Set != nil && strings.TrimSpace(field.Get(*next)) == filestorage.MaskPlaceholder {
+				field.Set(next, field.Get(current))
+			}
+		}
+	}
+}
+
+func encryptStorageSecret(storageConfig *filestorage.Config) error {
+	return encryptStorageSecretWithRegistry(storageConfig, filestorage.DefaultRegistry())
+}
+
+func encryptStorageSecretWithRegistry(storageConfig *filestorage.Config, registry *filestorage.Registry) error {
+	return transformStorageSecretsWithRegistry(storageConfig, registry, func(driverName, secret string) (string, error) {
+		if strings.TrimSpace(secret) == "" {
+			return "", nil
+		}
+		key, err := storageCredentialSecretKey(driverName)
+		if err != nil {
+			return "", err
+		}
+		encrypted, err := cryptox.Encrypt(key, secret)
+		if err != nil {
+			return "", err
+		}
+		return storageEncryptedPrefix + encrypted, nil
+	})
+}
+
+func decryptStorageSecret(storageConfig *filestorage.Config) error {
+	return decryptStorageSecretWithRegistry(storageConfig, filestorage.DefaultRegistry())
+}
+
+func decryptStorageSecretWithRegistry(storageConfig *filestorage.Config, registry *filestorage.Registry) error {
+	return transformStorageSecretsWithRegistry(storageConfig, registry, func(driverName, secret string) (string, error) {
+		if strings.TrimSpace(secret) == "" {
+			return "", nil
+		}
+		if !strings.HasPrefix(secret, storageEncryptedPrefix) {
+			return "", errors.New("对象存储凭据不是受支持的加密格式")
+		}
+		key, err := storageCredentialSecretKey(driverName)
+		if err != nil {
+			return "", err
+		}
+		return cryptox.Decrypt(key, strings.TrimPrefix(secret, storageEncryptedPrefix))
+	})
+}
+
+func maskStorageSecret(storageConfig *filestorage.Config) {
+	maskStorageSecretWithRegistry(storageConfig, filestorage.DefaultRegistry())
+}
+
+func maskStorageSecretWithRegistry(storageConfig *filestorage.Config, registry *filestorage.Registry) {
+	_ = transformStorageSecretsWithRegistry(storageConfig, registry, func(_ string, secret string) (string, error) {
+		if strings.TrimSpace(secret) == "" {
+			return "", nil
+		}
+		return filestorage.MaskPlaceholder, nil
+	})
+}
+
+func transformStorageSecrets(storageConfig *filestorage.Config, transform func(driverName, secret string) (string, error)) error {
+	return transformStorageSecretsWithRegistry(storageConfig, filestorage.DefaultRegistry(), transform)
+}
+
+func transformStorageSecretsWithRegistry(storageConfig *filestorage.Config, registry *filestorage.Registry, transform func(driverName, secret string) (string, error)) error {
+	if storageConfig == nil || transform == nil {
+		return nil
+	}
+	if registry == nil {
+		registry = filestorage.DefaultRegistry()
+	}
+	for _, driverName := range registry.Names() {
+		fields, err := registry.SensitiveFields(driverName)
+		if err != nil {
+			return err
+		}
+		for _, field := range fields {
+			if field.Get == nil || field.Set == nil {
+				continue
+			}
+			value, err := transform(driverName, field.Get(*storageConfig))
+			if err != nil {
+				return err
+			}
+			field.Set(storageConfig, value)
+		}
+	}
+	return nil
+}
+
+func storageCredentialSecretKey(driverName string) (string, error) {
+	purposeName := strings.ReplaceAll(strings.TrimSpace(driverName), "_", "-")
+	return credential.DeriveKey(credential.Purpose("storage-" + purposeName + "-credentials:v1"))
+}
+
+func newStorageConfigInputError(message string, cause error) *e.BusinessError {
+	businessErr := e.NewBusinessError(e.InvalidParameter, message)
+	if cause != nil {
+		businessErr.AppendContextErr(cause)
+	}
+	return businessErr
 }
 
 func applyLocalStorageDefaults(settings *StorageSettings) {
@@ -339,15 +517,14 @@ func (s *StorageConfigService) GetSensitiveValue(driverName, field string) (stri
 	if err != nil {
 		return "", err
 	}
-	switch strings.TrimSpace(driverName) {
-	case model.StorageDriverAliyunOSS:
-		switch strings.TrimSpace(field) {
-		case "access_key_secret":
-			return settings.Config.AliyunOSS.AccessKeySecret, nil
-		default:
-			return "", fmt.Errorf("unsupported storage secret field: %s", field)
-		}
-	default:
-		return "", fmt.Errorf("unsupported storage driver: %s", driverName)
+	fields, err := s.driverRegistry().SensitiveFields(driverName)
+	if err != nil {
+		return "", newStorageConfigInputError(err.Error(), err)
 	}
+	for _, definition := range fields {
+		if definition.Name == strings.TrimSpace(field) && definition.Get != nil {
+			return definition.Get(settings.Config), nil
+		}
+	}
+	return "", newStorageConfigInputError("不支持的存储敏感字段: "+strings.TrimSpace(field), nil)
 }

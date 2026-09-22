@@ -75,6 +75,9 @@ func localeTranslations(locale string) []translation {
 			{tag: "required_if_exist", translation: "{0} is required", override: false},
 			{tag: "regexp", translation: "{0} format is invalid", override: false},
 			{tag: "file_type_or_multi", translation: "{0} must be one or more of [image pdf word excel ppt archive text audio video other], comma-separated", override: false},
+			{tag: "storage_driver", translation: "{0} is not a registered storage driver", override: false},
+			{tag: "storage_direct_driver", translation: "{0} does not support direct upload", override: false},
+			{tag: "storage_multipart_driver", translation: "{0} does not support multipart upload", override: false},
 		}
 	default:
 		return []translation{
@@ -82,6 +85,9 @@ func localeTranslations(locale string) []translation {
 			{tag: "required_if_exist", translation: "{0}字段必填", override: false},
 			{tag: "regexp", translation: "{0}字段规则不匹配", override: false},
 			{tag: "file_type_or_multi", translation: "{0}必须是[image pdf word excel ppt archive text audio video other]中的一个或多个，逗号分隔", override: false},
+			{tag: "storage_driver", translation: "{0}不是已注册的存储驱动", override: false},
+			{tag: "storage_direct_driver", translation: "{0}不支持直传", override: false},
+			{tag: "storage_multipart_driver", translation: "{0}不支持分片上传", override: false},
 		}
 	}
 }

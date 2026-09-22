@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -120,6 +121,7 @@ func TestServiceNotifyExportResultBuildsMessage(t *testing.T) {
 
 	successMsg, err := svc.NotifyExportResult(context.Background(), ExportResultInput{
 		UserID:    9,
+		PublicID:  "export-501",
 		Scene:     model.ExportSceneRequestLog,
 		Status:    model.TaskRunStatusSuccess,
 		TaskRunID: 501,
@@ -132,6 +134,9 @@ func TestServiceNotifyExportResultBuildsMessage(t *testing.T) {
 	}
 	if successMsg.Title != "请求日志导出完成" {
 		t.Fatalf("unexpected success title: %s", successMsg.Title)
+	}
+	if successMsg.ActionURL != "/my-exports" || strings.Contains(successMsg.Payload, "task_run_id") || strings.Contains(successMsg.Payload, "file_id") {
+		t.Fatalf("export notification exposed diagnostics: %#v", successMsg)
 	}
 
 	failedMsg, err := svc.NotifyExportResult(context.Background(), ExportResultInput{
@@ -147,6 +152,9 @@ func TestServiceNotifyExportResultBuildsMessage(t *testing.T) {
 	if failedMsg.Title != "文件资源导出失败" {
 		t.Fatalf("unexpected failure title: %s", failedMsg.Title)
 	}
+	if strings.Contains(failedMsg.Content, "生成失败") || strings.Contains(failedMsg.Payload, "生成失败") {
+		t.Fatalf("raw execution error leaked to user notification: %#v", failedMsg)
+	}
 
 	var stored []model.SysMessage
 	if err := db.Order("id asc").Find(&stored).Error; err != nil {
@@ -157,6 +165,39 @@ func TestServiceNotifyExportResultBuildsMessage(t *testing.T) {
 	}
 	if stored[0].Payload == "" || stored[1].Payload == "" {
 		t.Fatalf("expected payload to be stored: %#v", stored)
+	}
+}
+
+func TestServicePublishExportProgressDispatchesEphemeralEvent(t *testing.T) {
+	var broadcasted []Event
+	var published []Event
+	svc := NewServiceWithDeps(ServiceDeps{
+		BroadcastFn: func(event Event) { broadcasted = append(broadcasted, event) },
+		PublishFn: func(_ context.Context, event Event) error {
+			published = append(published, event)
+			return nil
+		},
+	})
+
+	svc.PublishExportProgress(context.Background(), ExportProgressInput{
+		UserID:         7,
+		Scene:          model.ExportSceneRequestLog,
+		PublicID:       "export-101",
+		Status:         model.TaskRunStatusRunning,
+		Progress:       40,
+		ProcessedCount: 20,
+		TotalCount:     50,
+	})
+
+	if len(broadcasted) != 1 || len(published) != 1 {
+		t.Fatalf("expected one realtime event, got broadcast=%d publish=%d", len(broadcasted), len(published))
+	}
+	event := broadcasted[0]
+	if event.Event != "export_progress" || event.Topic != model.MessageTopicExportProgress || event.UserID != 7 {
+		t.Fatalf("unexpected export progress event: %#v", event)
+	}
+	if event.Data["public_id"] != "export-101" || event.Data["progress"] != uint8(40) {
+		t.Fatalf("unexpected export progress payload: %#v", event.Data)
 	}
 }
 
@@ -195,6 +236,29 @@ func TestNotifyExportResultIsIdempotentPerTaskStatus(t *testing.T) {
 	}
 	if count != 1 || dispatched != 1 {
 		t.Fatalf("expected one row and one dispatch, rows=%d dispatched=%d", count, dispatched)
+	}
+}
+
+func TestNotificationActionURLMustBeInternalPath(t *testing.T) {
+	db := newMessageTestDB(t)
+	svc := NewServiceWithDeps(ServiceDeps{DB: db, BroadcastFn: func(Event) {}})
+	for _, actionURL := range []string{"https://example.com", "//example.com", `\\example.com`, "javascript:alert(1)", "/safe\npath"} {
+		if _, err := svc.Create(context.Background(), CreateMessageInput{UserID: 7, Title: "unsafe", ActionURL: actionURL}); err == nil {
+			t.Fatalf("expected unsafe action URL %q to fail", actionURL)
+		}
+	}
+	if _, err := svc.Create(context.Background(), CreateMessageInput{UserID: 7, Title: "safe", ActionURL: "/todo/list?scope=overdue"}); err != nil {
+		t.Fatalf("expected internal action URL to pass: %v", err)
+	}
+}
+
+func TestManualNotificationCannotForgeTodoReminderCategory(t *testing.T) {
+	db := newMessageTestDB(t)
+	svc := NewServiceWithDeps(ServiceDeps{DB: db, BroadcastFn: func(Event) {}})
+	if _, err := svc.Send(context.Background(), SendInput{
+		Title: "manual", Content: "manual", Category: model.MessageCategoryTodo, AudienceType: "user_ids", UserIDs: []uint{7},
+	}); err == nil {
+		t.Fatal("manual notification must not use the reserved todo category")
 	}
 }
 

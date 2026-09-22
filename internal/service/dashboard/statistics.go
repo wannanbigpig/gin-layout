@@ -1,16 +1,19 @@
 package dashboard
 
 import (
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 )
 
 const statisticsWindowDays = 7
+const statisticsMaxWindowDays = 90
 
 type Statistics struct {
 	WindowDays   int                `json:"window_days"`
@@ -58,21 +61,36 @@ type ErrorCategoryBucket struct {
 }
 
 func (s *OverviewService) Statistics() (*Statistics, error) {
+	return s.StatisticsRange("", "")
+}
+
+// StatisticsRange returns statistics for an inclusive calendar-date range.
+// Empty dates preserve the original seven-day default contract.
+func (s *OverviewService) StatisticsRange(startDate string, endDate string) (*Statistics, error) {
 	db, err := model.GetDB()
 	if err != nil {
 		return nil, err
 	}
-	return buildStatistics(db, time.Now()), nil
+	now := time.Now()
+	start, end, err := normalizeStatisticsRange(startDate, endDate, now)
+	if err != nil {
+		return nil, err
+	}
+	return buildStatisticsRange(db, now, start, end), nil
 }
 
 func buildStatistics(db *gorm.DB, now time.Time) *Statistics {
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	windowStart := todayStart.AddDate(0, 0, -(statisticsWindowDays - 1))
-	windowEnd := todayStart.AddDate(0, 0, 1)
+	return buildStatisticsRange(db, now, todayStart.AddDate(0, 0, -(statisticsWindowDays-1)), todayStart)
+}
 
-	trendData, _ := buildTrendData(db, todayStart)
-	trend := StatisticsTrend{Days: make([]StatisticsTrendDay, 0, statisticsWindowDays)}
-	for i := 0; i < statisticsWindowDays; i++ {
+func buildStatisticsRange(db *gorm.DB, now time.Time, windowStart time.Time, inclusiveEnd time.Time) *Statistics {
+	windowEnd := inclusiveEnd.AddDate(0, 0, 1)
+	windowDays := calendarDays(windowStart, windowEnd)
+
+	trendData, _ := buildTrendDataRange(db, windowStart, windowEnd)
+	trend := StatisticsTrend{Days: make([]StatisticsTrendDay, 0, windowDays)}
+	for i := 0; i < windowDays; i++ {
 		day := StatisticsTrendDay{}
 		if trendData != nil {
 			day.Date = trendData.Dates[i]
@@ -104,7 +122,7 @@ func buildStatistics(db *gorm.DB, now time.Time) *Statistics {
 	}
 
 	return &Statistics{
-		WindowDays:   statisticsWindowDays,
+		WindowDays:   windowDays,
 		WindowStart:  windowStart.Format("2006-01-02"),
 		WindowEnd:    windowEnd.Add(-time.Nanosecond).Format(time.RFC3339),
 		GeneratedAt:  now.Format(time.RFC3339),
@@ -114,6 +132,38 @@ func buildStatistics(db *gorm.DB, now time.Time) *Statistics {
 		Errors:       errors,
 		Storage:      storage,
 	}
+}
+
+func normalizeStatisticsRange(startDate string, endDate string, now time.Time) (time.Time, time.Time, error) {
+	startDate = strings.TrimSpace(startDate)
+	endDate = strings.TrimSpace(endDate)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	if startDate == "" && endDate == "" {
+		return today.AddDate(0, 0, -(statisticsWindowDays - 1)), today, nil
+	}
+	if startDate == "" || endDate == "" {
+		return time.Time{}, time.Time{}, e.NewBusinessError(e.InvalidParameter, "开始日期和结束日期必须同时提供")
+	}
+	start, startErr := time.ParseInLocation("2006-01-02", startDate, now.Location())
+	end, endErr := time.ParseInLocation("2006-01-02", endDate, now.Location())
+	if startErr != nil || endErr != nil {
+		return time.Time{}, time.Time{}, e.NewBusinessError(e.InvalidParameter, "统计日期格式必须为 YYYY-MM-DD")
+	}
+	if end.Before(start) {
+		return time.Time{}, time.Time{}, e.NewBusinessError(e.InvalidParameter, "统计结束日期不能早于开始日期")
+	}
+	if end.After(start.AddDate(0, 0, statisticsMaxWindowDays-1)) {
+		return time.Time{}, time.Time{}, e.NewBusinessError(e.InvalidParameter, "统计时间范围不能超过90天")
+	}
+	return start, end, nil
+}
+
+func calendarDays(start time.Time, exclusiveEnd time.Time) int {
+	days := 0
+	for current := start; current.Before(exclusiveEnd); current = current.AddDate(0, 0, 1) {
+		days++
+	}
+	return days
 }
 
 func buildErrorDistribution(db *gorm.DB, start time.Time, end time.Time) ErrorDistribution {

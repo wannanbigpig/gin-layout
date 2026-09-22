@@ -238,24 +238,27 @@ func GenerateExportCSVWithProgress(params *form.RequestLogExport, reporter func(
 	return generateRequestLogExportCSVBytes(params, reporter)
 }
 
-// StreamExportCSV 流式生成请求日志 CSV，按 batch (requestLogExportBatchSize) 通过 Rows()/ScanRows
-// 写入 w，每写完一批回调一次 reporter，返回生成的文件名以及流式过程中遇到的首个错误。
-//
-// 导出为实时流式生成，非快照：数据在查询时刻即时从数据库读取，不预先冻结数据集。
-//
-// 与 GenerateExportCSVWithProgress 相比，本函数不会在内存中累积全部 CSV，
-// 内存峰值取决于 batch 大小而不是总行数，适合搭配 io.Pipe 与 CreateFromReader 串接。
-func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Writer, reporter func(processed, total int) error) (string, error) {
-	if w == nil {
-		return "", fmt.Errorf("StreamExportCSV: writer is nil")
+// HasRequestLogExportRows 使用与流式导出相同的过滤条件，在创建异步任务前快速判断是否为空。
+func HasRequestLogExportRows(ctx context.Context, params *form.RequestLogExport) (bool, error) {
+	query, _, _, err := requestLogExportQuery(ctx, params)
+	if err != nil {
+		return false, err
+	}
+	var rows []model.RequestLogs
+	result := query.Select("id").Limit(1).Find(&rows)
+	return result.RowsAffected > 0, result.Error
+}
+
+func requestLogExportQuery(ctx context.Context, params *form.RequestLogExport) (*gorm.DB, string, []any, error) {
+	if params == nil {
+		return nil, "", nil, e.NewBusinessError(e.InvalidParameter)
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ValidateRequestLogTimeRange(params.StartTime, params.EndTime); err != nil {
-		return "", err
+		return nil, "", nil, err
 	}
-
 	query := buildRequestLogQuery(requestLogQueryInput{
 		RequestID:          params.RequestID,
 		HasChangeDiff:      params.HasChangeDiff,
@@ -273,22 +276,41 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 		EndTime:            params.EndTime,
 	})
 	condition, args := query.Build()
+	db, err := requestLogGetDB()
+	if err != nil {
+		return nil, "", nil, err
+	}
+	baseQuery := db.WithContext(ctx).Model(&model.RequestLogs{})
+	if condition != "" {
+		baseQuery = baseQuery.Where(condition, args...)
+	}
+	return baseQuery, condition, args, nil
+}
 
+// StreamExportCSV 流式生成请求日志 CSV，按 batch (requestLogExportBatchSize) 通过 Rows()/ScanRows
+// 写入 w，每写完一批回调一次 reporter，返回生成的文件名以及流式过程中遇到的首个错误。
+//
+// 导出为实时流式生成，非快照：数据在查询时刻即时从数据库读取，不预先冻结数据集。
+//
+// 与 GenerateExportCSVWithProgress 相比，本函数不会在内存中累积全部 CSV，
+// 内存峰值取决于 batch 大小而不是总行数，适合搭配 io.Pipe 与 CreateFromReader 串接。
+func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Writer, reporter func(processed, total int) error) (string, error) {
+	if w == nil {
+		return "", fmt.Errorf("StreamExportCSV: writer is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	baseQuery, condition, args, err := requestLogExportQuery(ctx, params)
+	if err != nil {
+		return "", err
+	}
 	limit := params.Limit
 	if limit <= 0 {
 		limit = defaultRequestLogExportLimit
 	}
 
-	db, err := requestLogGetDB()
-	if err != nil {
-		return "", err
-	}
-	db = db.WithContext(ctx)
-
-	baseQuery := db.Model(&model.RequestLogs{})
-	if condition != "" {
-		baseQuery = baseQuery.Where(condition, args...)
-	}
 	var totalRows int64
 	if err := baseQuery.Count(&totalRows).Error; err != nil {
 		return "", err
@@ -319,7 +341,6 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 	}); err != nil {
 		return "", err
 	}
-
 	if reporter != nil {
 		if err := reporter(0, total); err != nil {
 			return "", err
@@ -341,7 +362,7 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 			batchLimit = remaining
 		}
 
-		queryDB := db.Model(&model.RequestLogs{}).
+		queryDB := baseQuery.Session(&gorm.Session{NewDB: true}).Model(&model.RequestLogs{}).
 			Select([]string{
 				"id",
 				"request_id",
@@ -368,13 +389,12 @@ func StreamExportCSV(ctx context.Context, params *form.RequestLogExport, w io.Wr
 		if condition != "" {
 			queryDB = queryDB.Where(condition, args...)
 		}
-
 		rows, err := queryDB.Rows()
 		if err != nil {
 			return "", err
 		}
 
-		batchCount, cursorCreatedAt, cursorID, scanErr := writeRequestLogRows(db, rows, writer)
+		batchCount, cursorCreatedAt, cursorID, scanErr := writeRequestLogRows(baseQuery, rows, writer)
 		// 立即关闭 rows，释放连接
 		_ = rows.Close()
 		if scanErr != nil {

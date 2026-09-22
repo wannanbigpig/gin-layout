@@ -75,8 +75,6 @@ func TestDefaultMenuAPIBindingsCoverManagementRoutes(t *testing.T) {
 		http.MethodPost + " /admin/v1/task/trigger",
 		http.MethodPost + " /admin/v1/task/run/retry",
 		http.MethodPost + " /admin/v1/task/run/cancel",
-		http.MethodGet + " /admin/v1/system/export/list",
-		http.MethodGet + " /admin/v1/system/export/detail",
 		http.MethodPost + " /admin/v1/system/file/export",
 		http.MethodPost + " /admin/v1/system/file/batch-delete",
 		http.MethodPost + " /admin/v1/system/file/upload/credential/batch",
@@ -88,6 +86,14 @@ func TestDefaultMenuAPIBindingsCoverManagementRoutes(t *testing.T) {
 	for _, route := range required {
 		if _, ok := bindingSet[route]; !ok {
 			t.Fatalf("missing default menu API binding for %s", route)
+		}
+	}
+}
+
+func TestPersonalExportRoutesAreNotBoundToOperationsPermissions(t *testing.T) {
+	for _, binding := range NewMenuAPIDefaultsService().bindings {
+		if binding.Route == "/admin/v1/system/export/list" || binding.Route == "/admin/v1/system/export/detail" {
+			t.Fatalf("personal export route must not inherit %s permission: %s", binding.MenuCode, binding.Route)
 		}
 	}
 }
