@@ -37,11 +37,11 @@ func TestMenuI18nUpsertSkipsEmptyLocaleOrTitle(t *testing.T) {
 
 	// 同时提交一个合法 locale 与若干空值组合，空值应被静默跳过，且不会触发 Replace 删除合法行。
 	payload := map[string]string{
-		"zh-CN":  "新中文",
-		"":       "无 locale",
-		"  ":     "纯空白 locale",
-		"en-US":  "",
-		"ja-JP":  "   ",
+		"zh-CN": "新中文",
+		"":      "无 locale",
+		"  ":    "纯空白 locale",
+		"en-US": "",
+		"ja-JP": "   ",
 	}
 	if err := NewMenuI18n().UpsertMenuTitles(1, payload, db); err != nil {
 		t.Fatalf("upsert menu titles with empties failed: %v", err)

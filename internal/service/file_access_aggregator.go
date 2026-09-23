@@ -26,8 +26,8 @@ import (
 //
 // 兜底：Redis 不可用 / ZADD 出错时退化为直接同步 UpdateById，确保不丢访问时间。
 const (
-	fileAccessPendingKey  = "file_resource:last_accessed_pending"
-	fileAccessFlushBatch  = 1000
+	fileAccessPendingKey     = "file_resource:last_accessed_pending"
+	fileAccessFlushBatch     = 1000
 	fileAccessRedisTimeoutOp = 500 * time.Millisecond
 	// fileAccessMaxFlushIterations 限制单次 Flush 的排空轮数，避免高访问量下 pending ZSet
 	// 持续累积（每分钟仅排一批会丢不掉积压），同时给个上限防止单轮 cron 长时间占用。

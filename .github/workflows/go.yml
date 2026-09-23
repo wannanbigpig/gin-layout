@@ -69,6 +69,21 @@ jobs:
           go run . -c /tmp/go-layout-openapi-config.yaml command gen-openapi
           git diff --exit-code -- docs/openapi.yaml
 
+      - name: Verify generated error codes are current
+        run: |
+          cp ./config/config.yaml.example /tmp/go-layout-error-codes-config.yaml
+          go run . -c /tmp/go-layout-error-codes-config.yaml command gen-error-codes
+          git diff --exit-code -- docs/error_codes.json docs/error_codes.ts
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Staticcheck targeted packages
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@latest

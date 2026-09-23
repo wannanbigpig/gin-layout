@@ -16,7 +16,6 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
-	"github.com/wannanbigpig/gin-layout/internal/pkg/i18n"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/security/credential"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
@@ -61,14 +60,29 @@ type StorageSettings struct {
 
 func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) {
 	settings := StorageSettings{ActiveDriver: model.StorageDriverLocal, Config: filestorage.DefaultConfig()}
-	if value, err := storageSysConfigValue(StorageActiveDriverConfigKey); err == nil && strings.TrimSpace(value) != "" {
-		settings.ActiveDriver = strings.TrimSpace(value)
-	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return StorageSettings{}, err
-	}
-	if value, err := storageSysConfigValue(StorageConfigConfigKey); err == nil && strings.TrimSpace(value) != "" {
-		if unmarshalErr := json.Unmarshal([]byte(value), &settings.Config); unmarshalErr != nil {
-			return StorageSettings{}, fmt.Errorf("invalid storage configuration: %w", unmarshalErr)
+
+	storageConfigModel := model.NewSysStorageConfig()
+	record, err := storageConfigModel.GetConfig()
+	if err == nil && record != nil {
+		if strings.TrimSpace(record.ActiveDriver) != "" {
+			settings.ActiveDriver = strings.TrimSpace(record.ActiveDriver)
+		}
+		if strings.TrimSpace(record.Config) != "" {
+			if unmarshalErr := json.Unmarshal([]byte(record.Config), &settings.Config); unmarshalErr != nil {
+				return StorageSettings{}, fmt.Errorf("invalid storage configuration: %w", unmarshalErr)
+			}
+		}
+		if record.SignedURLTTLSeconds > 0 {
+			settings.Config.SignedURLTTLSeconds = record.SignedURLTTLSeconds
+		}
+		if record.MaxFileSizeMB > 0 {
+			settings.Config.MaxFileSizeMB = record.MaxFileSizeMB
+		}
+		if strings.TrimSpace(record.AllowedMIMETypes) != "" {
+			var mimes []string
+			if err := json.Unmarshal([]byte(record.AllowedMIMETypes), &mimes); err == nil {
+				settings.Config.AllowedMimeTypes = mimes
+			}
 		}
 		if maskSensitive {
 			maskStorageSecretWithRegistry(&settings.Config, s.driverRegistry())
@@ -76,8 +90,16 @@ func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) 
 			return StorageSettings{}, decryptErr
 		}
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if legacy, fbErr := s.getLegacySysConfig(maskSensitive); fbErr == nil {
+			return legacy, nil
+		}
 		return StorageSettings{}, err
+	} else {
+		if legacy, fbErr := s.getLegacySysConfig(maskSensitive); fbErr == nil {
+			return legacy, nil
+		}
 	}
+
 	if settings.Config.SignedURLTTLSeconds <= 0 {
 		settings.Config.SignedURLTTLSeconds = 300
 	}
@@ -85,6 +107,30 @@ func (s *StorageConfigService) Get(maskSensitive bool) (StorageSettings, error) 
 		settings.Config.MaxFileSizeMB = 10
 	}
 	applyLocalStorageDefaults(&settings)
+	return settings, nil
+}
+
+func (s *StorageConfigService) getLegacySysConfig(maskSensitive bool) (StorageSettings, error) {
+	settings := StorageSettings{ActiveDriver: model.StorageDriverLocal, Config: filestorage.DefaultConfig()}
+	found := false
+	if value, err := storageSysConfigValue(StorageActiveDriverConfigKey); err == nil && strings.TrimSpace(value) != "" {
+		settings.ActiveDriver = strings.TrimSpace(value)
+		found = true
+	}
+	if value, err := storageSysConfigValue(StorageConfigConfigKey); err == nil && strings.TrimSpace(value) != "" {
+		if unmarshalErr := json.Unmarshal([]byte(value), &settings.Config); unmarshalErr != nil {
+			return StorageSettings{}, fmt.Errorf("invalid storage configuration: %w", unmarshalErr)
+		}
+		found = true
+		if maskSensitive {
+			maskStorageSecretWithRegistry(&settings.Config, s.driverRegistry())
+		} else if decryptErr := decryptStorageSecretWithRegistry(&settings.Config, s.driverRegistry()); decryptErr != nil {
+			return StorageSettings{}, decryptErr
+		}
+	}
+	if !found {
+		return StorageSettings{}, gorm.ErrRecordNotFound
+	}
 	return settings, nil
 }
 
@@ -114,21 +160,22 @@ func (s *StorageConfigService) SaveWithAuditDiff(next StorageSettings) (string, 
 	if err != nil {
 		return "", err
 	}
+	allowedMimes, err := json.Marshal(persisted.AllowedMimeTypes)
+	if err != nil {
+		allowedMimes = []byte("[]")
+	}
 	db, err := model.GetDB()
 	if err != nil {
 		return "", err
 	}
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
-		if err := upsertStorageSysConfig(tx, StorageActiveDriverConfigKey, next.ActiveDriver, model.SysConfigValueTypeString, 0, "当前启用的文件存储驱动", map[string]string{
-			i18n.LocaleZhCN: "当前存储驱动",
-			i18n.LocaleEnUS: "Active Storage Driver",
-		}); err != nil {
-			return err
-		}
-		return upsertStorageSysConfig(tx, StorageConfigConfigKey, string(payload), model.SysConfigValueTypeJSON, 1, "文件存储配置", map[string]string{
-			i18n.LocaleZhCN: "文件存储配置",
-			i18n.LocaleEnUS: "File Storage Config",
-		})
+		storageRecord := model.NewSysStorageConfig()
+		storageRecord.ActiveDriver = next.ActiveDriver
+		storageRecord.Config = string(payload)
+		storageRecord.SignedURLTTLSeconds = persisted.SignedURLTTLSeconds
+		storageRecord.MaxFileSizeMB = persisted.MaxFileSizeMB
+		storageRecord.AllowedMIMETypes = string(allowedMimes)
+		return storageRecord.SaveConfig(tx)
 	})
 	if err != nil {
 		return "", err

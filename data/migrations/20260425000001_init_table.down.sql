@@ -7,6 +7,8 @@ DROP TABLE IF EXISTS `sys_config_i18n`;
 DROP TABLE IF EXISTS `sys_dict_item`;
 DROP TABLE IF EXISTS `sys_dict_type`;
 DROP TABLE IF EXISTS `sys_config`;
+DROP TABLE IF EXISTS `sys_sms_config`;
+DROP TABLE IF EXISTS `sys_storage_config`;
 -- 删除每日统计与消息与导出记录表
 DROP TABLE IF EXISTS `daily_request_stats`;
 DROP TABLE IF EXISTS `sms_deliveries`;

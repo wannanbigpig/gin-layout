@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
@@ -68,6 +69,22 @@ func (s *MenuService) Delete(id uint) error {
 	coordinator := access.NewPermissionSyncCoordinator()
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
 		menu.SetDB(tx)
+		// 事务内加 FOR UPDATE 排他行锁并重检，防止并发添加子节点导致的 TOCTOU 孤儿数据风险
+		var current model.Menu
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&current).Error; err != nil {
+			return err
+		}
+		if current.ChildrenNum > 0 {
+			return e.NewBusinessError(e.MenuHasChildren)
+		}
+		var childCount int64
+		if err := tx.Model(&model.Menu{}).Where("pid = ?", id).Count(&childCount).Error; err != nil {
+			return err
+		}
+		if childCount > 0 {
+			return e.NewBusinessError(e.MenuHasChildren)
+		}
+
 		parentID := menu.Pid
 		menuApiMap := model.NewMenuApiMap()
 		menuApiMap.SetDB(tx)

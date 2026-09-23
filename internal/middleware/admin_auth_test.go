@@ -125,6 +125,47 @@ func TestAdminPermissionHandlerWithDepsReturnsAuthorizationMessageWhenDenied(t *
 	}
 }
 
+func TestAdminPermissionHandlerUsesFullPathForDynamicRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	enforcer := buildTestEnforcer(t)
+	// 授权策略配置的是动态路由模板 /user/:id，而不是具体实例 /user/123
+	_, err := enforcer.AddPolicy("adminUser:2", "/user/:id", http.MethodGet)
+	if err != nil {
+		t.Fatalf("add policy failed: %v", err)
+	}
+
+	deps := permissionDeps{
+		loadEnforcer: func() (*casbinx.CasbinEnforcer, error) {
+			return &casbinx.CasbinEnforcer{Enforcer: enforcer}, nil
+		},
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		auth.StoreAuthPrincipal(c, &auth.AuthPrincipal{
+			UserID:       2,
+			IsSuperAdmin: global.No,
+		})
+		c.Next()
+	})
+	router.Use(AdminPermissionHandlerWithDeps(deps))
+	router.GET("/user/:id", func(c *gin.Context) {
+		c.String(http.StatusOK, "user-"+c.Param("id"))
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/user/123", nil)
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d on dynamic route with FullPath, got %d (body: %s)", http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	if recorder.Body.String() != "user-123" {
+		t.Fatalf("expected body user-123, got %q", recorder.Body.String())
+	}
+}
+
 func buildTestEnforcer(t *testing.T) *casbin.Enforcer {
 	t.Helper()
 

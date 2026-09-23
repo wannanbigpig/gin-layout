@@ -77,14 +77,14 @@ func TestMenuWriteFlow(t *testing.T) {
 		"title_i18n": map[string]string{
 			"zh-CN": title,
 		},
-		"name":      title,
-		"path":      "/" + title,
+		"name":          title,
+		"path":          "/" + title,
 		"component_key": "test/component",
-		"sort":      10,
-		"type":      2,
-		"status":    1,
-		"is_show":   1,
-		"is_auth":   1,
+		"sort":          10,
+		"type":          2,
+		"status":        1,
+		"is_show":       1,
+		"is_auth":       1,
 	}
 	createBytes, _ := json.Marshal(createBody)
 	createPayload := string(createBytes)
@@ -111,14 +111,14 @@ func TestMenuWriteFlow(t *testing.T) {
 			"zh-CN": title,
 			"en-US": title + "-u-en",
 		},
-		"name":      title + "-u-name",
-		"path":      "/" + title + "-u-path",
+		"name":          title + "-u-name",
+		"path":          "/" + title + "-u-path",
 		"component_key": "test/component",
-		"sort":      20,
-		"type":      2,
-		"status":    1,
-		"is_show":   1,
-		"is_auth":   1,
+		"sort":          20,
+		"type":          2,
+		"status":        1,
+		"is_show":       1,
+		"is_auth":       1,
 	}
 	updateBytes, _ := json.Marshal(updateBody)
 	updatePayload := string(updateBytes)
@@ -164,14 +164,14 @@ func TestMenuUpdateOmittedLocaleUsesReplaceSemantics(t *testing.T) {
 			"zh-CN": title + "-zh",
 			"en-US": title + "-en",
 		},
-		"name":      title,
-		"path":      "/" + title,
+		"name":          title,
+		"path":          "/" + title,
 		"component_key": "test/component",
-		"sort":      10,
-		"type":      2,
-		"status":    1,
-		"is_show":   1,
-		"is_auth":   1,
+		"sort":          10,
+		"type":          2,
+		"status":        1,
+		"is_show":       1,
+		"is_auth":       1,
 	}
 	createBytes, _ := json.Marshal(createBody)
 	createPayload := string(createBytes)
@@ -186,14 +186,14 @@ func TestMenuUpdateOmittedLocaleUsesReplaceSemantics(t *testing.T) {
 		"title_i18n": map[string]string{
 			"zh-CN": title + "-zh-updated",
 		},
-		"name":      title + "-name-updated",
-		"path":      "/" + title + "-path-updated",
+		"name":          title + "-name-updated",
+		"path":          "/" + title + "-path-updated",
 		"component_key": "test/component",
-		"sort":      20,
-		"type":      2,
-		"status":    1,
-		"is_show":   1,
-		"is_auth":   1,
+		"sort":          20,
+		"type":          2,
+		"status":        1,
+		"is_show":       1,
+		"is_auth":       1,
 	}
 	updateBytes, _ := json.Marshal(updateBody)
 	updatePayload := string(updateBytes)

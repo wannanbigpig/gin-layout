@@ -31,6 +31,7 @@ var (
 		Queue:     cloneQueueConfig(autoload.Queue),
 	}
 	once        sync.Once
+	initErrMu   sync.RWMutex
 	initErr     error
 	V           *viper.Viper
 	configValue atomic.Value
@@ -39,6 +40,18 @@ var (
 	reloadMu         sync.Mutex
 	reloadHandlers   []ConfigReloadHandler
 )
+
+func setInitErr(err error) {
+	initErrMu.Lock()
+	defer initErrMu.Unlock()
+	initErr = err
+}
+
+func getInitErr() error {
+	initErrMu.RLock()
+	defer initErrMu.RUnlock()
+	return initErr
+}
 
 // ConfigReloadHandler 在配置热更新时被调用。
 type ConfigReloadHandler struct {

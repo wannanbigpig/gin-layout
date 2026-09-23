@@ -9,8 +9,10 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"go.uber.org/zap"
 )
 
 var sysConfigDiffRules = []auditdiff.FieldRule{
@@ -75,7 +77,8 @@ func (s *SysConfigService) CreateWithAuditDiff(params *form.CreateSysConfig) (st
 	}
 	after, err := s.snapshotConfigByKey(params.ConfigKey)
 	if err != nil {
-		return "", nil
+		log.Logger.Warn("创建系统参数后快照失败", zap.Error(err), zap.String("key", params.ConfigKey))
+		return "", err
 	}
 	if params.IsSensitive != nil && *params.IsSensitive == 1 {
 		after["sensitive_value_changed"] = true
@@ -101,7 +104,8 @@ func (s *SysConfigService) UpdateWithAuditDiff(params *form.UpdateSysConfig) (st
 	}
 	after, err := s.snapshotConfigByID(params.Id)
 	if err != nil {
-		return "", nil
+		log.Logger.Warn("更新系统参数后快照失败，审计变更降级记录前态", zap.Error(err), zap.Uint("id", params.Id))
+		return buildSysConfigDiffJSON(before, nil), nil
 	}
 	if sensitiveValueChanged {
 		before["sensitive_value_changed"] = false
@@ -152,7 +156,10 @@ func (s *SysConfigService) deleteConfig(id uint) error {
 	}); err != nil {
 		return err
 	}
-	return s.RefreshCache()
+	if err := s.RefreshCache(); err != nil {
+		log.Logger.Warn("系统参数已删除，运行时缓存刷新失败", zap.Error(err), zap.Uint("id", id))
+	}
+	return nil
 }
 
 func (s *SysConfigService) snapshotConfigByID(id uint) (map[string]any, error) {

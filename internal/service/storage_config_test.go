@@ -46,3 +46,20 @@ func TestNewStorageTestBusinessErrorForGeneralFailure(t *testing.T) {
 		t.Fatalf("expected general guidance message, got %q", businessErr.GetMessage())
 	}
 }
+
+func TestStorageConfigServiceDefaults(t *testing.T) {
+	settings := StorageSettings{}
+	applyLocalStorageDefaults(&settings)
+	if settings.Config.SignedURLTTLSeconds == 0 {
+		settings.Config.SignedURLTTLSeconds = 300
+	}
+	if settings.Config.MaxFileSizeMB == 0 {
+		settings.Config.MaxFileSizeMB = 10
+	}
+	if settings.Config.SignedURLTTLSeconds != 300 {
+		t.Fatalf("expected 300 seconds default, got %d", settings.Config.SignedURLTTLSeconds)
+	}
+	if settings.Config.MaxFileSizeMB != 10 {
+		t.Fatalf("expected 10 MB default, got %d", settings.Config.MaxFileSizeMB)
+	}
+}

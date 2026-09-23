@@ -2,6 +2,7 @@ package auditdiff
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -54,5 +55,60 @@ func TestMarshalReturnsJSONString(t *testing.T) {
 func TestMarshalReturnsEmptyArrayWhenNoDiff(t *testing.T) {
 	if got := Marshal(nil); got != "[]" {
 		t.Fatalf("expected [] for nil diff, got %s", got)
+	}
+}
+
+func TestBuildFieldDiffMasksSensitiveFields(t *testing.T) {
+	items := BuildFieldDiff(
+		map[string]any{
+			"phone_number": "13800138000",
+			"email":        "admin@example.com",
+			"password":     "SecretPass123",
+			"nickname":     "OldNick",
+		},
+		map[string]any{
+			"phone_number": "13900139000",
+			"email":        "newadmin@example.com",
+			"password":     "NewSecretPass456",
+			"nickname":     "NewNick",
+		},
+		[]FieldRule{
+			{Field: "phone_number", Label: "手机号"},
+			{Field: "email", Label: "邮箱"},
+			{Field: "password", Label: "密码"},
+			{Field: "nickname", Label: "昵称"},
+		},
+	)
+
+	if len(items) != 4 {
+		t.Fatalf("expected 4 diff items, got %d", len(items))
+	}
+
+	diffMap := make(map[string]ChangeDiffItem)
+	for _, it := range items {
+		diffMap[it.Field] = it
+	}
+
+	// nickname 普通字段不脱敏
+	if diffMap["nickname"].Before != "OldNick" || diffMap["nickname"].After != "NewNick" {
+		t.Fatalf("unexpected nickname diff: %+v", diffMap["nickname"])
+	}
+
+	// 手机号自动掩码为前3后4
+	if diffMap["phone_number"].Before != "138****8000" || diffMap["phone_number"].After != "139****9000" {
+		t.Fatalf("expected masked phone numbers, got: %+v", diffMap["phone_number"])
+	}
+
+	// 邮箱自动掩码
+	if diffMap["email"].Before != "ad***@example.com" || diffMap["email"].After != "ne***@example.com" {
+		t.Fatalf("expected masked email, got: %+v", diffMap["email"])
+	}
+
+	// 密码自动掩码且绝不包含原始明文
+	if diffMap["password"].Before == "SecretPass123" || diffMap["password"].After == "NewSecretPass456" {
+		t.Fatalf("expected password to be masked, got: %+v", diffMap["password"])
+	}
+	if !strings.Contains(diffMap["password"].Before.(string), "*") {
+		t.Fatalf("expected masked password with asterisks, got: %+v", diffMap["password"])
 	}
 }

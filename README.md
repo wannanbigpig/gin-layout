@@ -163,7 +163,7 @@ queue:
 - `jwt.refresh_ttl` 已废弃，当前双 Token 方案实际使用 `jwt.refresh_token_ttl` 和 `jwt.refresh_cookie_*`
 - 如果只启动 API、不启用异步任务，可以把 `queue.enable` 设为 `false`
 - 如果 `queue.enable=true` 但不想复用 `redis.*`，请把 `queue.use_default_redis` 设为 `false`，并补齐 `queue.redis.*`
-- 文件存储驱动和敏感存储参数运行时保存在 `sys_config`（`storage.active_driver` / `storage.config`），后台通过 `/admin/v1/system/storage/*` 管理；`config.yaml` 主要负责基础依赖与进程级配置
+- 文件存储驱动和敏感存储参数保存在独立实体表 `sys_storage_config`，后台通过 `/admin/v1/system/storage/*` 管理；`config.yaml` 主要负责基础依赖与进程级配置
 
 ### 5. 启动服务
 
@@ -331,7 +331,7 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 | `redis` | 缓存、黑名单和分布式锁配置 |
 | `queue.use_default_redis` | `true` 复用 `redis.*`；`false` 时改用 `queue.redis.*` 独立连接 |
 | `queue` | Asynq 异步任务开关、队列命名空间、并发度、优先级和审计日志重试策略 |
-| `storage.active_driver` / `storage.config` | 运行时文件存储驱动与敏感配置，保存在 `sys_config`，由 `/admin/v1/system/storage/*` 管理；OSS AccessKey Secret 以 `enc:v1` AES-256-GCM 密文保存 |
+| `storage` | 运行时文件存储配置保存在独立实体表 `sys_storage_config`，由 `/admin/v1/system/storage/*` 管理；OSS AccessKey Secret 以 `enc:v1` AES-256-GCM 密文保存 |
 | `todo.reminder_enabled` / `todo.reminder_sms_enabled` / `todo.reminder_lead_minutes` / `todo.reminder_catchup_minutes` | 待办提醒总开关、短信渠道总开关、提前提醒分钟数和 Cron 停机后的逾期补偿窗口，保存在 `sys_config`；短信默认关闭 |
 | `logger` | 日志输出、切割和保留策略 |
 
@@ -424,7 +424,7 @@ go test ./tests/admin_test
 
 ### 短信渠道扩展边界
 
-当前版本已实现可选的阿里云短信验证码登录和待办到期短信提醒，两者均默认关闭。拥有 `sms:config` 的管理员可在“系统配置 → 短信配置”维护供应商、模板、场景路由与验证码限制，`sms:update` 用于保存，`sms:test` 用于向指定号码发送一次受控测试。配置保存到受保护的 `sms.config`，AccessKey Secret 使用 `security.credential_encryption_key` 派生的短信专用密钥进行 AES-256-GCM 加密，读取接口只返回 `********`，请求日志和审计差异不会记录明文密钥、手机号或验证码。
+当前版本已实现可选的阿里云短信验证码登录和待办到期短信提醒，两者均默认关闭。拥有 `sms:config` 的管理员可在“系统配置 → 短信配置”维护供应商、模板、场景路由与验证码限制，`sms:update` 用于保存，`sms:test` 用于向指定号码发送一次受控测试。配置保存到独立实体表 `sys_sms_config`，AccessKey Secret 使用 `security.credential_encryption_key` 派生的短信专用密钥进行 AES-256-GCM 加密，读取接口只返回 `********`，请求日志和审计差异不会记录明文密钥、手机号或验证码。
 
 启用条件如下：
 
@@ -470,7 +470,7 @@ todo_due   ──> aliyun ──> SMS_TODO_TEMPLATE
 - 场景由代码白名单声明，管理员只能为既有场景选择模板和供应商，不能通过配置创造任意业务场景；模板同时声明允许变量，登录模板必须且只能接收 `code`，待办模板必须且只能接收 `title`、`due_at`。初始化配置预留待办模板但不创建路由，必须配置真实模板后再显式启用。
 - 待办短信使用持久化 `sms_deliveries` Outbox、业务幂等键、Redis 全局日预算和用户渠道偏好；不复用同步 OTP 发送流程。Outbox 不持久化明文手机号，发送前重新读取当前绑定手机号和偏好；已取消、已完成、改期、手机号失效或关闭偏好的待办会取消未发送记录。当前没有供应商送达回执和人工重放 `unknown` 的接口。
 - `security.credential_encryption_key` 必须通过 `${CREDENTIAL_ENCRYPTION_KEY}` 等环境变量提供，并与 `jwt.secret_key` 分离；同一部署的 `service`、`worker`、`cron` 及所有副本必须使用相同值。主密钥按短信凭据、OTP/HMAC、配额 HMAC、OSS 凭据等用途独立派生，不能跨用途复用。它只在进程启动时读取，轮换需要先用旧密钥离线解密现有 `enc:v1` 凭据、用新密钥重加密，再协调重启全部实例；轮换期间混用新旧值会导致部分实例无法解密。后续可迁移到 RAM Role/KMS 与多 key version。
-- 本版仍处于首次发布前，权限和 `sms.config` 已直接收敛到初始化迁移；首个正式 tag 后的短信表结构或默认权限演进必须新增独立成对迁移。
+- 本版仍处于首次发布前，短信配置独立实体表及默认权限已直接收敛到初始化迁移；首个正式 tag 后的短信表结构或默认权限演进必须新增独立成对迁移。
 
 ### 版本与升级策略
 

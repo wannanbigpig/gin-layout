@@ -305,7 +305,6 @@ func (failingFileAccessStore) ZAddBatch(_ context.Context, _ string, _ []redis.Z
 	return context.DeadlineExceeded
 }
 
-
 func newUploadFileForTest(id uint) *model.UploadFiles {
 	uf := &model.UploadFiles{}
 	uf.ID = id

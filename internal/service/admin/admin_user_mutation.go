@@ -652,7 +652,7 @@ func (s *AdminUserService) Delete(id uint) error {
 		return access.NewPermissionSyncCoordinator().ClearUser(id, tx)
 	})
 	if err != nil {
-		return e.NewBusinessError(e.DeleteUserFailed)
+		return s.handleMutationError(err, e.DeleteUserFailed)
 	}
 
 	revokeErr := s.revokeUserTokensAfterCommit(pendingRevocations)

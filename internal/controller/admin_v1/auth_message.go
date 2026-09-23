@@ -36,7 +36,7 @@ func (api SysMessageController) List(c *gin.Context) {
 	if err := validator.CheckQueryParams(c, &params); err != nil {
 		return
 	}
-	result, err := notification.NewService().List(api.GetCurrentUserID(c), params)
+	result, err := notification.NewService().List(c.Request.Context(), api.GetCurrentUserID(c), params)
 	if err != nil {
 		api.Err(c, err)
 		return

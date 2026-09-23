@@ -44,3 +44,20 @@ func maskArrayWithFields(arr []interface{}, sensitiveFields map[string]bool) []i
 	}
 	return result
 }
+
+// IsCommonSensitiveField 判定字段名是否匹配通用敏感字段（包括用户配置与常见隐私凭据）。
+func IsCommonSensitiveField(fieldName string) bool {
+	fieldName = strings.ToLower(strings.TrimSpace(fieldName))
+	if fieldName == "" {
+		return false
+	}
+	manager := currentFieldsManager()
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	return isSensitiveField(fieldName, manager.commonFields) || isSensitiveField(fieldName, manager.requestBodyFields)
+}
+
+// MaskSensitiveValue 对数据执行敏感信息掩码转换。
+func MaskSensitiveValue(v any) any {
+	return maskValue(v)
+}

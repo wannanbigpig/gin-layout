@@ -52,7 +52,11 @@ func AdminPermissionHandlerWithDeps(deps permissionDeps) gin.HandlerFunc {
 				err = e.NewBusinessErrorWithKey(e.ServerErr, e.MsgKeyAuthPermissionInitFailed)
 			} else {
 				userKey := fmt.Sprintf("%s%s%d", global.CasbinAdminUserPrefix, global.CasbinSeparator, principal.UserID)
-				allowed, enforceErr := enforcer.EnforceContext(c.Request.Context(), userKey, c.Request.URL.Path, c.Request.Method)
+				reqPath := c.FullPath()
+				if reqPath == "" {
+					reqPath = c.Request.URL.Path
+				}
+				allowed, enforceErr := enforcer.EnforceContext(c.Request.Context(), userKey, reqPath, c.Request.Method)
 				switch {
 				case enforceErr != nil:
 					log.Logger.Error("权限验证失败", zap.Error(enforceErr))

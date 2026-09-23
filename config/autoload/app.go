@@ -50,6 +50,8 @@ type AppConfig struct {
 	// EnableResetSystemCron 是否启用高风险的系统重建定时任务。
 	// 默认 false，避免在非预期环境触发系统数据重建。
 	EnableResetSystemCron bool `mapstructure:"enable_reset_system_cron"`
+	// RateLimitDriver 限流驱动: memory(单实例默认) / redis(多实例分布式)
+	RateLimitDriver string `mapstructure:"rate_limit_driver"`
 	// RateLimitEnabled 是否启用全局 IP 级速率限制，默认开启
 	RateLimitEnabled bool `mapstructure:"rate_limit_enabled"`
 	// RateLimitRPS 每 IP 每秒允许的请求数（令牌桶速率），默认 20
@@ -83,6 +85,7 @@ var App = AppConfig{
 	CorsCredentials:       false,                 // 默认不允许携带凭证
 	AllowDegradedStartup:  false,                 // 默认关闭降级启动，依赖初始化失败时直接退出
 	EnableResetSystemCron: false,                 // 默认关闭高风险系统重建定时任务
+	RateLimitDriver:       "memory",              // 默认单实例内存限流
 	RateLimitEnabled:      true,                  // 默认开启全局限流
 	RateLimitRPS:          20,                    // 默认每 IP 每秒 20 请求
 	RateLimitBurst:        40,                    // 默认每 IP 突发上限 40

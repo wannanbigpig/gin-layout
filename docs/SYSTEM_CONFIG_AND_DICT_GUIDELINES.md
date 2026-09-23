@@ -96,7 +96,7 @@
 - 核心枚举必须在 form validator 和 model 常量中显式表达。
 - 审计 diff 可以使用 label 映射提升可读性，但 diff 字段集合和安全脱敏规则必须由代码控制。
 - 敏感配置的列表接口与 `value` 接口只返回脱敏占位符；`detail` 接口用于后台编辑回填时返回真实值。更新时收到未改动的脱敏占位符应保留原值，不能把占位符写成真实配置值。
-- `storage.active_driver` / `storage.config` 这类文件存储运行时配置虽然落在 `sys_config`，但应通过 `/admin/v1/system/storage/*` 专用接口管理：前者是隐藏的非敏感配置，后者是隐藏的敏感 JSON 配置；保存后需要刷新 `sys_config` 缓存，查看敏感字段走 `/admin/v1/system/storage/secret`。
+- 文件存储运行时配置已收敛治理至专用实体表 `sys_storage_config`，通过 `/admin/v1/system/storage/*` 专用接口管理；查看敏感字段走 `/admin/v1/system/storage/secret`。
 - 菜单标题 i18n 更新采用 Replace 语义：同一 `menu_id` 下，本次请求未提交的 locale 会被删除，仅保留本次提交的 locale。
 - 系统配置名称、字典类型名称、字典项 label 的 i18n 更新采用 PATCH 语义：只新增/更新请求中出现的 locale，未传 locale 保留旧值。
 - 接口文档必须显式说明当前实体使用的是 Replace 还是 PATCH，不能笼统写成“支持 i18n 更新”。

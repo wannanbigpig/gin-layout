@@ -2,11 +2,15 @@ package data
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/wannanbigpig/gin-layout/config"
 	"gorm.io/gorm"
 )
+
+// ReloadDrainDuration 配置热更后旧连接池保持可用以排空在途请求的等待时长。
+var ReloadDrainDuration = 10 * time.Second
 
 // PreparedReload 持有尚未发布的连接；准备失败不能影响当前实例。
 type PreparedReload struct {
@@ -84,14 +88,30 @@ func (p *PreparedReload) Abort() {
 	}
 }
 
-// Finalize 只在配置与所有依赖均已发布后关闭旧连接。
+// Finalize 只在配置与所有依赖均已发布后平滑关闭旧连接。
 func (p *PreparedReload) Finalize() {
-	if p.previousMysql != p.mysql {
-		closePreparedMysql(p.previousMysql)
+	oldMysql := p.previousMysql
+	oldRedis := p.previousRedis
+	mysqlChanged := oldMysql != nil && oldMysql != p.mysql
+	redisChanged := oldRedis != nil && oldRedis != p.redis
+	if !mysqlChanged && !redisChanged {
+		return
 	}
-	if p.previousRedis != nil && p.previousRedis != p.redis {
-		_ = p.previousRedis.Close()
+
+	closeOld := func() {
+		if mysqlChanged {
+			closePreparedMysql(oldMysql)
+		}
+		if redisChanged {
+			_ = oldRedis.Close()
+		}
 	}
+
+	if ReloadDrainDuration <= 0 {
+		closeOld()
+		return
+	}
+	time.AfterFunc(ReloadDrainDuration, closeOld)
 }
 
 func closePreparedMysql(db *gorm.DB) {

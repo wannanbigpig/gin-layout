@@ -994,4 +994,36 @@ CREATE TABLE IF NOT EXISTS `daily_request_stats`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='每日请求统计表';
 
+CREATE TABLE IF NOT EXISTS `sys_storage_config`
+(
+    `id`                     bigint unsigned NOT NULL AUTO_INCREMENT,
+    `active_driver`          varchar(32)     NOT NULL DEFAULT 'local' COMMENT '当前激活存储驱动',
+    `config`                 mediumtext               DEFAULT NULL COMMENT '各驱动配置及凭证密文 JSON',
+    `signed_url_ttl_seconds` int unsigned    NOT NULL DEFAULT '300' COMMENT '签名URL有效期秒数',
+    `max_file_size_mb`       int unsigned    NOT NULL DEFAULT '10' COMMENT '最大上传大小MB',
+    `allowed_mime_types`     text                     DEFAULT NULL COMMENT '允许的MIME类型 JSON',
+    `created_at`             datetime                 DEFAULT NULL,
+    `updated_at`             datetime                 DEFAULT NULL,
+    `deleted_at`             int unsigned    NOT NULL DEFAULT '0' COMMENT '删除时间戳',
+    PRIMARY KEY (`id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统文件存储配置表';
+
+CREATE TABLE IF NOT EXISTS `sys_sms_config`
+(
+    `id`         bigint unsigned NOT NULL AUTO_INCREMENT,
+    `enabled`    tinyint(1)      NOT NULL DEFAULT '0' COMMENT '是否启用短信服务: 0=否, 1=是',
+    `providers`  mediumtext               DEFAULT NULL COMMENT '供应商凭证与配置 JSON（密文保存）',
+    `templates`  text                     DEFAULT NULL COMMENT '场景模板配置 JSON',
+    `routes`     text                     DEFAULT NULL COMMENT '场景路由映射 JSON',
+    `otp_config` text                     DEFAULT NULL COMMENT '验证码与防刷限制 JSON',
+    `created_at` datetime                 DEFAULT NULL,
+    `updated_at` datetime                 DEFAULT NULL,
+    `deleted_at` int unsigned    NOT NULL DEFAULT '0' COMMENT '删除时间戳',
+    PRIMARY KEY (`id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='系统短信服务配置表';
+
 COMMIT;

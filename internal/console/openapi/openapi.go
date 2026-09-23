@@ -51,14 +51,14 @@ type endpoint struct {
 
 // runGenOpenAPI 执行 OpenAPI 文档生成。
 func runGenOpenAPI() error {
-	catalog, err := routers.CompileRouteTree(routers.AdminRouteTreeWithOptions(nil, routers.BuildOptions{Debug: false}))
+	catalog, err := routers.CompileRouteTree(routers.AppRouteTreeWithOptions(routers.BuildOptions{Debug: false}))
 	if err != nil {
-		return fmt.Errorf("compile AdminRouteTree: %w", err)
+		return fmt.Errorf("compile AppRouteTree: %w", err)
 	}
 	endpoints := collectEndpoints(catalog)
 
 	if len(endpoints) == 0 {
-		return fmt.Errorf("no routes collected from AdminRouteTree")
+		return fmt.Errorf("no routes collected from AppRouteTree")
 	}
 
 	sort.Slice(endpoints, func(i, j int) bool {

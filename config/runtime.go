@@ -60,6 +60,16 @@ func BuildConfigDiff(oldConfig, newConfig *Conf) ConfigDiff {
 		diff.ChangedFields = append(diff.ChangedFields, "app.trusted_proxies")
 		diff.RestartRequiredFields = append(diff.RestartRequiredFields, "app.trusted_proxies")
 	}
+	rateLimitChanged := oldConfig.RateLimitDriver != newConfig.RateLimitDriver ||
+		oldConfig.RateLimitEnabled != newConfig.RateLimitEnabled ||
+		oldConfig.RateLimitRPS != newConfig.RateLimitRPS ||
+		oldConfig.RateLimitBurst != newConfig.RateLimitBurst ||
+		oldConfig.LoginRateLimitEnabled != newConfig.LoginRateLimitEnabled ||
+		oldConfig.LoginRateLimitRPS != newConfig.LoginRateLimitRPS ||
+		oldConfig.LoginRateLimitBurst != newConfig.LoginRateLimitBurst
+	if rateLimitChanged {
+		diff.ChangedFields = append(diff.ChangedFields, "rate_limit.*")
+	}
 	if oldConfig.Language != newConfig.Language {
 		diff.RestartRequiredFields = append(diff.RestartRequiredFields, "app.language")
 	}

@@ -190,3 +190,49 @@ func TestResolveEnvVarsLoadsCredentialEncryptionKey(t *testing.T) {
 		t.Fatalf("expected credential encryption key from environment, got %q", cfg.Security.CredentialEncryptionKey)
 	}
 }
+
+func TestCheckProductionCredentialsRejectsWeakMysqlPassword(t *testing.T) {
+	original := GetConfig()
+	testCfg := cloneDefaultConfig()
+	testCfg.AppEnv = "prod"
+	testCfg.Mysql.Enable = true
+	testCfg.Mysql.Password = "root1234"
+	setActiveConfig(testCfg)
+	t.Cleanup(func() { setActiveConfig(original) })
+
+	if err := checkProductionCredentials(); err == nil {
+		t.Fatal("expected weak prod mysql password to return error")
+	}
+}
+
+func TestCheckProductionCredentialsRejectsEmptyRedisPassword(t *testing.T) {
+	original := GetConfig()
+	testCfg := cloneDefaultConfig()
+	testCfg.AppEnv = "prod"
+	testCfg.Mysql.Enable = true
+	testCfg.Mysql.Password = "strong-mysql-password-1234"
+	testCfg.Redis.Enable = true
+	testCfg.Redis.Password = ""
+	setActiveConfig(testCfg)
+	t.Cleanup(func() { setActiveConfig(original) })
+
+	if err := checkProductionCredentials(); err == nil {
+		t.Fatal("expected empty prod redis password to return error")
+	}
+}
+
+func TestCheckProductionCredentialsAllowsValidPasswords(t *testing.T) {
+	original := GetConfig()
+	testCfg := cloneDefaultConfig()
+	testCfg.AppEnv = "prod"
+	testCfg.Mysql.Enable = true
+	testCfg.Mysql.Password = "strong-mysql-password-1234"
+	testCfg.Redis.Enable = true
+	testCfg.Redis.Password = "strong-redis-password-1234"
+	setActiveConfig(testCfg)
+	t.Cleanup(func() { setActiveConfig(original) })
+
+	if err := checkProductionCredentials(); err != nil {
+		t.Fatalf("expected valid prod credentials to pass, got %v", err)
+	}
+}

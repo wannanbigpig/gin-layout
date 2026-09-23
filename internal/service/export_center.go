@@ -466,12 +466,16 @@ func (s *ExportCenterService) ReassignTaskRun(ctx context.Context, oldTaskRunID,
 	return result.RowsAffected > 0, nil
 }
 
-func (s *ExportCenterService) List(params *form.ExportRecordList) (*resources.Collection, error) {
+// listInternal 内部底层全量查询，对外统一使用强制属主限定的 MyList。
+func (s *ExportCenterService) listInternal(params *form.ExportRecordList) (*resources.Collection, error) {
+	if params == nil || params.TriggerUserID == nil || *params.TriggerUserID == 0 {
+		return nil, e.NewBusinessError(e.InvalidParameter)
+	}
 	query := query_builder.New().
 		AddEq("scene", strings.TrimSpace(params.Scene)).
 		AddEq("status", strings.TrimSpace(params.Status)).
 		AddEq("task_run_id", params.TaskRunID).
-		AddEq("trigger_user_id", params.TriggerUserID)
+		AddEq("trigger_user_id", *params.TriggerUserID)
 	condition, args := query.Build()
 
 	recordModel := model.NewSysExportRecord()

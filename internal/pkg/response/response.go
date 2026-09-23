@@ -35,11 +35,11 @@ func NewResult() *Result {
 
 // Response 响应处理器
 type Response struct {
-	httpCode     int
-	httpCodeSet  bool // true 表示通过 SetHttpCode 显式设置，SetCode 不再覆盖
-	result       *Result
-	msgKey       string
-	msgArgs      []any
+	httpCode    int
+	httpCodeSet bool // true 表示通过 SetHttpCode 显式设置，SetCode 不再覆盖
+	result      *Result
+	msgKey      string
+	msgArgs     []any
 }
 
 // Resp 创建响应处理器实例

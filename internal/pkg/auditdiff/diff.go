@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/sensitive"
 )
 
 // ChangeDiffItem 表示单个字段变更。
@@ -52,13 +54,22 @@ func BuildFieldDiff(before, after map[string]any, rules []FieldRule) []ChangeDif
 		if item.Label == "" {
 			item.Label = rule.Field
 		}
+		isSensitive := sensitive.IsCommonSensitiveField(rule.Field)
 		if hasBefore {
-			item.Before = beforeValue
-			item.BeforeDisplay = formatDisplayValue(rule, beforeValue)
+			if isSensitive && rule.Formatter == nil {
+				item.Before = sensitive.MaskSensitiveValue(beforeValue)
+			} else {
+				item.Before = beforeValue
+				item.BeforeDisplay = formatDisplayValue(rule, beforeValue)
+			}
 		}
 		if hasAfter {
-			item.After = afterValue
-			item.AfterDisplay = formatDisplayValue(rule, afterValue)
+			if isSensitive && rule.Formatter == nil {
+				item.After = sensitive.MaskSensitiveValue(afterValue)
+			} else {
+				item.After = afterValue
+				item.AfterDisplay = formatDisplayValue(rule, afterValue)
+			}
 		}
 		result = append(result, item)
 	}

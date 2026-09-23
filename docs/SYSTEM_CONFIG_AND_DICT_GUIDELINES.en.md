@@ -96,7 +96,7 @@ Backend code may reuse dictionary data for display, but dictionary edits must no
 - Core enums must be explicitly expressed in form validators and model constants.
 - Audit diffs may use label mappings for readability, but diff fields and security masking rules must be controlled by code.
 - Sensitive config list responses and the `value` endpoint return only a masked placeholder. The `detail` endpoint returns the raw value for admin edit backfill. When an update receives the unchanged masked placeholder, backend code must keep the original value instead of writing the placeholder as the real config value.
-- Runtime file-storage settings such as `storage.active_driver` and `storage.config` are still stored in `sys_config`, but they should be managed through the dedicated `/admin/v1/system/storage/*` endpoints: the driver is hidden but non-sensitive, the JSON payload is hidden and sensitive, saves must refresh the `sys_config` cache, and secret reveals go through `/admin/v1/system/storage/secret`.
+- Runtime file-storage settings have been consolidated into the dedicated entity table `sys_storage_config` and managed through `/admin/v1/system/storage/*` endpoints; secret reveals go through `/admin/v1/system/storage/secret`.
 - Menu-title i18n updates use Replace semantics: for the same `menu_id`, locale rows omitted from the current request are deleted and only submitted locales remain.
 - i18n updates for system config names, dictionary type names, and dictionary item labels use PATCH semantics: only submitted locales are inserted or updated, and omitted locales keep their existing values.
 - API documentation must explicitly state whether an entity uses Replace or PATCH semantics. "Supports i18n updates" is not specific enough.

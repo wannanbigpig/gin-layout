@@ -47,19 +47,43 @@ func (s *SMSConfigService) providerRegistry() *sms.Registry {
 
 func (s *SMSConfigService) Get(maskSensitive bool) (sms.Config, error) {
 	settings := sms.DefaultConfig()
-	value, err := storageSysConfigValue(SMSConfigKey)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return settings, nil
+
+	smsConfigModel := model.NewSysSmsConfig()
+	record, err := smsConfigModel.GetConfig()
+	if err == nil && record != nil {
+		settings.Enabled = record.Enabled
+		if strings.TrimSpace(record.Providers) != "" {
+			if unmarshalErr := json.Unmarshal([]byte(record.Providers), &settings.Providers); unmarshalErr != nil {
+				return sms.Config{}, fmt.Errorf("invalid sms providers configuration: %w", unmarshalErr)
+			}
 		}
-		return sms.Config{}, err
+		if strings.TrimSpace(record.Templates) != "" {
+			if unmarshalErr := json.Unmarshal([]byte(record.Templates), &settings.Templates); unmarshalErr != nil {
+				return sms.Config{}, fmt.Errorf("invalid sms templates configuration: %w", unmarshalErr)
+			}
+		}
+		if strings.TrimSpace(record.Routes) != "" {
+			if unmarshalErr := json.Unmarshal([]byte(record.Routes), &settings.Routes); unmarshalErr != nil {
+				return sms.Config{}, fmt.Errorf("invalid sms routes configuration: %w", unmarshalErr)
+			}
+		}
+		if strings.TrimSpace(record.OTPConfig) != "" {
+			if unmarshalErr := json.Unmarshal([]byte(record.OTPConfig), &settings.OTP); unmarshalErr != nil {
+				return sms.Config{}, fmt.Errorf("invalid sms otp configuration: %w", unmarshalErr)
+			}
+		}
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if legacy, fbErr := s.getLegacySysConfig(); fbErr == nil {
+			settings = legacy
+		} else {
+			return sms.Config{}, err
+		}
+	} else {
+		if legacy, fbErr := s.getLegacySysConfig(); fbErr == nil {
+			settings = legacy
+		}
 	}
-	if strings.TrimSpace(value) == "" {
-		return settings, nil
-	}
-	if err := json.Unmarshal([]byte(value), &settings); err != nil {
-		return sms.Config{}, fmt.Errorf("invalid sms configuration: %w", err)
-	}
+
 	settings.ApplyDefaults()
 	if maskSensitive {
 		if err := transformSMSProviderSecrets(&settings, s.providerRegistry(), func(_, _, secret string) (string, error) {
@@ -72,6 +96,21 @@ func (s *SMSConfigService) Get(maskSensitive bool) (sms.Config, error) {
 		}
 	} else if err := transformSMSProviderSecrets(&settings, s.providerRegistry(), decryptStoredSMSSecret); err != nil {
 		return sms.Config{}, err
+	}
+	return settings, nil
+}
+
+func (s *SMSConfigService) getLegacySysConfig() (sms.Config, error) {
+	settings := sms.DefaultConfig()
+	value, err := storageSysConfigValue(SMSConfigKey)
+	if err != nil {
+		return settings, err
+	}
+	if strings.TrimSpace(value) == "" {
+		return settings, nil
+	}
+	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+		return sms.Config{}, fmt.Errorf("invalid legacy sms configuration: %w", err)
 	}
 	return settings, nil
 }
@@ -107,7 +146,19 @@ func (s *SMSConfigService) Save(next sms.Config) (string, error) {
 	if err := encryptSMSSecrets(&persisted, registry); err != nil {
 		return "", err
 	}
-	payload, err := json.Marshal(persisted)
+	providersPayload, err := json.Marshal(persisted.Providers)
+	if err != nil {
+		return "", err
+	}
+	templatesPayload, err := json.Marshal(persisted.Templates)
+	if err != nil {
+		return "", err
+	}
+	routesPayload, err := json.Marshal(persisted.Routes)
+	if err != nil {
+		return "", err
+	}
+	otpPayload, err := json.Marshal(persisted.OTP)
 	if err != nil {
 		return "", err
 	}
@@ -116,7 +167,13 @@ func (s *SMSConfigService) Save(next sms.Config) (string, error) {
 		return "", err
 	}
 	err = access.RunInTransaction(db, func(tx *gorm.DB) error {
-		return upsertSMSSysConfig(tx, string(payload))
+		smsRecord := model.NewSysSmsConfig()
+		smsRecord.Enabled = persisted.Enabled
+		smsRecord.Providers = string(providersPayload)
+		smsRecord.Templates = string(templatesPayload)
+		smsRecord.Routes = string(routesPayload)
+		smsRecord.OTPConfig = string(otpPayload)
+		return smsRecord.SaveConfig(tx)
 	})
 	if err != nil {
 		return "", err

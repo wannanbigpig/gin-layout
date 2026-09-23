@@ -14,12 +14,14 @@ tags:
   - name: "department"
   - name: "export_personal"
   - name: "file"
+  - name: "health"
   - name: "log"
   - name: "login"
   - name: "menu"
   - name: "notification"
   - name: "other"
   - name: "permission"
+  - name: "ping"
   - name: "product"
   - name: "request_log_self"
   - name: "role"
@@ -2678,6 +2680,40 @@ paths:
         - BearerAuth: []
       x-auth-mode: "login"
       x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/health/readiness":
+    get:
+      tags:
+        - "health"
+      summary: "readiness"
+      description: "服务依赖就绪状态"
+      operationId: "get_health_readiness"
+      security: []
+      x-auth-mode: "none"
+      x-security-policy: "public"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/ping":
+    get:
+      tags:
+        - "ping"
+      summary: "ping"
+      description: "服务心跳检测接口"
+      operationId: "get_ping"
+      security: []
+      x-auth-mode: "none"
+      x-security-policy: "public"
       responses:
         '200':
           description: OK

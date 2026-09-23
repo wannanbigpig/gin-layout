@@ -3,6 +3,7 @@ package data
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/wannanbigpig/gin-layout/config"
@@ -47,6 +48,10 @@ func TestPrepareReloadFailureKeepsLiveMysqlAndClosesCandidate(t *testing.T) {
 func TestPreparedReloadRetainsOldConnectionUntilFinalized(t *testing.T) {
 	restore := backupMysqlState()
 	defer restore()
+	oldDuration := ReloadDrainDuration
+	ReloadDrainDuration = 0
+	defer func() { ReloadDrainDuration = oldDuration }()
+
 	old, next := reloadTestDB(t), reloadTestDB(t)
 	mysqlDB = old
 	mysqlValue.Store(mysqlSlot{db: old})
@@ -70,6 +75,36 @@ func TestPreparedReloadRetainsOldConnectionUntilFinalized(t *testing.T) {
 	p.Finalize()
 	if err := getSQLDB(old).Ping(); err == nil {
 		t.Fatal("old resource not closed after finalize")
+	}
+}
+
+func TestPreparedReloadGracefulDrain(t *testing.T) {
+	restore := backupMysqlState()
+	defer restore()
+	oldDuration := ReloadDrainDuration
+	ReloadDrainDuration = 100 * time.Millisecond
+	defer func() { ReloadDrainDuration = oldDuration }()
+
+	old, next := reloadTestDB(t), reloadTestDB(t)
+	mysqlDB = old
+	mysqlValue.Store(mysqlSlot{db: old})
+	previous := openMysqlFunc
+	defer func() { openMysqlFunc = previous }()
+	openMysqlFunc = func(*config.Conf) (*gorm.DB, error) { return next, nil }
+	p, err := PrepareReload(&config.Conf{}, config.ConfigDiff{MysqlChanged: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Commit()
+	p.Finalize()
+	// Old resource should still be alive during drain window
+	if err := getSQLDB(old).Ping(); err != nil {
+		t.Fatal("old resource closed prematurely during drain window", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	// Old resource should be closed after drain window
+	if err := getSQLDB(old).Ping(); err == nil {
+		t.Fatal("old resource still open after drain window expired")
 	}
 }
 

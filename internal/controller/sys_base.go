@@ -1,8 +1,8 @@
 package controller
 
 import (
-	"fmt"
 	stderrors "errors"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -70,8 +70,8 @@ func (api Api) Err(c *gin.Context, err error) {
 			api.FailCode(c, errors.ServiceDependencyNotReady)
 			return
 		}
-		log.Logger.Warn("Unknown error:", 
-			zap.String("requestId", requestID), 
+		log.Logger.Warn("Unknown error:",
+			zap.String("requestId", requestID),
 			zap.Error(parseErr),
 			zap.String("type", fmt.Sprintf("%T", parseErr)),
 		)

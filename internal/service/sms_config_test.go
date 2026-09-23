@@ -276,3 +276,47 @@ func testSMSProviderSecret(t *testing.T, settings sms.Config, provider, field st
 	}
 	return value
 }
+
+func TestSMSConfigModelMapping(t *testing.T) {
+	cfg := sms.DefaultConfig()
+	cfg.Enabled = true
+	cfg.ApplyDefaults()
+
+	providersJSON, err := json.Marshal(cfg.Providers)
+	if err != nil {
+		t.Fatalf("marshal providers failed: %v", err)
+	}
+	templatesJSON, err := json.Marshal(cfg.Templates)
+	if err != nil {
+		t.Fatalf("marshal templates failed: %v", err)
+	}
+	routesJSON, err := json.Marshal(cfg.Routes)
+	if err != nil {
+		t.Fatalf("marshal routes failed: %v", err)
+	}
+	otpJSON, err := json.Marshal(cfg.OTP)
+	if err != nil {
+		t.Fatalf("marshal otp failed: %v", err)
+	}
+
+	var restored sms.Config
+	if err := json.Unmarshal(providersJSON, &restored.Providers); err != nil {
+		t.Fatalf("unmarshal providers failed: %v", err)
+	}
+	if err := json.Unmarshal(templatesJSON, &restored.Templates); err != nil {
+		t.Fatalf("unmarshal templates failed: %v", err)
+	}
+	if err := json.Unmarshal(routesJSON, &restored.Routes); err != nil {
+		t.Fatalf("unmarshal routes failed: %v", err)
+	}
+	if err := json.Unmarshal(otpJSON, &restored.OTP); err != nil {
+		t.Fatalf("unmarshal otp failed: %v", err)
+	}
+
+	if len(restored.Providers) != len(cfg.Providers) {
+		t.Fatalf("expected %d providers, got %d", len(cfg.Providers), len(restored.Providers))
+	}
+	if restored.OTP.TTLSeconds != cfg.OTP.TTLSeconds {
+		t.Fatalf("expected ttl %d, got %d", cfg.OTP.TTLSeconds, restored.OTP.TTLSeconds)
+	}
+}

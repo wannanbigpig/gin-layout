@@ -7,10 +7,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/wannanbigpig/gin-layout/config"
 	"github.com/wannanbigpig/gin-layout/data"
 	"github.com/wannanbigpig/gin-layout/internal/middleware"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/limiter"
 	response2 "github.com/wannanbigpig/gin-layout/internal/pkg/response"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
 )
@@ -51,10 +53,14 @@ func SetRoutersWithCatalog(catalog *Catalog) (*gin.Engine, error) {
 // createEngine 创建 gin 引擎并设置相关中间件
 func createEngine() (*gin.Engine, error) {
 	cfg := config.GetConfig()
-	globalRateLimit := buildGlobalRateLimitConfig(cfg)
 
 	// 启动时校验 CORS 配置
 	middleware.ValidateCORSConfig(cfg)
+
+	// 注入限流 RedisClient 提供者
+	limiter.DefaultManager().SetRedisClientProvider(func() redis.Cmdable {
+		return data.RedisClient()
+	})
 
 	debug := cfg != nil && cfg.Debug
 	var engine *gin.Engine
@@ -67,7 +73,9 @@ func createEngine() (*gin.Engine, error) {
 	middlewares := []gin.HandlerFunc{
 		middleware.CorsHandler(),
 		middleware.SecurityHeadersHandler(),
-		middleware.RateLimitHandler(globalRateLimit),
+		middleware.DynamicRateLimitHandler(func() middleware.RateLimitConfig {
+			return buildGlobalRateLimitConfig(config.GetConfig())
+		}),
 		loginRateLimitHandler(),
 		middleware.RequestCostHandler(),
 		middleware.RequestLocaleHandler(),
@@ -96,6 +104,7 @@ func buildGlobalRateLimitConfig(cfg *config.Conf) middleware.RateLimitConfig {
 		return middleware.RateLimitConfig{Enabled: false}
 	}
 	return middleware.RateLimitConfig{
+		Driver:  cfg.RateLimitDriver,
 		Enabled: cfg.RateLimitEnabled,
 		RPS:     cfg.RateLimitRPS,
 		Burst:   cfg.RateLimitBurst,
@@ -109,6 +118,7 @@ func buildLoginRateLimitConfig() middleware.RateLimitConfig {
 		return middleware.RateLimitConfig{Enabled: false}
 	}
 	return middleware.RateLimitConfig{
+		Driver:  cfg.RateLimitDriver,
 		Enabled: cfg.LoginRateLimitEnabled,
 		RPS:     cfg.LoginRateLimitRPS,
 		Burst:   cfg.LoginRateLimitBurst,
@@ -117,7 +127,7 @@ func buildLoginRateLimitConfig() middleware.RateLimitConfig {
 }
 
 func loginRateLimitHandler() gin.HandlerFunc {
-	handler := middleware.RateLimitHandler(buildLoginRateLimitConfig())
+	handler := middleware.DynamicRateLimitHandler(buildLoginRateLimitConfig)
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 		isLoginPath := path == "/admin/v1/login" || path == "/admin/v1/login/sms/send-code" || path == "/admin/v1/login/sms"

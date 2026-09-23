@@ -108,7 +108,14 @@ func TestExportCenterServiceCreateListDetailAndSuccess(t *testing.T) {
 		t.Fatalf("missing completed record mismatch: record=%#v err=%v", missing, err)
 	}
 
-	list, err := svc.List(&form.ExportRecordList{
+	// 验证无属主调用 listInternal 会被安全拦截
+	if _, err := svc.listInternal(&form.ExportRecordList{
+		Paginate: form.Paginate{Page: 1, PerPage: 10},
+	}); err == nil {
+		t.Fatal("expected error when listing export records without owner trigger_user_id, got nil")
+	}
+
+	list, err := svc.MyList(context.Background(), record.TriggerUserID, &form.ExportRecordList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 		Scene:    model.ExportSceneRequestLog,
 		Status:   model.TaskRunStatusSuccess,
@@ -435,7 +442,8 @@ func TestExportCenterServiceListExposesQueuedStageAndTaskCode(t *testing.T) {
 		t.Fatalf("create record failed: %v", err)
 	}
 
-	list, err := svc.List(&form.ExportRecordList{
+	userID := uint(3)
+	list, err := svc.MyList(context.Background(), userID, &form.ExportRecordList{
 		Paginate: form.Paginate{Page: 1, PerPage: 10},
 		Scene:    model.ExportSceneFileList,
 	})
@@ -498,7 +506,7 @@ func TestExportCenterServiceReassignTaskRunKeepsSameRecord(t *testing.T) {
 	}
 
 	oldID := uint(101)
-	listOld, err := svc.List(&form.ExportRecordList{
+	listOld, err := svc.MyList(context.Background(), record.TriggerUserID, &form.ExportRecordList{
 		Paginate:  form.Paginate{Page: 1, PerPage: 10},
 		TaskRunID: &oldID,
 	})
@@ -510,7 +518,7 @@ func TestExportCenterServiceReassignTaskRunKeepsSameRecord(t *testing.T) {
 	}
 
 	newID := uint(202)
-	listNew, err := svc.List(&form.ExportRecordList{
+	listNew, err := svc.MyList(context.Background(), record.TriggerUserID, &form.ExportRecordList{
 		Paginate:  form.Paginate{Page: 1, PerPage: 10},
 		TaskRunID: &newID,
 	})

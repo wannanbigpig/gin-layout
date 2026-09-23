@@ -15,22 +15,66 @@ import (
 // InitConfig 初始化配置系统并加载首个生效快照。
 func InitConfig(configPath string) error {
 	once.Do(func() {
-		var loaded *Conf
-		loaded, initErr = load(configPath)
-		if initErr != nil {
+		loaded, err := load(configPath)
+		if err != nil {
+			setInitErr(err)
 			return
 		}
-		initErr = validateJWTSecretKey(loaded)
-		if initErr != nil {
+		if err := validateJWTSecretKey(loaded); err != nil {
+			setInitErr(err)
+			return
+		}
+		if err := validateProductionCredentials(loaded); err != nil {
+			setInitErr(err)
 			return
 		}
 		setActiveConfig(loaded)
 	})
-	return initErr
+	return getInitErr()
 }
 
 func checkJwtSecretKey() error {
 	return validateJWTSecretKey(GetConfig())
+}
+
+func checkProductionCredentials() error {
+	return validateProductionCredentials(GetConfig())
+}
+
+func validateProductionCredentials(cfg *Conf) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	isProd := strings.EqualFold(cfg.AppEnv, "prod") || strings.EqualFold(cfg.AppEnv, "production")
+	if !isProd {
+		return nil
+	}
+
+	if cfg.Mysql.Enable {
+		weakMysqlPasswords := map[string]struct{}{
+			"root1234": {},
+			"123456":   {},
+			"root":     {},
+			"password": {},
+			"admin":    {},
+		}
+		pw := strings.TrimSpace(cfg.Mysql.Password)
+		if pw == "" {
+			return fmt.Errorf("mysql.password cannot be empty in production")
+		}
+		if _, ok := weakMysqlPasswords[strings.ToLower(pw)]; ok {
+			return fmt.Errorf("mysql.password uses a weak default/placeholder value in production")
+		}
+	}
+
+	if cfg.Redis.Enable {
+		if strings.TrimSpace(cfg.Redis.Password) == "" {
+			return fmt.Errorf("redis.password cannot be empty in production")
+		}
+	}
+
+	return nil
 }
 
 func validateJWTSecretKey(cfg *Conf) error {
@@ -185,7 +229,7 @@ func registerConfigWatcherIfNeeded(cfg *Conf) {
 
 	V.WatchConfig()
 	V.OnConfigChange(func(in fsnotify.Event) {
-		initErr = reloadConfigFromWatcher()
+		setInitErr(reloadConfigFromWatcher())
 	})
 }
 

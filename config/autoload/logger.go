@@ -39,8 +39,8 @@ var Logger = LoggerConfig{
 	DefaultDivision: "time", // 默认按时间切割
 	Filename:        "gin-layout.sys.log",
 	DivisionTime: DivisionTime{
-		MaxAge:       15,  // 日志保留 15 天
-		RotationTime: 24,  // 每 24 小时切割一次
+		MaxAge:       15, // 日志保留 15 天
+		RotationTime: 24, // 每 24 小时切割一次
 	},
 	DivisionSize: DivisionSize{
 		MaxSize:    20,    // 日志文件最大 20MB

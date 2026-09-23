@@ -446,10 +446,20 @@ VALUES ('auth.login_lock_enabled', 'true', 'bool', 'auth', 1, 0, 1, '', 1, 89, '
        ('todo.reminder_sms_enabled', 'false', 'bool', 'todo', 1, 0, 1, '', 1, 76, '是否启用待办提醒短信渠道，仍需用户主动开启', @init_time, @init_time, 0),
        ('todo.reminder_lead_minutes', '1440', 'number', 'todo', 1, 0, 1, '', 1, 78, '待办到期前多少分钟发送站内提醒', @init_time, @init_time, 0),
        ('todo.reminder_catchup_minutes', '10080', 'number', 'todo', 1, 0, 1, '', 1, 77, 'Cron 停机恢复后补发多少分钟内的逾期提醒', @init_time, @init_time, 0),
-       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code","sms_code","otp","captcha","code_hash"],"request_header":["authorization","auth","cookie","x-api-key"],"request_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","refresh-exp","cookie"],"response_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '请求日志脱敏字段配置', @init_time, @init_time, 0),
-       ('storage.active_driver', 'local', 'string', 'storage', 1, 0, 0, 'storage', 1, 90, '当前启用的文件存储驱动', @init_time, @init_time, 0),
-       ('storage.config', '{"local":{},"aliyun_oss":{},"signed_url_ttl_seconds":300,"max_file_size_mb":10,"allowed_mime_types":[]}', 'json', 'storage', 1, 1, 0, 'storage', 1, 80, '文件存储配置', @init_time, @init_time, 0),
-       ('sms.config', '{"enabled":false,"providers":{"aliyun":{"enabled":false,"access_key_id":"","access_key_secret":"","endpoint":"https://dysmsapi.aliyuncs.com"}},"templates":{"aliyun":{"login_otp":{"sign_name":"","template_code":"","variables":["code"]},"todo_due":{"sign_name":"","template_code":"","variables":["title","due_at"]}}},"routes":{"login_otp":{"provider":"aliyun","template":"login_otp"}},"otp":{"ttl_seconds":300,"resend_interval_seconds":60,"max_attempts":5,"ip_limit_per_10_minutes":10,"phone_daily_limit":20,"global_daily_limit":1000}}', 'json', 'sms', 1, 1, 0, 'sms', 1, 70, '短信供应商、模板、场景路由与验证码配置', @init_time, @init_time, 0)
+       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code","sms_code","otp","captcha","code_hash"],"request_header":["authorization","auth","cookie","x-api-key"],"request_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","refresh-exp","cookie"],"response_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '请求日志脱敏字段配置', @init_time, @init_time, 0)
+ON DUPLICATE KEY UPDATE `updated_at` = VALUES(`updated_at`);
+
+INSERT INTO `sys_storage_config` (`id`, `active_driver`, `config`, `signed_url_ttl_seconds`, `max_file_size_mb`, `allowed_mime_types`, `created_at`, `updated_at`, `deleted_at`)
+VALUES (1, 'local', '{"local":{},"aliyun_oss":{}}', 300, 10, '[]', @init_time, @init_time, 0)
+ON DUPLICATE KEY UPDATE `updated_at` = VALUES(`updated_at`);
+
+INSERT INTO `sys_sms_config` (`id`, `enabled`, `providers`, `templates`, `routes`, `otp_config`, `created_at`, `updated_at`, `deleted_at`)
+VALUES (1, 0,
+        '{"aliyun":{"enabled":false,"access_key_id":"","access_key_secret":"","endpoint":"https://dysmsapi.aliyuncs.com"}}',
+        '{"aliyun":{"login_otp":{"sign_name":"","template_code":"","variables":["code"]},"todo_due":{"sign_name":"","template_code":"","variables":["title","due_at"]}}}',
+        '{"login_otp":{"provider":"aliyun","template":"login_otp"}}',
+        '{"ttl_seconds":300,"resend_interval_seconds":60,"max_attempts":5,"ip_limit_per_10_minutes":10,"phone_daily_limit":20,"global_daily_limit":1000}',
+        @init_time, @init_time, 0)
 ON DUPLICATE KEY UPDATE `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_dict_type` (`type_code`, `is_system`, `status`, `sort`, `remark`, `created_at`,
@@ -521,16 +531,13 @@ SELECT `id`,
            WHEN `config_key` = 'todo.reminder_lead_minutes' THEN '待办提前提醒时间（分钟）'
            WHEN `config_key` = 'todo.reminder_catchup_minutes' THEN '待办逾期补偿窗口（分钟）'
            WHEN `config_key` = 'audit.sensitive_fields' THEN '请求日志脱敏配置'
-           WHEN `config_key` = 'storage.active_driver' THEN '当前存储驱动'
-           WHEN `config_key` = 'storage.config' THEN '文件存储配置'
-           WHEN `config_key` = 'sms.config' THEN '短信配置'
            ELSE ''
            END,
        @init_time,
        @init_time
 FROM `sys_config`
 WHERE `deleted_at` = 0
-  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'todo.reminder_enabled', 'todo.reminder_sms_enabled', 'todo.reminder_lead_minutes', 'todo.reminder_catchup_minutes', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config', 'sms.config')
+  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'todo.reminder_enabled', 'todo.reminder_sms_enabled', 'todo.reminder_lead_minutes', 'todo.reminder_catchup_minutes', 'audit.sensitive_fields')
 ON DUPLICATE KEY UPDATE `config_name` = VALUES(`config_name`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_config_i18n` (`config_id`, `locale`, `config_name`, `created_at`, `updated_at`)
@@ -546,16 +553,13 @@ SELECT `id`,
            WHEN `config_key` = 'todo.reminder_lead_minutes' THEN 'Todo Reminder Lead Minutes'
            WHEN `config_key` = 'todo.reminder_catchup_minutes' THEN 'Todo Reminder Catch-up Minutes'
            WHEN `config_key` = 'audit.sensitive_fields' THEN 'Request Log Mask Config'
-           WHEN `config_key` = 'storage.active_driver' THEN 'Active Storage Driver'
-           WHEN `config_key` = 'storage.config' THEN 'File Storage Config'
-           WHEN `config_key` = 'sms.config' THEN 'SMS Config'
            ELSE ''
            END,
        @init_time,
        @init_time
 FROM `sys_config`
 WHERE `deleted_at` = 0
-  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'todo.reminder_enabled', 'todo.reminder_sms_enabled', 'todo.reminder_lead_minutes', 'todo.reminder_catchup_minutes', 'audit.sensitive_fields', 'storage.active_driver', 'storage.config', 'sms.config')
+  AND `config_key` IN ('auth.login_lock_enabled', 'auth.login_max_failures', 'auth.login_lock_minutes', 'task.cron_demo_enabled', 'todo.reminder_enabled', 'todo.reminder_sms_enabled', 'todo.reminder_lead_minutes', 'todo.reminder_catchup_minutes', 'audit.sensitive_fields')
 ON DUPLICATE KEY UPDATE `config_name` = VALUES(`config_name`), `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_dict_type_i18n` (`dict_type_id`, `locale`, `type_name`, `created_at`, `updated_at`)

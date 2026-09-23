@@ -66,7 +66,7 @@ func TestServiceCreateListReadAndReadAll(t *testing.T) {
 		t.Fatalf("create third message failed: %v", err)
 	}
 
-	list, err := svc.List(7, &form.SysMessageList{Paginate: form.Paginate{Page: 1, PerPage: 10}})
+	list, err := svc.List(context.Background(), 7, &form.SysMessageList{Paginate: form.Paginate{Page: 1, PerPage: 10}})
 	if err != nil {
 		t.Fatalf("list messages failed: %v", err)
 	}
@@ -362,4 +362,16 @@ func newMessageTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("create admin_user table failed: %v", err)
 	}
 	return db
+}
+
+func TestServiceListWithCanceledContext(t *testing.T) {
+	db := newMessageTestDB(t)
+	svc := NewServiceWithDeps(ServiceDeps{DB: db})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 预先取消
+
+	_, err := svc.List(ctx, 1, &form.SysMessageList{})
+	if err == nil {
+		t.Fatal("expected error on canceled context, got nil")
+	}
 }

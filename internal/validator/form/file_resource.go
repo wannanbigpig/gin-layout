@@ -125,7 +125,7 @@ type FileLocalUpload struct {
 }
 
 func NewFileLocalUploadForm() *FileLocalUpload {
-	return &FileLocalUpload{IsPublic: 1}
+	return &FileLocalUpload{IsPublic: 0}
 }
 
 type FileUploadCredential struct {
@@ -141,7 +141,7 @@ type FileUploadCredential struct {
 }
 
 func NewFileUploadCredentialForm() *FileUploadCredential {
-	return &FileUploadCredential{IsPublic: 1}
+	return &FileUploadCredential{IsPublic: 0}
 }
 
 type FileUploadCredentialBatch struct {
@@ -165,7 +165,7 @@ type FileUploadCredentialBatchItem struct {
 }
 
 func NewFileUploadCredentialBatchForm() *FileUploadCredentialBatch {
-	return &FileUploadCredentialBatch{IsPublic: 1}
+	return &FileUploadCredentialBatch{IsPublic: 0}
 }
 
 type FileUploadComplete struct {
@@ -192,7 +192,7 @@ type FileUploadComplete struct {
 }
 
 func NewFileUploadCompleteForm() *FileUploadComplete {
-	return &FileUploadComplete{IsPublic: 1}
+	return &FileUploadComplete{IsPublic: 0}
 }
 
 type FileUploadCompleteBatch struct {
@@ -227,7 +227,7 @@ type FileUploadCompleteBatchItem struct {
 }
 
 func NewFileUploadCompleteBatchForm() *FileUploadCompleteBatch {
-	return &FileUploadCompleteBatch{IsPublic: 1}
+	return &FileUploadCompleteBatch{IsPublic: 0}
 }
 
 type FileReferenceList struct {
@@ -258,7 +258,7 @@ type FileMultipartInit struct {
 }
 
 func NewFileMultipartInitForm() *FileMultipartInit {
-	return &FileMultipartInit{IsPublic: 1}
+	return &FileMultipartInit{IsPublic: 0}
 }
 
 // FileMultipartComplete 分片上传完成参数。
@@ -287,7 +287,7 @@ type MultipartCompletePart struct {
 }
 
 func NewFileMultipartCompleteForm() *FileMultipartComplete {
-	return &FileMultipartComplete{IsPublic: 1}
+	return &FileMultipartComplete{IsPublic: 0}
 }
 
 // FileMultipartAbort 分片上传中止参数。

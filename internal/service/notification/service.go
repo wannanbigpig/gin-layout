@@ -434,11 +434,14 @@ func (s *Service) unreadCountsByUsers(db *gorm.DB, userIDs []uint) map[uint]int6
 	return counts
 }
 
-func (s *Service) List(userID uint, params *form.SysMessageList) (*resources.Collection, error) {
+func (s *Service) List(ctx context.Context, userID uint, params *form.SysMessageList) (*resources.Collection, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if params == nil {
 		params = form.NewSysMessageListQuery()
 	}
-	db, err := s.dbOrDefault(context.Background())
+	db, err := s.dbOrDefault(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +464,7 @@ func (s *Service) List(userID uint, params *form.SysMessageList) (*resources.Col
 		normalizedPerPage = 10
 	}
 
-	base := db.Model(&model.SysMessage{})
+	base := db.WithContext(ctx).Model(&model.SysMessage{})
 	if strings.TrimSpace(condition) != "" {
 		base = base.Where(condition, args...)
 	}

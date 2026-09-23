@@ -8,11 +8,13 @@ import (
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
+	"go.uber.org/zap"
 )
 
 // ApiService 处理 API 权限的维护与查询。
@@ -78,7 +80,7 @@ func (s *ApiService) Update(params *form.UpdatePermission) error {
 		return err
 	}
 	if err := access.NewApiRouteCacheService().RefreshCache(); err != nil {
-		return err
+		log.Logger.Warn("API权限更新已提交，路由缓存刷新失败", zap.Error(err), zap.Uint("api_id", params.Id))
 	}
 	return nil
 }

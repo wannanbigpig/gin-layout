@@ -22,4 +22,3 @@ func (a Algorithm) IsValid() bool {
 		return false
 	}
 }
-
