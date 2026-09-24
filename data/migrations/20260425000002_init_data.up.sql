@@ -446,7 +446,7 @@ VALUES ('auth.login_lock_enabled', 'true', 'bool', 'auth', 1, 0, 1, '', 1, 89, '
        ('todo.reminder_sms_enabled', 'false', 'bool', 'todo', 1, 0, 1, '', 1, 76, '是否启用待办提醒短信渠道，仍需用户主动开启', @init_time, @init_time, 0),
        ('todo.reminder_lead_minutes', '1440', 'number', 'todo', 1, 0, 1, '', 1, 78, '待办到期前多少分钟发送站内提醒', @init_time, @init_time, 0),
        ('todo.reminder_catchup_minutes', '10080', 'number', 'todo', 1, 0, 1, '', 1, 77, 'Cron 停机恢复后补发多少分钟内的逾期提醒', @init_time, @init_time, 0),
-       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code","sms_code","otp","captcha","code_hash"],"request_header":["authorization","auth","cookie","x-api-key"],"request_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","refresh-exp","cookie"],"response_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '请求日志脱敏字段配置', @init_time, @init_time, 0)
+       ('audit.sensitive_fields', '{"common":["password","pwd","passwd","pass","secret","token","access_token","refresh_token","api_key","apikey","apiKey","pin","cvv","cvc","cvv2","security_code","sms_code","otp","captcha","code_hash"],"request_header":["authorization","auth","cookie","x-api-key"],"request_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security","real_name","realname","name"],"response_header":["set-cookie","authorization","auth","x-api-key","refresh-exp","cookie"],"response_body":["phone","mobile","tel","telephone","phone_number","mobile_number","email","mail","id_card","idcard","identity","id_number","bank_card","bankcard","card_number","card_no","ssn","social_security"]}', 'json', 'audit', 1, 1, 0, 'audit_mask', 1, 95, '数据脱敏字段配置', @init_time, @init_time, 0)
 ON DUPLICATE KEY UPDATE `updated_at` = VALUES(`updated_at`);
 
 INSERT INTO `sys_storage_config` (`id`, `active_driver`, `config`, `signed_url_ttl_seconds`, `max_file_size_mb`, `allowed_mime_types`, `created_at`, `updated_at`, `deleted_at`)
@@ -530,7 +530,7 @@ SELECT `id`,
            WHEN `config_key` = 'todo.reminder_sms_enabled' THEN '待办短信提醒开关'
            WHEN `config_key` = 'todo.reminder_lead_minutes' THEN '待办提前提醒时间（分钟）'
            WHEN `config_key` = 'todo.reminder_catchup_minutes' THEN '待办逾期补偿窗口（分钟）'
-           WHEN `config_key` = 'audit.sensitive_fields' THEN '请求日志脱敏配置'
+           WHEN `config_key` = 'audit.sensitive_fields' THEN '数据脱敏配置'
            ELSE ''
            END,
        @init_time,

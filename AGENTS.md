@@ -204,7 +204,7 @@ go run main.go -c ./config.yaml command migrate check
 - Go 代码修改先执行 `gofmt -w <changed-go-files>` 并运行相关测试；共享行为、权限/认证、跨模块或发布变更运行 `go test ./...`，必要时加 `go vet ./...`。
 - 依赖变更或完整性问题运行 `go mod verify`；迁移变更运行 `go run main.go -c ./config.yaml command migrate check`。数据库重建不属于测试加跑项。
 - 新增接口必须在 `tests/` 增加业务场景，自动鉴权/handler 覆盖不能替代业务场景；管理端接口默认放到 `tests/admin_test/` 并按资源域归类。
-- `tests/` 接口测试使用根目录 `config.yaml`，会写入测试数据，执行前核对其指向专用测试库。MySQL 不可用时失败，不改为 Skip；其他包按各自已有测试约定执行。
+- `tests/` 接口测试只使用根目录 `config.test.yaml`（或 `GOTEST_CONFIG`），**不读业务 `config.yaml`**，会写入测试数据；执行前确认其指向专用测试库。MySQL 不可用时失败，不改为 Skip；其他包按各自已有测试约定执行。
 - 不删除或弱化已有测试，不通过跳过校验、吞异常、硬编码返回来让测试通过。
 
 ## 文档维护

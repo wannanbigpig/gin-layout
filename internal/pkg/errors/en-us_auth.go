@@ -24,7 +24,7 @@ func init() {
 		SuperAdminMustKeepRole:  "Default super admin must keep super admin role",
 		LoginAccountLocked:      "Account is locked, please try again later",
 		RefreshTokenInvalid:     "Refresh token is invalid or expired",
-		CurrentPasswordRequired: "Current password is required when changing password or login phone number",
+		CurrentPasswordRequired: "Current password is required when changing password",
 		CurrentPasswordWrong:    "Current password is incorrect",
 		SMSCredentialInvalid:    "Phone number or SMS code is incorrect",
 		SMSLoginDisabled:        "SMS login is disabled",

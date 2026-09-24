@@ -390,7 +390,7 @@ go test ./...
 go test ./tests/admin_test
 ```
 
-HTTP integration tests under `tests` use only the root `config.yaml` and require a real, reachable MySQL instance. Missing configuration, unavailable MySQL, or missing migration tables fails the run instead of falling back to the example config or skipping database flows. Use a rebuildable dedicated test database; see `tests/README.md`.
+HTTP integration tests under `tests` use only a dedicated test config (root `config.test.yaml`, or the `GOTEST_CONFIG` environment variable) and never fall back to the business `config.yaml`. They require a real, reachable MySQL instance. Missing configuration, unavailable MySQL, or missing migration tables fails the run. Use a rebuildable dedicated test database; see `tests/README.md` and `config/config.test.yaml.example`.
 
 File-upload contract: `GET /admin/v1/system/file/upload/options` requires `file:create` permission and returns only the minimum current-driver, size/type allowlist, and direct/multipart capability settings; it does not return credentials, `bucket`, or endpoint. Upload initialization creates a server-side session and signs a `complete_token`; complete accepts only server metadata bound to that token, and multipart abort accepts only `complete_token`. On direct-upload completion, the server streams the temporary object into an independent final key and validates the actual content with SHA-256; the client hash is an integrity declaration and is not used for instant server-side reuse. Legacy sessions created for unverified instant reuse are rejected after upgrade; clients must initialize a new upload.
 

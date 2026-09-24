@@ -35,7 +35,7 @@ func TestMain(m *testing.M) {
 	}
 	db, err := model.GetDB()
 	if err != nil {
-		_, _ = os.Stderr.WriteString("获取真实 MySQL 连接失败: " + err.Error() + "\n")
+		_, _ = os.Stderr.WriteString("获取测试库 MySQL 连接失败: " + err.Error() + "\n")
 		os.Exit(1)
 	}
 	adminUser := model.NewAdminUsers()
@@ -142,10 +142,10 @@ func decodeResult(t *testing.T, recorder *httptest.ResponseRecorder) *response.R
 	return result
 }
 
-// requireMySQL 断言接口测试正在使用配置文件中的真实 MySQL。
+// requireMySQL 断言接口测试正在使用测试配置中的真实 MySQL。
 func requireMySQL(t *testing.T) {
 	t.Helper()
 	if !mysqlEnabled {
-		t.Fatal("接口测试必须在项目根 config.yaml 中启用真实 MySQL")
+		t.Fatal("接口测试必须在测试配置（config.test.yaml / GOTEST_CONFIG）中启用真实 MySQL")
 	}
 }

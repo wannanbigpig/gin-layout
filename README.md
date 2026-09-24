@@ -410,7 +410,7 @@ go test ./...
 go test ./tests/admin_test
 ```
 
-`tests` 下的接口集成测试只使用项目根目录 `config.yaml`，并要求其中启用且可连接真实 MySQL；配置缺失、MySQL 不可用或迁移表缺失时直接失败，不会回退示例配置或跳过数据库流程。建议使用可重建的专用测试库，详见 `tests/README.md`。
+`tests` 下的接口集成测试只使用测试专用配置（根目录 `config.test.yaml`，或环境变量 `GOTEST_CONFIG`），**不会读取业务 `config.yaml`**；要求启用且可连接真实 MySQL。配置缺失、MySQL 不可用或迁移表缺失时直接失败，不会回退业务配置或跳过数据库流程。请使用可重建的专用测试库，详见 `tests/README.md` 与 `config/config.test.yaml.example`。
 
 文件上传约定：`GET /admin/v1/system/file/upload/options` 需要 `file:create` 权限，只返回当前驱动、大小和类型白名单、直传/分片能力等最小配置，不返回密钥、`bucket` 或 endpoint。上传初始化由服务端创建 session 并签发 `complete_token`；complete 只接受 token 对应的服务端元数据，multipart abort 只接受 `complete_token`。直传完成时，服务端把临时对象流复制到独立最终 key，并对实际内容计算 SHA-256 后校验；客户端 hash 只用于完整性声明，不再据此执行秒传复用。升级前已创建的旧版秒传复用会话会被拒绝，客户端需重新初始化上传。
 

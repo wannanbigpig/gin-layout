@@ -91,15 +91,19 @@ jobs:
 
       - name: Prepare MySQL integration config
         run: |
-          cat > config.yaml <<'YAML'
+          cat > config.test.yaml <<'YAML'
           app:
             app_env: local
             debug: true
             language: zh_CN
+            rate_limit_enabled: false
+            login_rate_limit_enabled: false
           jwt:
             ttl: 7200
             refresh_ttl: 3600
             secret_key: ci-secret-key-for-go-layout-tests
+          security:
+            credential_encryption_key: ci-credential-encryption-key-for-tests-0123456789abcdef
           mysql:
             enable: true
             host: 127.0.0.1
@@ -124,9 +128,11 @@ jobs:
           YAML
 
       - name: Initialize MySQL schema and seed data
-        run: go run main.go -c ./config.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
+        run: go run main.go -c ./config.test.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
         env:
           GO_LAYOUT_MIGRATIONS_PATH: ${{ github.workspace }}/data/migrations
 
       - name: Full test coverage
         run: make test-coverage
+        env:
+          GOTEST_CONFIG: config.test.yaml

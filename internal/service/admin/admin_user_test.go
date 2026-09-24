@@ -763,6 +763,24 @@ func TestUpdateProfileWithoutPasswordDoesNotRequireCurrentPassword(t *testing.T)
 	}
 }
 
+func TestUpdateProfilePhoneChangeDoesNotRequireCurrentPassword(t *testing.T) {
+	user := &model.AdminUser{PhoneNumber: "13800138000", CountryCode: "86", Password: "unused"}
+	changedPhone := "13900139000"
+	params := &form.UpdateProfile{PhoneNumber: &changedPhone}
+	// 手机号变更不再要求当前密码（仅改密码时要求）
+	if err := verifyProfileCurrentPassword(user, params, false); err != nil {
+		t.Fatalf("phone-only update must not require current password: %v", err)
+	}
+	// 改密码仍要求当前密码
+	pw := "new-password"
+	paramsWithPw := &form.UpdateProfile{Password: &pw}
+	if err := verifyProfileCurrentPassword(user, paramsWithPw, true); err == nil {
+		t.Fatal("password change without current password must fail")
+	} else if businessErr, ok := err.(*e.BusinessError); !ok || businessErr.GetCode() != e.CurrentPasswordRequired {
+		t.Fatalf("expected CurrentPasswordRequired, got: %v", err)
+	}
+}
+
 func TestProfilePhoneChangedOnlyWhenCredentialValueChanges(t *testing.T) {
 	user := &model.AdminUser{PhoneNumber: "13800138000", CountryCode: "86"}
 	samePhone := "13800138000"

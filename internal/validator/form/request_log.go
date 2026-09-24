@@ -49,7 +49,7 @@ func NewRequestLogExportQuery() *RequestLogExport {
 	return &RequestLogExport{Limit: 1000}
 }
 
-// RequestLogMaskConfigForm 请求日志脱敏配置。
+// RequestLogMaskConfigForm 数据脱敏配置。
 type RequestLogMaskConfigForm struct {
 	Common         []string `form:"common" json:"common" binding:"omitempty,dive,max=64"`
 	RequestHeader  []string `form:"request_header" json:"request_header" binding:"omitempty,dive,max=64"`

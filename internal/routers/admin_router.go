@@ -509,8 +509,8 @@ func logGroup(deps *ControllerDeps) RouteGroupDef {
 					GET("list", "请求日志列表", deps.RequestLog.List),
 					GET("detail", "请求日志详情", deps.RequestLog.Detail),
 					POST("export", "导出请求日志", deps.RequestLog.Export),
-					GET("mask-config", "获取请求日志脱敏配置", deps.RequestLog.MaskConfig),
-					POST("mask-config", "更新请求日志脱敏配置", deps.RequestLog.UpdateMaskConfig),
+					GET("mask-config", "获取数据脱敏配置", deps.RequestLog.MaskConfig),
+					POST("mask-config", "更新数据脱敏配置", deps.RequestLog.UpdateMaskConfig),
 				},
 			},
 			{

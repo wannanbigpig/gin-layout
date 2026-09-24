@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"testing"
@@ -93,6 +94,22 @@ func TestRequestLogMaskConfigRoutesWithAuthorization(t *testing.T) {
 	result := decodeResult(t, resp)
 	assert.Equal(t, e.SUCCESS, result.Code)
 
+	// 保存原配置，结束后恢复，避免共享测试库被写小。
+	var prevMask any
+	if result.Code == e.SUCCESS {
+		prevMask = result.Data
+	}
+	if prevMask != nil {
+		defer func() {
+			restoreBytes, err := json.Marshal(prevMask)
+			if err != nil {
+				return
+			}
+			restorePayload := string(restoreBytes)
+			_ = postRequest("/admin/v1/log/request/mask-config", &restorePayload)
+		}()
+	}
+
 	body := `{"common":["password","token"],"request_body":["phone"]}`
 	updateResp := postRequest("/admin/v1/log/request/mask-config", &body)
 	assert.Equal(t, http.StatusOK, updateResp.Code)
@@ -127,7 +144,7 @@ func TestLogRoutesRequireLogin(t *testing.T) {
 			query: &url.Values{"id": {"1"}},
 		},
 		{
-			name:  "请求日志脱敏配置需要登录",
+			name:  "数据脱敏配置需要登录",
 			route: "/admin/v1/log/request/mask-config",
 			query: nil,
 		},
@@ -169,7 +186,7 @@ func TestLogRoutesRequireLogin(t *testing.T) {
 			body:  `{"limit":10}`,
 		},
 		{
-			name:  "请求日志脱敏配置更新需要登录",
+			name:  "数据脱敏配置更新需要登录",
 			route: "/admin/v1/log/request/mask-config",
 			body:  `{"common":["password"]}`,
 		},

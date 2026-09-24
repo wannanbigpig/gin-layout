@@ -1,0 +1,70 @@
+# 接口集成测试专用配置示例。
+# 复制为项目根目录 config.test.yaml 后按环境修改：
+#   cp config/config.test.yaml.example ./config.test.yaml
+#
+# tests/ 只读取该文件（或环境变量 GOTEST_CONFIG / TEST_CONFIG），
+# 不会回退业务 config.yaml，避免测试写库污染业务环境。
+#
+# 请指向可重建的专用测试库，不要指向生产库。
+# 首次准备：
+#   go run main.go -c ./config.test.yaml command migrate up
+#   go run main.go -c ./config.test.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
+app:
+  app_env: local
+  debug: true
+  language: zh_CN
+  # 测试过程会关闭限流；此处仅保证结构完整
+  rate_limit_enabled: false
+  login_rate_limit_enabled: false
+
+jwt:
+  ttl: 7200
+  refresh_ttl: 3600
+  refresh_token_ttl: 604800
+  refresh_cookie_name: refresh_token
+  refresh_cookie_path: /admin/v1/auth
+  refresh_cookie_domain: ""
+  refresh_cookie_secure: false
+  refresh_cookie_same_site: Lax
+  # 仅用于测试签名，不要与业务密钥混用
+  secret_key: ci-secret-key-for-go-layout-tests
+
+security:
+  # 仅用于测试；与业务 credential_encryption_key 隔离
+  credential_encryption_key: ci-credential-encryption-key-for-tests-0123456789abcdef
+
+mysql:
+  enable: true
+  host: 127.0.0.1
+  port: 3306
+  # 必须与业务库隔离
+  database: go_layout_test
+  username: root
+  password: root1234
+  charset: utf8mb4
+  table_prefix: ""
+  max_idle_conns: 10
+  max_open_conns: 100
+  max_lifetime: 3600s
+  print_sql: false
+
+redis:
+  # 按需开启；CI 可保持 false。与业务 Redis database 隔离
+  enable: false
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  database: 1
+
+queue:
+  enable: false
+  namespace: go_layout_test
+  concurrency: 4
+  strict_priority: false
+  consume_cron_fallback: false
+
+logger:
+  output: stderr
+
+storage:
+  active_driver: local

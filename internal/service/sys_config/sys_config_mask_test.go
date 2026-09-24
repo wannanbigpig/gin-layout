@@ -155,7 +155,7 @@ func TestResolveMutationConfigValuePreservesStringWhitespace(t *testing.T) {
 func TestBuildSysConfigDiffIncludesVisibilityFields(t *testing.T) {
 	before := map[string]any{
 		"config_key":       "audit.sensitive_fields",
-		"config_name_i18n": map[string]string{"zh-CN": "请求日志脱敏配置"},
+		"config_name_i18n": map[string]string{"zh-CN": "数据脱敏配置"},
 		"config_value":     "before",
 		"value_type":       model.SysConfigValueTypeJSON,
 		"group_code":       "audit",
@@ -168,7 +168,7 @@ func TestBuildSysConfigDiffIncludesVisibilityFields(t *testing.T) {
 	}
 	after := map[string]any{
 		"config_key":       "audit.sensitive_fields",
-		"config_name_i18n": map[string]string{"zh-CN": "请求日志脱敏配置"},
+		"config_name_i18n": map[string]string{"zh-CN": "数据脱敏配置"},
 		"config_value":     maskedConfigValue,
 		"value_type":       model.SysConfigValueTypeJSON,
 		"group_code":       "audit",

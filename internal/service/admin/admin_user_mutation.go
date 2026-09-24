@@ -449,7 +449,9 @@ func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *fo
 			return err
 		}
 		phoneChanged = profilePhoneChanged(adminUserModel, params)
-		if err := verifyProfileCurrentPassword(adminUserModel, params, passwordChanged || phoneChanged); err != nil {
+		// 仅改密码时校验当前密码；改昵称/邮箱/头像/手机号不需要。
+		// 手机号变更仍会撤销会话（见 profileCredentialRevocation），但不强制填当前密码。
+		if err := verifyProfileCurrentPassword(adminUserModel, params, passwordChanged); err != nil {
 			return err
 		}
 		oldAvatar := adminUserModel.Avatar

@@ -41,7 +41,7 @@
 
 ## MySQL 与前置数据
 
-- `TestMain` 使用项目根 `config.yaml` 初始化真实 MySQL；配置缺失、MySQL 未启用或不可连接时整个测试包失败。
+- `TestMain` 使用测试专用配置（`config.test.yaml` 或 `GOTEST_CONFIG`）初始化真实 MySQL；配置缺失、MySQL 未启用或不可连接时整个测试包失败。不会读取业务 `config.yaml`。
 - 默认认证主体是数据库中的 `ID=1` 超级管理员；测试库必须先完成 migration 和系统初始数据。
 - product 流程会读取一个真实部门作为前置；session、notification、folder 流程创建专属记录并在结束时清理。
 - 所有写入数据使用唯一名称或 marker，测试不能依赖运行顺序。

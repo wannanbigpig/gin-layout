@@ -34,13 +34,13 @@ type exportProgressReporter func(processed, total int) error
 const (
 	requestLogMaskConfigGroupCode = "audit"
 	requestLogMaskConfigSort      = 95
-	requestLogMaskConfigRemark    = "请求日志脱敏字段配置"
+	requestLogMaskConfigRemark    = "数据脱敏字段配置"
 	requestLogMaskConfigManageTab = "audit_mask"
 )
 
 var requestLogMaskConfigNameI18n = map[string]string{
-	"zh-CN": "请求日志脱敏配置",
-	"en-US": "Request Log Mask Config",
+	"zh-CN": "数据脱敏配置",
+	"en-US": "Data Masking Configuration",
 }
 
 // requestLogGetDB 可替换的 DB 获取函数，测试时注入 mock。

@@ -12,25 +12,27 @@
 
 `admin_test/route_scenarios_test.go` 进一步要求每个管理端路由显式归类：按当前实际列表为 `99` 个已有业务成功或状态流（包括个人工作台、个人请求日志、个人待办和 `GET /admin/v1/system/file/upload/options`）、`25` 个覆盖参数、NotFound、权限或幂等契约、`14` 个受 Redis、queue、multipart 文件系统或隔离对象存储约束。新增路由未分类、重复分类或删除路由后遗留分类都会导致测试失败。
 
-## 真实 MySQL 约束
+## 测试配置与真实 MySQL 约束
 
-- 接口测试只读取项目根目录 `config.yaml`，不再回退 `config/config.yaml.example` 或临时配置。
+- 接口测试**只**读取测试专用配置，**不会**回退业务 `config.yaml`。
+- 解析顺序：环境变量 `GOTEST_CONFIG`（或 `TEST_CONFIG`）→ 项目根 `config.test.yaml`。
+- 首次准备：`cp config/config.test.yaml.example ./config.test.yaml`，并把 `mysql.database` 指向**专用测试库**（如 `go_layout_test`）。
 - `mysql.enable` 必须为 `true`，连接或健康检查失败时测试初始化直接失败，不允许 `Skip`。
 - 涉及系统配置和字典的流程会检查所需表；缺表时直接提示先执行迁移或初始化。
-- 测试会写入并清理带 `test-auto-` 前缀的数据。强烈建议让 `config.yaml` 指向专用测试库，不要指向生产库。
+- 测试会写入并清理带 `test-auto-` 前缀的数据。强烈建议 `config.test.yaml` 指向专用测试库，不要指向生产或业务库。
 - 测试不会自动执行 `init-system`。首次准备专用测试库时可显式执行：
 
 ```bash
-go run main.go -c ./config.yaml command migrate up
+go run main.go -c ./config.test.yaml command migrate up
 # 仅允许重建的专用测试库才执行：
-go run main.go -c ./config.yaml command init-system -y --backup-confirmed --confirm-database <database>
+go run main.go -c ./config.test.yaml command init-system -y --backup-confirmed --confirm-database go_layout_test
 ```
 
-CI 使用 MySQL service 和专用 `go_layout_test` 数据库，先初始化系统数据，再执行 `make test-coverage`。
+CI 使用 MySQL service 和专用 `go_layout_test` 数据库，生成 `config.test.yaml` 后执行 `init-system` 与 `make test-coverage`。
 
 ## 目录职责
 
-- `test.go`：加载根 `config.yaml`、初始化真实 MySQL、Redis（按配置）、验证器和 Gin Router。
+- `test.go`：加载测试专用配置、初始化真实 MySQL、Redis（按配置）、验证器和 Gin Router。
 - `ping_test.go`、`readiness_test.go`：根路由测试和根路由覆盖守卫。
 - `admin_test/admin_test.go`：管理端 `TestMain`、请求发送、认证头和统一响应解析。
 - `admin_test/route_coverage_test.go`：全部管理端声明路由的自动覆盖守卫、匿名鉴权边界和认证后 handler smoke 测试。
@@ -47,8 +49,11 @@ CI 使用 MySQL service 和专用 `go_layout_test` 数据库，先初始化系�
 ## 常用命令
 
 ```bash
+# 确保根目录存在 config.test.yaml（复制 config/config.test.yaml.example）
 go test ./tests/... -count=1
 go test ./tests/admin_test -count=1
+# 或显式指定测试配置
+GOTEST_CONFIG=config.test.yaml go test ./tests/admin_test -count=1
 go test ./...
 make test-coverage
 ```

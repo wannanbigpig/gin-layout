@@ -58,15 +58,19 @@ jobs:
           go run . -c /tmp/go-layout-release-config.yaml command gen-openapi
           git diff --exit-code -- docs/openapi.yaml
           go run . -c /tmp/go-layout-release-config.yaml command migrate check --path ./data/migrations
-          cat > config.yaml <<'YAML'
+          cat > config.test.yaml <<'YAML'
           app:
             app_env: local
             debug: false
             language: zh_CN
+            rate_limit_enabled: false
+            login_rate_limit_enabled: false
           jwt:
             ttl: 7200
             refresh_ttl: 3600
             secret_key: release-ci-secret-key-for-tests
+          security:
+            credential_encryption_key: release-ci-credential-key-for-tests-0123456789
           mysql:
             enable: true
             host: 127.0.0.1
@@ -89,8 +93,8 @@ jobs:
           storage:
             active_driver: local
           YAML
-          GO_LAYOUT_MIGRATIONS_PATH="${GITHUB_WORKSPACE}/data/migrations" go run . -c ./config.yaml command init-system -y --backup-confirmed --confirm-database go_layout_release_test
-          go test ./tests/...
+          GO_LAYOUT_MIGRATIONS_PATH="${GITHUB_WORKSPACE}/data/migrations" go run . -c ./config.test.yaml command init-system -y --backup-confirmed --confirm-database go_layout_release_test
+          GOTEST_CONFIG=config.test.yaml go test ./tests/...
       - name: Build archives
         shell: bash
         run: |

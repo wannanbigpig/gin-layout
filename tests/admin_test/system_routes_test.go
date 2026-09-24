@@ -260,12 +260,13 @@ func TestSystemConfigGenericUpdateRejectsDedicatedManagedConfig(t *testing.T) {
 	requireWritableDB(t)
 	requireSystemModuleTables(t)
 
-	config := findSysConfigByKey(t, "storage.config")
+	// storage.* 已迁到专用表；用仍在 sys_config 中的专属键验证通用 update 拒绝逻辑。
+	config := findSysConfigByKey(t, "audit.sensitive_fields")
 	updateBody := map[string]any{
 		"id":         config.ID,
 		"config_key": config.ConfigKey,
 		"config_name_i18n": map[string]string{
-			"zh-CN": "文件存储配置",
+			"zh-CN": "数据脱敏字段配置",
 		},
 		"config_value": "******",
 		"value_type":   config.ValueType,
@@ -287,9 +288,8 @@ func TestSystemConfigVisibilityTabsAndHiddenSaveFlags(t *testing.T) {
 	requireWritableDB(t)
 	requireSystemModuleTables(t)
 
+	// storage.* 已迁移到 sys_storage_config 专用表，不再作为 sys_config 隐藏键初始化。
 	hiddenKeys := []string{
-		"storage.active_driver",
-		"storage.config",
 		"audit.sensitive_fields",
 	}
 
@@ -354,19 +354,37 @@ func TestSystemConfigVisibilityTabsAndHiddenSaveFlags(t *testing.T) {
 		"response_header": []string{},
 		"response_body":   []string{},
 	}
+	// 写脱敏配置前保存原值，结束后恢复，避免共享测试库被永久改小。
+	prevMaskResp := getRequest("/admin/v1/log/request/mask-config", nil)
+	var prevMask any
+	if prevMaskResp.Code == http.StatusOK {
+		if prevResult := decodeResult(t, prevMaskResp); prevResult.Code == e.SUCCESS {
+			prevMask = prevResult.Data
+		}
+	}
+	if prevMask != nil {
+		defer func() {
+			restoreBytes, _ := json.Marshal(prevMask)
+			restorePayload := string(restoreBytes)
+			_ = postRequest("/admin/v1/log/request/mask-config", &restorePayload)
+		}()
+	}
 	auditBytes, _ := json.Marshal(auditBody)
 	auditPayload := string(auditBytes)
 	auditResp := postRequest("/admin/v1/log/request/mask-config", &auditPayload)
 	auditResult := decodeResult(t, auditResp)
 	assert.Equal(t, e.SUCCESS, auditResult.Code, auditResult.Msg)
 
-	storageConfig := findSysConfigByKey(t, "storage.active_driver")
-	assert.Equal(t, uint8(0), storageConfig.IsVisible)
-	assert.Equal(t, "storage", storageConfig.ManageTab)
-
-	storageJSONConfig := findSysConfigByKey(t, "storage.config")
-	assert.Equal(t, uint8(0), storageJSONConfig.IsVisible)
-	assert.Equal(t, "storage", storageJSONConfig.ManageTab)
+	// storage 配置存放在专用表 sys_storage_config，不再断言 sys_config 键。
+	storageRow := model.NewSysStorageConfig()
+	storageDB, err := storageRow.GetDB()
+	if err != nil {
+		t.Fatalf("查询存储配置表失败: %v", err)
+	}
+	if err := storageDB.Where("id = ? AND deleted_at = 0", 1).First(storageRow).Error; err != nil {
+		t.Fatalf("测试库缺少 sys_storage_config id=1 初始行，请先 init-system: %v", err)
+	}
+	assert.Equal(t, "local", storageRow.ActiveDriver)
 
 	auditConfig := findSysConfigByKey(t, "audit.sensitive_fields")
 	assert.Equal(t, uint8(0), auditConfig.IsVisible)
@@ -792,7 +810,7 @@ func requireSystemModuleTables(t *testing.T) {
 	t.Helper()
 	db, err := model.GetDB()
 	if err != nil {
-		t.Fatalf("配置文件中的真实数据库不可用: %v", err)
+		t.Fatalf("测试配置中的数据库不可用: %v", err)
 	}
 	requiredTables := []string{
 		"sys_config",
@@ -804,7 +822,7 @@ func requireSystemModuleTables(t *testing.T) {
 	}
 	for _, table := range requiredTables {
 		if !db.Migrator().HasTable(table) {
-			t.Fatalf("配置文件中的真实数据库缺少表 %s，请先执行 migrate up 或 init-system", table)
+			t.Fatalf("测试配置中的数据库缺少表 %s，请先执行 migrate up 或 init-system", table)
 		}
 	}
 }
