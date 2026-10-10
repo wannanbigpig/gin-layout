@@ -57,6 +57,9 @@ jobs:
           cat "$guide" >> release-notes.md
       - name: Verify
         shell: bash
+        env:
+          JWT_SECRET_KEY: ci-documentation-jwt-key-not-for-deployment
+          CREDENTIAL_ENCRYPTION_KEY: ci-documentation-encryption-key-not-for-deployment
         run: |
           set -euo pipefail
           packages="$(go list ./... | grep -Ev '/tests(/|$)')"

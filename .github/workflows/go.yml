@@ -70,6 +70,9 @@ jobs:
           go vet $packages
 
       - name: Verify generated OpenAPI is current
+        env:
+          JWT_SECRET_KEY: ci-documentation-jwt-key-not-for-deployment
+          CREDENTIAL_ENCRYPTION_KEY: ci-documentation-encryption-key-not-for-deployment
         run: |
           cp ./config/config.yaml.example /tmp/go-layout-openapi-config.yaml
           go run . -c /tmp/go-layout-openapi-config.yaml command gen-openapi
@@ -81,6 +84,9 @@ jobs:
           node scripts/generate-api-documentation.mjs --check
 
       - name: Verify generated error codes are current
+        env:
+          JWT_SECRET_KEY: ci-documentation-jwt-key-not-for-deployment
+          CREDENTIAL_ENCRYPTION_KEY: ci-documentation-encryption-key-not-for-deployment
         run: |
           cp ./config/config.yaml.example /tmp/go-layout-error-codes-config.yaml
           go run . -c /tmp/go-layout-error-codes-config.yaml command gen-error-codes
