@@ -87,7 +87,7 @@ type exportTaskService interface {
 	CreateRecordForTask(ctx context.Context, input baseservice.ExportTaskBootstrapInput) (*model.SysExportRecord, bool, error)
 	HasRecordForTaskRun(ctx context.Context, taskRunID uint) (bool, error)
 	ReassignTaskRun(ctx context.Context, oldTaskRunID, newTaskRunID uint, queueName string) (bool, error)
-	MarkFailed(ctx context.Context, taskRunID uint, taskErr error) error
+	MarkFailed(ctx context.Context, taskRunID uint, taskErr error, executionTokens ...string) error
 	MarkCanceledIfExists(ctx context.Context, taskRunID uint, cancelReason string) error
 }
 
@@ -197,6 +197,9 @@ func (s *TaskCenterService) UpdateTaskOperationConfig(ctx context.Context, param
 	}
 	cronSpec := strings.TrimSpace(params.CronSpec)
 	if definition.Kind == model.TaskKindCron {
+		if definition.IsHighRisk == model.TaskHighRisk && params.AllowRetry == model.TaskRetryAllowed {
+			return nil, e.NewBusinessError(e.InvalidParameter, "高危定时任务请使用手动触发并确认")
+		}
 		if cronSpec == "" {
 			cronSpec = strings.TrimSpace(definition.CronSpec)
 		}
@@ -402,6 +405,14 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 	if definition.Kind != runModel.Kind {
 		return nil, e.NewBusinessError(e.InvalidParameter, "任务类型与当前定义不一致，无法重试")
 	}
+	if definition.Kind == model.TaskKindCron {
+		if definition.IsHighRisk == model.TaskHighRisk {
+			return nil, e.NewBusinessError(e.InvalidParameter, "高危定时任务请使用手动触发并确认")
+		}
+		if strings.TrimSpace(definition.Handler) == "" {
+			return nil, e.NewBusinessError(e.InvalidParameter, "cron 任务处理器未配置")
+		}
+	}
 	rootRunID := retryRootRunID(runModel)
 
 	payloadAny := map[string]any{}
@@ -412,7 +423,9 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 	}
 
 	queueName := strings.TrimSpace(runModel.Queue)
-	if queueName == "" {
+	if runModel.Kind == model.TaskKindCron {
+		queueName = ""
+	} else if queueName == "" {
 		queueName = queue.DefaultQueue
 	}
 	rawPayload, _ := json.Marshal(payloadAny)
@@ -435,6 +448,9 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 	retryRun, retrySeq, taskID, err := s.enqueueRetryRunWithChainGuard(ctx, runModel, definition, rootRunID, queueName, rawPayload, triggerUserID, triggerAccount)
 	if err != nil {
 		return nil, err
+	}
+	if definition.Kind == model.TaskKindCron {
+		return s.retryCronTask(ctx, definition, runModel, retryRun, retrySeq, taskID, payloadAny, triggerUserID, triggerAccount)
 	}
 
 	if shouldUpdateExportRecord {
@@ -491,6 +507,47 @@ func (s *TaskCenterService) RetryTask(ctx context.Context, runID uint, triggerUs
 		"type":           jobInfo.Type,
 		"retry_from_run": runModel.ID,
 		"retry_root_run": rootRunID,
+		"retry_seq":      retrySeq,
+	}, nil
+}
+
+func (s *TaskCenterService) retryCronTask(ctx context.Context, definition *model.TaskDefinition, original, queued *model.TaskRun, retrySeq int, taskID string, payload map[string]any, userID uint, account string) (map[string]any, error) {
+	recorder := NewRunRecorder()
+	run, err := recorder.Start(ctx, RunStart{
+		TaskCode:       definition.Code,
+		Kind:           model.TaskKindCron,
+		Source:         model.TaskSourceManual,
+		SourceID:       taskID,
+		CronSpec:       definition.CronSpec,
+		Attempt:        1,
+		MaxRetry:       original.MaxRetry,
+		RetryOfRunID:   original.ID,
+		RetryRootRunID: retryRootRunID(original),
+		RetrySeq:       retrySeq,
+		Payload:        []byte(queued.Payload),
+		TriggerUserID:  userID,
+		TriggerAccount: account,
+	})
+	if err != nil {
+		if finishErr := recorder.Finish(ctx, queued, RunFinish{Error: err}); finishErr != nil {
+			log.Logger.Warn("启动 cron 重试失败后更新执行记录失败", zap.Uint("run_id", queued.ID), zap.Error(finishErr))
+		}
+		return nil, err
+	}
+	execErr := executeCronHandler(ctx, definition.Handler, payload)
+	if finishErr := recorder.Finish(ctx, run, RunFinish{Error: execErr}); finishErr != nil {
+		return nil, finishErr
+	}
+	if execErr != nil {
+		return nil, e.NewBusinessError(e.ServerErr, "任务重试失败")
+	}
+	return map[string]any{
+		"run_id":         run.ID,
+		"task_id":        taskID,
+		"queue":          "",
+		"type":           definition.Code,
+		"retry_from_run": original.ID,
+		"retry_root_run": retryRootRunID(original),
 		"retry_seq":      retrySeq,
 	}, nil
 }

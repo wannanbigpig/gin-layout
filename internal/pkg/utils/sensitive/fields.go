@@ -52,6 +52,20 @@ var (
 	bankCardRegex = regexp.MustCompile(`\d{16,19}`)
 )
 
+// immutableCredentialFields applies to every audit scope, independently of
+// editable business-field configuration. Provider registrations only add keys.
+var immutableCredentialFields = map[string]bool{
+	"password": true, "pwd": true, "passwd": true, "pass": true,
+	"secret": true, "token": true, "access_token": true, "refresh_token": true,
+	"api_key": true, "apikey": true,
+	"authorization": true, "auth": true, "cookie": true, "set-cookie": true,
+	"currentpassword": true, "newpassword": true, "accesstoken": true, "refreshtoken": true,
+	"clientsecret": true, "secretkey": true, "x-api-key": true,
+	"pin": true, "cvv": true, "cvc": true, "cvv2": true, "security_code": true,
+	"sms_code": true, "otp": true, "captcha": true, "code_hash": true,
+	"access_key_secret": true, "secret_access_key": true,
+}
+
 // immutableRequestBodyFields 是认证凭据和付费渠道密钥的安全基线。
 // audit.sensitive_fields 可以追加业务字段，但不能让这些字段恢复为明文日志。
 var immutableRequestBodyFields = map[string]bool{
@@ -70,7 +84,7 @@ var immutableRequestBodyFields = map[string]bool{
 var immutableRequestBodyFieldsMu sync.RWMutex
 
 // RegisterImmutableRequestBodyFields lets compile-time provider registries add
-// credential field names that request logging must never expose. Registration
+// credential field names that audit logging must never expose in any scope. Registration
 // is additive so runtime audit configuration cannot remove the safety baseline.
 func RegisterImmutableRequestBodyFields(fields ...string) {
 	immutableRequestBodyFieldsMu.Lock()
@@ -79,6 +93,7 @@ func RegisterImmutableRequestBodyFields(fields ...string) {
 		field = strings.ToLower(strings.TrimSpace(field))
 		if field != "" {
 			immutableRequestBodyFields[field] = true
+			immutableCredentialFields[field] = true
 		}
 	}
 }
@@ -169,10 +184,10 @@ func DefaultSensitiveFieldsConfig() SensitiveFieldsConfig {
 
 // LoadSensitiveFieldsConfig 加载敏感字段配置（未来可从配置文件调用）
 func LoadSensitiveFieldsConfig(config SensitiveFieldsConfig) {
-	manager := currentFieldsManager()
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	manager.applyConfig(config)
+	// Initialize once before publishing, then replace the entire immutable snapshot.
+	// Concurrent readers must never observe map fields being replaced in place.
+	_ = currentFieldsManager()
+	defaultFieldsManagerVal.Store(newSensitiveFieldsManager(config))
 }
 
 // GetSensitiveFieldsConfig 返回当前生效的敏感字段配置快照。
@@ -294,6 +309,22 @@ func getResponseHeaderFields() map[string]bool {
 func getResponseBodyFields() map[string]bool {
 	manager := currentFieldsManager()
 	return manager.cloneFieldSet(manager.responseBodyFields)
+}
+
+// Credential names match whole keys or delimited parts, so removing a business
+// mask still works for unrelated fields such as shipping, compass or tokenizer.
+func isImmutableCredentialField(field string) bool {
+	immutableRequestBodyFieldsMu.RLock()
+	defer immutableRequestBodyFieldsMu.RUnlock()
+	if immutableCredentialFields[field] {
+		return true
+	}
+	for _, part := range strings.FieldsFunc(field, func(r rune) bool { return r == '_' || r == '-' || r == '.' }) {
+		if immutableCredentialFields[part] {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *sensitiveFieldsManager) cloneFieldSet(source map[string]bool) map[string]bool {

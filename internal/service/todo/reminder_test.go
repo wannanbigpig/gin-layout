@@ -318,15 +318,104 @@ func TestReminderPreferenceDefaultsAndRequiresPhoneForSMS(t *testing.T) {
 	}
 	svc := NewServiceWithDB(db)
 	preference, err := svc.GetReminderPreference(context.Background(), 7)
-	if err != nil || !preference.InAppEnabled || preference.SMSEnabled || !preference.SMSAvailable {
+	if err != nil || !preference.InAppEnabled || preference.SMSEnabled || !preference.SMSAvailable || preference.LeadMinutes != DefaultReminderLeadMinutes {
 		t.Fatalf("unexpected default preference: %#v err=%v", preference, err)
 	}
-	updated, err := svc.UpdateReminderPreference(context.Background(), 7, false, true)
-	if err != nil || updated.InAppEnabled || !updated.SMSEnabled {
+	minutes := 30
+	updated, err := svc.UpdateReminderPreference(context.Background(), 7, false, true, &minutes)
+	if err != nil || updated.InAppEnabled || !updated.SMSEnabled || updated.LeadMinutes != 30 {
 		t.Fatalf("unexpected updated preference: %#v err=%v", updated, err)
 	}
-	if _, err := svc.UpdateReminderPreference(context.Background(), 9, true, true); err == nil {
+	if _, err := svc.UpdateReminderPreference(context.Background(), 9, true, true, nil); err == nil {
 		t.Fatal("SMS preference must reject users without a phone")
+	}
+	if _, err := svc.UpdateReminderPreference(context.Background(), 7, true, false, nil); err != nil {
+		t.Fatalf("legacy update must keep lead time: %v", err)
+	}
+	got, err := svc.GetReminderPreference(context.Background(), 7)
+	if err != nil || got.LeadMinutes != 30 {
+		t.Fatalf("legacy update changed lead time: %#v err=%v", got, err)
+	}
+	zero := 0
+	updated, err = svc.UpdateReminderPreference(context.Background(), 7, true, false, &zero)
+	if err != nil || updated.LeadMinutes != 0 {
+		t.Fatalf("zero lead time must be accepted: %#v err=%v", updated, err)
+	}
+	got, err = svc.GetReminderPreference(context.Background(), 7)
+	if err != nil || got.LeadMinutes != 0 {
+		t.Fatalf("zero lead time was not persisted: %#v err=%v", got, err)
+	}
+	invalid := -1
+	if _, err := svc.UpdateReminderPreference(context.Background(), 7, true, false, &invalid); err == nil {
+		t.Fatal("negative lead time must be rejected")
+	}
+	oneMinute := 1
+	updated, err = svc.UpdateReminderPreference(context.Background(), 7, true, false, &oneMinute)
+	if err != nil || updated.LeadMinutes != oneMinute {
+		t.Fatalf("one-minute lead time must be accepted: %#v err=%v", updated, err)
+	}
+	maximum := MaxReminderLeadMinutes
+	updated, err = svc.UpdateReminderPreference(context.Background(), 7, true, false, &maximum)
+	if err != nil || updated.LeadMinutes != maximum {
+		t.Fatalf("maximum lead time must be accepted: %#v err=%v", updated, err)
+	}
+	got, err = svc.GetReminderPreference(context.Background(), 7)
+	if err != nil || got.LeadMinutes != maximum {
+		t.Fatalf("maximum lead time was not persisted: %#v err=%v", got, err)
+	}
+	tooLong := maximum + 1
+	if _, err := svc.UpdateReminderPreference(context.Background(), 7, true, false, &tooLong); err == nil {
+		t.Fatal("lead time beyond the maximum must be rejected")
+	}
+}
+
+func TestReminderRunIncludesSevenDayLeadBoundary(t *testing.T) {
+	db := newReminderTestDB(t)
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.Local)
+	seedReminderUser(t, db, 7, model.AdminUserStatusEnabled)
+	seedReminderTodo(t, db, 7, "seven-day reminder", model.TodoStatusPending, now.Add(7*24*time.Hour))
+	seedReminderTodo(t, db, 7, "outside window", model.TodoStatusPending, now.Add(7*24*time.Hour+time.Minute))
+	sevenDays := 7 * 24 * 60
+	if _, err := NewServiceWithDB(db).UpdateReminderPreference(context.Background(), 7, true, false, &sevenDays); err != nil {
+		t.Fatalf("set seven-day lead time: %v", err)
+	}
+	result, err := newReminderTestService(db, now, nil).Run(context.Background(), ReminderOptions{LeadTime: time.Duration(MaxReminderLeadMinutes) * time.Minute})
+	if err != nil || result.Handled != 1 {
+		t.Fatalf("seven-day scan: %#v err=%v", result, err)
+	}
+	var messages []model.SysMessage
+	if err := db.Find(&messages).Error; err != nil || len(messages) != 1 || messages[0].Title != "待办即将到期" {
+		t.Fatalf("unexpected seven-day notification: %#v err=%v", messages, err)
+	}
+}
+
+func TestReminderRunUsesEachAssigneeLeadTime(t *testing.T) {
+	db := newReminderTestDB(t)
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.Local)
+	seedReminderUser(t, db, 7, model.AdminUserStatusEnabled)
+	seedReminderUser(t, db, 8, model.AdminUserStatusEnabled)
+	seedReminderTodo(t, db, 7, "short lead", model.TodoStatusPending, now.Add(30*time.Minute))
+	seedReminderTodo(t, db, 8, "default lead", model.TodoStatusPending, now.Add(30*time.Minute))
+	minutes := 5
+	if _, err := NewServiceWithDB(db).UpdateReminderPreference(context.Background(), 7, true, false, &minutes); err != nil {
+		t.Fatalf("set personal lead time: %v", err)
+	}
+	svc := newReminderTestService(db, now, nil)
+	first, err := svc.Run(context.Background(), ReminderOptions{LeadTime: 24 * time.Hour})
+	if err != nil || first.Handled != 1 {
+		t.Fatalf("first scan: %#v err=%v", first, err)
+	}
+	var messages []model.SysMessage
+	if err := db.Find(&messages).Error; err != nil || len(messages) != 1 || messages[0].UserID != 8 {
+		t.Fatalf("wrong user notified: %#v err=%v", messages, err)
+	}
+	svc.now = func() time.Time { return now.Add(25 * time.Minute) }
+	second, err := svc.Run(context.Background(), ReminderOptions{LeadTime: 24 * time.Hour})
+	if err != nil || second.Handled != 2 {
+		t.Fatalf("second scan: %#v err=%v", second, err)
+	}
+	if err := db.Find(&messages).Error; err != nil || len(messages) != 2 {
+		t.Fatalf("short lead reminder missing: %#v err=%v", messages, err)
 	}
 }
 
@@ -393,6 +482,7 @@ func newReminderTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE admin_user (id integer primary key, status integer not null default 1, full_phone_number text not null default '', deleted_at integer not null default 0)`,
 		`CREATE TABLE user_todos (
 			id integer primary key autoincrement, assignee_id integer not null default 0, creator_id integer not null default 0,
+			group_id integer not null default 0,
 			source_type text not null default 'manual', source_key text not null default '', title text not null default '', description text,
 			priority text not null default 'normal', status text not null default 'pending', action_url text not null default '', due_at datetime,
 			completed_at datetime, canceled_at datetime, created_at datetime, updated_at datetime, deleted_at integer not null default 0
@@ -402,11 +492,12 @@ func newReminderTestDB(t *testing.T) *gorm.DB {
 			batch_id text not null default '', category text not null default '', topic text not null default '', title text not null default '',
 			content text, payload text, action_url text not null default '', action_label text not null default '', recipient_type text not null default '',
 			recipient_ids text, send_immediately integer not null default 1, send_at datetime, sent_at datetime, is_read integer not null default 0,
-			read_at datetime, created_at datetime, updated_at datetime, UNIQUE(user_id, batch_id)
+			read_at datetime, deleted_at datetime, created_at datetime, updated_at datetime, UNIQUE(user_id, batch_id)
 		)`,
 		`CREATE TABLE notification_preferences (
 			id integer primary key autoincrement, user_id integer not null default 0, scene text not null default '',
 			in_app_enabled integer not null default 1, sms_enabled integer not null default 0,
+			lead_minutes integer not null default 1440,
 			created_at datetime, updated_at datetime, UNIQUE(user_id, scene)
 		)`,
 		`CREATE TABLE sms_deliveries (

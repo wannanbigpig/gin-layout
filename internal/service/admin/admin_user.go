@@ -196,7 +196,9 @@ func (s *AdminUserService) List(params *form.AdminUserList) (*resources.Collecti
 	}
 
 	adminUserModel := model.NewAdminUsers()
-	total, collection, err := model.ListPageE(adminUserModel, params.Page, params.PerPage, conditionStr, args, s.adminUserListOptions())
+	listOptions := s.adminUserListOptions()
+	listOptions.OrderBy = query_builder.ResolveListOrder(params.SortBy, params.SortOrder, listOptions.OrderBy, "id", "username", "nickname", "created_at", "updated_at")
+	total, collection, err := model.ListPageE(adminUserModel, params.Page, params.PerPage, conditionStr, args, listOptions)
 	if err != nil {
 		log.Logger.Error("查询管理员列表失败", zap.Error(err))
 		return nil, err

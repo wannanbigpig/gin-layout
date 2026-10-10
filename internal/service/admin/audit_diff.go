@@ -129,6 +129,25 @@ func (s *AdminUserService) UpdateProfileWithAuditDiff(uid uint, params *form.Upd
 	return buildAdminUserDiff(before, after), nil
 }
 
+// ChangePhoneWithAuditDiff 为独立换绑手机号操作记录字段差异。
+func (s *AdminUserService) ChangePhoneWithAuditDiff(uid uint, params *form.ChangeProfilePhone) (string, error) {
+	if params == nil {
+		return "", e.NewBusinessError(e.InvalidParameter)
+	}
+	before, err := s.snapshotAdminUserByID(uid)
+	if err != nil {
+		return "", err
+	}
+	if err := s.ChangePhone(uid, params); err != nil {
+		return "", err
+	}
+	after, err := s.snapshotAdminUserByID(uid)
+	if err != nil {
+		return auditdiff.Marshal(nil), nil
+	}
+	return buildAdminUserDiff(before, after), nil
+}
+
 // BindRoleWithAuditDiff 绑定角色并返回精确 change_diff。
 func (s *AdminUserService) BindRoleWithAuditDiff(params *form.BindRole) (string, error) {
 	if params == nil {

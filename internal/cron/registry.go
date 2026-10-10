@@ -97,7 +97,7 @@ func RegisterBuiltinHandlers() error {
 
 // BuiltinTaskDefinitions 返回系统内置任务定义（任务中心列表与 cron 注册共用此定义源）。
 func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
-	// 高风险“系统重建”任务默认禁用，仅在配置显式开启时启用调度。
+	// 高风险“系统重建”任务首次同步默认禁用；已有任务保留数据库中的运营状态。
 	resetStatus := model.TaskStatusDisabled
 	if cfg != nil && cfg.EnableResetSystemCron {
 		resetStatus = model.TaskStatusEnabled
@@ -240,7 +240,7 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 			Name:                         "待办到期提醒",
 			Kind:                         model.TaskKindCron,
 			Queue:                        "",
-			CronSpec:                     "0 */5 * * * *",
+			CronSpec:                     "0 * * * * *",
 			Handler:                      HandlerCronTodoReminder,
 			Status:                       model.TaskStatusEnabled,
 			AllowManual:                  model.TaskManualAllowed,
@@ -251,7 +251,7 @@ func BuiltinTaskDefinitions(cfg *config.Conf) []model.TaskDefinition {
 			RecordSuccessIntervalSeconds: 3600,
 			RecordDetailOnManual:         1,
 			RecordDetailOnFailure:        1,
-			Remark:                       "每 5 分钟扫描临期和逾期待办；站内消息与短信 Outbox 都使用业务唯一键防重，当前仍只支持单 cron 实例",
+			Remark:                       "每分钟扫描临期和逾期待办；站内消息与短信 Outbox 都使用业务唯一键防重，当前仍只支持单 cron 实例",
 		},
 		{
 			Code:                         TaskCodeCronCleanAuditLogs,

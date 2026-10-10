@@ -128,7 +128,7 @@ type stubExportLifecycle struct {
 	completedErr    error
 }
 
-func (s *stubExportLifecycle) ClaimExecution(context.Context, uint, string) (*model.SysExportRecord, bool, error) {
+func (s *stubExportLifecycle) ClaimExecution(context.Context, uint, string, ...string) (*model.SysExportRecord, bool, error) {
 	return nil, false, nil
 }
 
@@ -140,11 +140,11 @@ func (s *stubExportLifecycle) CompletedRecordForTaskRun(context.Context, uint) (
 	return s.completedRecord, s.completedErr
 }
 
-func (s *stubExportLifecycle) MarkFailed(context.Context, uint, error) error {
+func (s *stubExportLifecycle) MarkFailed(context.Context, uint, error, ...string) error {
 	return nil
 }
 
-func (s *stubExportLifecycle) MarkPendingForRetry(context.Context, uint, error) error {
+func (s *stubExportLifecycle) MarkPendingForRetry(context.Context, uint, error, ...string) error {
 	return nil
 }
 

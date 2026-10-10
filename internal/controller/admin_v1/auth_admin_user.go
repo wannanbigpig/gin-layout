@@ -31,11 +31,40 @@ func (api AdminUserController) GetUserInfo(c *gin.Context) {
 	api.Success(c, result)
 }
 
-// UpdateProfile 更新个人资料（只能更新自己的手机号、邮箱、密码、昵称）
+// UpdateProfile 更新个人资料；手机号只能通过独立换绑接口修改。
 func (api AdminUserController) UpdateProfile(c *gin.Context) {
 	uid := api.GetCurrentUserID(c)
 	handleAuditWrite(api.Api, c, form.NewUpdateProfile, func(p *form.UpdateProfile) (string, error) {
 		return admin.NewAdminUserService().UpdateProfileWithAuditDiff(uid, p)
+	})
+}
+
+func (api AdminUserController) ProfileSecurityOptions(c *gin.Context) {
+	result, err := admin.NewAdminUserService().ProfileSecurityOptions()
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+func (api AdminUserController) SendProfileCode(c *gin.Context) {
+	params := form.NewProfileCodeRequest()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	result, err := admin.NewAdminUserService().SendProfileCode(c.Request.Context(), api.GetCurrentUserID(c), params, c.ClientIP())
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, result)
+}
+
+func (api AdminUserController) ChangePhone(c *gin.Context) {
+	uid := api.GetCurrentUserID(c)
+	handleAuditWrite(api.Api, c, form.NewChangeProfilePhone, func(p *form.ChangeProfilePhone) (string, error) {
+		return admin.NewAdminUserService().ChangePhoneWithAuditDiff(uid, p)
 	})
 }
 

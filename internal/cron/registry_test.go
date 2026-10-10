@@ -31,6 +31,10 @@ func TestSyncBuiltinDefinitionsUpsert(t *testing.T) {
 	assertTaskStatus(t, db, TaskCodeCronCleanExpiredFiles, 1)
 	assertTaskStatus(t, db, TaskCodeCronCleanAuditLogs, 1)
 	assertTaskStatus(t, db, TaskCodeCronTodoReminder, 1)
+	var todoReminder model.TaskDefinition
+	if err := db.Where("code = ?", TaskCodeCronTodoReminder).First(&todoReminder).Error; err != nil || todoReminder.CronSpec != "0 * * * * *" {
+		t.Fatalf("todo reminder must scan each minute: %#v err=%v", todoReminder, err)
+	}
 	assertTaskStatus(t, db, jobs.AuditLogTaskType, 1)
 	assertTaskStatus(t, db, jobs.TypeExportRequestLog, 1)
 	assertTaskStatus(t, db, jobs.TypeExportFileList, 1)

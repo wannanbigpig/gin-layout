@@ -58,7 +58,7 @@ func GetMaskedRequestBody(bodyBytes []byte, contentType string) string {
 		}
 		return MaskQueryString(string(bodyBytes))
 	case !strings.Contains(contentTypeLower, "application/json"):
-		return maskString(string(bodyBytes))
+		return "[unsupported content type: body not logged]"
 	default:
 		if !json.Valid(bodyBytes) {
 			return "[invalid or truncated JSON: body not logged]"
@@ -86,7 +86,7 @@ func MaskQueryString(queryString string) string {
 
 	values, err := url.ParseQuery(queryString)
 	if err != nil {
-		return maskString(queryString)
+		return "[invalid query: query not logged]"
 	}
 
 	requestBodyFields := getRequestBodyFields()

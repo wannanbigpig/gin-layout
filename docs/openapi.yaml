@@ -116,6 +116,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/change-phone":
+    post:
+      tags:
+        - "adminUser"
+      summary: "换绑手机号"
+      description: "换绑手机号"
+      operationId: "post_admin_v1_admin_user_change_phone"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
   "/admin/v1/admin-user/create":
     post:
       tags:
@@ -253,6 +271,42 @@ paths:
         - BearerAuth: []
       x-auth-mode: "auth"
       x-security-policy: "access_token_permission"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/profile-security/options":
+    get:
+      tags:
+        - "adminUser"
+      summary: "个人资料安全选项"
+      description: "个人资料安全选项"
+      operationId: "get_admin_v1_admin_user_profile_security_options"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/admin-user/profile-security/send-code":
+    post:
+      tags:
+        - "adminUser"
+      summary: "发送个人资料验证码"
+      description: "发送个人资料验证码"
+      operationId: "post_admin_v1_admin_user_profile_security_send_code"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
       responses:
         '200':
           description: OK
@@ -1610,6 +1664,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Response'
+  "/admin/v1/system/export/summary":
+    get:
+      tags:
+        - "export_personal"
+      summary: "我的导出摘要"
+      description: "我的导出摘要"
+      operationId: "get_admin_v1_system_export_summary"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
   "/admin/v1/system/file/batch-delete":
     post:
       tags:
@@ -2114,6 +2186,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Response'
+  "/admin/v1/system/notification/delete":
+    post:
+      tags:
+        - "notification"
+      summary: "删除个人消息"
+      description: "删除个人消息"
+      operationId: "post_admin_v1_system_notification_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
   "/admin/v1/system/notification/list":
     get:
       tags:
@@ -2569,6 +2659,96 @@ paths:
       summary: "删除个人待办"
       description: "删除个人待办"
       operationId: "post_admin_v1_todo_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/group/create":
+    post:
+      tags:
+        - "todo_personal"
+      summary: "创建待办分组"
+      description: "创建待办分组"
+      operationId: "post_admin_v1_todo_group_create"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/group/delete":
+    post:
+      tags:
+        - "todo_personal"
+      summary: "删除待办分组"
+      description: "删除待办分组"
+      operationId: "post_admin_v1_todo_group_delete"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/group/move":
+    post:
+      tags:
+        - "todo_personal"
+      summary: "调整待办分组"
+      description: "调整待办分组"
+      operationId: "post_admin_v1_todo_group_move"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/group/rename":
+    post:
+      tags:
+        - "todo_personal"
+      summary: "重命名待办分组"
+      description: "重命名待办分组"
+      operationId: "post_admin_v1_todo_group_rename"
+      security:
+        - BearerAuth: []
+      x-auth-mode: "login"
+      x-security-policy: "access_token"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+  "/admin/v1/todo/groups":
+    get:
+      tags:
+        - "todo_personal"
+      summary: "我的待办分组"
+      description: "我的待办分组"
+      operationId: "get_admin_v1_todo_groups"
       security:
         - BearerAuth: []
       x-auth-mode: "login"

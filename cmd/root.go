@@ -70,7 +70,7 @@ func shouldSkipBootstrap(cmd *cobra.Command) bool {
 	}
 	commandPath := cmd.CommandPath()
 	switch commandPath {
-	case "go-layout", "go-layout version", "go-layout help":
+	case "go-layout", "go-layout version", "go-layout help", "go-layout command release-check":
 		return true
 	default:
 		return strings.HasPrefix(commandPath, "go-layout completion") ||

@@ -21,6 +21,7 @@ func TestInferHTTPStatus(t *testing.T) {
 
 		// ---- 协议级映射 ----
 		{"NotLogin -> 401", NotLogin, http.StatusUnauthorized},
+		{"FilePrivateAuthNeeded -> 401", FilePrivateAuthNeeded, http.StatusUnauthorized},
 		{"AuthorizationErr -> 403", AuthorizationErr, http.StatusForbidden},
 		{"NotFound -> 404", NotFound, http.StatusNotFound},
 		{"ServerErr -> 500", ServerErr, http.StatusInternalServerError},

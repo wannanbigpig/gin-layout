@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	defaultTodoReminderLeadMinutes    = 24 * 60
 	defaultTodoReminderCatchupMinutes = 7 * 24 * 60
 )
 
@@ -20,16 +19,12 @@ func TodoReminderHandler(ctx context.Context, _ map[string]any) error {
 	if !sys_config.BoolValue(sys_config.TodoReminderEnabledConfigKey, true) {
 		return nil
 	}
-	leadMinutes, err := reminderMinutes(sys_config.TodoReminderLeadMinutesKey, defaultTodoReminderLeadMinutes)
-	if err != nil {
-		return err
-	}
 	catchupMinutes, err := reminderMinutes(sys_config.TodoReminderCatchupMinutesKey, defaultTodoReminderCatchupMinutes)
 	if err != nil {
 		return err
 	}
 	_, err = todo.NewReminderService().Run(ctx, todo.ReminderOptions{
-		LeadTime:      time.Duration(leadMinutes) * time.Minute,
+		LeadTime:      time.Duration(todo.MaxReminderLeadMinutes) * time.Minute,
 		CatchupWindow: time.Duration(catchupMinutes) * time.Minute,
 		SMSEnabled:    sys_config.BoolValue(sys_config.TodoReminderSMSEnabledKey, false),
 	})

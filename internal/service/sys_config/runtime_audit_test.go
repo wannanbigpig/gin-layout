@@ -1,6 +1,7 @@
 package sys_config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
@@ -72,6 +73,26 @@ func TestApplyRuntimeConfigLoadsSensitiveManager(t *testing.T) {
 
 	assertStringSliceEqual(t, captured.Common, []string{"password"})
 	assertStringSliceEqual(t, captured.RequestHeader, []string{"authorization"})
+}
+
+func TestApplyEmptyAuditRuntimeConfigRetainsCredentialBaseline(t *testing.T) {
+	previous := sensitive.GetSensitiveFieldsConfig()
+	t.Cleanup(func() { sensitive.LoadSensitiveFieldsConfig(previous) })
+	err := applyRuntimeConfig([]model.SysConfig{{
+		ConfigKey: AuditSensitiveFieldsConfigKey, ValueType: model.SysConfigValueTypeJSON,
+		ConfigValue: `{"common":[],"request_header":[],"request_body":[],"response_header":[],"response_body":[]}`,
+	}})
+	if err != nil {
+		t.Fatalf("applyRuntimeConfig returned error: %v", err)
+	}
+	for scope, result := range map[string]string{
+		"request":  sensitive.GetMaskedRequestBody([]byte(`{"password":"CredentialFixtureOnly","name":"visible-name"}`), "application/json"),
+		"response": sensitive.GetMaskedResponseBody([]byte(`{"access_token":"CredentialFixtureOnly","name":"visible-name"}`)),
+	} {
+		if strings.Contains(result, "CredentialFixtureOnly") || !strings.Contains(result, "visible-name") {
+			t.Errorf("%s did not retain credential baseline after runtime config refresh: %s", scope, result)
+		}
+	}
 }
 
 func assertStringSliceEqual(t *testing.T, got []string, want []string) {

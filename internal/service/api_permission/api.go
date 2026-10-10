@@ -104,7 +104,7 @@ func (s *ApiService) ListPage(params *form.ListPermission, locale ...string) (*r
 		condition,
 		args,
 		model.ListOptionalParams{
-			OrderBy: "sort desc, id desc",
+			OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "sort desc, id desc", "code", "route", "method", "sort"),
 		},
 	)
 	if err != nil {

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/sensitive"
 )
 
 func TestBuildFieldDiffMapsStatusLabel(t *testing.T) {
@@ -110,5 +112,25 @@ func TestBuildFieldDiffMasksSensitiveFields(t *testing.T) {
 	}
 	if !strings.Contains(diffMap["password"].Before.(string), "*") {
 		t.Fatalf("expected masked password with asterisks, got: %+v", diffMap["password"])
+	}
+}
+
+func TestBuildFieldDiffUsesCommonNameMaskConfiguration(t *testing.T) {
+	previous := sensitive.GetSensitiveFieldsConfig()
+	t.Cleanup(func() { sensitive.LoadSensitiveFieldsConfig(previous) })
+
+	rules := []FieldRule{{Field: "name", Label: "角色名称"}}
+	sensitive.LoadSensitiveFieldsConfig(sensitive.DefaultSensitiveFieldsConfig())
+	plain := BuildFieldDiff(nil, map[string]any{"name": "但是"}, rules)
+	if len(plain) != 1 || plain[0].After != "但是" {
+		t.Fatalf("expected plain role name with default fields, got %#v", plain)
+	}
+
+	config := sensitive.DefaultSensitiveFieldsConfig()
+	config.Common = append(config.Common, "name")
+	sensitive.LoadSensitiveFieldsConfig(config)
+	masked := BuildFieldDiff(nil, map[string]any{"name": "但是"}, rules)
+	if len(masked) != 1 || masked[0].After != "**" {
+		t.Fatalf("expected configured name masking, got %#v", masked)
 	}
 }

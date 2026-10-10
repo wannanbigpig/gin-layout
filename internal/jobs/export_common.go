@@ -21,11 +21,11 @@ const (
 var ErrExportExecutionInProgress = errors.New("export execution is already in progress")
 
 type exportRecordLifecycle interface {
-	ClaimExecution(context.Context, uint, string) (*model.SysExportRecord, bool, error)
+	ClaimExecution(context.Context, uint, string, ...string) (*model.SysExportRecord, bool, error)
 	CommitSuccess(context.Context, uint, service.ExportRecordSuccessInput) (*model.SysExportRecord, bool, error)
 	CompletedRecordForTaskRun(context.Context, uint) (*model.SysExportRecord, error)
-	MarkFailed(context.Context, uint, error) error
-	MarkPendingForRetry(context.Context, uint, error) error
+	MarkFailed(context.Context, uint, error, ...string) error
+	MarkPendingForRetry(context.Context, uint, error, ...string) error
 }
 
 type generatedExportFileCleaner interface {
@@ -58,11 +58,18 @@ func isFinalExportAttempt(retryCount, maxRetry int, hasRetryMetadata bool) bool 
 }
 
 func beginExportExecution(ctx context.Context, lifecycle exportRecordLifecycle, taskRunID uint) (*model.SysExportRecord, bool, error) {
-	executionToken, ok := asynq.GetTaskID(ctx)
-	if !ok || executionToken == "" {
-		executionToken = fmt.Sprintf("direct:%d", taskRunID)
+	executionToken := ExportExecutionToken(ctx, taskRunID)
+	var previousTokens []string
+	if taskID, ok := asynq.GetTaskID(ctx); ok && taskID != "" {
+		if retryCount, ok := asynq.GetRetryCount(ctx); ok && retryCount > 0 {
+			// 允许接管同一队列任务的旧尝试；升级前的 token 仅包含 Task ID。
+			previousTokens = append(previousTokens, taskID)
+			for attempt := 1; attempt <= retryCount; attempt++ {
+				previousTokens = append(previousTokens, fmt.Sprintf("%s:attempt:%d", taskID, attempt))
+			}
+		}
 	}
-	record, claimed, err := lifecycle.ClaimExecution(ctx, taskRunID, executionToken)
+	record, claimed, err := lifecycle.ClaimExecution(ctx, taskRunID, executionToken, previousTokens...)
 	if err != nil || claimed {
 		return record, claimed, err
 	}
@@ -76,12 +83,23 @@ func beginExportExecution(ctx context.Context, lifecycle exportRecordLifecycle, 
 	return record, false, fmt.Errorf("%w: task_run_id=%d status=%s", ErrExportExecutionInProgress, taskRunID, status)
 }
 
+// ExportExecutionToken 标识单次尝试，阻止超时执行的迟到收尾覆盖下一次重试。
+func ExportExecutionToken(ctx context.Context, taskRunID uint) string {
+	taskID, ok := asynq.GetTaskID(ctx)
+	if !ok || taskID == "" {
+		return fmt.Sprintf("direct:%d", taskRunID)
+	}
+	retryCount, _ := asynq.GetRetryCount(ctx)
+	return fmt.Sprintf("%s:attempt:%d", taskID, retryCount+1)
+}
+
 func finishExportAttemptFailure(ctx context.Context, lifecycle exportRecordLifecycle, taskRunID uint, taskErr error) error {
 	var stateErr error
+	executionToken := ExportExecutionToken(ctx, taskRunID)
 	if shouldFinalizeExportFailure(ctx) {
-		stateErr = lifecycle.MarkFailed(ctx, taskRunID, taskErr)
+		stateErr = lifecycle.MarkFailed(ctx, taskRunID, taskErr, executionToken)
 	} else {
-		stateErr = lifecycle.MarkPendingForRetry(ctx, taskRunID, taskErr)
+		stateErr = lifecycle.MarkPendingForRetry(ctx, taskRunID, taskErr, executionToken)
 	}
 	return errors.Join(taskErr, stateErr)
 }

@@ -111,6 +111,56 @@ func TestServiceCreateListReadAndReadAll(t *testing.T) {
 	}
 }
 
+func TestServiceDeleteOnlyOwnMessageAndKeepsDeliveryDedupe(t *testing.T) {
+	db := newMessageTestDB(t)
+	ctx := context.Background()
+	var events []Event
+	svc := NewServiceWithDeps(ServiceDeps{
+		DB:          db,
+		BroadcastFn: func(event Event) { events = append(events, event) },
+		PublishFn:   func(context.Context, Event) error { return nil },
+	})
+	first, err := svc.Create(ctx, CreateMessageInput{UserID: 7, BatchID: "batch-7", Title: "自己的消息"})
+	if err != nil {
+		t.Fatalf("create own message: %v", err)
+	}
+	other, err := svc.Create(ctx, CreateMessageInput{UserID: 8, BatchID: "batch-8", Title: "其他用户消息"})
+	if err != nil {
+		t.Fatalf("create other message: %v", err)
+	}
+
+	deleted, unread, err := svc.Delete(ctx, 7, other.ID)
+	if err != nil || deleted || unread != 1 {
+		t.Fatalf("cross-user delete: deleted=%v unread=%d err=%v", deleted, unread, err)
+	}
+	deleted, unread, err = svc.Delete(ctx, 7, first.ID)
+	if err != nil || !deleted || unread != 0 {
+		t.Fatalf("delete own message: deleted=%v unread=%d err=%v", deleted, unread, err)
+	}
+	list, err := svc.List(ctx, 7, &form.SysMessageList{})
+	if err != nil || list.Total != 0 {
+		t.Fatalf("deleted message still listed: total=%d err=%v", list.Total, err)
+	}
+	deleted, unread, err = svc.Delete(ctx, 7, first.ID)
+	if err != nil || deleted || unread != 0 {
+		t.Fatalf("repeat delete: deleted=%v unread=%d err=%v", deleted, unread, err)
+	}
+	if updated, _, err := svc.MarkRead(ctx, 7, first.ID); err != nil || updated {
+		t.Fatalf("deleted message should not be marked read: updated=%v err=%v", updated, err)
+	}
+	reused, created, err := svc.Persist(ctx, CreateMessageInput{UserID: 7, BatchID: "batch-7", Title: "重试投递"})
+	if err != nil || created || reused.ID != first.ID {
+		t.Fatalf("retry resurrected deleted notification: reused=%#v created=%v err=%v", reused, created, err)
+	}
+	var stored model.SysMessage
+	if err := db.First(&stored, first.ID).Error; err != nil || stored.DeletedAt == nil {
+		t.Fatalf("deleted marker missing: deleted_at=%v err=%v", stored.DeletedAt, err)
+	}
+	if len(events) != 3 || events[2].Event != "message_deleted" || events[2].MessageID != first.ID || events[2].UnreadCount != 0 {
+		t.Fatalf("unexpected realtime delete events: %#v", events)
+	}
+}
+
 func TestServiceNotifyExportResultBuildsMessage(t *testing.T) {
 	db := newMessageTestDB(t)
 	svc := NewServiceWithDeps(ServiceDeps{
@@ -347,6 +397,7 @@ func newMessageTestDB(t *testing.T) *gorm.DB {
 		sent_at datetime,
 		is_read integer,
 		read_at datetime,
+		deleted_at datetime,
 		created_at datetime,
 		updated_at datetime,
 		unique(user_id, batch_id)

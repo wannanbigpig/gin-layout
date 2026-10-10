@@ -39,6 +39,7 @@ func NewUpdateAdminUser() *UpdateAdminUser {
 
 type AdminUserList struct {
 	Paginate
+	ListSort
 	Email       string `form:"email" json:"email" binding:"omitempty,email"`
 	UserName    string `form:"username" json:"username" binding:"omitempty"`
 	Status      *uint8 `form:"status" json:"status"  binding:"omitempty,oneof=0 1"`
@@ -67,13 +68,36 @@ type UpdateProfile struct {
 	Password        *string `form:"password" json:"password" label:"密码" binding:"omitempty,min=6,max=32"`
 	PhoneNumber     *string `form:"phone_number" json:"phone_number" label:"手机号" binding:"omitempty,phone_number"`
 	CountryCode     *string `form:"country_code" json:"country_code" label:"国家代码" binding:"omitempty,oneof=86 +86"`
-	Email           *string `form:"email" json:"email" label:"邮箱" binding:"omitempty,email"`
+	Email           *string `form:"email" json:"email" label:"邮箱" binding:"omitempty,email|len=0"`
 	Avatar          *string `form:"avatar" json:"avatar" label:"头像" binding:"omitempty"`
+	SMSChallengeID  string  `form:"sms_challenge_id" json:"sms_challenge_id" label:"短信验证标识" binding:"omitempty,uuid"`
+	SMSCode         string  `form:"sms_code" json:"sms_code" label:"短信验证码" binding:"omitempty,len=6,numeric"`
 }
 
 func NewUpdateProfile() *UpdateProfile {
 	return &UpdateProfile{}
 }
+
+// ProfileCodeRequest 只用于需要短信验证的密码修改或独立手机号换绑。
+type ProfileCodeRequest struct {
+	Purpose         string `form:"purpose" json:"purpose" binding:"required,oneof=phone password"`
+	CountryCode     string `form:"country_code" json:"country_code" binding:"omitempty,oneof=86 +86"`
+	PhoneNumber     string `form:"phone_number" json:"phone_number" binding:"omitempty,phone_number"`
+	CurrentPassword string `form:"current_password" json:"current_password" binding:"omitempty,min=6,max=32"`
+}
+
+func NewProfileCodeRequest() *ProfileCodeRequest { return &ProfileCodeRequest{} }
+
+// ChangeProfilePhone 是独立的当前用户手机号换绑请求。
+type ChangeProfilePhone struct {
+	CountryCode     string `form:"country_code" json:"country_code" binding:"required,oneof=86 +86"`
+	PhoneNumber     string `form:"phone_number" json:"phone_number" binding:"required,phone_number"`
+	CurrentPassword string `form:"current_password" json:"current_password" binding:"required,min=6,max=32"`
+	SMSChallengeID  string `form:"sms_challenge_id" json:"sms_challenge_id" binding:"omitempty,uuid"`
+	SMSCode         string `form:"sms_code" json:"sms_code" binding:"omitempty,len=6,numeric"`
+}
+
+func NewChangeProfilePhone() *ChangeProfilePhone { return &ChangeProfilePhone{} }
 
 type BindRole struct {
 	UserId  uint   `form:"user_id" json:"user_id" label:"用户ID" binding:"required"`             //  验证规则：必填

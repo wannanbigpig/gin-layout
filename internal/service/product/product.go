@@ -64,7 +64,7 @@ func (s *ProductService) List(params *form.ProductList) (interface{}, error) {
 	}
 	productModel.SetDB(db)
 	listOptions := model.ListOptionalParams{
-		OrderBy: "id desc",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "id desc", "id", "name", "price", "created_at"),
 		Preload: map[string]func(db *gorm.DB) *gorm.DB{
 			"Department": nil,
 		},

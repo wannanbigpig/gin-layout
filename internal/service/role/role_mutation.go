@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"uuid"
-
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -184,9 +182,9 @@ func isRoleCodeDuplicateErr(err error) bool {
 	return strings.Contains(err.Error(), "Duplicate entry") && strings.Contains(err.Error(), "role.uniq_code_deleted_at")
 }
 
-// generateRoleCode 生成角色唯一编码，格式：role_{uuid}。
+// generateRoleCode 生成短随机角色编码，数据库唯一索引负责最终约束。
 func (s *RoleService) generateRoleCode() string {
-	return "role_" + uuid.New().String()
+	return "role_" + utils.RandString(12)
 }
 
 // updateRoleMenu 更新角色的菜单关联关系。

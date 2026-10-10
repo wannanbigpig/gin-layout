@@ -8,6 +8,7 @@ const (
 // TaskDefinitionList 任务定义列表查询参数。
 type TaskDefinitionList struct {
 	Paginate
+	ListSort
 	Code        string `form:"code" json:"code" binding:"omitempty"`
 	Name        string `form:"name" json:"name" binding:"omitempty"`
 	Kind        string `form:"kind" json:"kind" binding:"omitempty,oneof=async cron"`
@@ -24,6 +25,7 @@ func NewTaskDefinitionListQuery() *TaskDefinitionList {
 // TaskRunList 任务执行记录列表查询参数。
 type TaskRunList struct {
 	Paginate
+	ListSort
 	TaskCode         string `form:"task_code" json:"task_code" binding:"omitempty"`
 	Kind             string `form:"kind" json:"kind" binding:"omitempty,oneof=async cron"`
 	Source           string `form:"source" json:"source" binding:"omitempty,oneof=queue cron manual"`
@@ -51,6 +53,7 @@ func NewTaskRunEventsQuery() *TaskRunEvents {
 // CronTaskStateList 定时任务状态列表查询参数。
 type CronTaskStateList struct {
 	Paginate
+	ListSort
 	TaskCode   string `form:"task_code" json:"task_code" binding:"omitempty"`
 	LastStatus string `form:"last_status" json:"last_status" binding:"omitempty,oneof=pending running success failed canceled retrying timeout interrupted"`
 }

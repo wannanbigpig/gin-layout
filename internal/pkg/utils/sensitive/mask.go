@@ -51,10 +51,7 @@ func IsCommonSensitiveField(fieldName string) bool {
 	if fieldName == "" {
 		return false
 	}
-	manager := currentFieldsManager()
-	manager.mu.RLock()
-	defer manager.mu.RUnlock()
-	return isSensitiveField(fieldName, manager.commonFields) || isSensitiveField(fieldName, manager.requestBodyFields)
+	return isSensitiveField(fieldName, getRequestBodyFields())
 }
 
 // MaskSensitiveValue 对数据执行敏感信息掩码转换。

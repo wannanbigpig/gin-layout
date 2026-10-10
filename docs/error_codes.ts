@@ -3,81 +3,157 @@
 // Source: internal/pkg/errors/code_*.go
 
 export const ErrorCode = {
+    /** 成功 */
     SUCCESS: 0,
+    /** 失败 */
     FAILURE: 1,
+    /** 验证码错误 */
     CaptchaErr: 400,
+    /** 请先登录 */
     NotLogin: 401,
+    /** 暂无权限 */
     AuthorizationErr: 403,
+    /** 资源不存在 */
     NotFound: 404,
+    /** 服务器内部错误 */
     ServerErr: 500,
+    /** 参数错误 */
     InvalidParameter: 10000,
+    /** 用户不存在 */
     UserDoesNotExist: 10001,
+    /** 用户已被禁用 */
     UserDisable: 10002,
+    /** 服务暂未配置数据库，请联系管理员 */
     ServiceDependencyNotReady: 10003,
+    /** 暂无需要导出的数据 */
     NoExportData: 10004,
+    /** 请求过多 */
     TooManyRequests: 10102,
+    /** 文件标识错误 */
     FileIdentifierInvalid: 11001,
+    /** 访问私有文件需要登录认证 */
     FilePrivateAuthNeeded: 11002,
+    /** 无权访问该文件 */
     FileAccessDenied: 11003,
+    /** 部分图片上传失败 */
     FileUploadPartialFail: 11004,
+    /** 文件存在引用，不能删除 */
     FileReferenced: 11005,
+    /** 存储配置测试失败 */
     StorageTestFailed: 11006,
+    /** 同级目录下已存在同名文件夹 */
     FolderNameExists: 11007,
+    /** 文件夹不为空，请先删除其中的文件和子文件夹 */
     FolderNotEmpty: 11008,
+    /** 不能将文件夹移动到自身或其子文件夹 */
     FolderMoveInvalid: 11009,
+    /** 文件夹名称不合法 */
     FolderNameInvalid: 11010,
+    /** 本地存储不支持分片上传 */
     LocalStorageMultipartUnsupported: 11011,
+    /** 文件大小超出限制 */
     FileTooLarge: 11012,
+    /** 不支持的文件类型 */
     FileMimeTypeNotAllowed: 11013,
+    /** 同级目录下已存在同名文件 */
     FileNameExists: 11014,
+    /** 文件名称不合法 */
     FileNameInvalid: 11015,
+    /** 用户密码错误 */
     UserPasswordWrong: 20001,
+    /** 用户已存在 */
     UserExists: 20002,
+    /** 手机号已存在 */
     PhoneNumberExists: 20003,
+    /** 邮箱已存在 */
     EmailExists: 20004,
+    /** 用户名必填 */
     UsernameRequired: 20005,
+    /** 昵称必填 */
     NicknameRequired: 20006,
+    /** 密码处理失败 */
     PasswordProcessFailed: 20007,
+    /** 系统默认超级管理员不允许修改密码 */
     SuperAdminCannotModify: 20008,
+    /** 系统默认超级管理员不允许被禁用 */
     SuperAdminCannotDisable: 20009,
+    /** 系统默认超级管理员不允许删除 */
     SuperAdminCannotDelete: 20010,
+    /** 新密码不能与当前密码相同 */
     SamePassword: 20011,
+    /** 角色不存在 */
     RoleNotFound: 20012,
+    /** 角色已存在 */
     RoleExists: 20013,
+    /** 删除角色失败 */
     RoleCannotDelete: 20014,
+    /** 菜单不存在 */
     MenuNotFound: 20020,
+    /** 菜单已存在 */
     MenuExists: 20021,
+    /** 该菜单有子菜单，无法删除 */
     MenuHasChildren: 20022,
+    /** 删除菜单失败 */
     MenuCannotDelete: 20023,
+    /** 部门不存在 */
     DepartmentNotFound: 20024,
+    /** 部门已存在 */
     DepartmentExists: 20025,
+    /** 该部门有子部门，无法删除 */
     DepartmentHasChildren: 20026,
+    /** 删除部门失败 */
     DepartmentCannotDelete: 20027,
+    /** 上级部门不存在 */
     ParentDeptNotExists: 20028,
+    /** 上级部门不能是当前部门自身或其子部门 */
     ParentDeptInvalid: 20029,
+    /** 部门层级超出限制 */
     MaxDeptDepth: 20030,
+    /** 权限验证初始化失败 */
     CasbinInitFailed: 20031,
+    /** 生成Token失败 */
     TokenGenerateFailed: 20032,
+    /** 登录失败，请稍后重试 */
     LoginFailed: 20033,
+    /** 创建用户失败，请重试 */
     CreateUserFailed: 20034,
+    /** 更新用户失败，请重试 */
     UpdateUserFailed: 20035,
+    /** 删除用户失败，请重试 */
     DeleteUserFailed: 20036,
+    /** 查询用户部门关联失败 */
     QueryUserDeptFailed: 20037,
+    /** 系统默认超级管理员必须保留超级管理员角色 */
     SuperAdminMustKeepRole: 20038,
+    /** 最多只能创建 4 层菜单 */
     MaxMenuDepth: 20039,
+    /** 上级菜单不存在 */
     ParentMenuNotExists: 20040,
+    /** 上级菜单不能是按钮类型 */
     ParentMenuTypeInvalid: 20041,
+    /** 上级菜单不能是当前菜单自身或其子菜单 */
     ParentMenuInvalid: 20042,
+    /** 权限标识已存在 */
     MenuCodeExists: 20043,
+    /** 路由名称已存在 */
     MenuRouteNameExists: 20044,
+    /** 路由已存在 */
     MenuPathExists: 20045,
+    /** 账号已被锁定，请稍后重试 */
     LoginAccountLocked: 20046,
+    /** 密码必填 */
     PasswordRequired: 20047,
+    /** 刷新令牌无效或已过期 */
     RefreshTokenInvalid: 20048,
+    /** 修改密码时必须填写当前密码 */
     CurrentPasswordRequired: 20049,
+    /** 当前密码错误 */
     CurrentPasswordWrong: 20050,
+    /** 手机号或短信验证码错误 */
     SMSCredentialInvalid: 20051,
+    /** 短信登录未启用 */
     SMSLoginDisabled: 20052,
+    /** 短信发送失败，请检查供应商配置 */
     SMSProviderFailed: 20053,
 } as const
 

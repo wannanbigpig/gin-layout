@@ -18,6 +18,7 @@ import (
 const (
 	maxPayloadBytes = 64 * 1024
 	maxErrorBytes   = 8 * 1024
+	finishTimeout   = 3 * time.Second
 )
 
 // ErrTaskRunStatusChanged 当任务执行记录的状态已被其他操作（如取消）修改时返回此错误。
@@ -139,11 +140,11 @@ func (r *recorder) Start(ctx context.Context, input RunStart) (*model.TaskRun, e
 	run.StartedAt = &now
 
 	err = db.Transaction(func(tx *gorm.DB) error {
-		// 如果存在同 source_id 的 pending/retrying 记录（例如手动触发后进入 worker），就复用该记录并推进状态。
+		// 复用同 source_id 的排队/重试记录，或收尾失败后遗留的旧尝试，避免自动重试分裂记录。
 		if input.SourceID != "" {
 			var existing model.TaskRun
-			findErr := tx.Where("task_code = ? AND source_id = ? AND status IN ?",
-				input.TaskCode, input.SourceID, []string{model.TaskRunStatusPending, model.TaskRunStatusRetrying}).
+			findErr := tx.Where("task_code = ? AND source_id = ?", input.TaskCode, input.SourceID).
+				Where("status IN ? OR (status = ? AND attempt < ?)", []string{model.TaskRunStatusPending, model.TaskRunStatusRetrying}, model.TaskRunStatusRunning, input.Attempt).
 				Order("id DESC").First(&existing).Error
 			if findErr == nil {
 				run = &existing
@@ -280,13 +281,25 @@ func (r *recorder) Finish(ctx context.Context, run *model.TaskRun, input RunFini
 	}
 	status := input.Status
 	if status == "" {
-		status = model.TaskRunStatusSuccess
-		if input.Error != nil {
+		switch {
+		case errors.Is(input.Error, context.DeadlineExceeded):
+			status = model.TaskRunStatusTimeout
+		case errors.Is(input.Error, context.Canceled):
+			status = model.TaskRunStatusInterrupted
+		case input.Error != nil:
 			status = model.TaskRunStatusFailed
+		default:
+			status = model.TaskRunStatusSuccess
 		}
 	}
 
-	db, err := r.dbWithContext(ctx)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// 执行已超时或取消时仍须落库终态，独立超时避免停机被数据库拖住。
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishTimeout)
+	defer cancel()
+	db, err := r.dbWithContext(finishCtx)
 	if err != nil {
 		return err
 	}
@@ -297,7 +310,7 @@ func (r *recorder) Finish(ctx context.Context, run *model.TaskRun, input RunFini
 	if input.Error != nil {
 		errorMessage = truncateString(input.Error.Error(), maxErrorBytes)
 		eventMessage = errorMessage
-		if status != model.TaskRunStatusRetrying {
+		if status == model.TaskRunStatusFailed {
 			eventType = model.TaskEventFail
 		}
 	}
@@ -322,7 +335,7 @@ func (r *recorder) Finish(ctx context.Context, run *model.TaskRun, input RunFini
 		if status == model.TaskRunStatusCanceled {
 			allowedStatuses = append(allowedStatuses, model.TaskRunStatusRetrying)
 		}
-		result := tx.Model(&model.TaskRun{}).Where("id = ? AND status IN ?", run.ID, allowedStatuses).Updates(map[string]any{
+		result := tx.Model(&model.TaskRun{}).Where("id = ? AND attempt = ? AND status IN ?", run.ID, run.Attempt, allowedStatuses).Updates(map[string]any{
 			"status":             run.Status,
 			"error_message":      run.ErrorMessage,
 			"finished_at":        run.FinishedAt,

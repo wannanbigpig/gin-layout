@@ -188,7 +188,7 @@ func buildPersonalSummary(db *gorm.DB, uid uint, now time.Time) (PersonalSummary
 	}
 
 	var unread int64
-	if err := db.Table("sys_messages").Where("user_id = ? AND is_read = ?", uid, model.MessageUnread).Count(&unread).Error; err != nil {
+	if err := db.Table("sys_messages").Where("user_id = ? AND is_read = ? AND deleted_at IS NULL", uid, model.MessageUnread).Count(&unread).Error; err != nil {
 		return PersonalSummary{}, err
 	}
 	return PersonalSummary{

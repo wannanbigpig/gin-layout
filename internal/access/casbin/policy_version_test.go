@@ -148,6 +148,56 @@ func TestPolicyVersionRedisFailureUsesCooldown(t *testing.T) {
 	}
 }
 
+func TestSharedDataScopeVersionAdvancesWithoutPolicyRowsAndRollsBack(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE permission_policy_versions (id integer primary key, version integer not null, updated_at datetime)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO permission_policy_versions (id, version) VALUES (1, 7)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	previous := defaultPolicyVersionStore
+	defaultPolicyVersionStore = &policyVersionStore{
+		dbProvider:    func() *gorm.DB { return db },
+		redisProvider: func() *redis.Client { return nil },
+		cacheTTL:      policyVersionCacheTTL,
+		dirtyTTL:      policyVersionDirtyTTL,
+	}
+	t.Cleanup(func() { defaultPolicyVersionStore = previous })
+	assertVersion := func(want uint64) {
+		t.Helper()
+		got, err := CurrentPermissionVersion(context.Background())
+		if err != nil || got != want {
+			t.Fatalf("DB fallback version=%d want=%d err=%v", got, want, err)
+		}
+	}
+	assertVersion(7)
+	if err := db.Transaction(AdvancePermissionVersion); err != nil {
+		t.Fatal(err)
+	}
+	assertVersion(8)
+	rollback := errors.New("tree change failed")
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if err := AdvancePermissionVersion(tx); err != nil {
+			return err
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("expected rollback, got %v", err)
+	}
+	assertVersion(8)
+	if err := db.Exec(`DROP TABLE permission_policy_versions`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CurrentPermissionVersion(context.Background()); err == nil {
+		t.Fatal("missing authority must not return a usable version")
+	}
+}
+
 func TestPolicyVersionCurrentCoalescesConcurrentDBFallback(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:policy_version_singleflight?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

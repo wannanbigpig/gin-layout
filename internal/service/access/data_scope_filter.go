@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/data"
+	casbinx "github.com/wannanbigpig/gin-layout/internal/access/casbin"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
-	"go.uber.org/zap"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/redisutil"
 )
 
 const (
@@ -59,15 +60,8 @@ var (
 	computeScopeForSingleflight = func(f *DataScopeFilter, ctx context.Context, uid uint) (*scopeResult, error) {
 		return f.computeScope(ctx, uid)
 	}
-	dataScopeCacheVersions = struct {
-		sync.RWMutex
-		global uint64
-		users  map[uint]uint64
-	}{
-		// 进程重启后不复用上一进程可能未来得及删除的权限快照。
-		global: uint64(time.Now().UnixNano()),
-		users:  make(map[uint]uint64),
-	}
+	currentDataScopeCacheVersion = casbinx.CurrentPermissionVersion
+	dataScopeRedisClient         = data.RedisClient
 )
 
 // NewDataScopeFilter 创建数据权限过滤器。
@@ -121,10 +115,13 @@ func (f *DataScopeFilter) resolveScope(ctx context.Context, uid uint) (*scopeRes
 	// 权限变更可能与当前回源并发；版本变化时最多重试一次，
 	// 避免把变更前的计算结果写回并继续用于当前请求。
 	for attempt := 0; attempt < 2; attempt++ {
-		version := currentDataScopeCacheVersion(uid)
+		version, err := currentDataScopeCacheVersion(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("read data scope version: %w", err)
+		}
 		result, cacheErr := f.getFromCache(ctx, uid, version)
 		if cacheErr != nil {
-			cacheKey := fmt.Sprintf("%s%d:%d:%d", dataScopeCachePrefix, uid, version.Global, version.User)
+			cacheKey := fmt.Sprintf("%s:%d", f.cacheKey(uid), version)
 			v, sfErr, _ := dataScopeSingleflightGroup.Do(cacheKey, func() (interface{}, error) {
 				return computeScopeForSingleflight(f, ctx, uid)
 			})
@@ -140,11 +137,23 @@ func (f *DataScopeFilter) resolveScope(ctx context.Context, uid uint) (*scopeRes
 		if result == nil {
 			return nil, fmt.Errorf("empty data scope result for uid %d", uid)
 		}
-		if !version.isCurrent(uid) {
+		currentVersion, err := currentDataScopeCacheVersion(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("recheck data scope version: %w", err)
+		}
+		if currentVersion != version {
 			continue
 		}
 		if cacheErr != nil {
 			f.setToCache(ctx, uid, result, version)
+			// 写入期间可能提交撤权；旧版本缓存即使晚到也不能用于本次请求。
+			currentVersion, err = currentDataScopeCacheVersion(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("recheck data scope version after cache write: %w", err)
+			}
+			if currentVersion != version {
+				continue
+			}
 		}
 		return result, nil
 	}
@@ -381,37 +390,19 @@ func collectDeptAndChildrenFromDB(db *gorm.DB, deptIDs []uint) ([]uint, error) {
 
 // cacheEntry 缓存条目。
 type cacheEntry struct {
-	Result   *scopeResult          `json:"result"`
-	Version  dataScopeCacheVersion `json:"version"`
-	CachedAt time.Time             `json:"cached_at"`
-}
-
-type dataScopeCacheVersion struct {
-	Global uint64 `json:"global"`
-	User   uint64 `json:"user"`
-}
-
-func currentDataScopeCacheVersion(uid uint) dataScopeCacheVersion {
-	dataScopeCacheVersions.RLock()
-	defer dataScopeCacheVersions.RUnlock()
-	return dataScopeCacheVersion{
-		Global: dataScopeCacheVersions.global,
-		User:   dataScopeCacheVersions.users[uid],
-	}
-}
-
-func (v dataScopeCacheVersion) isCurrent(uid uint) bool {
-	return v == currentDataScopeCacheVersion(uid)
+	Result   *scopeResult `json:"result"`
+	Version  uint64       `json:"version"`
+	CachedAt time.Time    `json:"cached_at"`
 }
 
 // cacheKey 生成缓存 key。
 func (f *DataScopeFilter) cacheKey(uid uint) string {
-	return fmt.Sprintf("%s%d", dataScopeCachePrefix, uid)
+	return redisutil.Channel(fmt.Sprintf("%s%d", dataScopeCachePrefix, uid))
 }
 
 // getFromCache 从 Redis 读取缓存。
-func (f *DataScopeFilter) getFromCache(ctx context.Context, uid uint, version dataScopeCacheVersion) (*scopeResult, error) {
-	client := data.RedisClient()
+func (f *DataScopeFilter) getFromCache(ctx context.Context, uid uint, version uint64) (*scopeResult, error) {
+	client := dataScopeRedisClient()
 	if client == nil {
 		return nil, fmt.Errorf("redis unavailable")
 	}
@@ -435,11 +426,8 @@ func (f *DataScopeFilter) getFromCache(ctx context.Context, uid uint, version da
 }
 
 // setToCache 写入 Redis 缓存。
-func (f *DataScopeFilter) setToCache(ctx context.Context, uid uint, result *scopeResult, version dataScopeCacheVersion) {
-	if !version.isCurrent(uid) {
-		return
-	}
-	client := data.RedisClient()
+func (f *DataScopeFilter) setToCache(ctx context.Context, uid uint, result *scopeResult, version uint64) {
+	client := dataScopeRedisClient()
 	if client == nil {
 		return
 	}
@@ -464,15 +452,11 @@ func (f *DataScopeFilter) setToCache(ctx context.Context, uid uint, result *scop
 
 // InvalidateCache 使指定用户的数据权限缓存失效。
 // 应在以下场景调用：角色 data_scope/自定义部门、用户部门、用户角色、部门角色、部门树结构变化。
+// 权限变更事务必须已推进共享版本；删除只是清理，版本复核才是并发失效边界。
 func (f *DataScopeFilter) InvalidateCache(ctx context.Context, uids ...uint) {
 	uids = UniqueUintSlice(uids)
-	dataScopeCacheVersions.Lock()
-	for _, uid := range uids {
-		dataScopeCacheVersions.users[uid]++
-	}
-	dataScopeCacheVersions.Unlock()
 
-	client := data.RedisClient()
+	client := dataScopeRedisClient()
 	if client == nil || len(uids) == 0 {
 		return
 	}
@@ -490,19 +474,14 @@ func (f *DataScopeFilter) InvalidateCache(ctx context.Context, uids ...uint) {
 // InvalidateAllCache 使所有用户的数据权限缓存失效。
 // 部门树结构变化会影响多个祖先部门的子级范围，该场景优先保证正确性。
 func (f *DataScopeFilter) InvalidateAllCache(ctx context.Context) {
-	dataScopeCacheVersions.Lock()
-	dataScopeCacheVersions.global++
-	dataScopeCacheVersions.users = make(map[uint]uint64)
-	dataScopeCacheVersions.Unlock()
-
-	client := data.RedisClient()
+	client := dataScopeRedisClient()
 	if client == nil {
 		return
 	}
 
 	var cursor uint64
 	for {
-		keys, nextCursor, err := client.Scan(ctx, cursor, dataScopeCachePrefix+"*", 100).Result()
+		keys, nextCursor, err := client.Scan(ctx, cursor, redisutil.Channel(dataScopeCachePrefix)+"*", 100).Result()
 		if err != nil {
 			log.Error("DataScopeFilter: scan cache keys failed", zap.Error(err))
 			return

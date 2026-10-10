@@ -59,7 +59,7 @@ func (m *Department) UpdateUserNumberByIds(deptIds []uint, updateExpr string) er
 }
 
 // UpdateChildrenPidsByParent 批量更新指定父节点下所有子部门的 pids 和 level。
-func (m *Department) UpdateChildrenPidsByParent(parentID uint, updateExpr string) error {
+func (m *Department) UpdateChildrenPidsByParent(parentID uint, updateExpr string, levelDelta int) error {
 	db, err := m.GetDB()
 	if err != nil {
 		return err
@@ -68,6 +68,6 @@ func (m *Department) UpdateChildrenPidsByParent(parentID uint, updateExpr string
 		Where("FIND_IN_SET(?,pids)", parentID).
 		Updates(map[string]interface{}{
 			"pids":  gorm.Expr(updateExpr),
-			"level": gorm.Expr("length(pids) - length(replace(pids, ',', '')) + 1"),
+			"level": gorm.Expr("level + ?", levelDelta),
 		}).Error
 }

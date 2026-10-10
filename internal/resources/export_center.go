@@ -78,6 +78,23 @@ type MyExportRecordResources struct {
 	FinishedAt     *utils.FormatDate `json:"finished_at"`
 }
 
+// MyExportSummaryResources 仅统计当前用户的导出记录状态。
+type MyExportSummaryResources struct {
+	Total    int64 `json:"total"`
+	Pending  int64 `json:"pending"`
+	Running  int64 `json:"running"`
+	Retrying int64 `json:"retrying"`
+	Success  int64 `json:"success"`
+	Failed   int64 `json:"failed"`
+	Canceled int64 `json:"canceled"`
+}
+
+// MyExportRecordListResources 在分页数据中附带当前用户的全量状态统计。
+type MyExportRecordListResources struct {
+	*Collection
+	Summary *MyExportSummaryResources `json:"summary"`
+}
+
 func NewMyExportRecordResource(data *model.SysExportRecord) *MyExportRecordResources {
 	base := buildExportRecordBaseResources(data)
 	fileUUID := ""

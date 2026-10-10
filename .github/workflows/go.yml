@@ -37,6 +37,8 @@ jobs:
         go-version: [ '1.27.x' ]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
@@ -45,6 +47,10 @@ jobs:
 
       - name: Display Go version
         run: go version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
 
       - name: Build
         run: go build -v ./...
@@ -69,11 +75,19 @@ jobs:
           go run . -c /tmp/go-layout-openapi-config.yaml command gen-openapi
           git diff --exit-code -- docs/openapi.yaml
 
+      - name: Verify versioned API business documentation
+        run: |
+          node --test scripts/api-documentation.test.mjs
+          node scripts/generate-api-documentation.mjs --check
+
       - name: Verify generated error codes are current
         run: |
           cp ./config/config.yaml.example /tmp/go-layout-error-codes-config.yaml
           go run . -c /tmp/go-layout-error-codes-config.yaml command gen-error-codes
           git diff --exit-code -- docs/error_codes.json docs/error_codes.ts
+
+      - name: Verify compatibility, API changes and published migrations
+        run: go run . command release-check
 
       - name: gofmt
         run: |

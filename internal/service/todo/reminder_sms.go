@@ -31,6 +31,7 @@ const (
 type reminderSMSPreference struct {
 	InAppEnabled bool
 	SMSEnabled   bool
+	LeadMinutes  int
 }
 
 type reminderSMSSender interface {
@@ -38,6 +39,7 @@ type reminderSMSSender interface {
 }
 
 type reminderSMSRuntime struct {
+	Paused           bool
 	Sender           reminderSMSSender
 	Provider         string
 	GlobalDailyLimit int
@@ -53,7 +55,7 @@ type reminderSMSProcessResult struct {
 }
 
 func loadReminderChannels(db *gorm.DB, userID uint) (reminderSMSPreference, string, error) {
-	preference := reminderSMSPreference{InAppEnabled: true}
+	preference := reminderSMSPreference{InAppEnabled: true, LeadMinutes: DefaultReminderLeadMinutes}
 	var row model.NotificationPreference
 	err := db.Where("user_id = ? AND scene = ?", userID, model.NotificationSceneTodoDue).First(&row).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -62,6 +64,7 @@ func loadReminderChannels(db *gorm.DB, userID uint) (reminderSMSPreference, stri
 	if err == nil {
 		preference.InAppEnabled = row.InAppEnabled == 1
 		preference.SMSEnabled = row.SMSEnabled == 1
+		preference.LeadMinutes = effectiveReminderLeadMinutes(row.LeadMinutes)
 	}
 
 	var user model.AdminUser
@@ -116,79 +119,97 @@ func (s *ReminderService) processSMSOutbox(ctx context.Context, db *gorm.DB, now
 		runErrors = append(runErrors, fmt.Errorf("%d stale SMS deliveries moved to unknown", stale.RowsAffected))
 	}
 
-	deliveries := make([]*model.SMSDelivery, 0, todoSMSBatchSize)
-	if err := db.Where("scene = ? AND (status = ? OR (status = ? AND next_attempt_at <= ?))",
-		sms.SceneTodoDue, model.SMSDeliveryStatusPending, model.SMSDeliveryStatusRetryWait, now).
-		Order("id ASC").Limit(todoSMSBatchSize).Find(&deliveries).Error; err != nil {
-		return result, err
-	}
-	if len(deliveries) == 0 {
-		return result, errors.Join(runErrors...)
-	}
-
-	runtime, runtimeErr := s.smsRuntimeFactory()
-	for _, candidate := range deliveries {
-		delivery, phone, claimed, err := claimTodoSMSDelivery(db, candidate.ID, now)
-		if err != nil {
-			runErrors = append(runErrors, err)
-			continue
+	var runtime reminderSMSRuntime
+	var runtimeErr error
+	lastID, claimedCount := uint(0), 0
+	for claimedCount < todoSMSBatchSize {
+		deliveries := make([]*model.SMSDelivery, 0, todoSMSBatchSize)
+		if err := db.Where("id > ?", lastID).Where("scene = ? AND (status = ? OR (status = ? AND next_attempt_at <= ?))",
+			sms.SceneTodoDue, model.SMSDeliveryStatusPending, model.SMSDeliveryStatusRetryWait, now).
+			Order("id ASC").Limit(todoSMSBatchSize).Find(&deliveries).Error; err != nil {
+			return result, err
 		}
-		if !claimed {
-			continue
+		if len(deliveries) == 0 {
+			break
 		}
-		if runtimeErr != nil || runtime.Sender == nil {
-			if err := finishSMSKnownFailure(db, delivery, now, "sms configuration unavailable", ""); err != nil {
-				runErrors = append(runErrors, err)
-			} else {
-				result.Failed++
-				runErrors = append(runErrors, fmt.Errorf("SMS delivery %d configuration unavailable", delivery.ID))
+		if lastID == 0 {
+			runtime, runtimeErr = s.smsRuntimeFactory()
+			if runtimeErr == nil && runtime.Paused {
+				return result, errors.Join(runErrors...)
 			}
-			continue
 		}
-		variables := make(map[string]string)
-		if err := json.Unmarshal([]byte(delivery.Variables), &variables); err != nil {
-			if finishErr := finishSMSPermanentFailure(db, delivery, now, "invalid template variables", runtime.Provider); finishErr != nil {
-				runErrors = append(runErrors, finishErr)
-			} else {
-				result.Failed++
-				runErrors = append(runErrors, fmt.Errorf("SMS delivery %d has invalid template variables", delivery.ID))
+		for _, candidate := range deliveries {
+			if claimedCount >= todoSMSBatchSize {
+				break
 			}
-			continue
-		}
-		if err := s.smsBudgetReserve(ctx, runtime.GlobalDailyLimit); err != nil {
-			if finishErr := finishSMSKnownFailure(db, delivery, now, "SMS daily budget unavailable or exhausted", runtime.Provider); finishErr != nil {
-				runErrors = append(runErrors, finishErr)
-			} else {
-				result.Failed++
-				runErrors = append(runErrors, fmt.Errorf("SMS delivery %d budget unavailable", delivery.ID))
-			}
-			continue
-		}
-		sendResult, sendErr := runtime.Sender.Send(ctx, sms.SceneTodoDue, phone, variables)
-		if sendErr != nil {
-			log.Logger.Warn("待办提醒短信发送失败", zap.Uint("delivery_id", delivery.ID), zap.String("provider", runtime.Provider), zap.Error(sendErr))
-		}
-		switch sendResult.State {
-		case sms.SendStateAccepted:
-			if err := finishSMSAccepted(db, delivery, now, runtime.Provider, sendResult); err != nil {
+			lastID = candidate.ID
+			delivery, phone, claimed, err := claimTodoSMSDelivery(db, candidate.ID, now)
+			if err != nil {
 				runErrors = append(runErrors, err)
 				continue
 			}
-			result.Accepted++
-		case sms.SendStateFailed:
-			if err := finishSMSKnownFailure(db, delivery, now, "provider rejected SMS request", runtime.Provider, sendResult); err != nil {
-				runErrors = append(runErrors, err)
+			if !claimed {
 				continue
 			}
-			result.Failed++
-			runErrors = append(runErrors, fmt.Errorf("SMS delivery %d rejected by provider", delivery.ID))
-		default:
-			if err := finishSMSUnknown(db, delivery, now, runtime.Provider, sendResult); err != nil {
-				runErrors = append(runErrors, err)
+			claimedCount++
+			if runtimeErr != nil || runtime.Sender == nil {
+				if err := finishSMSKnownFailure(db, delivery, now, "sms configuration unavailable", ""); err != nil {
+					runErrors = append(runErrors, err)
+				} else {
+					result.Failed++
+					runErrors = append(runErrors, fmt.Errorf("SMS delivery %d configuration unavailable", delivery.ID))
+				}
 				continue
 			}
-			result.Unknown++
-			runErrors = append(runErrors, fmt.Errorf("SMS delivery %d provider outcome unknown", delivery.ID))
+			variables := make(map[string]string)
+			if err := json.Unmarshal([]byte(delivery.Variables), &variables); err != nil {
+				if finishErr := finishSMSPermanentFailure(db, delivery, now, "invalid template variables", runtime.Provider); finishErr != nil {
+					runErrors = append(runErrors, finishErr)
+				} else {
+					result.Failed++
+					runErrors = append(runErrors, fmt.Errorf("SMS delivery %d has invalid template variables", delivery.ID))
+				}
+				continue
+			}
+			if err := s.smsBudgetReserve(ctx, runtime.GlobalDailyLimit); err != nil {
+				if finishErr := finishSMSKnownFailure(db, delivery, now, "SMS daily budget unavailable or exhausted", runtime.Provider); finishErr != nil {
+					runErrors = append(runErrors, finishErr)
+				} else {
+					result.Failed++
+					runErrors = append(runErrors, fmt.Errorf("SMS delivery %d budget unavailable", delivery.ID))
+				}
+				continue
+			}
+			sendResult, sendErr := runtime.Sender.Send(ctx, sms.SceneTodoDue, phone, variables)
+			if sendErr != nil {
+				log.Logger.Warn("待办提醒短信发送失败", zap.Uint("delivery_id", delivery.ID), zap.String("provider", runtime.Provider), zap.Error(sendErr))
+			}
+			switch sendResult.State {
+			case sms.SendStateAccepted:
+				if err := finishSMSAccepted(db, delivery, now, runtime.Provider, sendResult); err != nil {
+					runErrors = append(runErrors, err)
+					continue
+				}
+				result.Accepted++
+			case sms.SendStateFailed, "":
+				reason := "provider rejected SMS request"
+				if sendResult.State == "" {
+					reason = "SMS request rejected before provider send"
+				}
+				if err := finishSMSKnownFailure(db, delivery, now, reason, runtime.Provider, sendResult); err != nil {
+					runErrors = append(runErrors, err)
+					continue
+				}
+				result.Failed++
+				runErrors = append(runErrors, fmt.Errorf("SMS delivery %d: %s", delivery.ID, reason))
+			default:
+				if err := finishSMSUnknown(db, delivery, now, runtime.Provider, sendResult); err != nil {
+					runErrors = append(runErrors, err)
+					continue
+				}
+				result.Unknown++
+				runErrors = append(runErrors, fmt.Errorf("SMS delivery %d provider outcome unknown", delivery.ID))
+			}
 		}
 	}
 	return result, errors.Join(runErrors...)
@@ -223,6 +244,9 @@ func claimTodoSMSDelivery(db *gorm.DB, id uint, now time.Time) (*model.SMSDelive
 			return cancelSMSDelivery(tx, delivery.ID, "todo reminder cycle changed")
 		}
 		preference, fullPhone, err := loadReminderChannels(tx, delivery.UserID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return cancelSMSDelivery(tx, delivery.ID, "recipient is no longer active")
+		}
 		if err != nil {
 			return err
 		}
@@ -231,6 +255,11 @@ func claimTodoSMSDelivery(db *gorm.DB, id uint, now time.Time) (*model.SMSDelive
 		}
 		if fullPhone == "" {
 			return cancelSMSDelivery(tx, delivery.ID, "recipient phone unavailable")
+		}
+		// A changed lead time pauses this cycle without consuming an attempt.
+		// Keep the record eligible for rechecking later preference changes.
+		if item.DueAt.Time.After(now.Add(time.Duration(preference.LeadMinutes) * time.Minute)) {
+			return nil
 		}
 		attempt := delivery.AttemptCount + 1
 		if err := tx.Model(&model.SMSDelivery{}).Where("id = ?", delivery.ID).Updates(map[string]any{
@@ -334,6 +363,13 @@ func defaultReminderSMSRuntime() (reminderSMSRuntime, error) {
 	settings, err := baseservice.NewSMSConfigService().Get(false)
 	if err != nil {
 		return reminderSMSRuntime{}, err
+	}
+	return buildReminderSMSRuntime(settings)
+}
+
+func buildReminderSMSRuntime(settings sms.Config) (reminderSMSRuntime, error) {
+	if !settings.Enabled {
+		return reminderSMSRuntime{Paused: true}, nil
 	}
 	route, ok := settings.Routes[sms.SceneTodoDue]
 	if !ok {

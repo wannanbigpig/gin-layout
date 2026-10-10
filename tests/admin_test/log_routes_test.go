@@ -80,6 +80,24 @@ func TestExportRecordListRouteWithAuthorization(t *testing.T) {
 	assert.Equal(t, e.SUCCESS, result.Code)
 }
 
+func TestExportRecordSummaryRouteWithAuthorization(t *testing.T) {
+	requireMySQL(t)
+
+	resp := getRequest("/admin/v1/system/export/summary", nil)
+	assert.Equal(t, http.StatusOK, resp.Code)
+	result := decodeResult(t, resp)
+	assert.Equal(t, e.SUCCESS, result.Code)
+	counts, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected export summary data: %#v", result.Data)
+	}
+	for _, status := range []string{"total", "pending", "running", "retrying", "success", "failed", "canceled"} {
+		if _, exists := counts[status]; !exists {
+			t.Errorf("missing export summary count %s: %#v", status, counts)
+		}
+	}
+}
+
 func TestExportRecordDetailNotFound(t *testing.T) {
 	requireMySQL(t)
 

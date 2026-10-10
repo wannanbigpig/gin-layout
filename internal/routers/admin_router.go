@@ -144,6 +144,7 @@ func personalExportGroup(deps *ControllerDeps) RouteGroupDef {
 		GroupCode: "export_personal",
 		Routes: []RouteDef{
 			GET("list", "我的导出列表", deps.Export.List),
+			GET("summary", "我的导出摘要", deps.Export.Summary),
 			GET("detail", "我的导出详情", deps.Export.Detail),
 		},
 	}
@@ -157,11 +158,16 @@ func personalTodoGroup(deps *ControllerDeps) RouteGroupDef {
 		Routes: []RouteDef{
 			GET("list", "我的待办列表", deps.Todo.List),
 			GET("summary", "我的待办摘要", deps.Todo.Summary),
+			GET("groups", "我的待办分组", deps.Todo.Groups),
 			GET("reminder-preference", "待办提醒偏好", deps.Todo.ReminderPreference),
 			POST("create", "创建个人待办", deps.Todo.Create),
 			POST("update", "更新个人待办", deps.Todo.Update),
 			POST("status", "更新待办状态", deps.Todo.Status),
 			POST("delete", "删除个人待办", deps.Todo.Delete),
+			POST("group/create", "创建待办分组", deps.Todo.CreateGroup),
+			POST("group/rename", "重命名待办分组", deps.Todo.RenameGroup),
+			POST("group/delete", "删除待办分组", deps.Todo.DeleteGroup),
+			POST("group/move", "调整待办分组", deps.Todo.MoveGroup),
 			POST("reminder-preference", "更新待办提醒偏好", deps.Todo.UpdateReminderPreference),
 		},
 	}
@@ -277,6 +283,9 @@ func adminProfileGroup(deps *ControllerDeps) RouteGroupDef {
 			GET("get", "获取当前用户信息", deps.AdminUser.GetUserInfo),
 			GET("user-menu-info", "获取用户权限信息", deps.AdminUser.GetUserMenuInfo),
 			POST("update-profile", "更新个人资料", deps.AdminUser.UpdateProfile),
+			GET("profile-security/options", "个人资料安全选项", deps.AdminUser.ProfileSecurityOptions),
+			POST("profile-security/send-code", "发送个人资料验证码", deps.AdminUser.SendProfileCode),
+			POST("change-phone", "换绑手机号", deps.AdminUser.ChangePhone),
 			POST("avatar/upload", "上传头像", deps.AdminUser.UploadAvatar),
 		},
 	}
@@ -390,6 +399,7 @@ func notificationLoginGroup(deps *ControllerDeps) RouteGroupDef {
 					GET("list", "系统消息列表", deps.Message.List),
 					GET("unread-count", "系统消息未读数", deps.Message.UnreadCount),
 					POST("read", "标记消息已读", deps.Message.Read),
+					POST("delete", "删除个人消息", deps.Message.Delete),
 					POST("read-all", "全部标记已读", deps.Message.ReadAll),
 				},
 			},

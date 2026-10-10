@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
@@ -104,7 +105,7 @@ func TestTodoReminderPreferenceFlowWithConfiguredMySQL(t *testing.T) {
 	assert.Equal(t, http.StatusOK, getResp.Code)
 	assert.Equal(t, e.SUCCESS, decodeResult(t, getResp).Code)
 
-	payload := mustJSONBody(t, map[string]any{"in_app_enabled": false, "sms_enabled": false})
+	payload := mustJSONBody(t, map[string]any{"in_app_enabled": false, "sms_enabled": false, "lead_minutes": 10080})
 	updateResp := postRequest("/admin/v1/todo/reminder-preference", &payload)
 	assert.Equal(t, http.StatusOK, updateResp.Code)
 	assert.Equal(t, e.SUCCESS, decodeResult(t, updateResp).Code)
@@ -115,4 +116,47 @@ func TestTodoReminderPreferenceFlowWithConfiguredMySQL(t *testing.T) {
 	}
 	assert.Equal(t, uint8(0), preference.InAppEnabled)
 	assert.Equal(t, uint8(0), preference.SMSEnabled)
+	assert.Equal(t, uint16(10080), preference.LeadMinutes)
+}
+
+func TestTodoGroupFlowWithConfiguredMySQL(t *testing.T) {
+	requireWritableDB(t)
+	db, err := model.GetDB()
+	if err != nil {
+		t.Fatalf("获取数据库连接失败: %v", err)
+	}
+	name := uniqueCompactTestName("todo-group")
+	sourceKey := uniqueCompactTestName("todo-group-item")
+	defer func() {
+		_ = db.Unscoped().Where("assignee_id = ? AND source_key = ?", 1, sourceKey).Delete(&model.UserTodo{}).Error
+		_ = db.Where("user_id = ? AND name IN ?", 1, []string{name, name + "-renamed"}).Delete(&model.UserTodoGroup{}).Error
+	}()
+
+	createGroupBody := mustJSONBody(t, map[string]any{"name": name})
+	assert.Equal(t, e.SUCCESS, decodeResult(t, postRequest("/admin/v1/todo/group/create", &createGroupBody)).Code)
+	group := model.NewUserTodoGroup()
+	if err := db.Where("user_id = ? AND name = ?", 1, name).First(group).Error; err != nil {
+		t.Fatalf("回读待办分组失败: %v", err)
+	}
+	assert.Equal(t, e.SUCCESS, decodeResult(t, getRequest("/admin/v1/todo/groups", nil)).Code)
+
+	createTodoBody := mustJSONBody(t, map[string]any{"source_key": sourceKey, "title": "分组接口待办", "group_id": group.ID})
+	assert.Equal(t, e.SUCCESS, decodeResult(t, postRequest("/admin/v1/todo/create", &createTodoBody)).Code)
+	item := model.NewUserTodo()
+	if err := db.Where("assignee_id = ? AND source_key = ?", 1, sourceKey).First(item).Error; err != nil {
+		t.Fatalf("回读分组待办失败: %v", err)
+	}
+	assert.Equal(t, group.ID, item.GroupID)
+	listResp := getRequest("/admin/v1/todo/list", &url.Values{"group_id": {fmt.Sprint(group.ID)}})
+	assert.Equal(t, e.SUCCESS, decodeResult(t, listResp).Code)
+
+	renameBody := mustJSONBody(t, map[string]any{"id": group.ID, "name": name + "-renamed"})
+	assert.Equal(t, e.SUCCESS, decodeResult(t, postRequest("/admin/v1/todo/group/rename", &renameBody)).Code)
+	moveBody := mustJSONBody(t, map[string]any{"id": item.ID, "group_id": 0})
+	assert.Equal(t, e.SUCCESS, decodeResult(t, postRequest("/admin/v1/todo/group/move", &moveBody)).Code)
+	if err := db.First(item, item.ID).Error; err != nil || item.GroupID != 0 {
+		t.Fatalf("调整待办分组失败: %#v err=%v", item, err)
+	}
+	deleteBody := mustJSONBody(t, map[string]any{"id": group.ID})
+	assert.Equal(t, e.SUCCESS, decodeResult(t, postRequest("/admin/v1/todo/group/delete", &deleteBody)).Code)
 }

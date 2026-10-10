@@ -255,6 +255,35 @@ func TestRequestLogSelfChangeSummaryLocalizesProductAndFileLabels(t *testing.T) 
 	}
 }
 
+func TestRequestLogSelfChangeSummaryDescribesMenuPermissionRefresh(t *testing.T) {
+	changeDiff := `[{"field":"action","after":"sync_all_menu_permissions"}]`
+	for _, test := range []struct {
+		locale string
+		label  string
+	}{
+		{i18n.LocaleZhCN, "已刷新菜单权限缓存"},
+		{i18n.LocaleEnUS, "Menu permission cache refreshed"},
+	} {
+		detail := NewRequestLogTransformer(test.locale).ToSelfDetail(&model.RequestLogs{
+			BaseURL:    "/admin/v1/menu/update-all-menu-permissions",
+			ChangeDiff: changeDiff,
+		})
+		if detail.ChangeSummary == nil || detail.ChangeSummary.OmittedCount != 0 || len(detail.ChangeSummary.Items) != 1 {
+			t.Fatalf("unexpected summary for %s: %#v", test.locale, detail.ChangeSummary)
+		}
+		if item := detail.ChangeSummary.Items[0]; item.ChangeType != selfChangeTypeAction || item.Label != test.label {
+			t.Fatalf("unexpected action for %s: %#v", test.locale, item)
+		}
+	}
+	unknown := NewRequestLogTransformer(i18n.LocaleZhCN).ToSelfDetail(&model.RequestLogs{
+		BaseURL:    "/admin/v1/menu/update-all-menu-permissions",
+		ChangeDiff: `[{"field":"action","after":"unknown_action"}]`,
+	})
+	if unknown.ChangeSummary == nil || len(unknown.ChangeSummary.Items) != 0 || unknown.ChangeSummary.OmittedCount != 1 {
+		t.Fatalf("unknown action must not be described as a menu refresh: %#v", unknown.ChangeSummary)
+	}
+}
+
 func TestRequestLogSelfChangeSummarySupportsCoreManagementAndRedactsSensitiveDetails(t *testing.T) {
 	tests := []struct {
 		name       string

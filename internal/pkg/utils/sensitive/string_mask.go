@@ -38,9 +38,10 @@ func maskSensitiveString(s string) string {
 		return maskAuthToken(s, prefix)
 	}
 
-	masked := applyMatchers(s, maskBankCard, maskIdCard, maskPhone, maskEmail)
-	if masked != s {
-		return masked
+	// Preserve familiar privacy masks only when the entire value is that type.
+	// A cookie or credential containing a phone/email must be masked as a whole.
+	if bankCardRegex.FindString(s) == s || idCardRegex.FindString(s) == s || phoneRegex.FindString(s) == s || emailRegex.FindString(s) == s {
+		return applyMatchers(s, maskBankCard, maskIdCard, maskPhone, maskEmail)
 	}
 	return maskDefault(s)
 }
@@ -102,6 +103,9 @@ func maskAuthToken(s, prefix string) string {
 }
 
 func isSensitiveField(fieldName string, sensitiveFields map[string]bool) bool {
+	if isImmutableCredentialField(fieldName) {
+		return true
+	}
 	if sensitiveFields[fieldName] {
 		return true
 	}
@@ -166,13 +170,14 @@ func maskBankCard(cardNo string) string {
 }
 
 func maskDefault(s string) string {
-	length := len(s)
+	runes := []rune(s)
+	length := len(runes)
 	if length <= maskDefaultPrefixLen+maskDefaultSuffixLen {
 		return strings.Repeat("*", length)
 	}
 	if length > maskDefaultFoldThreshold {
-		return s[:maskDefaultPrefixLen] + "***" + s[length-maskDefaultSuffixLen:]
+		return string(runes[:maskDefaultPrefixLen]) + "***" + string(runes[length-maskDefaultSuffixLen:])
 	}
 	maskLen := length - maskDefaultPrefixLen - maskDefaultSuffixLen
-	return s[:maskDefaultPrefixLen] + strings.Repeat("*", maskLen) + s[length-maskDefaultSuffixLen:]
+	return string(runes[:maskDefaultPrefixLen]) + strings.Repeat("*", maskLen) + string(runes[length-maskDefaultSuffixLen:])
 }

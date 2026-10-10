@@ -60,3 +60,27 @@ func TestUpdateProfileRequiresCurrentPasswordOnlyWhenChangingPassword(t *testing
 		})
 	}
 }
+
+func TestUpdateProfileEmailCanBeCleared(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		wantErr    bool
+		wantNil    bool
+	}{
+		{"omitted", `{}`, false, true},
+		{"clear", `{"email":""}`, false, false},
+		{"valid", `{"email":"user@example.com"}`, false, false},
+		{"invalid", `{"email":"invalid-email"}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := NewUpdateProfile()
+			err := bindJSONBody(t, tc.body, payload)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("bind error=%v wantErr=%v", err, tc.wantErr)
+			}
+			if (payload.Email == nil) != tc.wantNil {
+				t.Fatal("email omission must remain distinct from clearing")
+			}
+		})
+	}
+}

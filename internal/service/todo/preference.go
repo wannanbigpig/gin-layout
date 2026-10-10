@@ -12,11 +12,17 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 )
 
+const (
+	DefaultReminderLeadMinutes = 24 * 60
+	MaxReminderLeadMinutes     = 30 * 24 * 60
+)
+
 // ReminderPreference 是待办到期提醒的用户级渠道偏好。
 type ReminderPreference struct {
 	InAppEnabled bool `json:"in_app_enabled"`
 	SMSEnabled   bool `json:"sms_enabled"`
 	SMSAvailable bool `json:"sms_available"`
+	LeadMinutes  int  `json:"lead_minutes"`
 }
 
 // GetReminderPreference 返回有效偏好；未创建记录时默认开启站内、关闭短信。
@@ -39,19 +45,23 @@ func (s *Service) GetReminderPreference(ctx context.Context, userID uint) (*Remi
 		return nil, err
 	}
 	if errors.Is(preferenceErr, gorm.ErrRecordNotFound) || preference.ID == 0 {
-		return &ReminderPreference{InAppEnabled: true, SMSAvailable: phoneAvailable}, nil
+		return &ReminderPreference{InAppEnabled: true, SMSAvailable: phoneAvailable, LeadMinutes: DefaultReminderLeadMinutes}, nil
 	}
 	return &ReminderPreference{
 		InAppEnabled: preference.InAppEnabled == 1,
 		SMSEnabled:   preference.SMSEnabled == 1,
 		SMSAvailable: phoneAvailable,
+		LeadMinutes:  effectiveReminderLeadMinutes(preference.LeadMinutes),
 	}, nil
 }
 
 // UpdateReminderPreference 按当前用户 + todo_due 场景幂等更新渠道偏好。
-func (s *Service) UpdateReminderPreference(ctx context.Context, userID uint, inAppEnabled, smsEnabled bool) (*ReminderPreference, error) {
+func (s *Service) UpdateReminderPreference(ctx context.Context, userID uint, inAppEnabled, smsEnabled bool, leadMinutes *int) (*ReminderPreference, error) {
 	if userID == 0 {
 		return nil, e.NewBusinessError(e.NotLogin)
+	}
+	if leadMinutes != nil && (*leadMinutes < 0 || *leadMinutes > MaxReminderLeadMinutes) {
+		return nil, e.NewBusinessError(e.InvalidParameter)
 	}
 	db, err := s.dbOrDefault(ctx)
 	if err != nil {
@@ -64,19 +74,40 @@ func (s *Service) UpdateReminderPreference(ctx context.Context, userID uint, inA
 	if smsEnabled && !phoneAvailable {
 		return nil, e.NewBusinessError(e.InvalidParameter, "开启短信提醒前请先绑定手机号")
 	}
+	minutes := DefaultReminderLeadMinutes
+	updateColumns := []string{"in_app_enabled", "sms_enabled", "updated_at"}
+	if leadMinutes != nil {
+		minutes = *leadMinutes
+		updateColumns = append(updateColumns, "lead_minutes")
+	}
 	preference := &model.NotificationPreference{
 		UserID:       userID,
 		Scene:        model.NotificationSceneTodoDue,
 		InAppEnabled: boolToUint8(inAppEnabled),
 		SMSEnabled:   boolToUint8(smsEnabled),
+		LeadMinutes:  uint16(minutes),
 	}
 	if err := db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}, {Name: "scene"}},
-		DoUpdates: clause.AssignmentColumns([]string{"in_app_enabled", "sms_enabled", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns(updateColumns),
 	}).Create(preference).Error; err != nil {
 		return nil, err
 	}
-	return &ReminderPreference{InAppEnabled: inAppEnabled, SMSEnabled: smsEnabled, SMSAvailable: phoneAvailable}, nil
+	if leadMinutes == nil {
+		if err := db.Select("lead_minutes").Where("user_id = ? AND scene = ?", userID, model.NotificationSceneTodoDue).
+			First(preference).Error; err != nil {
+			return nil, err
+		}
+		minutes = effectiveReminderLeadMinutes(preference.LeadMinutes)
+	}
+	return &ReminderPreference{InAppEnabled: inAppEnabled, SMSEnabled: smsEnabled, SMSAvailable: phoneAvailable, LeadMinutes: minutes}, nil
+}
+
+func effectiveReminderLeadMinutes(value uint16) int {
+	if value > MaxReminderLeadMinutes {
+		return DefaultReminderLeadMinutes
+	}
+	return int(value)
 }
 
 func reminderSMSPhoneAvailable(db *gorm.DB, userID uint) (bool, error) {

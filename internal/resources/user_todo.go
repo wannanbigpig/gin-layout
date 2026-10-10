@@ -10,6 +10,7 @@ type UserTodoResources struct {
 	ID              uint              `json:"id"`
 	AssigneeID      uint              `json:"assignee_id"`
 	CreatorID       uint              `json:"creator_id"`
+	GroupID         uint              `json:"group_id"`
 	SourceType      string            `json:"source_type"`
 	SourceKey       string            `json:"source_key"`
 	Title           string            `json:"title"`
@@ -28,10 +29,39 @@ type UserTodoResources struct {
 }
 
 type UserTodoSummaryResources struct {
+	Total      int64 `json:"total"`
 	Pending    int64 `json:"pending"`
 	Processing int64 `json:"processing"`
+	Completed  int64 `json:"completed"`
+	Canceled   int64 `json:"canceled"`
 	Overdue    int64 `json:"overdue"`
 	DueToday   int64 `json:"due_today"`
+}
+
+// UserTodoListResources 在分页数据中附带当前分组的全量状态统计。
+type UserTodoListResources struct {
+	*Collection
+	Summary *UserTodoSummaryResources `json:"summary"`
+}
+
+type UserTodoGroupResources struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+}
+
+func NewUserTodoGroupResource(group *model.UserTodoGroup) *UserTodoGroupResources {
+	if group == nil {
+		return nil
+	}
+	return &UserTodoGroupResources{ID: group.ID, Name: group.Name}
+}
+
+func NewUserTodoGroupCollection(groups []*model.UserTodoGroup) []UserTodoGroupResources {
+	result := make([]UserTodoGroupResources, 0, len(groups))
+	for _, group := range groups {
+		result = append(result, *NewUserTodoGroupResource(group))
+	}
+	return result
 }
 
 type UserTodoTransformer struct{}
@@ -49,6 +79,7 @@ func (UserTodoTransformer) ToStruct(item *model.UserTodo) *UserTodoResources {
 		ID:              item.ID,
 		AssigneeID:      item.AssigneeID,
 		CreatorID:       item.CreatorID,
+		GroupID:         item.GroupID,
 		SourceType:      item.SourceType,
 		SourceKey:       item.SourceKey,
 		Title:           item.Title,

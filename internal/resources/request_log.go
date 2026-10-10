@@ -161,14 +161,15 @@ func (r RequestLogTransformer) ToSelfDetail(data *model.RequestLogs) *RequestLog
 }
 
 const (
-	requestLogSelfProfilePath = "/admin/v1/admin-user/update-profile"
-	selfChangeTypeCreated     = "created"
-	selfChangeTypeUpdated     = "updated"
-	selfChangeTypeRemoved     = "removed"
-	selfChangeTypeChanged     = "changed"
-	selfChangeTypeAction      = "action"
-	selfChangeTextMaxRunes    = 80
-	selfChangeMaxItems        = 24
+	requestLogSelfProfilePath  = "/admin/v1/admin-user/update-profile"
+	requestLogSelfMenuSyncPath = "/admin/v1/menu/update-all-menu-permissions"
+	selfChangeTypeCreated      = "created"
+	selfChangeTypeUpdated      = "updated"
+	selfChangeTypeRemoved      = "removed"
+	selfChangeTypeChanged      = "changed"
+	selfChangeTypeAction       = "action"
+	selfChangeTextMaxRunes     = 80
+	selfChangeMaxItems         = 24
 )
 
 type requestLogSelfChangeValueMode uint8
@@ -427,6 +428,9 @@ func buildRequestLogSelfChangeSummary(data *model.RequestLogs, language string) 
 	}
 
 	path := strings.TrimSpace(data.BaseURL)
+	if path == requestLogSelfMenuSyncPath {
+		return buildRequestLogSelfMenuSyncSummary(raw, language)
+	}
 	if rules := requestLogSelfChangeRulesForPath(path); rules != nil {
 		return buildRequestLogSelfFieldChangeSummary(raw, rules, language)
 	}
@@ -434,6 +438,24 @@ func buildRequestLogSelfChangeSummary(data *model.RequestLogs, language string) 
 		return buildRequestLogSelfFileChangeSummary(raw, policy, language)
 	}
 	return newRequestLogSelfOmittedSummary()
+}
+
+func buildRequestLogSelfMenuSyncSummary(raw, language string) *RequestLogSelfChangeSummaryResources {
+	var changes []requestLogRawChangeItem
+	if err := json.Unmarshal([]byte(raw), &changes); err != nil || len(changes) != 1 || changes[0].Field != "action" || len(changes[0].Before) != 0 {
+		return newRequestLogSelfOmittedSummary()
+	}
+	var action string
+	if err := json.Unmarshal(changes[0].After, &action); err != nil || action != "sync_all_menu_permissions" {
+		return newRequestLogSelfOmittedSummary()
+	}
+	label := "已刷新菜单权限缓存"
+	if i18n.NormalizeLocale(language) == i18n.LocaleEnUS {
+		label = "Menu permission cache refreshed"
+	}
+	summary := newRequestLogSelfChangeSummary(1)
+	appendRequestLogSelfChangeItem(summary, RequestLogSelfChangeItemResources{Label: label, ChangeType: selfChangeTypeAction})
+	return summary
 }
 
 func buildRequestLogSelfFieldChangeSummary(raw string, rules map[string]requestLogSelfChangeRule, language string) *RequestLogSelfChangeSummaryResources {

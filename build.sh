@@ -28,8 +28,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# 生成版本号
-VERSION=$(date +"%Y%m%d_%H%M%S")
+# 时间戳只标识构建，不代替应用版本。
+BUILD_ID=$(date -u +"%Y%m%dT%H%M%SZ")
+BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+VERSION=""
+BUILD_COMMIT=""
+BUILD_DIRTY=""
+MODULE_PATH=""
 
 # ==================== 工具函数 ====================
 
@@ -43,6 +48,7 @@ usage() {
   -p, --platform      指定平台 (格式：os/arch，如 linux/amd64)
   -a, --all           构建所有支持的平台
   -n, --no-compress   不使用 UPX 压缩
+      --release       从与源码版本一致的干净 Git Tag 构建
   -k, --keep <num>    保留的历史版本数量 (默认：3，0=全部清理)
   -h, --help          显示帮助信息
 
@@ -111,7 +117,7 @@ build_binary() {
     fi
 
     if ! CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" go build \
-        -ldflags="-w -s" -trimpath -o "${binary_file}" .; then
+        -ldflags="-w -s -X ${MODULE_PATH}/internal/global.Version=${VERSION} -X ${MODULE_PATH}/internal/global.BuildCommit=${BUILD_COMMIT} -X ${MODULE_PATH}/internal/global.BuildTime=${BUILD_TIME} -X ${MODULE_PATH}/internal/global.BuildDirty=${BUILD_DIRTY}" -trimpath -o "${binary_file}" .; then
         echo -e "${RED}编译失败：${os}/${arch}${NC}"
         return 1
     fi
@@ -173,6 +179,12 @@ copy_resources() {
 
     # 权限模型文件；运行时策略来自数据库 casbin_rule，不打包 policy.csv 样例
     [ -f "rbac_model.conf" ] && cp "rbac_model.conf" "${dist_dir}/"
+    cp CHANGELOG.md "${dist_dir}/"
+    mkdir -p "${dist_dir}/docs/upgrades"
+    cp docs/COMPATIBILITY.md docs/release.json docs/openapi.yaml docs/error_codes.json docs/api-documentation.json "${dist_dir}/docs/"
+    cp docs/upgrades/*.md "${dist_dir}/docs/upgrades/"
+    printf '{"version":"%s","commit":"%s","builtAt":"%s","dirty":"%s","buildId":"%s"}\n' \
+        "$VERSION" "$BUILD_COMMIT" "$BUILD_TIME" "$BUILD_DIRTY" "$BUILD_ID" > "${dist_dir}/build-info.json"
 }
 
 # 创建压缩包
@@ -181,7 +193,10 @@ create_tarball() {
     local arch="$2"
     local dist_dir="$3"
 
-    local tarball_name="${PROJECT_NAME}_${os}_${arch}_${VERSION}.tar.gz"
+    local tarball_name="${PROJECT_NAME}_${VERSION}_${os}_${arch}.tar.gz"
+    if [ "$RELEASE_BUILD" != true ]; then
+        tarball_name="${PROJECT_NAME}_${VERSION}_${BUILD_ID}_${os}_${arch}.tar.gz"
+    fi
 
     # 输出到 stderr（不污染返回值）
     echo "创建压缩包..." >&2
@@ -189,16 +204,25 @@ create_tarball() {
 
     # Windows 平台使用 zip 格式
     if [ "$os" = "windows" ]; then
-        tarball_name="${PROJECT_NAME}_${os}_${arch}_${VERSION}.zip"
+        tarball_name="${tarball_name%.tar.gz}.zip"
         if command -v zip &> /dev/null; then
+            if [ "$RELEASE_BUILD" = true ] && [ -e "$tarball_name" ]; then
+                echo "正式构建产物已存在，禁止覆盖：${tarball_name}" >&2
+                return 1
+            fi
             zip -rq "${tarball_name}" dist
         else
             echo -e "${YELLOW}警告：zip 命令不可用，使用 tar.gz 格式${NC}" >&2
-            tar -czf "${tarball_name%.zip}.tar.gz" -C dist .
+            if [ "$RELEASE_BUILD" = true ] && [ -e "${tarball_name%.zip}.tar.gz" ]; then return 1; fi
+            COPYFILE_DISABLE=1 tar -czf "${tarball_name%.zip}.tar.gz" -C dist .
             tarball_name="${tarball_name%.zip}.tar.gz"
         fi
     else
-        tar -czf "${tarball_name}" -C dist .
+        if [ "$RELEASE_BUILD" = true ] && [ -e "$tarball_name" ]; then
+            echo "正式构建产物已存在，禁止覆盖：${tarball_name}" >&2
+            return 1
+        fi
+        COPYFILE_DISABLE=1 tar -czf "${tarball_name}" -C dist .
     fi
 
     cd ..
@@ -259,7 +283,7 @@ build_platform() {
     clean_macos_artifacts "${platform_dist}"
 
     local tarball
-    tarball=$(create_tarball "${os}" "${arch}" "${platform_dist}")
+    if ! tarball=$(create_tarball "${os}" "${arch}" "${platform_dist}"); then return 1; fi
     tarball="${tarball#TARBALL:}"
 
     # 压缩包已在 BUILD_DIR 目录下，无需移动
@@ -291,7 +315,7 @@ cleanup_old_versions() {
     for platform in "${PLATFORMS[@]}"; do
         local os="${platform%/*}"
         local arch="${platform#*/}"
-        local pattern="${PROJECT_NAME}_${os}_${arch}_*"
+        local pattern="${PROJECT_NAME}_*_${os}_${arch}"
 
         local all_versions=($(ls -t "${BUILD_DIR}"/${pattern}.tar.gz "${BUILD_DIR}"/${pattern}.zip 2>/dev/null || true))
         local count=${#all_versions[@]}
@@ -317,6 +341,7 @@ TARGET_OS=""
 TARGET_ARCH=""
 PLATFORM=""
 CLEAN_ONLY=false
+RELEASE_BUILD=false
 KEEP_COUNT=3
 
 while [[ $# -gt 0 ]]; do
@@ -349,6 +374,10 @@ while [[ $# -gt 0 ]]; do
             CLEAN_ONLY=true
             shift
             ;;
+        --release)
+            RELEASE_BUILD=true
+            shift
+            ;;
         -h|--help)
             usage
             ;;
@@ -377,6 +406,25 @@ main() {
         return
     fi
 
+    local source_version
+    source_version=$(sed -n 's/^var Version = "\([^"]*\)"$/\1/p' internal/global/common.go)
+    MODULE_PATH=$(awk '$1 == "module" {print $2; exit}' go.mod)
+    if [ -z "$source_version" ] || [ -z "$MODULE_PATH" ]; then
+        echo "无法读取源码版本或 module 路径" >&2
+        return 1
+    fi
+    BUILD_COMMIT=$(git rev-parse HEAD)
+    BUILD_DIRTY=false
+    if [ -n "$(git status --porcelain)" ]; then BUILD_DIRTY=true; fi
+    VERSION="$source_version"
+    if [ "$RELEASE_BUILD" = true ]; then
+        go run . command release-check --tag "v${source_version}"
+        node scripts/generate-api-documentation.mjs --check
+    else
+        VERSION="${source_version}-dev+${BUILD_COMMIT:0:12}"
+        if [ "$BUILD_DIRTY" = true ]; then VERSION="${VERSION}.dirty"; fi
+    fi
+
     echo "=========================================="
     echo "Go 项目构建脚本"
     echo "版本：${VERSION}"
@@ -396,7 +444,8 @@ main() {
             local arch="${platform#*/}"
 
             if ! build_platform "${os}" "${arch}" "${USE_COMPRESS}"; then
-                echo -e "${YELLOW}跳过失败的平台：${platform}${NC}"
+                echo -e "${RED}构建失败的平台：${platform}${NC}" >&2
+                return 1
             fi
         done
 

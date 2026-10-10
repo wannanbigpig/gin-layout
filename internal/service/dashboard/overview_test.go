@@ -115,6 +115,7 @@ func newDashboardTestDB(t *testing.T) *gorm.DB {
 			id integer primary key autoincrement,
 			user_id integer,
 			is_read integer default 0,
+			deleted_at datetime,
 			created_at datetime
 		)`,
 	}

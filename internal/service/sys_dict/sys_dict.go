@@ -33,7 +33,7 @@ func (s *SysDictService) TypeList(params *form.SysDictTypeList, locale string) (
 	}
 	condition, args := query.Build()
 	total, collection, err := model.ListPageE(model.NewSysDictType(), params.Page, params.PerPage, condition, args, model.ListOptionalParams{
-		OrderBy: "sort desc, id desc",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "sort desc, id desc", "id", "type_code", "sort", "updated_at"),
 	})
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (s *SysDictService) ItemList(params *form.SysDictItemList, locale string) (
 	}
 	condition, args := query.Build()
 	total, collection, err := model.ListPageE(model.NewSysDictItem(), params.Page, params.PerPage, condition, args, model.ListOptionalParams{
-		OrderBy: "sort desc, id asc",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "sort desc, id asc", "id", "value", "sort", "updated_at"),
 	})
 	if err != nil {
 		return nil, err

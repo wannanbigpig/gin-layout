@@ -3,6 +3,7 @@ package form
 // SessionList 在线会话列表查询参数。
 type SessionList struct {
 	Paginate
+	ListSort
 	UID       uint   `form:"uid" json:"uid" binding:"omitempty,gt=0"`
 	Username  string `form:"username" json:"username" binding:"omitempty"`
 	IP        string `form:"ip" json:"ip" binding:"omitempty"`

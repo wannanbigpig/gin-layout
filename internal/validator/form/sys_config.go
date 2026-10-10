@@ -2,6 +2,7 @@ package form
 
 type SysConfigList struct {
 	Paginate
+	ListSort
 	ConfigKey     string `form:"config_key" json:"config_key" binding:"omitempty,max=100"`
 	ConfigName    string `form:"config_name" json:"config_name" binding:"omitempty,max=100"`
 	GroupCode     string `form:"group_code" json:"group_code" binding:"omitempty,max=60"`

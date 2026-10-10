@@ -46,6 +46,16 @@ func (s *SMSConfigService) providerRegistry() *sms.Registry {
 }
 
 func (s *SMSConfigService) Get(maskSensitive bool) (sms.Config, error) {
+	return s.get(maskSensitive, false)
+}
+
+// GetStrict refuses a legacy fallback when the primary SMS config read fails.
+// Account-change verification must not be disabled by a transient database error.
+func (s *SMSConfigService) GetStrict(maskSensitive bool) (sms.Config, error) {
+	return s.get(maskSensitive, true)
+}
+
+func (s *SMSConfigService) get(maskSensitive, strict bool) (sms.Config, error) {
 	settings := sms.DefaultConfig()
 
 	smsConfigModel := model.NewSysSmsConfig()
@@ -73,6 +83,9 @@ func (s *SMSConfigService) Get(maskSensitive bool) (sms.Config, error) {
 			}
 		}
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if strict {
+			return sms.Config{}, err
+		}
 		if legacy, fbErr := s.getLegacySysConfig(); fbErr == nil {
 			settings = legacy
 		} else {

@@ -41,6 +41,9 @@ func TestPersonalReturnsOnlyCurrentUserLoginAndActivities(t *testing.T) {
 	if err := db.Exec(`INSERT INTO sys_messages (user_id, is_read, created_at) VALUES (7, 0, ?), (7, 0, ?), (7, 1, ?), (8, 0, ?)`, now, now, now, now).Error; err != nil {
 		t.Fatalf("insert messages: %v", err)
 	}
+	if err := db.Exec(`INSERT INTO sys_messages (user_id, is_read, deleted_at, created_at) VALUES (7, 0, ?, ?)`, now, now).Error; err != nil {
+		t.Fatalf("insert deleted message: %v", err)
+	}
 
 	svc := &OverviewService{db: db}
 	svc.SetAdminUserId(7)

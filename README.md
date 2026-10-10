@@ -82,27 +82,20 @@ cd gin-layout
 go mod download
 ```
 
-### 3. 执行迁移
+本地依赖可用 `make dev-up` 启动。`docker-compose.dev.yml` 将 MinIO API 映射到宿主机 `9000`，控制台映射到 `9002`（容器内仍为 `9001`），避免与本项目 API 默认端口 `9001` 冲突。
 
-推荐使用项目命令：
-
-```bash
-go run main.go -c ./config.yaml command migrate        # 默认等价于 migrate up
-go run main.go -c ./config.yaml command migrate check
-```
-
-迁移执行完成后会写入一套默认基础数据，其中包含超级管理员账号 `super_admin / 123456`。仅建议用于本地初始化，首次登录后请立即修改密码；个人改密必须提供当前密码，成功后会撤销该用户的全部既有会话。
-
-迁移文件创建、时间戳命名规范、`down/goto/force/version` 等详细说明见：[docs/MIGRATE_COMMANDS.md](./docs/MIGRATE_COMMANDS.md)。
-
-### 4. 配置项目
+### 3. 配置项目
 
 源码运行时建议带上 `GO_ENV=development`。未显式传入 `-c` 时：
 
 - 开发模式会把当前工作目录下的 `config/config.yaml.example` 自动复制为项目根目录 `config.yaml`
 - 非开发模式会在可执行文件同级查找 `config.yaml`，若不存在则尝试从同目录 `config.yaml.example` 复制
 
-也可以手动复制配置文件后再修改。
+首次运行先复制配置文件，再修改数据库连接、启用 `mysql.enable=true`，并配置 `jwt.secret_key`；迁移和接口同步命令会使用这个配置：
+
+```bash
+cp config/config.yaml.example config.yaml
+```
 
 最小配置示例：
 
@@ -165,6 +158,20 @@ queue:
 - 如果 `queue.enable=true` 但不想复用 `redis.*`，请把 `queue.use_default_redis` 设为 `false`，并补齐 `queue.redis.*`
 - 文件存储驱动和敏感存储参数保存在独立实体表 `sys_storage_config`，后台通过 `/admin/v1/system/storage/*` 管理；`config.yaml` 主要负责基础依赖与进程级配置
 
+### 4. 执行迁移并同步接口
+
+配置完成且 MySQL 可连接后，依次校验迁移、执行迁移并同步接口权限元数据：
+
+```bash
+go run main.go -c ./config.yaml command migrate check
+go run main.go -c ./config.yaml command migrate up
+go run main.go -c ./config.yaml command api-route -y
+```
+
+迁移执行完成后会写入一套默认基础数据，其中包含超级管理员账号 `super_admin / 123456`。仅建议用于本地初始化，首次登录后请立即修改密码；个人改密必须提供当前密码，成功后会撤销该用户的全部既有会话。
+
+迁移文件创建、时间戳命名规范、`down/goto/force/version` 等详细说明见：[docs/MIGRATE_COMMANDS.md](./docs/MIGRATE_COMMANDS.md)。
+
 ### 5. 启动服务
 
 ```bash
@@ -226,7 +233,7 @@ curl http://127.0.0.1:9001/health/readiness
 
 当前权限模型采用“数据库关系为真相，Casbin 负责最终接口判定”的方式。角色、部门、菜单和 API 的业务关系以数据库为准，`rebuild-user-permissions` 命令会按这些关系重建用户最终 API 权限。
 
-Casbin 策略刷新支持多个 `service` 实例。权限策略与全局版本在同一 MySQL 事务内提交；正常请求优先读取 Redis 版本，发现本机策略落后时同步回源 MySQL 后再判权。权限写事务会先设置 Redis dirty 标记，提交后更新版本并发布通知；其他实例收到通知会立即刷新。Redis 缺失、异常或 dirty 存在时，请求回源 MySQL，单个实例内的并发回源由 `singleflight` 合并；Redis 版本键保留 30 秒安全过期，定时回源仍作为补偿。版本读取或策略重载失败时 fail-closed。该机制提供正常路径近实时、异常路径有界最终一致，不是跨实例提交确认屏障。
+Casbin 策略刷新支持多个 `service` 实例。权限策略与全局版本在同一 MySQL 事务内提交；正常请求优先读取 Redis 版本，发现本机策略落后时同步回源 MySQL 后再判权。权限写事务会先设置 Redis dirty 标记，提交后更新版本并发布通知；其他实例收到通知会立即刷新。Redis 缺失、异常或 dirty 存在时，请求回源 MySQL，单个实例内的并发回源由 `singleflight` 合并；Redis 版本键保留 30 秒安全过期，定时回源仍作为补偿。版本读取或策略重载失败时 fail-closed。该机制提供正常路径近实时、异常路径有界最终一致，不是跨实例提交确认屏障。 行级数据权限缓存使用同一共享版本，并在回源及缓存写入后复核；部门树变化也在事务内推进版本，避免另一实例回填旧范围。
 
 升级到含权限版本校验的版本时，必须先执行 `command migrate up` 创建 `permission_policy_versions`，再启动或滚动替换 `service` 实例；缺少该表时权限判定会按 fail-closed 拒绝，并在日志中报告迁移缺失。
 
@@ -332,7 +339,7 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 | `queue.use_default_redis` | `true` 复用 `redis.*`；`false` 时改用 `queue.redis.*` 独立连接 |
 | `queue` | Asynq 异步任务开关、队列命名空间、并发度、优先级和审计日志重试策略 |
 | `storage` | 运行时文件存储配置保存在独立实体表 `sys_storage_config`，由 `/admin/v1/system/storage/*` 管理；OSS AccessKey Secret 以 `enc:v1` AES-256-GCM 密文保存 |
-| `todo.reminder_enabled` / `todo.reminder_sms_enabled` / `todo.reminder_lead_minutes` / `todo.reminder_catchup_minutes` | 待办提醒总开关、短信渠道总开关、提前提醒分钟数和 Cron 停机后的逾期补偿窗口，保存在 `sys_config`；短信默认关闭 |
+| `todo.reminder_enabled` / `todo.reminder_sms_enabled` / `todo.reminder_catchup_minutes` | 待办提醒总开关、短信渠道总开关和 Cron 停机后的逾期补偿窗口，保存在 `sys_config`；短信默认关闭，提前时间由个人提醒偏好控制 |
 | `logger` | 日志输出、切割和保留策略 |
 
 如果通过 Nginx、Ingress 或负载均衡转发请求，需要同步配置 `app.trusted_proxies`，否则客户端 IP 可能记录不准确。
@@ -341,13 +348,13 @@ go run main.go -c ./config.yaml command init-system -y --backup-confirmed --conf
 
 - `service`、`worker`、`cron` 是三类进程角色；扩容 API 时只增加 `service` 实例，不要把它们理解为三个 API 实例。
 - `service` 负责提供 HTTP API。
-- `worker` 负责消费 Asynq 异步任务，当前内置了请求审计日志落库、请求日志导出、文件资源导出 3 类任务。多个 `worker` 可以连接同一 Redis、使用相同 `queue.namespace` 和队列配置并发消费；正常情况下同一任务只交给一个实例。Asynq 仍是至少一次语义：请求审计以 `request_id` 唯一键 upsert；导出记录通过数据库条件更新和稳定的 Asynq Task ID 领取执行权，同一 `task_run_id` 的异常并发只有一个初始执行者，只有同一 Task ID 的后续重试可接管自身释放或遗留的 `running` 状态；导出结果采用首个成功提交者获胜，未采用的临时文件会立即清理，清理失败则保留带过期时间的文件记录供定时任务重试。完成导出时会在记录中固化文件过期时间，导出列表展示导出总条数和实时已处理条数；到期后接口返回 `file_expired=true`、`download_ready=false`，前端显示“已过期”而不再提供下载。对象上传成功但后续数据库步骤失败时会补偿删除，删除失败的对象行标记为 `delete_failed`。对象存储与数据库仍不是同一事务，进程若恰好在对象上传后、补偿逻辑运行前被强制终止，仍需依赖对象存储生命周期或独立的对象对账能力；当前 `cron:clean-expired-files` 只处理已有 `upload_files.expires_at` 的记录，不能覆盖这个极窄窗口。WebSocket 实时提醒不作为交付凭据，最终状态以消息列表和导出记录为准。
+- `worker` 负责消费 Asynq 异步任务，当前内置了请求审计日志落库、请求日志导出、文件资源导出 3 类任务。多个 `worker` 可以连接同一 Redis、使用相同 `queue.namespace` 和队列配置并发消费；正常情况下同一任务只交给一个实例。Asynq 仍是至少一次语义：请求审计以 `request_id` 唯一键 upsert；导出记录通过数据库条件更新和 `TaskID:attempt:N` 执行 token 领取执行权，同一 `task_run_id` 的异常并发只有一个初始执行者，同一 Task ID 的后续尝试可接管旧尝试释放或遗留的 `running` 状态。超时收尾使用独立短超时的上下文落库，并由 Asynq `ErrorHandler` 补偿无需等待 handler 返回的超时；状态更新校验 attempt/token，迟到的旧尝试不得覆盖新尝试。导出结果采用首个成功提交者获胜，未采用的临时文件会立即清理，清理失败则保留带过期时间的文件记录供定时任务重试。完成导出时会在记录中固化文件过期时间，导出列表展示导出总条数和实时已处理条数；到期后接口返回 `file_expired=true`、`download_ready=false`，前端显示“已过期”而不再提供下载。对象上传成功但后续数据库步骤失败时会补偿删除，删除失败的对象行标记为 `delete_failed`。对象存储与数据库仍不是同一事务，进程若恰好在对象上传后、补偿逻辑运行前被强制终止，仍需依赖对象存储生命周期或独立的对象对账能力；当前 `cron:clean-expired-files` 只处理已有 `upload_files.expires_at` 的记录，不能覆盖这个极窄窗口。WebSocket 实时提醒不作为交付凭据，最终状态以消息列表和导出记录为准。
 - 使用导出能力时，`queue.queues` 必须包含可消费的 `export` 队列，并运行 `worker`；仅注册任务或启动 `service` 不会消费导出任务。
 - 导出文件由顶部“我的导出”独立页面承接，不属于任务运维 Tab。`GET /admin/v1/system/export/list` 和 `detail?public_id=<UUID>` 只要求登录并在服务端限定当前用户；提交导出只返回随机 `public_id` 和状态，个人列表/详情、进度推送和结果通知不暴露任务执行 ID、队列或原始异常。任务运维中的执行记录继续供有权限的管理员排障。初版重置部署时，初始化迁移会为 `sys_export_records.public_id` 创建唯一索引；若目标库已执行旧版初始迁移，需先按部署方案重建数据库后再启用本版代码，并执行 `command api-route -y` 同步接口认证元数据。公开编号用于识别和反馈问题，不代替登录及文件所有者校验。
 - 请求日志与文件资源导出提交前会按导出筛选条件检查是否有记录；空集返回业务码 `NoExportData`（`10004`，暂无需要导出的数据），不会创建任务或导出记录。该检查不冻结数据，若记录在提交后发生变化，最终导出仍以 worker 执行时为准。
 - `queue.enable=false` 时，不需要启动 `worker`；请求审计日志由 service 进程内的有界缓冲批量异步落库。缓冲满且存储健康时，新条目使用固定超时的同步写入兜底；存储已故障时不会让每个业务请求持续阻塞在 DB 上，而是计数并限频告警溢出丢失。导出类异步能力会随之不可用。
-- `cron` 负责定时任务调度；代码内置任务会同步到 `task_definitions`，后台运营配置中的 `status/cron_spec/allow_manual/allow_retry` 会作为运行时真相，并通过进程缓存和 `cron_task_states` 维护最近同步/执行状态。
-- `cron:todo-reminder` 默认每 5 分钟扫描临期与最近逾期的待办。站内提醒先持久化到 `sys_messages`，再通过 WebSocket/Redis 通知在线客户端；可选短信先与业务事务一起写入 `sms_deliveries`，再由本次及后续扫描发送。`tdr:v1:{todo_id}:{due_at}:{type}` / `tds:v1:{todo_id}:{due_at}:{type}` 幂等键保证重复扫描不会重复创建同一提醒周期。明确失败最多尝试 3 次；供应商结果未知或进程在发送中断时转为 `unknown`，不自动重试以避免重复计费。`accepted` 只表示供应商 API 已接受，不是手机送达回执。修改截止时间会进入新的提醒周期，完成、取消、关闭短信偏好或手机号失效会停止未发送短信。
+- `cron` 负责定时任务调度；代码内置任务会同步到 `task_definitions`，后台运营配置中的 `status/cron_spec/allow_manual/allow_retry` 会作为运行时真相，并通过进程缓存和 `cron_task_states` 维护最近同步/执行状态。普通 cron 的失败记录在允许重试时沿原 handler 手动执行，不依赖 Asynq；高危 cron 不允许开启重试，必须通过手动触发完成风险确认并获取分布式锁。
+- `cron:todo-reminder` 默认每分钟扫描临期与最近逾期的待办。站内提醒先持久化到 `sys_messages`，再通过 WebSocket/Redis 通知在线客户端；可选短信先与业务事务一起写入 `sms_deliveries`，再由本次及后续扫描发送。`tdr:v1:{todo_id}:{due_at}:{type}` / `tds:v1:{todo_id}:{due_at}:{type}` 幂等键保证重复扫描不会重复创建同一提醒周期。明确失败最多尝试 3 次；供应商结果未知或进程在发送中断时转为 `unknown`，不自动重试以避免重复计费。`accepted` 只表示供应商 API 已接受，不是手机送达回执。修改截止时间会进入新的提醒周期，完成、取消、关闭短信偏好、用户禁用/删除或手机号失效会取消未发送短信。每批预查渠道投递记录，已处理周期不再逐条加锁和重复插入。个人提前时间支持 0–43200 分钟，0 表示到期时提醒。短信全局总开关关闭时，待发和重试记录暂停，不消耗发送预算或尝试次数，重新开启后恢复。发送前重新读取当前提前时间，尚未进入临期窗口的记录保留，等待窗口到达或偏好再次调整；到期后按逾期提醒周期处理。迁移 `20260928000001` 将旧 `todo.reminder_lead_minutes` 的有效设置保存为已有用户偏好（包含此前未设置偏好的用户），保留渠道开关；新用户默认提前 1440 分钟。旧配置保留值和启用状态供回滚使用，仅隐藏入口。
 - 演示定时任务初始化默认关闭；`reset-system-data` 默认关闭，启用执行时会输出高风险告警。
 - 不要把同一个周期任务同时注册到 `cron` 和 `worker` 体系里，否则会重复执行。
 - 当前版本必须只运行一个 `cron` 实例。普通任务只有进程内 `WithoutOverlapping` 保护，多实例会对同一调度周期重复执行或重复入队。Redis 分布式锁仅覆盖标记为高风险的 cron 任务，只提供执行期间的跨实例互斥，不提供每个调度周期的唯一触发保证；锁固定 30 分钟 TTL、没有自动续期，超过 TTL 的长任务也可能再次并发。释放锁会校验持有者 token，避免旧实例删除新持有者的锁。需要多 `cron` 实例前，必须另行实现按调度周期去重和锁续期，不能仅依赖现有高风险任务锁。
@@ -416,6 +423,10 @@ go test ./tests/admin_test
 
 存储驱动通过 `filestorage.DriverDefinition` 编译期注册。二开供应商实现基础 `Driver`，按需实现 `DirectUploadCapable`、`MultipartCapable`、`StatCapable`、`ImageThumbnailCapable`，再调用 `filestorage.RegisterDriver`；业务层不再按驱动名称分支。自定义配置使用 `Config.DecodeProviderConfig` / `SetProviderConfig` 保存在 `config.<driver>`，未知供应商配置会原位保留；顶层字符串密钥通过 `SensitiveFields` 与 `ProviderString` / `SetProviderString` 接入统一的加密、掩码、空值清除、查看权限和审计脱敏。配套前端新增一个供应商表单并调用 `registerStorageProviderForm`，无需修改 `StorageConfigPanel.vue`。驱动 ID 会持久化到文件记录，发布后必须保持稳定，历史对象迁移完成前不能移除旧驱动注册。
 
+存储测试 `POST /admin/v1/system/storage/test` 会按当前草稿端点实际写入、读取和删除随机测试对象。`storage:config`、`storage:test` 和 `storage:secret` 只应授予可信的基础设施管理员；生产环境通过出站网络规则限制到批准的对象存储域名或网段。合法内网对象存储仍受支持，端点非空校验不代表已具备 SSRF 网络隔离。
+
+请求日志的密码、令牌、认证 Header 和已登记供应商凭据使用不可移除的脱敏基线；`audit.sensitive_fields` 只配置额外业务字段，清空或删除配置字段不能关闭这些保护。基线覆盖请求、响应、查询参数和审计差异，非敏感字段仍按业务配置处理。无法可靠结构化脱敏的文本请求体（如 XML、YAML、TOML 和纯文本）只记录省略说明；无法解析的查询字符串也省略，接口原有参数绑定行为不变。
+
 审计日志统一落在 `request_logs` 的 `change_diff` 字段；有字段级差异的写操作可通过 `has_change_diff=1` 在列表和导出中筛选。已认证用户的后台业务请求不参与随机采样；`queue.audit_sample_get_keep_every` 仅用于无法关联登录用户的低风险成功只读流量。`/ping`、`/health/readiness`和未匹配路由的 404 噪声既不写入请求日志，也不进入面向业务的每日请求统计；已命中业务路由的 404 仍保留。基础设施总流量应由 ingress/Prometheus 等监控链路采集，不用 MySQL 审计表代替。每日请求统计写入有短超时和独立故障冷却，不会熔断主审计；数据库故障时统计允许少量缺失，不能作为计费或合规口径。内存缓冲不主动驱逐已接收记录，短暂数据库不可用时保留当前批次并等待重试；字段在持久化边界按表宽归一化，明确的永久行错误会被隔离，避免单条坏记录阻塞整个批次。该链路仍为 best-effort：队列和数据库同时不可用且缓冲溢出、停机 drain 超时或进程崩溃时不承诺零丢失；溢出丢失会计数并限频记录，不会反复阻塞业务请求。非数据库触发器也不会覆盖人工 SQL。
 
 工作台和日志采用“个人可见、全局授权”的边界：所有登录用户可访问个人工作台与个人请求日志，但服务端固定按当前 Token 的 UID 查询，不能传入其他用户 ID；全局指标、服务器监控和全部请求日志仍分别要求 `dashboard:*`、`requestLog:*` 权限。首页“今日操作”和“我的最近操作”只统计写操作、失败、高风险或有字段变更的记录，并排除 WebSocket 建连/临时票据及个人日志自查询等后台技术请求，避免连接重建和页面轮询淹没真实业务操作；完整审计记录仍保留在请求日志中。`GET /admin/v1/dashboard/statistics` 默认查询最近 7 个自然日，也接受包含首尾日期的 `start_date` / `end_date`（`YYYY-MM-DD`），最多 90 天，供工作台的 7 天、30 天和自定义范围共用同一真实统计口径。个人日志默认使用 `scope=regular` 隐藏“个人请求日志列表/详情”自身产生的读取记录，避免每次查询和翻页持续制造噪声；用户可选择 `scope=self_reads`，或明确填写操作名称，重新查询这些审计记录。个人列表和详情不返回 JWT、Header、查询参数、请求体、响应体或原始 JSON 差异，只对用户、角色、部门、菜单、字典、系统配置、个人资料、Product 和文件/目录等已登记操作按 route、action、field 三级白名单生成自然语言摘要，敏感值继续脱敏或隐藏；未知结构只显示“已省略”，不会回退展示原文。管理员详情保留结构化 JSON，便于排障和审计。服务器监控响应的 `app.audit` 同时提供进程内接收、采样、入队、降级、持久化、失败、永久丢弃、溢出丢弃、缓冲待处理和存储不可用指标；多实例部署需按实例采集聚合。
@@ -476,7 +487,7 @@ todo_due   ──> aliyun ──> SMS_TODO_TEMPLATE
 
 - `v0.10.0` 是本轮首个公开版本候选。当前仍处于首版初始化阶段，部署会重置系统数据，因此 `v0.10.0` 正式 tag 前允许直接收敛现有初始化迁移。
 - 首个公开 `vX.Y.Z` tag 发布后，已发布迁移视为不可变；表结构、权限和默认数据演进必须新增成对的 `up/down` 迁移，不再修改历史迁移。
-- `docs/openapi.yaml` 随源码纳入版本控制；路由、安全策略或 API 元数据变化后必须重新生成，CI 和 Release 会校验生成结果无漂移，发布归档同时携带该文件。
+- `docs/openapi.yaml` 随源码纳入版本控制；路由、安全策略或 API 元数据变化后必须重新生成，CI 和 Release 会校验生成结果无漂移，发布归档同时携带该文件。 业务目录源在 `docs/api/`；维护字段及示例后用 Node.js 24 执行 `node scripts/generate-api-documentation.mjs`，提交 `docs/api-documentation.json`。CI、Release 和正式构建检查其无漂移，官网按后端正式 Release 自动发现并切换整份版本文档。
 - 发布版本遵循 SemVer：`0.x` 阶段的破坏兼容调整升级 minor，兼容修复升级 patch；进入 `1.x` 后，破坏兼容调整升级 major，向后兼容功能升级 minor，兼容修复升级 patch。tag 触发 release workflow，并校验 tag、源码版本和 CHANGELOG 条目一致，执行单元测试、`go vet`、迁移检查和 MySQL 接口集成测试；产物包含二进制、示例配置、RBAC 模型、迁移、README、CHANGELOG、兼容说明、LICENSE 和校验和。
 - 升级顺序为：备份数据库与配置 → `command migrate check` → `command migrate up` → 按变更说明执行 `api-route -y` / `task sync-definitions` → 协调重启 `service/worker/cron` → 验证 readiness 与关键权限流程。
 - 回滚必须同时评估二进制与数据库：仅在新迁移明确支持安全 `down` 时回退数据库；涉及数据转换或破坏性结构变更时优先前向修复，不自动降级。每个正式版本应在 release notes 中列出兼容边界、升级命令、回滚限制和已知风险。
@@ -584,3 +595,5 @@ gin-layout/
 ## 免责声明
 
 本项目按 **“现状”提供**，不附带任何明示或默示担保。项目可能存在缺陷、安全漏洞或与特定业务场景不匹配的实现；上线前请自行完成代码审查、安全加固、配置审查、权限验收和数据备份。因使用、依赖、部署、改造或运维本项目导致的问题，由使用者自行承担。
+
+发布前执行 `go run . command release-check`；版本声明见 `docs/release.json`，每次升级说明放在 `docs/upgrades/<version>.md`。正式构建使用 `./build.sh --release`（要求干净版本 Tag），开发构建包含 dev/commit/dirty；`version --json` 可读取构建身份。后端与管理端独立发版，按兼容范围配套；官网不维护独立版本，API 文档标示后端版本和配套管理端 Tag，详见 [版本策略](docs/COMPATIBILITY.md)。

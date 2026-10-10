@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/wannanbigpig/gin-layout/config"
+	"github.com/wannanbigpig/gin-layout/internal/jobs"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
 	"github.com/wannanbigpig/gin-layout/internal/queue"
+	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/taskcenter"
 )
 
@@ -202,6 +207,7 @@ func NewServer(cfg *config.Conf, registry queue.Registry) (*asynq.Server, *asynq
 			log.Warn("Asynq task failed",
 				zap.String("task_type", task.Type()),
 				zap.Error(err))
+			recordAsynqTaskError(ctx, task, err)
 		}),
 	})
 
@@ -259,7 +265,7 @@ func recordAsynqTaskFinish(ctx context.Context, run *model.TaskRun, taskErr erro
 	if run == nil {
 		return
 	}
-	if err := taskcenter.NewRunRecorder().Finish(ctx, run, resolveAsynqRunFinish(ctx, taskErr)); err != nil {
+	if err := taskcenter.NewRunRecorder().Finish(ctx, run, resolveAsynqRunFinish(ctx, taskErr)); err != nil && !errors.Is(err, taskcenter.ErrTaskRunStatusChanged) {
 		log.Warn("Record async task finish failed",
 			zap.String("task_type", run.TaskCode),
 			zap.String("task_id", run.SourceID),
@@ -268,6 +274,9 @@ func recordAsynqTaskFinish(ctx context.Context, run *model.TaskRun, taskErr erro
 }
 
 func resolveAsynqRunFinish(ctx context.Context, taskErr error) taskcenter.RunFinish {
+	if taskErr == nil && ctx.Err() != nil {
+		taskErr = ctx.Err()
+	}
 	finish := taskcenter.RunFinish{Error: taskErr}
 	if taskErr == nil || errors.Is(taskErr, queue.ErrSkipRetry) {
 		return finish
@@ -278,6 +287,61 @@ func resolveAsynqRunFinish(ctx context.Context, taskErr error) taskcenter.RunFin
 		finish.Status = model.TaskRunStatusRetrying
 	}
 	return finish
+}
+
+// Asynq 超时不会等待 handler 返回，必须在队列失败回调中补齐本次执行状态。
+func recordAsynqTaskError(ctx context.Context, task *asynq.Task, taskErr error) {
+	if task == nil {
+		return
+	}
+	taskID, ok := asynq.GetTaskID(ctx)
+	if !ok || taskID == "" {
+		return
+	}
+	db, err := model.GetDB()
+	if err == nil {
+		retryCount, _ := asynq.GetRetryCount(ctx)
+		err = finishActiveAsynqTask(ctx, db, task.Type(), taskID, retryCount+1, resolveAsynqRunFinish(ctx, taskErr))
+	}
+	if err != nil {
+		log.Warn("Finalize async task failure failed", zap.String("task_type", task.Type()), zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+func finishActiveAsynqTask(ctx context.Context, db *gorm.DB, taskCode, taskID string, attempt int, finish taskcenter.RunFinish) error {
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	return db.WithContext(finishCtx).Transaction(func(tx *gorm.DB) error {
+		var run model.TaskRun
+		// 锁住当前尝试直到导出状态也已落库，避免空 token 的未领取记录与下一次重试竞争。
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("task_code = ? AND source_id = ? AND attempt = ? AND status IN ?", taskCode, taskID, attempt, []string{
+				model.TaskRunStatusPending, model.TaskRunStatusRunning, model.TaskRunStatusRetrying,
+				model.TaskRunStatusFailed, model.TaskRunStatusTimeout, model.TaskRunStatusInterrupted,
+			}).Order("id DESC").First(&run).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if run.Status == model.TaskRunStatusPending || run.Status == model.TaskRunStatusRunning {
+			if err := taskcenter.NewRecorderWithDB(tx).Finish(finishCtx, &run, finish); err != nil {
+				return err
+			}
+		}
+		// wrapper 可能先结束任务，但领取导出失败时尚未写入导出终态；重复回调仅补齐导出。
+		if taskCode != jobs.TypeExportFileList && taskCode != jobs.TypeExportRequestLog {
+			return nil
+		}
+		svc := service.NewExportCenterServiceWithDeps(service.ExportCenterServiceDeps{DB: tx})
+		token := fmt.Sprintf("%s:attempt:%d", taskID, attempt)
+		if run.Status == model.TaskRunStatusRetrying {
+			return svc.MarkPendingForRetry(finishCtx, run.ID, finish.Error, token)
+		}
+		// 领取前失败时 token 仍为空；行锁确保此时尚未开始下一次尝试。
+		return svc.MarkFailed(finishCtx, run.ID, finish.Error, token, "")
+	})
 }
 
 func currentQueueNamespace() string {

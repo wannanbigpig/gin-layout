@@ -58,7 +58,7 @@ func (s *RoleService) List(params *form.RoleList) (interface{}, error) {
 		params.PerPage,
 		condition,
 		args,
-		model.ListOptionalParams{OrderBy: "sort desc, id desc"},
+		model.ListOptionalParams{OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "sort desc, id desc", "id", "name", "code", "sort", "created_at", "updated_at")},
 	)
 	if err != nil {
 		return nil, err

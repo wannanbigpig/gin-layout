@@ -118,9 +118,25 @@ func (s *ReminderService) Run(ctx context.Context, options ReminderOptions) (Rem
 		if len(items) == 0 {
 			break
 		}
+		candidates, err := loadReminderCandidates(db, items, now, options.SMSEnabled)
+		if err != nil {
+			return result, err
+		}
 		for _, item := range items {
 			result.Scanned++
-			handled, smsQueued, err := s.notify(ctx, db, item, now, options.SMSEnabled)
+			lastID = item.ID
+			candidate, ok := candidates[item.ID]
+			if !ok {
+				continue
+			}
+			if (!candidate.inAppEnabled || candidate.delivered.inApp) && (!candidate.smsEnabled || candidate.delivered.sms) {
+				// Handled 表示本轮有效渠道已处理，包含此前已经投递的周期。
+				if candidate.inAppEnabled || candidate.smsEnabled {
+					result.Handled++
+				}
+				continue
+			}
+			handled, smsQueued, err := s.notifyWithDeliveryState(ctx, db, item, now, options.SMSEnabled, candidate.delivered)
 			if err != nil {
 				return result, err
 			}
@@ -130,7 +146,6 @@ func (s *ReminderService) Run(ctx context.Context, options ReminderOptions) (Rem
 			if smsQueued {
 				result.SMSQueued++
 			}
-			lastID = item.ID
 		}
 		if len(items) < reminderPageSize {
 			break
@@ -148,7 +163,119 @@ func (s *ReminderService) Run(ctx context.Context, options ReminderOptions) (Rem
 	return result, nil
 }
 
+type reminderDeliveryState struct {
+	inApp bool
+	sms   bool
+}
+
+type reminderCandidate struct {
+	userID       uint
+	inAppEnabled bool
+	smsEnabled   bool
+	delivered    reminderDeliveryState
+}
+
+// 批量预查偏好和周期投递记录；只有缺少已开启渠道的待办才进入逐条事务。
+// 消息软删除和短信失败/未知等状态均保留幂等身份，不能再次生成同周期投递。
+func loadReminderCandidates(db *gorm.DB, items []*model.UserTodo, now time.Time, smsEnabled bool) (map[uint]*reminderCandidate, error) {
+	preferencesByUser := make(map[uint]reminderSMSPreference)
+	userIDs := make([]uint, 0, len(items))
+	for _, item := range items {
+		if _, exists := preferencesByUser[item.AssigneeID]; exists {
+			continue
+		}
+		preferencesByUser[item.AssigneeID] = reminderSMSPreference{InAppEnabled: true, LeadMinutes: DefaultReminderLeadMinutes}
+		userIDs = append(userIDs, item.AssigneeID)
+	}
+	var preferences []model.NotificationPreference
+	if err := db.Model(&model.NotificationPreference{}).
+		Select("user_id", "lead_minutes", "in_app_enabled", "sms_enabled").
+		Where("scene = ? AND user_id IN ?", model.NotificationSceneTodoDue, userIDs).
+		Find(&preferences).Error; err != nil {
+		return nil, err
+	}
+	for _, preference := range preferences {
+		preferencesByUser[preference.UserID] = reminderSMSPreference{
+			InAppEnabled: preference.InAppEnabled == 1,
+			SMSEnabled:   preference.SMSEnabled == 1,
+			LeadMinutes:  effectiveReminderLeadMinutes(preference.LeadMinutes),
+		}
+	}
+	phoneAvailable := make(map[uint]bool)
+	if smsEnabled {
+		smsUserIDs := make([]uint, 0, len(userIDs))
+		for _, userID := range userIDs {
+			if preferencesByUser[userID].SMSEnabled {
+				smsUserIDs = append(smsUserIDs, userID)
+			}
+		}
+		if len(smsUserIDs) > 0 {
+			var users []model.AdminUser
+			if err := db.Select("id", "full_phone_number").Where("id IN ? AND status = ? AND deleted_at = 0", smsUserIDs, model.AdminUserStatusEnabled).Find(&users).Error; err != nil {
+				return nil, err
+			}
+			for _, user := range users {
+				phoneAvailable[user.ID] = normalizeReminderPhone(user.FullPhoneNumber) != ""
+			}
+		}
+	}
+
+	candidates := make(map[uint]*reminderCandidate, len(items))
+	messageKeys, smsKeys := make([]string, 0, len(items)), make([]string, 0, len(items))
+	messageTargets, smsTargets := make(map[string]*reminderCandidate), make(map[string]*reminderCandidate)
+	for _, item := range items {
+		preference := preferencesByUser[item.AssigneeID]
+		if item.DueAt == nil || item.DueAt.Time.After(now.Add(time.Duration(preference.LeadMinutes)*time.Minute)) {
+			continue
+		}
+		candidate := &reminderCandidate{
+			userID:       item.AssigneeID,
+			inAppEnabled: preference.InAppEnabled,
+			smsEnabled:   smsEnabled && preference.SMSEnabled && phoneAvailable[item.AssigneeID],
+		}
+		candidates[item.ID] = candidate
+		cycle := fmt.Sprintf("v1:%d:%d:%s", item.ID, item.DueAt.Time.Unix(), todoReminderType(item.DueAt.Time, now))
+		if candidate.inAppEnabled {
+			key := "tdr:" + cycle
+			messageKeys = append(messageKeys, key)
+			messageTargets[key] = candidate
+		}
+		if candidate.smsEnabled {
+			key := "tds:" + cycle
+			smsKeys = append(smsKeys, key)
+			smsTargets[key] = candidate
+		}
+	}
+	if len(messageKeys) > 0 {
+		var messages []model.SysMessage
+		if err := db.Select("user_id", "batch_id").Where("user_id IN ? AND batch_id IN ?", userIDs, messageKeys).Find(&messages).Error; err != nil {
+			return nil, err
+		}
+		for _, message := range messages {
+			if target := messageTargets[message.BatchID]; target != nil && target.userID == message.UserID {
+				target.delivered.inApp = true
+			}
+		}
+	}
+	if len(smsKeys) > 0 {
+		var deliveries []model.SMSDelivery
+		if err := db.Select("user_id", "idempotency_key").Where("idempotency_key IN ?", smsKeys).Find(&deliveries).Error; err != nil {
+			return nil, err
+		}
+		for _, delivery := range deliveries {
+			if target := smsTargets[delivery.IdempotencyKey]; target != nil && target.userID == delivery.UserID {
+				target.delivered.sms = true
+			}
+		}
+	}
+	return candidates, nil
+}
+
 func (s *ReminderService) notify(ctx context.Context, db *gorm.DB, item *model.UserTodo, now time.Time, smsEnabled bool) (bool, bool, error) {
+	return s.notifyWithDeliveryState(ctx, db, item, now, smsEnabled, reminderDeliveryState{})
+}
+
+func (s *ReminderService) notifyWithDeliveryState(ctx context.Context, db *gorm.DB, item *model.UserTodo, now time.Time, smsEnabled bool, delivered reminderDeliveryState) (bool, bool, error) {
 	if item == nil || item.DueAt == nil {
 		return false, false, nil
 	}
@@ -175,18 +302,24 @@ func (s *ReminderService) notify(ctx context.Context, db *gorm.DB, item *model.U
 		if err != nil {
 			return err
 		}
-		input := buildReminderMessage(current, now)
+		if current.DueAt.Time.After(now.Add(time.Duration(preference.LeadMinutes) * time.Minute)) {
+			return nil
+		}
 		if preference.InAppEnabled {
-			message, created, err = s.notificationFactory(tx).Persist(ctx, input)
-			if err != nil {
-				return err
+			if !delivered.inApp {
+				message, created, err = s.notificationFactory(tx).Persist(ctx, buildReminderMessage(current, now))
+				if err != nil {
+					return err
+				}
 			}
 			handled = true
 		}
 		if smsEnabled && preference.SMSEnabled && fullPhone != "" {
-			smsQueued, err = persistTodoSMSDelivery(tx, current, now)
-			if err != nil {
-				return err
+			if !delivered.sms {
+				smsQueued, err = persistTodoSMSDelivery(tx, current, now)
+				if err != nil {
+					return err
+				}
 			}
 			handled = true
 		}

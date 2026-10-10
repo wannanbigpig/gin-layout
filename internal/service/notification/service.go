@@ -422,7 +422,7 @@ func (s *Service) unreadCountsByUsers(db *gorm.DB, userIDs []uint) map[uint]int6
 	var rows []row
 	if err := db.Model(&model.SysMessage{}).
 		Select("user_id, COUNT(*) AS cnt").
-		Where("user_id IN ? AND is_read = ?", userIDs, model.MessageUnread).
+		Where("user_id IN ? AND is_read = ? AND deleted_at IS NULL", userIDs, model.MessageUnread).
 		Group("user_id").
 		Scan(&rows).Error; err != nil {
 		log.Warn("query unread message counts failed", zap.Error(err))
@@ -465,6 +465,7 @@ func (s *Service) List(ctx context.Context, userID uint, params *form.SysMessage
 	}
 
 	base := db.WithContext(ctx).Model(&model.SysMessage{})
+	base = base.Where("deleted_at IS NULL")
 	if strings.TrimSpace(condition) != "" {
 		base = base.Where(condition, args...)
 	}
@@ -499,7 +500,7 @@ func (s *Service) UnreadCount(ctx context.Context, userID uint) (int64, error) {
 		return 0, err
 	}
 	var count int64
-	err = db.Model(&model.SysMessage{}).Where("user_id = ? AND is_read = ?", userID, model.MessageUnread).Count(&count).Error
+	err = db.Model(&model.SysMessage{}).Where("user_id = ? AND is_read = ? AND deleted_at IS NULL", userID, model.MessageUnread).Count(&count).Error
 	return count, err
 }
 
@@ -516,7 +517,7 @@ func (s *Service) MarkRead(ctx context.Context, userID, id uint) (bool, int64, e
 	}
 	now := utils.FormatDate{Time: time.Now()}
 	result := db.Model(&model.SysMessage{}).
-		Where("id = ? AND user_id = ? AND is_read = ?", id, userID, model.MessageUnread).
+		Where("id = ? AND user_id = ? AND is_read = ? AND deleted_at IS NULL", id, userID, model.MessageUnread).
 		Updates(map[string]any{"is_read": model.MessageRead, "read_at": &now})
 	if result.Error != nil {
 		return false, 0, result.Error
@@ -536,6 +537,35 @@ func (s *Service) MarkRead(ctx context.Context, userID, id uint) (bool, int64, e
 	return result.RowsAffected > 0, unreadCount, nil
 }
 
+// Delete 只隐藏当前用户收到的消息；保留原记录和批次唯一键，避免重试投递后消息重新出现。
+func (s *Service) Delete(ctx context.Context, userID, id uint) (bool, int64, error) {
+	if userID == 0 || id == 0 {
+		return false, 0, nil
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return false, 0, err
+	}
+	if err := ensureMessageTable(db); err != nil {
+		return false, 0, err
+	}
+	now := utils.FormatDate{Time: time.Now()}
+	result := db.Model(&model.SysMessage{}).
+		Where("id = ? AND user_id = ? AND deleted_at IS NULL", id, userID).
+		Update("deleted_at", &now)
+	if result.Error != nil {
+		return false, 0, result.Error
+	}
+	unreadCount, err := s.UnreadCount(ctx, userID)
+	if err != nil {
+		return result.RowsAffected > 0, 0, err
+	}
+	if result.RowsAffected > 0 {
+		s.dispatch(ctx, Event{Event: "message_deleted", UserID: userID, MessageID: id, UnreadCount: unreadCount})
+	}
+	return result.RowsAffected > 0, unreadCount, nil
+}
+
 func (s *Service) MarkAllRead(ctx context.Context, userID uint, category string) (int64, int64, error) {
 	if userID == 0 {
 		return 0, 0, nil
@@ -548,7 +578,7 @@ func (s *Service) MarkAllRead(ctx context.Context, userID uint, category string)
 		return 0, 0, err
 	}
 	now := utils.FormatDate{Time: time.Now()}
-	query := db.Model(&model.SysMessage{}).Where("user_id = ? AND is_read = ?", userID, model.MessageUnread)
+	query := db.Model(&model.SysMessage{}).Where("user_id = ? AND is_read = ? AND deleted_at IS NULL", userID, model.MessageUnread)
 	if strings.TrimSpace(category) != "" {
 		query = query.Where("category = ?", strings.TrimSpace(category))
 	}

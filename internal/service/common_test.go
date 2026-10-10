@@ -221,6 +221,38 @@ func TestGetFileAccessPathReturnsThumbnailForLocalImageVariant(t *testing.T) {
 	assert.LessOrEqual(t, bounds.Dy(), thumbnailMaxDimension)
 }
 
+func TestGetFileAccessPathPrivateFileRequiresOwnerToken(t *testing.T) {
+	db := newFileResourceSQLiteDB(t)
+	basePath := t.TempDir()
+	filePath := filepath.Join(basePath, "private.txt")
+	assert.NoError(t, os.WriteFile(filePath, []byte("private"), 0o600))
+
+	record := &model.UploadFiles{
+		UUID:          "1234567890abcdef1234567890abcdee",
+		UID:           7,
+		IsPublic:      global.No,
+		StorageDriver: model.StorageDriverLocal,
+		StorageBase:   basePath,
+		ObjectKey:     "private.txt",
+		StorageStatus: model.StorageStatusStored,
+	}
+	assert.NoError(t, db.Create(record).Error)
+	service := NewCommonService().SetDB(db)
+
+	_, err := service.GetFileAccessPath(record.UUID, "", false, 0)
+	var businessErr *e.BusinessError
+	assert.ErrorAs(t, err, &businessErr)
+	assert.Equal(t, e.FilePrivateAuthNeeded, businessErr.GetCode())
+
+	_, err = service.GetFileAccessPath(record.UUID, "", true, 8)
+	assert.ErrorAs(t, err, &businessErr)
+	assert.Equal(t, e.FileAccessDenied, businessErr.GetCode())
+
+	access, err := service.GetFileAccessPath(record.UUID, "", true, 7)
+	assert.NoError(t, err)
+	assert.Equal(t, filePath, access.LocalPath)
+}
+
 func TestGetFileAccessPathRejectsExpiredFile(t *testing.T) {
 	db := newFileResourceSQLiteDB(t)
 	record := &model.UploadFiles{

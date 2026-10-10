@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	casbinx "github.com/wannanbigpig/gin-layout/internal/access/casbin"
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
@@ -35,6 +36,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 	dept := model.NewDepartment()
 	originPids := "0"
 	originPid := uint(0)
+	originLevel := uint8(1)
 	// 更新场景：加载现有部门数据，记录原始 pids 用于后续级联判断
 	if params.Id > 0 {
 		if err := dept.GetById(params.Id); err != nil {
@@ -48,6 +50,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 		}
 		originPids = dept.Pids
 		originPid = dept.Pid
+		originLevel = dept.Level
 	}
 	// 检查是否为受保护部门（系统默认部门只允许修改名称和描述）
 	if params.Id > 0 && access.NewSystemDefaultsService().IsProtectedDepartment(dept) {
@@ -118,10 +121,7 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 		}
 		// pids 变更时，级联更新所有子部门的 pids 路径
 		if dept.Pids != originPids {
-			updateExpr := utils2.BuildPidsUpdateExpr(originPids, dept.Pids)
-			deptModel := model.NewDepartment()
-			deptModel.SetDB(tx)
-			if err := deptModel.UpdateChildrenPidsByParent(dept.ID, updateExpr); err != nil {
+			if err := updateDeptDescendants(tx, dept, originPids, originLevel); err != nil {
 				return err
 			}
 		}
@@ -138,6 +138,9 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 				return err
 			}
 		}
+		if params.Id == 0 || dept.Pids != originPids {
+			return casbinx.AdvancePermissionVersion(tx)
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -146,6 +149,32 @@ func (s *DeptService) applyDeptMutation(params *deptMutation) (*model.Department
 		access.NewDataScopeFilter().InvalidateAllCache(context.Background())
 	}
 	return dept, nil
+}
+
+// 子部门路径包含被移动部门自身的 ID，根部门的 "0" 不属于子部门路径。
+func departmentPath(pids string, id uint) string {
+	if pids == "0" || pids == "" {
+		return fmt.Sprint(id)
+	}
+	return fmt.Sprintf("%s,%d", pids, id)
+}
+
+func updateDeptDescendants(tx *gorm.DB, dept *model.Department, originPids string, originLevel uint8) error {
+	oldPath := departmentPath(originPids, dept.ID)
+	levelDelta := int(dept.Level) - int(originLevel)
+	var deepest int
+	if err := tx.Model(&model.Department{}).
+		Where("pids = ? OR pids LIKE ?", oldPath, oldPath+",%").
+		Select("COALESCE(MAX(level), 0)").Scan(&deepest).Error; err != nil {
+		return err
+	}
+	if deepest > 0 && deepest+levelDelta > maxDeptLevel {
+		return e.NewBusinessError(e.MaxDeptDepth)
+	}
+	updateExpr := utils2.BuildPidsUpdateExpr(oldPath, departmentPath(dept.Pids, dept.ID))
+	deptModel := model.NewDepartment()
+	deptModel.SetDB(tx)
+	return deptModel.UpdateChildrenPidsByParent(dept.ID, updateExpr, levelDelta)
 }
 
 // generateDeptCode 生成部门唯一编码，格式：dept_{uuid}。
@@ -200,7 +229,10 @@ func (s *DeptService) executeDeleteTransaction(dept *model.Department, id uint) 
 			}
 		}
 
-		return access.NewPermissionSyncCoordinator().SyncUsers(affectedUserIDs, tx)
+		if err := access.NewPermissionSyncCoordinator().SyncUsers(affectedUserIDs, tx); err != nil {
+			return err
+		}
+		return casbinx.AdvancePermissionVersion(tx)
 	})
 	if err != nil {
 		return err

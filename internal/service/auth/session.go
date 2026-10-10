@@ -54,7 +54,7 @@ func (s *LoginService) ListSessions(params *form.SessionList) (*resources.Collec
 			"token_expires",
 			"created_at",
 		},
-		OrderBy: "created_at DESC, id DESC",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "created_at DESC, id DESC", "uid", "token_expires", "created_at"),
 	}
 
 	transformer := resources.NewSessionTransformer()

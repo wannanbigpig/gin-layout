@@ -3,6 +3,8 @@ package admin_v1
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -48,17 +50,78 @@ func TestUserTodoControllerUsesCurrentUserID(t *testing.T) {
 
 	preferenceRecorder := httptest.NewRecorder()
 	preferenceCtx, _ := gin.CreateTestContext(preferenceRecorder)
-	preferenceCtx.Request = httptest.NewRequest(http.MethodPost, "/admin/v1/todo/reminder-preference", bytes.NewBufferString(`{"in_app_enabled":false,"sms_enabled":false}`))
+	preferenceCtx.Request = httptest.NewRequest(http.MethodPost, "/admin/v1/todo/reminder-preference", bytes.NewBufferString(`{"in_app_enabled":false,"sms_enabled":false,"lead_minutes":30}`))
 	preferenceCtx.Request.Header.Set("Content-Type", "application/json")
 	preferenceCtx.Set(global.ContextKeyUID, uint(7))
 	preferenceCtx.Set(global.ContextKeyRequestStartTime, time.Now())
 	UserTodoController{}.UpdateReminderPreference(preferenceCtx)
-	if preferenceRecorder.Code != http.StatusOK || fake.preferenceUID != 7 || fake.preferenceInApp || fake.preferenceSMS {
+	if preferenceRecorder.Code != http.StatusOK || fake.preferenceUID != 7 || fake.preferenceInApp || fake.preferenceSMS || fake.preferenceLead != 30 {
 		t.Fatalf("preference status=%d uid=%d in_app=%v sms=%v body=%s", preferenceRecorder.Code, fake.preferenceUID, fake.preferenceInApp, fake.preferenceSMS, preferenceRecorder.Body.String())
 	}
 }
 
+func TestUserTodoListIncludesCurrentGroupSummary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fake := &fakeUserTodoService{}
+	previous := newUserTodoService
+	newUserTodoService = func() userTodoService { return fake }
+	t.Cleanup(func() { newUserTodoService = previous })
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/todo/list?page=1&per_page=10&group_id=7&status=completed", nil)
+	c.Set(global.ContextKeyUID, uint(9))
+	c.Set(global.ContextKeyRequestStartTime, time.Now())
+	UserTodoController{}.List(c)
+
+	var body struct {
+		Data struct {
+			Total   int64 `json:"total"`
+			Summary struct {
+				Total   int64 `json:"total"`
+				Pending int64 `json:"pending"`
+			} `json:"summary"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusOK || fake.summaryGroupID == nil || *fake.summaryGroupID != 7 || body.Data.Total != 0 || body.Data.Summary.Total != 2 || body.Data.Summary.Pending != 2 {
+		t.Fatalf("list summary mismatch: code=%d group=%v body=%s", recorder.Code, fake.summaryGroupID, recorder.Body.String())
+	}
+}
+
+func TestUserTodoListStillReturnsRowsWhenSummaryFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fake := &fakeUserTodoService{summaryErr: errors.New("summary unavailable")}
+	previous := newUserTodoService
+	newUserTodoService = func() userTodoService { return fake }
+	t.Cleanup(func() { newUserTodoService = previous })
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/admin/v1/todo/list?page=1&per_page=10", nil)
+	c.Set(global.ContextKeyUID, uint(9))
+	c.Set(global.ContextKeyRequestStartTime, time.Now())
+	UserTodoController{}.List(c)
+
+	var body struct {
+		Data struct {
+			Data    []any                               `json:"data"`
+			Summary *resources.UserTodoSummaryResources `json:"summary"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusOK || body.Data.Data == nil || body.Data.Summary != nil {
+		t.Fatalf("list must survive summary error: %s", recorder.Body.String())
+	}
+}
+
 type fakeUserTodoService struct {
+	summaryGroupID  *uint
+	summaryErr      error
 	createUID       uint
 	createTitle     string
 	statusUID       uint
@@ -67,6 +130,7 @@ type fakeUserTodoService struct {
 	preferenceUID   uint
 	preferenceInApp bool
 	preferenceSMS   bool
+	preferenceLead  int
 }
 
 func (f *fakeUserTodoService) List(context.Context, uint, *form.UserTodoList) (*resources.Collection, error) {
@@ -75,6 +139,14 @@ func (f *fakeUserTodoService) List(context.Context, uint, *form.UserTodoList) (*
 
 func (f *fakeUserTodoService) Summary(context.Context, uint) (*resources.UserTodoSummaryResources, error) {
 	return &resources.UserTodoSummaryResources{}, nil
+}
+
+func (f *fakeUserTodoService) SummaryInGroup(_ context.Context, _ uint, groupID *uint) (*resources.UserTodoSummaryResources, error) {
+	f.summaryGroupID = groupID
+	if f.summaryErr != nil {
+		return nil, f.summaryErr
+	}
+	return &resources.UserTodoSummaryResources{Total: 2, Pending: 2}, nil
 }
 
 func (f *fakeUserTodoService) CreateManual(_ context.Context, uid uint, params *form.UserTodoCreate) (*model.UserTodo, error) {
@@ -102,9 +174,30 @@ func (f *fakeUserTodoService) GetReminderPreference(context.Context, uint) (*tod
 	return &todo.ReminderPreference{InAppEnabled: true}, nil
 }
 
-func (f *fakeUserTodoService) UpdateReminderPreference(_ context.Context, uid uint, inAppEnabled, smsEnabled bool) (*todo.ReminderPreference, error) {
+func (f *fakeUserTodoService) ListGroups(context.Context, uint) ([]*model.UserTodoGroup, error) {
+	return []*model.UserTodoGroup{}, nil
+}
+
+func (f *fakeUserTodoService) CreateGroup(_ context.Context, uid uint, name string) (*model.UserTodoGroup, error) {
+	return &model.UserTodoGroup{UserID: uid, Name: name}, nil
+}
+
+func (f *fakeUserTodoService) RenameGroup(_ context.Context, uid, id uint, name string) (*model.UserTodoGroup, error) {
+	return &model.UserTodoGroup{UserID: uid, Name: name}, nil
+}
+
+func (f *fakeUserTodoService) DeleteGroup(context.Context, uint, uint) error { return nil }
+
+func (f *fakeUserTodoService) MoveToGroup(context.Context, uint, uint, uint) (*model.UserTodo, error) {
+	return &model.UserTodo{}, nil
+}
+
+func (f *fakeUserTodoService) UpdateReminderPreference(_ context.Context, uid uint, inAppEnabled, smsEnabled bool, leadMinutes *int) (*todo.ReminderPreference, error) {
 	f.preferenceUID = uid
 	f.preferenceInApp = inAppEnabled
 	f.preferenceSMS = smsEnabled
+	if leadMinutes != nil {
+		f.preferenceLead = *leadMinutes
+	}
 	return &todo.ReminderPreference{InAppEnabled: inAppEnabled, SMSEnabled: smsEnabled}, nil
 }

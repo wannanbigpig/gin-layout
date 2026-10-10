@@ -6,7 +6,7 @@ app:
   max_upload_body_mb: 256       # 本地 multipart 整个请求体上限（MB），包含全部文件和表单字段；不替代 storage.max_file_size_mb 单文件限制
   language: zh_CN
 #  allow_degraded_startup: false   # service 启动时依赖初始化失败是否继续启动；仅建议在需要”先起服务再排障”场景开启
-#  enable_reset_system_cron: false # 高风险：是否启用 reset-system-data 定时任务；默认关闭，避免误重建系统数据
+#  enable_reset_system_cron: false # 高风险：首次同步 reset-system-data 的默认状态；已有任务须通过 task_definitions.status 启停
   # 速率限制（全局限流，基于 IP 的内存令牌桶，单实例保护；多 API 实例不共享计数）
 #  rate_limit_enabled: true        # 是否启用全局限流，默认开启
 #  rate_limit_rps: 20              # 每 IP 每秒允许的请求数，默认 20

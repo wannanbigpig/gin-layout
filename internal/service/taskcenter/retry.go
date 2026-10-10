@@ -3,6 +3,7 @@ package taskcenter
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -65,6 +66,14 @@ func evaluateTaskRunRetryState(run *model.TaskRun, definition *model.TaskDefinit
 	}
 	if definition.AllowRetry != model.TaskRetryAllowed {
 		return false, "任务不允许重试"
+	}
+	if definition.Kind == model.TaskKindCron {
+		if definition.IsHighRisk == model.TaskHighRisk {
+			return false, "高危定时任务请使用手动触发并确认"
+		}
+		if strings.TrimSpace(definition.Handler) == "" {
+			return false, "cron 任务处理器未配置"
+		}
 	}
 	if summary.ActiveCount > 0 {
 		return false, "该任务已有重试记录正在执行或排队"

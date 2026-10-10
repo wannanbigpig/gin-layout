@@ -35,6 +35,7 @@ func (f *UpdatePermission) GetIDPointer() *uint {
 
 type ListPermission struct {
 	Paginate
+	ListSort
 	Name        string `form:"name" json:"name" binding:"omitempty,max=60"`                                                          // 权限名称
 	Method      string `form:"method" json:"method" binding:"omitempty,oneof=GET POST PUT DELETE OPTIONS HEAD PATCH" label:"接口请求方法"` // 接口请求方法
 	Route       string `form:"route" json:"route" binding:"omitempty"`                                                               // 接口路由

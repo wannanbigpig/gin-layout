@@ -15,6 +15,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
 	"github.com/wannanbigpig/gin-layout/internal/service/auth"
+	"github.com/wannanbigpig/gin-layout/internal/sms"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 	"gorm.io/driver/sqlite"
@@ -675,6 +676,9 @@ func TestProfilePasswordRevocationUsesSelfChangeReason(t *testing.T) {
 }
 
 func TestUpdateProfilePasswordVerifiesCurrentPasswordBeforeUpdate(t *testing.T) {
+	previousSettings := profileSMSSettings
+	profileSMSSettings = func() (sms.Config, error) { return sms.Config{}, nil }
+	defer func() { profileSMSSettings = previousSettings }()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite failed: %v", err)
@@ -763,14 +767,15 @@ func TestUpdateProfileWithoutPasswordDoesNotRequireCurrentPassword(t *testing.T)
 	}
 }
 
-func TestUpdateProfilePhoneChangeDoesNotRequireCurrentPassword(t *testing.T) {
-	user := &model.AdminUser{PhoneNumber: "13800138000", CountryCode: "86", Password: "unused"}
+func TestUpdateProfileRejectsPhoneChange(t *testing.T) {
 	changedPhone := "13900139000"
 	params := &form.UpdateProfile{PhoneNumber: &changedPhone}
-	// 手机号变更不再要求当前密码（仅改密码时要求）
-	if err := verifyProfileCurrentPassword(user, params, false); err != nil {
-		t.Fatalf("phone-only update must not require current password: %v", err)
+	if err := NewAdminUserService().UpdateProfile(1, params); err == nil {
+		t.Fatal("profile edit must reject phone updates")
+	} else if businessErr, ok := err.(*e.BusinessError); !ok || businessErr.GetCode() != e.InvalidParameter {
+		t.Fatalf("expected InvalidParameter, got %v", err)
 	}
+	user := &model.AdminUser{Password: "unused"}
 	// 改密码仍要求当前密码
 	pw := "new-password"
 	paramsWithPw := &form.UpdateProfile{Password: &pw}
@@ -781,25 +786,20 @@ func TestUpdateProfilePhoneChangeDoesNotRequireCurrentPassword(t *testing.T) {
 	}
 }
 
-func TestProfilePhoneChangedOnlyWhenCredentialValueChanges(t *testing.T) {
-	user := &model.AdminUser{PhoneNumber: "13800138000", CountryCode: "86"}
-	samePhone := "13800138000"
-	sameCountryCode := "86"
-	if profilePhoneChanged(user, &form.UpdateProfile{PhoneNumber: &samePhone, CountryCode: &sameCountryCode}) {
-		t.Fatal("unchanged phone fields must not be treated as a credential change")
+func TestManagedUserUpdateCannotBypassOwnCredentialVerification(t *testing.T) {
+	svc := NewAdminUserService()
+	svc.SetAdminUserId(7)
+	phone := "13900139000"
+	phoneUpdate := &form.UpdateAdminUser{Id: 7}
+	phoneUpdate.PhoneNumber = &phone
+	if err := svc.Update(phoneUpdate); err == nil {
+		t.Fatal("managed-user route changed own phone without security flow")
 	}
-
-	changedPhone := "13900139000"
-	if !profilePhoneChanged(user, &form.UpdateProfile{PhoneNumber: &changedPhone}) {
-		t.Fatal("changed phone number must be treated as a credential change")
-	}
-	changedCountryCode := "852"
-	if !profilePhoneChanged(user, &form.UpdateProfile{CountryCode: &changedCountryCode}) {
-		t.Fatal("changed country code must be treated as a credential change")
-	}
-	prefixedSameCountryCode := "+86"
-	if profilePhoneChanged(user, &form.UpdateProfile{CountryCode: &prefixedSameCountryCode}) {
-		t.Fatal("equivalent +86 country code must not be treated as a credential change")
+	password := "new-password"
+	passwordUpdate := &form.UpdateAdminUser{Id: 7}
+	passwordUpdate.Password = &password
+	if err := svc.Update(passwordUpdate); err == nil {
+		t.Fatal("managed-user route changed own password without security flow")
 	}
 }
 
@@ -1027,4 +1027,39 @@ func testPNGContent() []byte {
 
 func testWebPContent() []byte {
 	return []byte{'R', 'I', 'F', 'F', 0x10, 0x00, 0x00, 0x00, 'W', 'E', 'B', 'P', 'V', 'P', '8', ' ', 0x00, 0x00, 0x00, 0x00}
+}
+
+func TestUpdateProfilePersistsExplicitEmptyEmail(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE admin_user (id integer primary key, nickname text, email text, updated_at datetime, deleted_at integer not null default 0)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO admin_user (id,nickname,email) VALUES (7,'member','old@example.com'),(8,'other','')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	svc := NewAdminUserService()
+	nickname := "updated"
+	if err := svc.updateProfileWithDB(db, 7, &form.UpdateProfile{Nickname: &nickname}); err != nil {
+		t.Fatal(err)
+	}
+	var email string
+	if err := db.Table("admin_user").Where("id=7").Pluck("email", &email).Error; err != nil {
+		t.Fatal(err)
+	}
+	if email != "old@example.com" {
+		t.Fatalf("omitted email changed: %q", email)
+	}
+	empty := ""
+	if err := svc.updateProfileWithDB(db, 7, &form.UpdateProfile{Email: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Table("admin_user").Where("id=7").Pluck("email", &email).Error; err != nil {
+		t.Fatal(err)
+	}
+	if email != "" {
+		t.Fatalf("explicit empty email not persisted: %q", email)
+	}
 }

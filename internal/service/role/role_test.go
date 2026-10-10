@@ -2,6 +2,7 @@ package role
 
 import (
 	"errors"
+	"regexp"
 	"testing"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -27,8 +28,9 @@ func TestGenerateRoleCodeUsesUniqueDefaultPrefix(t *testing.T) {
 	if first == second {
 		t.Fatalf("expected different role codes, got %s", first)
 	}
-	if first[:5] != "role_" || second[:5] != "role_" {
-		t.Fatalf("expected role_ prefix, got %s and %s", first, second)
+	pattern := regexp.MustCompile(`^role_[A-Za-z0-9]{12}$`)
+	if !pattern.MatchString(first) || !pattern.MatchString(second) {
+		t.Fatalf("expected 17-character role code, got %s and %s", first, second)
 	}
 }
 

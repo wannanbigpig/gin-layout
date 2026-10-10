@@ -31,7 +31,7 @@ var (
 	Cmd = &cobra.Command{
 		Use:     "gen-error-codes",
 		Short:   "Generate frontend-friendly error code files (JSON & TypeScript) from internal/pkg/errors.",
-		Long:    "Scan the Go error code constants under internal/pkg/errors/code_*.go and emit docs/error_codes.json and docs/error_codes.ts so frontend projects can share the same numeric codes.",
+		Long:    "Scan code_*.go constants and their Chinese messages in zh-cn_*.go; emit docs/error_codes.json and docs/error_codes.ts with common errors first and descriptions for every code.",
 		Example: "go-layout command gen-error-codes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run()
@@ -40,17 +40,18 @@ var (
 )
 
 func init() {
-	Cmd.Flags().StringVar(&errorsDir, "src", defaultErrorsDir, "Directory containing error code files (code_*.go)")
+	Cmd.Flags().StringVar(&errorsDir, "src", defaultErrorsDir, "Directory containing error code files (code_*.go) and Chinese messages (zh-cn_*.go)")
 	Cmd.Flags().StringVar(&jsonOut, "json", defaultJSONOut, "Output path of the generated JSON file")
 	Cmd.Flags().StringVar(&tsOut, "ts", defaultTSOut, "Output path of the generated TypeScript file")
 }
 
 // errorCode 单个错误码项。
 type errorCode struct {
-	Name    string `json:"name"`
-	Code    int    `json:"code"`
-	Comment string `json:"comment,omitempty"`
-	Source  string `json:"source"`
+	Name        string `json:"name"`
+	Code        int    `json:"code"`
+	Description string `json:"description"`
+	Comment     string `json:"comment,omitempty"`
+	Source      string `json:"source"`
 }
 
 // fileGroup 单个 code_*.go 文件中的错误码集合。
@@ -69,14 +70,24 @@ type outputDoc struct {
 }
 
 func run() error {
-	files, err := filepath.Glob(filepath.Join(errorsDir, "code_*.go"))
+	return generate(errorsDir, jsonOut, tsOut)
+}
+
+func generate(src, jsonPath, tsPath string) error {
+	files, err := filepath.Glob(filepath.Join(src, "code_*.go"))
 	if err != nil {
 		return fmt.Errorf("glob error code files: %w", err)
 	}
 	if len(files) == 0 {
-		return fmt.Errorf("no code_*.go files found in %s", errorsDir)
+		return fmt.Errorf("no code_*.go files found in %s", src)
 	}
-	sort.Strings(files)
+	sort.SliceStable(files, func(i, j int) bool {
+		iCommon, jCommon := filepath.Base(files[i]) == "code_common.go", filepath.Base(files[j]) == "code_common.go"
+		if iCommon != jCommon {
+			return iCommon
+		}
+		return files[i] < files[j]
+	})
 
 	var (
 		groups []fileGroup
@@ -85,6 +96,10 @@ func run() error {
 	)
 
 	fset := token.NewFileSet()
+	descriptions, err := readDescriptions(fset, src)
+	if err != nil {
+		return err
+	}
 	for _, file := range files {
 		// 跳过测试文件。
 		if strings.HasSuffix(file, "_test.go") {
@@ -98,11 +113,23 @@ func run() error {
 			continue
 		}
 		// 同名常量校验，避免出现重复。
-		for _, c := range group.Codes {
+		for i := range group.Codes {
+			c := &group.Codes[i]
 			if origin, ok := seen[c.Name]; ok {
 				return fmt.Errorf("duplicate error code constant %q in %s and %s", c.Name, origin, file)
 			}
 			seen[c.Name] = file
+			message := descriptions[c.Name]
+			if strings.TrimSpace(message) == "" {
+				return fmt.Errorf("missing Chinese description for %s (%d) in zh-cn_*.go", c.Name, c.Code)
+			}
+			// 通用成功/失败响应保留 OK/FAIL，文档另提供中文含义。
+			if c.Name == "SUCCESS" && message == "OK" {
+				message = "成功"
+			} else if c.Name == "FAILURE" && message == "FAIL" {
+				message = "失败"
+			}
+			c.Description = message
 		}
 		groups = append(groups, group)
 		all = append(all, group.Codes...)
@@ -113,22 +140,91 @@ func run() error {
 
 	doc := outputDoc{
 		Generator: "go-layout command gen-error-codes",
-		Source:    errorsDir,
+		Source:    src,
 		Total:     len(all),
 		Groups:    groups,
 	}
 
-	if err := writeJSON(jsonOut, doc); err != nil {
+	if err := writeJSON(jsonPath, doc); err != nil {
 		return err
 	}
-	if err := writeTS(tsOut, all); err != nil {
+	if err := writeTS(tsPath, all); err != nil {
 		return err
 	}
 
 	fmt.Printf("Generated %d error codes from %d files.\n", len(all), len(groups))
-	fmt.Printf("  - %s\n", jsonOut)
-	fmt.Printf("  - %s\n", tsOut)
+	fmt.Printf("  - %s\n", jsonPath)
+	fmt.Printf("  - %s\n", tsPath)
 	return nil
+}
+
+// 从所选源码读取文案，避免自定义 --src 时误用编译进工具的其他版本。
+func readDescriptions(fset *token.FileSet, src string) (map[string]string, error) {
+	files, err := filepath.Glob(filepath.Join(src, "zh-cn_*.go"))
+	if err != nil {
+		return nil, fmt.Errorf("glob Chinese error text files: %w", err)
+	}
+	messages := make(map[string]string)
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, file, nil, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", file, err)
+		}
+		var parseErr error
+		ast.Inspect(f, func(node ast.Node) bool {
+			if parseErr != nil {
+				return false
+			}
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			fn, ok := call.Fun.(*ast.Ident)
+			if !ok || fn.Name != "mergeZhCNText" {
+				return true
+			}
+			if len(call.Args) != 1 {
+				parseErr = fmt.Errorf("unsupported mergeZhCNText call in %s", file)
+				return false
+			}
+			entries, ok := call.Args[0].(*ast.CompositeLit)
+			if !ok {
+				parseErr = fmt.Errorf("mergeZhCNText must use a map literal in %s", file)
+				return false
+			}
+			for _, entry := range entries.Elts {
+				pair, ok := entry.(*ast.KeyValueExpr)
+				if !ok {
+					parseErr = fmt.Errorf("unsupported Chinese error text entry in %s", file)
+					return false
+				}
+				name, nameOK := pair.Key.(*ast.Ident)
+				value, valueOK := pair.Value.(*ast.BasicLit)
+				if !nameOK || !valueOK || value.Kind != token.STRING {
+					parseErr = fmt.Errorf("Chinese error text must map constants to string literals in %s", file)
+					return false
+				}
+				message, err := strconv.Unquote(value.Value)
+				if err != nil {
+					parseErr = fmt.Errorf("parse Chinese error text in %s: %w", file, err)
+					return false
+				}
+				if _, exists := messages[name.Name]; exists {
+					parseErr = fmt.Errorf("duplicate Chinese error text for %s in %s", name.Name, file)
+					return false
+				}
+				messages[name.Name] = message
+			}
+			return false
+		})
+		if parseErr != nil {
+			return nil, parseErr
+		}
+	}
+	return messages, nil
 }
 
 // parseFile 解析单个 code_*.go 文件，提取所有 int 类型常量。
@@ -243,10 +339,15 @@ func writeTS(path string, codes []errorCode) error {
 	})
 
 	for _, c := range sorted {
-		if c.Comment != "" {
+		comment := c.Description
+		if comment == "" {
+			comment = c.Comment
+		}
+		if comment != "" {
 			// 单行展开为 // 注释，多行则裁成首行避免破坏代码块。
-			line := strings.SplitN(c.Comment, "\n", 2)[0]
+			line := strings.SplitN(comment, "\n", 2)[0]
 			line = strings.TrimSpace(line)
+			line = strings.ReplaceAll(line, "*/", "* /")
 			if line != "" {
 				fmt.Fprintf(&b, "    /** %s */\n", line)
 			}

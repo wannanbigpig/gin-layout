@@ -29,6 +29,7 @@ const (
 	exportProgressDone    uint8 = 100
 
 	exportManualRetryLimit = 3
+	exportFinishTimeout    = 3 * time.Second
 )
 
 var (
@@ -123,8 +124,8 @@ func (s *ExportCenterService) CreateRecord(ctx context.Context, input ExportReco
 }
 
 // ClaimExecution 原子占有一次导出执行。正常并发只能有一个 pending 记录进入 running；
-// 相同 executionToken 的 Asynq 后续重试可接管自身遗留的 running 状态。
-func (s *ExportCenterService) ClaimExecution(ctx context.Context, taskRunID uint, executionToken string) (*model.SysExportRecord, bool, error) {
+// 后续重试使用新 token，携带旧尝试 token 接管自身遗留的 running 状态。
+func (s *ExportCenterService) ClaimExecution(ctx context.Context, taskRunID uint, executionToken string, previousTokens ...string) (*model.SysExportRecord, bool, error) {
 	if taskRunID == 0 {
 		return nil, false, nil
 	}
@@ -141,12 +142,13 @@ func (s *ExportCenterService) ClaimExecution(ctx context.Context, taskRunID uint
 	}
 
 	now := utils.FormatDate{Time: time.Now()}
+	claimTokens := append([]string{executionToken}, previousTokens...)
 	query := db.Model(&model.SysExportRecord{}).
 		Where("task_run_id = ?", taskRunID).
-		Where("status IN ? OR (status = ? AND execution_token = ?)",
+		Where("status IN ? OR (status = ? AND execution_token IN ?)",
 			[]string{model.TaskRunStatusPending, model.TaskRunStatusRetrying},
 			model.TaskRunStatusRunning,
-			executionToken)
+			claimTokens)
 	result := query.Updates(map[string]any{
 		"status":          model.TaskRunStatusRunning,
 		"execution_token": executionToken,
@@ -164,8 +166,7 @@ func (s *ExportCenterService) ClaimExecution(ctx context.Context, taskRunID uint
 		return nil, false, err
 	}
 	claimed := result.RowsAffected > 0
-	// MySQL DATETIME 只有秒精度；重试在同一秒接管 running 时各字段可能未变化，
-	// RowsAffected 会是 0。Asynq 不会在上一尝试仍运行时启动其重试，因此该分支可视为已接管。
+	// 同一执行者的幂等领取可能未改变字段；后续重试使用不同 token，不依赖时间精度判定。
 	if !claimed && record.Status == model.TaskRunStatusRunning && record.ExecutionToken == executionToken {
 		claimed = true
 	}
@@ -173,11 +174,13 @@ func (s *ExportCenterService) ClaimExecution(ctx context.Context, taskRunID uint
 }
 
 // MarkPendingForRetry 释放本次执行占有，让 Asynq 的下一次自动重试重新领取。
-func (s *ExportCenterService) MarkPendingForRetry(ctx context.Context, taskRunID uint, taskErr error) error {
+func (s *ExportCenterService) MarkPendingForRetry(ctx context.Context, taskRunID uint, taskErr error, executionTokens ...string) error {
 	if taskRunID == 0 {
 		return nil
 	}
-	db, err := s.dbOrDefault(ctx)
+	finishCtx, cancel := exportFinishContext(ctx)
+	defer cancel()
+	db, err := s.dbOrDefault(finishCtx)
 	if err != nil {
 		return err
 	}
@@ -192,9 +195,12 @@ func (s *ExportCenterService) MarkPendingForRetry(ctx context.Context, taskRunID
 	if taskErr != nil {
 		updates["error_message"] = strings.TrimSpace(taskErr.Error())
 	}
-	result := db.Model(&model.SysExportRecord{}).
-		Where("task_run_id = ? AND status = ?", taskRunID, model.TaskRunStatusRunning).
-		Updates(updates)
+	query := db.Model(&model.SysExportRecord{}).
+		Where("task_run_id = ? AND status = ?", taskRunID, model.TaskRunStatusRunning)
+	if len(executionTokens) > 0 {
+		query = query.Where("execution_token IN ?", executionTokens)
+	}
+	result := query.Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -318,7 +324,7 @@ func (s *ExportCenterService) CommitSuccess(ctx context.Context, taskRunID uint,
 	return record, false, fmt.Errorf("%w: task run %d status is %s", ErrExportRecordFinalized, taskRunID, record.Status)
 }
 
-func (s *ExportCenterService) MarkFailed(ctx context.Context, taskRunID uint, taskErr error) error {
+func (s *ExportCenterService) MarkFailed(ctx context.Context, taskRunID uint, taskErr error, executionTokens ...string) error {
 	if taskRunID == 0 {
 		return nil
 	}
@@ -331,16 +337,21 @@ func (s *ExportCenterService) MarkFailed(ctx context.Context, taskRunID uint, ta
 	if taskErr != nil {
 		updates["error_message"] = strings.TrimSpace(taskErr.Error())
 	}
-	db, err := s.dbOrDefault(ctx)
+	finishCtx, cancel := exportFinishContext(ctx)
+	defer cancel()
+	db, err := s.dbOrDefault(finishCtx)
 	if err != nil {
 		return err
 	}
 	if err := ensureExportRecordTable(db); err != nil {
 		return err
 	}
-	result := db.Model(&model.SysExportRecord{}).
-		Where("task_run_id = ? AND status NOT IN ?", taskRunID, []string{model.TaskRunStatusSuccess, model.TaskRunStatusCanceled}).
-		Updates(updates)
+	query := db.Model(&model.SysExportRecord{}).
+		Where("task_run_id = ? AND status NOT IN ?", taskRunID, []string{model.TaskRunStatusSuccess, model.TaskRunStatusCanceled})
+	if len(executionTokens) > 0 {
+		query = query.Where("execution_token IN ?", executionTokens)
+	}
+	result := query.Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -557,6 +568,36 @@ func (s *ExportCenterService) listInternal(params *form.ExportRecordList) (*reso
 	return transformer.ToCollection(params.Page, params.PerPage, total, collection), nil
 }
 
+// MySummary 在数据库中汇总当前用户的全部导出记录，不受列表分页影响。
+func (s *ExportCenterService) MySummary(ctx context.Context, userID uint) (*resources.MyExportSummaryResources, error) {
+	if userID == 0 {
+		return nil, e.NewBusinessError(e.NotFound)
+	}
+	db, err := s.dbOrDefault(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureExportRecordTable(db); err != nil {
+		return nil, err
+	}
+	var summary resources.MyExportSummaryResources
+	err = db.Model(&model.SysExportRecord{}).
+		Select(`COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS pending,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS running,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS retrying,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS success,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS failed,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS canceled`,
+			model.TaskRunStatusPending, model.TaskRunStatusRunning, model.TaskRunStatusRetrying,
+			model.TaskRunStatusSuccess, model.TaskRunStatusFailed, model.TaskRunStatusCanceled).
+		Where("trigger_user_id = ?", userID).Scan(&summary).Error
+	if err != nil {
+		return nil, err
+	}
+	return &summary, nil
+}
+
 // MyList 在查询层强制限定当前用户，避免调用方通过请求参数覆盖数据范围。
 func (s *ExportCenterService) MyList(ctx context.Context, userID uint, params *form.ExportRecordList) (*resources.Collection, error) {
 	if userID == 0 {
@@ -588,10 +629,29 @@ func (s *ExportCenterService) MyList(ctx context.Context, userID uint, params *f
 	}
 	fields := []string{"public_id", "scene", "status", "progress", "total_count", "processed_count", "file_uuid", "file_name", "file_size", "file_expires_at", "format", "created_at", "finished_at"}
 	rows := make([]*model.SysExportRecord, 0, params.PerPage)
-	if err := query.Select(fields).Order("created_at DESC, id DESC").Scopes(model.NewSysExportRecord().Paginate(params.Page, params.PerPage)).Find(&rows).Error; err != nil {
+	if err := query.Select(fields).Order(myExportRecordOrder(params.SortBy, params.SortOrder)).Scopes(model.NewSysExportRecord().Paginate(params.Page, params.PerPage)).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return resources.NewMyExportRecordCollection(params.Page, params.PerPage, total, rows), nil
+}
+
+func myExportRecordOrder(sortBy, sortOrder string) string {
+	field := "created_at"
+	switch sortBy {
+	case "finished_at", "file_size":
+		field = sortBy
+	}
+	direction := "DESC"
+	if sortOrder == "asc" {
+		direction = "ASC"
+	}
+	if field == "finished_at" {
+		return "finished_at IS NULL ASC, finished_at " + direction + ", id DESC"
+	}
+	if field == "file_size" {
+		return "CASE WHEN file_name IS NULL OR file_name = '' THEN 1 ELSE 0 END ASC, file_size " + direction + ", id DESC"
+	}
+	return field + " " + direction + ", id DESC"
 }
 
 func (s *ExportCenterService) MyDetail(ctx context.Context, userID uint, publicID string) (*resources.MyExportRecordResources, error) {
@@ -933,6 +993,13 @@ func resolveExportSceneName(scene string) string {
 	default:
 		return ""
 	}
+}
+
+func exportFinishContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), exportFinishTimeout)
 }
 
 func (s *ExportCenterService) dbOrDefault(ctx context.Context) (*gorm.DB, error) {

@@ -9,6 +9,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
@@ -83,7 +84,7 @@ func (s *AdminLoginLogService) List(params *form.AdminLoginLogList) (*resources.
 			"revoked_at",
 			"created_at",
 		},
-		OrderBy: "created_at DESC, id DESC",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "created_at DESC, id DESC", "id", "username", "execution_time", "created_at"),
 	}
 
 	// 分页查询（只查询列表需要的字段）

@@ -88,7 +88,7 @@ func (s *stubExportTaskService) ReassignTaskRun(ctx context.Context, oldTaskRunI
 	return s.reassignReturn, nil
 }
 
-func (s *stubExportTaskService) MarkFailed(ctx context.Context, taskRunID uint, taskErr error) error {
+func (s *stubExportTaskService) MarkFailed(ctx context.Context, taskRunID uint, taskErr error, _ ...string) error {
 	_ = ctx
 	s.markFailedInputs = append(s.markFailedInputs, struct {
 		taskRunID uint

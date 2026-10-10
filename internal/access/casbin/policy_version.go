@@ -57,6 +57,21 @@ var defaultPolicyVersionStore = &policyVersionStore{
 	dirtyTTL:      policyVersionDirtyTTL,
 }
 
+// CurrentPermissionVersion 返回跨实例共享的权限版本；Redis 不可用时回源数据库。
+// 行级数据范围与接口权限使用同一事务版本，避免各进程缓存独立失效。
+func CurrentPermissionVersion(ctx context.Context) (uint64, error) {
+	return defaultPolicyVersionStore.Current(ctx)
+}
+
+// AdvancePermissionVersion 在调用方事务内推进权限版本，用于不重建 Casbin 策略的部门树变更。
+func AdvancePermissionVersion(tx *gorm.DB) error {
+	target, err := defaultPolicyVersionStore.beginMutation(tx)
+	if err != nil {
+		return err
+	}
+	return defaultPolicyVersionStore.finishMutation(tx, target)
+}
+
 var readPolicyVersionScript = redis.NewScript(`
 local dirty = redis.call('GET', KEYS[1])
 if dirty then

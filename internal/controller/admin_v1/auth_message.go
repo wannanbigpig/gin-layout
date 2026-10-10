@@ -66,6 +66,19 @@ func (api SysMessageController) Read(c *gin.Context) {
 	api.Success(c, map[string]any{"updated": updated, "unread_count": unreadCount})
 }
 
+func (api SysMessageController) Delete(c *gin.Context) {
+	params := form.NewSysMessageDeleteForm()
+	if err := validator.CheckPostParams(c, &params); err != nil {
+		return
+	}
+	deleted, unreadCount, err := notification.NewService().Delete(c.Request.Context(), api.GetCurrentUserID(c), params.ID)
+	if err != nil {
+		api.Err(c, err)
+		return
+	}
+	api.Success(c, map[string]any{"deleted": deleted, "unread_count": unreadCount})
+}
+
 // Send 管理员手动发送系统通知
 func (api SysMessageController) Send(c *gin.Context) {
 	params := form.NewSysMessageSendForm()

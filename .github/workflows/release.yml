@@ -25,9 +25,14 @@ jobs:
           --health-retries=10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Verify release metadata
         shell: bash
         run: |
@@ -36,6 +41,7 @@ jobs:
           source_version="$(sed -n 's/^var Version = "\([^"]*\)"$/\1/p' internal/global/common.go)"
           test -n "$source_version"
           test "$tag_version" = "$source_version"
+          go run . command release-check --tag "$GITHUB_REF_NAME"
           grep -Fq "## [${tag_version}]" CHANGELOG.md
           awk -v marker="## [${tag_version}]" '
             index($0, marker) == 1 { found=1 }
@@ -47,6 +53,8 @@ jobs:
             printf '\n## Compatibility, upgrade, and rollback\n\n'
             cat docs/COMPATIBILITY.md
           } >> release-notes.md
+          guide="docs/upgrades/${tag_version}.md"
+          cat "$guide" >> release-notes.md
       - name: Verify
         shell: bash
         run: |
@@ -57,6 +65,10 @@ jobs:
           cp ./config/config.yaml.example /tmp/go-layout-release-config.yaml
           go run . -c /tmp/go-layout-release-config.yaml command gen-openapi
           git diff --exit-code -- docs/openapi.yaml
+          go run . -c /tmp/go-layout-release-config.yaml command gen-error-codes
+          git diff --exit-code -- docs/error_codes.json docs/error_codes.ts
+          node --test scripts/api-documentation.test.mjs
+          node scripts/generate-api-documentation.mjs --check
           go run . -c /tmp/go-layout-release-config.yaml command migrate check --path ./data/migrations
           cat > config.test.yaml <<'YAML'
           app:
@@ -100,6 +112,8 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
+          module_path="$(awk '$1 == "module" {print $2; exit}' go.mod)"
+          built_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           mkdir -p dist/stage
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             os="${target%/*}"
@@ -109,10 +123,12 @@ jobs:
             package_name="go-layout_${version}_${os}_${arch}"
             package_dir="dist/stage/${package_name}"
             mkdir -p "${package_dir}/data/migrations" "${package_dir}/docs"
-            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/wannanbigpig/gin-layout/internal/global.Version=${version}" -o "${package_dir}/go-layout${ext}" .
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X ${module_path}/internal/global.Version=${version} -X ${module_path}/internal/global.BuildCommit=${GITHUB_SHA} -X ${module_path}/internal/global.BuildTime=${built_at} -X ${module_path}/internal/global.BuildDirty=false" -o "${package_dir}/go-layout${ext}" .
             cp config/config.yaml.example "${package_dir}/config.yaml.example"
             cp rbac_model.conf README.md README.en.md CHANGELOG.md LICENSE "${package_dir}/"
-            cp docs/COMPATIBILITY.md docs/openapi.yaml "${package_dir}/docs/"
+            cp docs/COMPATIBILITY.md docs/release.json docs/openapi.yaml docs/error_codes.json docs/error_codes.ts docs/api-documentation.json "${package_dir}/docs/"
+            cp -R docs/upgrades "${package_dir}/docs/"
+            printf '{"version":"%s","commit":"%s","builtAt":"%s","dirty":"false"}\n' "$version" "$GITHUB_SHA" "$built_at" > "${package_dir}/build-info.json"
             cp -R data/migrations/. "${package_dir}/data/migrations/"
             if [ "$os" = windows ]; then
               (cd dist/stage && zip -rq "../${package_name}.zip" "${package_name}")
@@ -147,15 +163,34 @@ jobs:
             test -f "${package_dir}/CHANGELOG.md"
             test -f "${package_dir}/docs/COMPATIBILITY.md"
             test -f "${package_dir}/docs/openapi.yaml"
+            test -f "${package_dir}/docs/release.json"
+            test -f "${package_dir}/docs/api-documentation.json"
+            test -f "${package_dir}/docs/upgrades/${GITHUB_REF_NAME#v}.md"
+            test -f "${package_dir}/build-info.json"
             test -f "${package_dir}/LICENSE"
             test -n "$(find "${package_dir}/data/migrations" -type f -print -quit)"
             if [ "$package_name" = "go-layout_${GITHUB_REF_NAME#v}_linux_amd64" ]; then
               "${package_dir}/go-layout" -h >/dev/null
+              test "$("${package_dir}/go-layout" version)" = "${GITHUB_REF_NAME#v}"
             fi
           done
           rm -rf dist/verify
-          sha256sum dist/*.tar.gz dist/*.zip > dist/checksums.txt
+          cp docs/openapi.yaml docs/error_codes.json docs/release.json docs/api-documentation.json dist/
+          sha256sum dist/*.tar.gz dist/*.zip dist/*.yaml dist/*.json > dist/checksums.txt
+      - name: Reject an existing release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag: context.ref.replace('refs/tags/', '') });
+              throw new Error('A release already exists for this tag; do not mix artifacts from different builds.');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
       - uses: softprops/action-gh-release@v2
         with:
           body_path: release-notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          overwrite_files: false
+          fail_on_unmatched_files: true
           files: dist/*

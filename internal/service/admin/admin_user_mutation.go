@@ -13,6 +13,8 @@ import (
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	"github.com/wannanbigpig/gin-layout/internal/service"
 	"github.com/wannanbigpig/gin-layout/internal/service/access"
+	"github.com/wannanbigpig/gin-layout/internal/service/auth"
+	"github.com/wannanbigpig/gin-layout/internal/sms"
 	"github.com/wannanbigpig/gin-layout/internal/validator/form"
 	utils2 "github.com/wannanbigpig/gin-layout/pkg/utils"
 )
@@ -43,6 +45,13 @@ func (s *AdminUserService) Create(params *form.CreateAdminUser) error {
 
 // Update 更新管理员用户。
 func (s *AdminUserService) Update(params *form.UpdateAdminUser) error {
+	if params == nil {
+		return e.NewBusinessError(e.InvalidParameter)
+	}
+	if actorID := s.GetAdminUserId(); actorID != 0 && params.Id == actorID &&
+		(params.PhoneNumber != nil || params.CountryCode != nil || params.Password != nil) {
+		return e.NewBusinessError(e.InvalidParameter, "修改自己的登录凭证请使用个人安全设置")
+	}
 	if err := s.requireUserInDataScope(params.Id); err != nil {
 		return err
 	}
@@ -407,11 +416,12 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 	if params == nil {
 		return e.NewBusinessError(e.InvalidParameter)
 	}
+	if params.PhoneNumber != nil || params.CountryCode != nil {
+		return e.NewBusinessError(e.InvalidParameter, "请使用独立的换绑手机号功能")
+	}
 	passwordChanged := params.Password != nil && *params.Password != ""
 	hasUpdate := params.Nickname != nil ||
 		passwordChanged ||
-		params.PhoneNumber != nil ||
-		params.CountryCode != nil ||
 		params.Email != nil ||
 		params.Avatar != nil
 	if !hasUpdate {
@@ -426,15 +436,23 @@ func (s *AdminUserService) UpdateProfile(uid uint, params *form.UpdateProfile) e
 }
 
 func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *form.UpdateProfile) error {
+	if params == nil || params.PhoneNumber != nil || params.CountryCode != nil {
+		return e.NewBusinessError(e.InvalidParameter, "请使用独立的换绑手机号功能")
+	}
 	passwordChanged := params.Password != nil && *params.Password != ""
-	phoneChanged := false
+	var smsSettings sms.Config
+	if passwordChanged {
+		var err error
+		smsSettings, err = profileSMSSettings()
+		if err != nil {
+			return err
+		}
+	}
 	adminUserModel := model.NewAdminUsers()
 	editParams := &adminUserEditParams{
 		Id:                                   uid,
 		Nickname:                             params.Nickname,
 		Password:                             params.Password,
-		PhoneNumber:                          params.PhoneNumber,
-		CountryCode:                          params.CountryCode,
 		Email:                                params.Email,
 		Avatar:                               params.Avatar,
 		allowDefaultSuperAdminPasswordChange: uid == global.SuperAdminId,
@@ -448,11 +466,18 @@ func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *fo
 			}
 			return err
 		}
-		phoneChanged = profilePhoneChanged(adminUserModel, params)
-		// 仅改密码时校验当前密码；改昵称/邮箱/头像/手机号不需要。
-		// 手机号变更仍会撤销会话（见 profileCredentialRevocation），但不强制填当前密码。
+		// 改密始终先验证当前密码；启用手机号登录时再验证绑定号码的短信码。
 		if err := verifyProfileCurrentPassword(adminUserModel, params, passwordChanged); err != nil {
 			return err
+		}
+		if passwordChanged && smsSettings.Enabled {
+			if adminUserModel.PhoneNumber == "" {
+				return e.NewBusinessError(e.InvalidParameter, "请先绑定手机号再修改密码")
+			}
+			if err := newProfileOTPService().Consume(context.Background(), uid, auth.ProfileOTPPassword,
+				adminUserModel.CountryCode, adminUserModel.PhoneNumber, params.SMSChallengeID, params.SMSCode, smsSettings); err != nil {
+				return err
+			}
 		}
 		oldAvatar := adminUserModel.Avatar
 		if err := s.applyUpdateFields(adminUserModel, editParams); err != nil {
@@ -461,9 +486,6 @@ func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *fo
 
 		validateParams := map[string]interface{}{
 			"email": params.Email,
-		}
-		if (params.PhoneNumber != nil || params.CountryCode != nil) && adminUserModel.PhoneNumber != "" {
-			validateParams["full_phone_number"] = adminUserModel.FullPhoneNumber
 		}
 		if err := s.validateUniqueFieldsWithLock(tx, validateParams, uid); err != nil {
 			return err
@@ -486,7 +508,7 @@ func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *fo
 				}
 			}
 		}
-		if revocation := profileCredentialRevocation(uid, passwordChanged, phoneChanged); revocation != nil {
+		if revocation := profilePasswordRevocation(uid, passwordChanged); revocation != nil {
 			if err := s.prepareUserTokenRevocation(tx, revocation); err != nil {
 				return err
 			}
@@ -498,14 +520,6 @@ func (s *AdminUserService) updateProfileWithDB(db *gorm.DB, uid uint, params *fo
 		return err
 	}
 	return s.handleMutationError(s.revokeUserTokensAfterCommit(pendingRevocations), e.UpdateUserFailed)
-}
-
-func profilePhoneChanged(user *model.AdminUser, params *form.UpdateProfile) bool {
-	if user == nil || params == nil {
-		return false
-	}
-	return (params.PhoneNumber != nil && *params.PhoneNumber != user.PhoneNumber) ||
-		(params.CountryCode != nil && strings.TrimPrefix(strings.TrimSpace(*params.CountryCode), "+") != user.CountryCode)
 }
 
 func verifyProfileCurrentPassword(user *model.AdminUser, params *form.UpdateProfile, credentialChanged bool) error {

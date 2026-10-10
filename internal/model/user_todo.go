@@ -21,6 +21,7 @@ type UserTodo struct {
 	ContainsDeleteBaseModel
 	AssigneeID  uint              `json:"assignee_id" gorm:"column:assignee_id;not null;default:0"`
 	CreatorID   uint              `json:"creator_id" gorm:"column:creator_id;not null;default:0"`
+	GroupID     uint              `json:"group_id" gorm:"column:group_id;not null;default:0"`
 	SourceType  string            `json:"source_type" gorm:"column:source_type;type:varchar(40);not null;default:''"`
 	SourceKey   string            `json:"source_key" gorm:"column:source_key;type:varchar(128);not null;default:''"`
 	Title       string            `json:"title" gorm:"column:title;type:varchar(255);not null;default:''"`

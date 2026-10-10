@@ -5,6 +5,12 @@ type Paginate struct {
 	PerPage int `form:"per_page" json:"per_page" binding:"omitempty,gt=0,max=200"` // 每页条数，1~200
 }
 
+// ListSort 为支持表头排序的分页接口提供统一参数；各 service 仍须独立限制字段白名单。
+type ListSort struct {
+	SortBy    string `form:"sort_by" json:"sort_by" binding:"omitempty,max=40"`
+	SortOrder string `form:"sort_order" json:"sort_order" binding:"omitempty,oneof=asc desc"`
+}
+
 // NewPaginate 创建一个新的分页查询
 func NewPaginate() *Paginate {
 	return &Paginate{}

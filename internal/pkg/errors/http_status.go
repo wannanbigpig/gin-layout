@@ -24,6 +24,7 @@ import "net/http"
 var codeHTTPStatus = map[int]int{
 	// ---- 协议级（与 HTTP 语义一一对应，跨业务稳定） ----
 	NotLogin:                  http.StatusUnauthorized,        // 401 - Token 缺失/过期/会话失效
+	FilePrivateAuthNeeded:     http.StatusUnauthorized,        // 401 - 私有文件访问需要有效登录态，供客户端续期重试
 	AuthorizationErr:          http.StatusForbidden,           // 403 - 已登录但无权限
 	NotFound:                  http.StatusNotFound,            // 404 - 资源不存在
 	ServerErr:                 http.StatusInternalServerError, // 500 - 服务器内部错误

@@ -1,0 +1,7 @@
+{
+  "previousTag": null,
+  "changeType": "initial",
+  "compatibleFrontend": { "min": "0.10.0", "maxExclusive": "0.11.0" },
+  "upgradeGuide": "docs/upgrades/0.10.0.md",
+  "apiChanges": []
+}

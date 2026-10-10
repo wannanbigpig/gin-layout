@@ -8,7 +8,50 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wannanbigpig/gin-layout/internal/pkg/auditdiff"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/sensitive"
 )
+
+func TestRegistrySensitiveFieldsRemainMaskedAfterEmptyAuditConfig(t *testing.T) {
+	previous := sensitive.GetSensitiveFieldsConfig()
+	t.Cleanup(func() { sensitive.LoadSensitiveFieldsConfig(previous) })
+	const fieldName = "storage_fixture_material"
+	const credential = "StorageCredentialFixtureOnly"
+	definition := testDriverDefinition("private_fixture")
+	definition.SensitiveFields = []SensitiveField{{
+		Name: fieldName,
+		Get:  func(config Config) string { return config.ProviderString("private_fixture", fieldName) },
+		Set:  func(config *Config, value string) { config.SetProviderString("private_fixture", fieldName, value) },
+	}}
+	registry := NewRegistry()
+	if err := registry.Register(definition); err != nil {
+		t.Fatal(err)
+	}
+	registered, ok := registry.Definition("private_fixture")
+	if !ok {
+		t.Fatal("expected registered storage driver")
+	}
+	config := DefaultConfig()
+	registered.SensitiveFields[0].Set(&config, credential)
+	if registered.SensitiveFields[0].Get(config) != credential {
+		t.Fatal("registration changed provider credential accessors")
+	}
+	payload, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sensitive.LoadSensitiveFieldsConfig(sensitive.SensitiveFieldsConfig{})
+	for scope, output := range map[string]string{
+		"request":     sensitive.GetMaskedRequestBody(payload, "application/json"),
+		"response":    sensitive.GetMaskedResponseBody(payload),
+		"change_diff": auditdiff.Marshal(auditdiff.BuildFieldDiff(nil, map[string]any{fieldName: credential}, []auditdiff.FieldRule{{Field: fieldName}})),
+	} {
+		if strings.Contains(output, credential) {
+			t.Errorf("%s exposed registered storage credential", scope)
+		}
+	}
+}
 
 func TestRegistryRejectsDuplicateDriver(t *testing.T) {
 	registry := NewRegistry()

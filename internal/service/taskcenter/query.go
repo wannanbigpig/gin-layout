@@ -11,6 +11,7 @@ import (
 	"github.com/wannanbigpig/gin-layout/internal/model"
 	e "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
 	log "github.com/wannanbigpig/gin-layout/internal/pkg/logger"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/query_builder"
 	"github.com/wannanbigpig/gin-layout/internal/pkg/utils"
 	"github.com/wannanbigpig/gin-layout/internal/resources"
 	"github.com/wannanbigpig/gin-layout/internal/service"
@@ -79,7 +80,7 @@ func (s *TaskCenterService) ListTaskDefinitions(params *form.TaskDefinitionList)
 			"created_at",
 			"updated_at",
 		},
-		OrderBy: "id DESC",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "id DESC", "id", "code", "name", "updated_at"),
 	}
 
 	transformer := resources.NewTaskDefinitionTransformer()
@@ -127,7 +128,7 @@ func (s *TaskCenterService) ListTaskRuns(params *form.TaskRunList) (*resources.C
 			"trigger_account",
 			"detail_record_mode",
 		},
-		OrderBy: "created_at DESC, id DESC",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "created_at DESC, id DESC", "id", "task_code", "duration_ms", "started_at", "finished_at"),
 	}
 
 	transformer := resources.NewTaskRunTransformer()
@@ -339,7 +340,7 @@ func (s *TaskCenterService) ListCronTaskStates(params *form.CronTaskStateList) (
 			"last_error",
 			"updated_at",
 		},
-		OrderBy: "updated_at DESC, id DESC",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "updated_at DESC, id DESC", "id", "task_code", "next_run_at", "updated_at"),
 	}
 
 	transformer := resources.NewCronTaskStateTransformer()

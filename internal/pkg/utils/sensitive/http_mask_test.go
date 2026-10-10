@@ -74,3 +74,14 @@ func TestMaskDefault_FoldsLongStrings(t *testing.T) {
 		t.Fatalf("long string should fold middle stars, want x***x, got %q", got)
 	}
 }
+
+func TestMaskDefaultPreservesUTF8Characters(t *testing.T) {
+	for input, want := range map[string]string{
+		"但是":   "**",
+		"测试角色": "测**色",
+	} {
+		if got := maskDefault(input); got != want {
+			t.Errorf("maskDefault(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

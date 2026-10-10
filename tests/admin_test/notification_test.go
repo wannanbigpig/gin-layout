@@ -60,6 +60,19 @@ func TestNotificationSendReadAndReadAllFlowWithConfiguredMySQL(t *testing.T) {
 	}
 	assert.Equal(t, model.MessageRead, second.IsRead)
 	assert.NotZero(t, second.ID)
+
+	third := sendNotificationToSuperAdmin(t, category, "第三条待删除通知")
+	deletePayload := mustJSONBody(t, map[string]any{"id": third.ID})
+	deleteResp := postRequest("/admin/v1/system/notification/delete", &deletePayload)
+	assert.Equal(t, http.StatusOK, deleteResp.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, deleteResp).Code)
+	if err := db.First(third, third.ID).Error; err != nil {
+		t.Fatalf("查询删除后的通知失败: %v", err)
+	}
+	assert.NotNil(t, third.DeletedAt)
+	listResp = getRequest("/admin/v1/system/notification/list", &url.Values{"category": {category}})
+	assert.Equal(t, http.StatusOK, listResp.Code)
+	assert.NotContains(t, listResp.Body.String(), "第三条待删除通知")
 }
 
 func sendNotificationToSuperAdmin(t *testing.T, category, title string) *model.SysMessage {

@@ -43,6 +43,7 @@ type SysMessage struct {
 	SentAt          *utils.FormatDate `json:"sent_at"`
 	IsRead          uint8             `json:"is_read"`
 	ReadAt          *utils.FormatDate `json:"read_at"`
+	DeletedAt       *utils.FormatDate `json:"deleted_at"`
 }
 
 func NewSysMessage() *SysMessage {

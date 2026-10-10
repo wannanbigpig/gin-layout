@@ -47,8 +47,8 @@ type AppConfig struct {
 	// AllowDegradedStartup 是否允许 service 在依赖初始化失败时降级启动。
 	// true 时仅 HTTP 服务会继续启动，由 readiness 与路由守卫体现未就绪状态。
 	AllowDegradedStartup bool `mapstructure:"allow_degraded_startup"`
-	// EnableResetSystemCron 是否启用高风险的系统重建定时任务。
-	// 默认 false，避免在非预期环境触发系统数据重建。
+	// EnableResetSystemCron 控制系统重建任务首次同步时的默认启用状态。
+	// 默认 false；已有任务按 task_definitions.status 运行，不受此初始化默认值覆盖。
 	EnableResetSystemCron bool `mapstructure:"enable_reset_system_cron"`
 	// RateLimitDriver 限流驱动: memory(单实例默认) / redis(多实例分布式)
 	RateLimitDriver string `mapstructure:"rate_limit_driver"`

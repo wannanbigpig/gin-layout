@@ -10,6 +10,7 @@ import (
 	initconsole "github.com/wannanbigpig/gin-layout/internal/console/init"
 	migrateconsole "github.com/wannanbigpig/gin-layout/internal/console/migrate"
 	openapiconsole "github.com/wannanbigpig/gin-layout/internal/console/openapi"
+	releaseconsole "github.com/wannanbigpig/gin-layout/internal/console/release"
 	"github.com/wannanbigpig/gin-layout/internal/console/system_init"
 	taskconsole "github.com/wannanbigpig/gin-layout/internal/console/task"
 )
@@ -28,6 +29,7 @@ func init() {
 
 // registerSubCommands 注册子命令
 func registerSubCommands() {
+	Cmd.AddCommand(releaseconsole.Cmd)
 	// 一次性运行脚本
 	Cmd.AddCommand(demo.Cmd)
 	Cmd.AddCommand(bootstrapx.WrapCommand(initconsole.ApiRouteCmd, bootstrapx.Requirements{Data: true}))               // 初始化API路由表: go-layout command api-route

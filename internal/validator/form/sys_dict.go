@@ -2,6 +2,7 @@ package form
 
 type SysDictTypeList struct {
 	Paginate
+	ListSort
 	TypeCode string `form:"type_code" json:"type_code" binding:"omitempty,max=100"`
 	TypeName string `form:"type_name" json:"type_name" binding:"omitempty,max=100"`
 	Status   *uint8 `form:"status" json:"status" binding:"omitempty,oneof=0 1"`
@@ -28,6 +29,7 @@ type UpdateSysDictType struct {
 
 type SysDictItemList struct {
 	Paginate
+	ListSort
 	TypeCode string `form:"type_code" json:"type_code" label:"字典类型编码" binding:"required,max=100"`
 	Label    string `form:"label" json:"label" binding:"omitempty,max=100"`
 	Value    string `form:"value" json:"value" binding:"omitempty,max=100"`

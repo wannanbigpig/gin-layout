@@ -64,6 +64,24 @@ func TestUpdateProfileInvalidEmail(t *testing.T) {
 	assert.Equal(t, e.InvalidParameter, result.Code)
 }
 
+func TestProfileEditRejectsPhoneAndChangePhoneRequiresCurrentPassword(t *testing.T) {
+	requireMySQL(t)
+
+	legacyBody := `{"phone_number":"13900139001"}`
+	legacy := postRequest("/admin/v1/admin-user/update-profile", &legacyBody)
+	assert.Equal(t, http.StatusBadRequest, legacy.Code)
+	assert.Equal(t, e.InvalidParameter, decodeResult(t, legacy).Code)
+
+	options := getRequest("/admin/v1/admin-user/profile-security/options", nil)
+	assert.Equal(t, http.StatusOK, options.Code)
+	assert.Equal(t, e.SUCCESS, decodeResult(t, options).Code)
+
+	changeBody := `{"country_code":"86","phone_number":"13900139001","current_password":"wrong-password"}`
+	change := postRequest("/admin/v1/admin-user/change-phone", &changeBody)
+	assert.Equal(t, http.StatusBadRequest, change.Code)
+	assert.Equal(t, e.CurrentPasswordWrong, decodeResult(t, change).Code)
+}
+
 func TestAdminUserListWithAuthorization(t *testing.T) {
 	requireMySQL(t)
 

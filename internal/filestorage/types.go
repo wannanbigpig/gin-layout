@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wannanbigpig/gin-layout/internal/pkg/utils/sensitive"
 )
 
 const MaskPlaceholder = "******"
@@ -334,6 +336,9 @@ func (r *Registry) Register(definition DriverDefinition) error {
 		return errors.New("storage driver already registered: " + name)
 	}
 	r.definitions[name] = definition
+	for _, field := range definition.SensitiveFields {
+		sensitive.RegisterImmutableRequestBodyFields(field.Name)
+	}
 	return nil
 }
 

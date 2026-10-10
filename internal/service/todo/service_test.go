@@ -23,6 +23,7 @@ func newTodoTestDB(t *testing.T) *gorm.DB {
 		id integer primary key autoincrement,
 		assignee_id integer not null default 0,
 		creator_id integer not null default 0,
+		group_id integer not null default 0,
 		source_type text not null default '',
 		source_key text not null default '',
 		title text not null default '',
@@ -43,6 +44,12 @@ func newTodoTestDB(t *testing.T) *gorm.DB {
 		ON user_todos(assignee_id, source_type, source_key)
 		WHERE deleted_at = 0 AND status IN ('pending', 'processing')`).Error; err != nil {
 		t.Fatalf("create active todo unique index: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE user_todo_groups (
+		id integer primary key autoincrement, user_id integer not null, name text not null,
+		created_at datetime, updated_at datetime, UNIQUE(user_id, name)
+	)`).Error; err != nil {
+		t.Fatalf("create todo groups: %v", err)
 	}
 	return db
 }
@@ -108,6 +115,61 @@ func TestManualTodoOwnershipAndBusinessMutationBoundary(t *testing.T) {
 	}
 	if err := svc.DeleteManual(ctx, 7, manual.ID); err != nil {
 		t.Fatalf("delete own manual todo: %v", err)
+	}
+}
+
+func TestTodoGroupsArePrivateAndPreserveBusinessAssignment(t *testing.T) {
+	ctx := context.Background()
+	svc := NewServiceWithDB(newTodoTestDB(t))
+	group, err := svc.CreateGroup(ctx, 7, "工作")
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if _, err := svc.CreateGroup(ctx, 7, " 工作 "); err == nil {
+		t.Fatal("duplicate group name must fail after trimming")
+	}
+	manual, err := svc.CreateManual(ctx, 7, &form.UserTodoCreate{Title: "Plan", GroupID: group.ID})
+	if err != nil || manual.GroupID != group.ID {
+		t.Fatalf("create grouped manual todo: %#v err=%v", manual, err)
+	}
+	if _, err := svc.CreateManual(ctx, 8, &form.UserTodoCreate{Title: "Foreign group", GroupID: group.ID}); err == nil {
+		t.Fatal("another user must not use this group")
+	}
+	businessInput := BusinessTodoInput{AssigneeID: 7, SourceType: "approval", SourceKey: "one", Title: "Approve"}
+	business, err := svc.UpsertBusinessTodo(ctx, businessInput)
+	if err != nil {
+		t.Fatalf("create business todo: %v", err)
+	}
+	moved, err := svc.MoveToGroup(ctx, 7, business.ID, group.ID)
+	if err != nil || moved.GroupID != group.ID {
+		t.Fatalf("move business todo: %#v err=%v", moved, err)
+	}
+	if _, err := svc.MoveToGroup(ctx, 8, business.ID, 0); err == nil {
+		t.Fatal("another user must not move this todo")
+	}
+	businessInput.Title = "Approve updated"
+	business, err = svc.UpsertBusinessTodo(ctx, businessInput)
+	if err != nil || business.GroupID != group.ID {
+		t.Fatalf("business refresh must preserve personal group: %#v err=%v", business, err)
+	}
+	list, err := svc.List(ctx, 7, &form.UserTodoList{Paginate: form.Paginate{Page: 1, PerPage: 20}, GroupID: &group.ID})
+	if err != nil || list.Total != 2 {
+		t.Fatalf("group filter: total=%d err=%v", list.Total, err)
+	}
+	summary, err := svc.SummaryInGroup(ctx, 7, &group.ID)
+	if err != nil || summary.Total != 2 {
+		t.Fatalf("group summary: %#v err=%v", summary, err)
+	}
+	if _, err := svc.RenameGroup(ctx, 8, group.ID, "Other"); err == nil {
+		t.Fatal("another user must not rename group")
+	}
+	if err := svc.DeleteGroup(ctx, 7, group.ID); err != nil {
+		t.Fatalf("delete group: %v", err)
+	}
+	ungrouped := uint(0)
+	list, err = svc.List(ctx, 7, &form.UserTodoList{Paginate: form.Paginate{Page: 1, PerPage: 20}, GroupID: &ungrouped})
+	if err != nil || list.Total != 2 {
+		t.Fatalf("deleting group must ungroup todos: total=%d err=%v", list.Total, err)
 	}
 }
 
@@ -230,15 +292,23 @@ func TestTodoSummaryAndDueScope(t *testing.T) {
 	today := create("today", "2026-09-17 18:00:00")
 	processing := create("processing", "2026-09-18 09:00:00")
 	create("no due", "")
+	completed := create("completed", "")
+	canceled := create("canceled", "")
 	if _, err := svc.UpdateStatus(ctx, 7, processing.ID, model.TodoStatusProcessing); err != nil {
 		t.Fatalf("mark processing: %v", err)
+	}
+	if _, err := svc.UpdateStatus(ctx, 7, completed.ID, model.TodoStatusCompleted); err != nil {
+		t.Fatalf("mark completed: %v", err)
+	}
+	if _, err := svc.UpdateStatus(ctx, 7, canceled.ID, model.TodoStatusCanceled); err != nil {
+		t.Fatalf("mark canceled: %v", err)
 	}
 
 	summary, err := svc.Summary(ctx, 7)
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
-	if summary.Pending != 3 || summary.Processing != 1 || summary.Overdue != 1 || summary.DueToday != 1 {
+	if summary.Total != 6 || summary.Pending != 3 || summary.Processing != 1 || summary.Completed != 1 || summary.Canceled != 1 || summary.Overdue != 1 || summary.DueToday != 1 {
 		t.Fatalf("unexpected summary: %#v", summary)
 	}
 	for scope, expectedID := range map[string]uint{"overdue": overdue.ID, "today": today.ID} {
@@ -294,6 +364,24 @@ func TestTodoListOrdersOverdueThenPriorityThenDueAt(t *testing.T) {
 	for index := range want {
 		if titles[index] != want[index] {
 			t.Fatalf("unexpected todo order: got=%v want=%v", titles, want)
+		}
+	}
+
+	list, err = svc.List(ctx, 7, &form.UserTodoList{
+		Paginate: form.Paginate{Page: 1, PerPage: 20},
+		ListSort: form.ListSort{SortBy: "due_at", SortOrder: "desc"},
+	})
+	if err != nil {
+		t.Fatalf("sort todos by due date: %v", err)
+	}
+	titles = titles[:0]
+	for _, raw := range list.Data {
+		titles = append(titles, raw.(*resources.UserTodoResources).Title)
+	}
+	want = []string{"future urgent", "overdue urgent later", "overdue urgent earlier", "overdue low", "completed urgent"}
+	for index := range want {
+		if titles[index] != want[index] {
+			t.Fatalf("unexpected due date order: got=%v want=%v", titles, want)
 		}
 	}
 }

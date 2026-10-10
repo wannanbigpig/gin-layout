@@ -131,6 +131,7 @@ func TestApplicationCatalogSecurityProjection(t *testing.T) {
 		{http.MethodGet, "/admin/v1/common/ws", SecurityWebSocketTicket, AuthModeNone},
 		{http.MethodGet, "/admin/v1/auth/check-token", SecurityAccessToken, AuthModeLogin},
 		{http.MethodGet, "/admin/v1/system/export/list", SecurityAccessToken, AuthModeLogin},
+		{http.MethodGet, "/admin/v1/system/export/summary", SecurityAccessToken, AuthModeLogin},
 		{http.MethodGet, "/admin/v1/system/export/detail", SecurityAccessToken, AuthModeLogin},
 		{http.MethodGet, "/admin/v1/dashboard/overview", SecurityAccessTokenPermission, AuthModeAuth},
 	}

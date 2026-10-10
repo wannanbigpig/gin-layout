@@ -20,6 +20,15 @@ func NewSysMessageReadForm() *SysMessageRead {
 	return &SysMessageRead{}
 }
 
+// SysMessageDelete 表示删除当前用户的一条消息。
+type SysMessageDelete struct {
+	ID uint `form:"id" json:"id" binding:"required,gt=0"`
+}
+
+func NewSysMessageDeleteForm() *SysMessageDelete {
+	return &SysMessageDelete{}
+}
+
 // SysMessageReadAll 表示全部已读请求。
 type SysMessageReadAll struct {
 	Category string `form:"category" json:"category" binding:"omitempty"`

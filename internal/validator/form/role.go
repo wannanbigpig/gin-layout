@@ -2,6 +2,7 @@ package form
 
 type RoleList struct {
 	Paginate
+	ListSort
 	Status *int8  `form:"status" json:"status"  binding:"omitempty,oneof=0 1"`
 	Name   string `form:"name" json:"name" binding:"omitempty"`
 	Code   string `form:"code" json:"code" binding:"omitempty,max=60"`

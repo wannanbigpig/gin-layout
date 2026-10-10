@@ -10,6 +10,12 @@ const (
 
 // businessScenarioRoutes 已有成功响应、状态流或真实 MySQL 回读断言。
 var businessScenarioRoutes = []string{
+	"GET /admin/v1/admin-user/profile-security/options",
+	"GET /admin/v1/todo/groups",
+	"POST /admin/v1/todo/group/create",
+	"POST /admin/v1/todo/group/delete",
+	"POST /admin/v1/todo/group/move",
+	"POST /admin/v1/todo/group/rename",
 	"GET /admin/v1/system/file/upload/options",
 	"GET /admin/v1/admin-user/detail",
 	"GET /admin/v1/admin-user/get",
@@ -80,6 +86,7 @@ var businessScenarioRoutes = []string{
 	"GET /admin/v1/system/dict/type/list",
 	"POST /admin/v1/system/dict/type/update",
 	"GET /admin/v1/system/export/list",
+	"GET /admin/v1/system/export/summary",
 	"POST /admin/v1/system/file/folder/create",
 	"POST /admin/v1/system/file/folder/delete",
 	"POST /admin/v1/system/file/folder/move",
@@ -90,6 +97,7 @@ var businessScenarioRoutes = []string{
 	"GET /admin/v1/system/file/references",
 	"GET /admin/v1/system/file/trash/list",
 	"GET /admin/v1/system/notification/list",
+	"POST /admin/v1/system/notification/delete",
 	"POST /admin/v1/system/notification/read",
 	"POST /admin/v1/system/notification/read-all",
 	"POST /admin/v1/system/notification/send",
@@ -116,6 +124,8 @@ var businessScenarioRoutes = []string{
 
 // contractScenarioRoutes 已有明确的参数、NotFound、权限或幂等边界断言，但尚未闭环成功状态流。
 var contractScenarioRoutes = []string{
+	"POST /admin/v1/admin-user/change-phone",
+	"POST /admin/v1/admin-user/profile-security/send-code",
 	"POST /admin/v1/admin-user/update-profile",
 	"GET /admin/v1/file/:uuid",
 	"GET /admin/v1/log/login/detail",

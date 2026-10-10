@@ -358,6 +358,7 @@ func newProductTestService(t *testing.T) (*gorm.DB, *ProductService) {
 		id integer primary key autoincrement,
 		assignee_id integer not null default 0,
 		creator_id integer not null default 0,
+		group_id integer not null default 0,
 		source_type text not null default '',
 		source_key text not null default '',
 		title text not null default '',

@@ -110,6 +110,9 @@ func (s *Service) List(ctx context.Context, assigneeID uint, params *form.UserTo
 		like := "%" + keyword + "%"
 		query = query.Where("(title LIKE ? OR description LIKE ?)", like, like)
 	}
+	if params.GroupID != nil {
+		query = query.Where("group_id = ?", *params.GroupID)
+	}
 	query = applyDueScope(query, strings.TrimSpace(params.DueScope), s.currentTime())
 
 	var total int64
@@ -117,11 +120,15 @@ func (s *Service) List(ctx context.Context, assigneeID uint, params *form.UserTo
 		return nil, err
 	}
 	items := make([]*model.UserTodo, 0)
+	order := clause.OrderBy{Expression: clause.Expr{
+		SQL:  "CASE WHEN status IN (?, ?) THEN 0 ELSE 1 END ASC, CASE WHEN status IN (?, ?) AND due_at IS NOT NULL AND due_at < ? THEN 0 ELSE 1 END ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END ASC, CASE WHEN due_at IS NULL THEN 1 ELSE 0 END ASC, due_at ASC, created_at DESC, id DESC",
+		Vars: []any{model.TodoStatusPending, model.TodoStatusProcessing, model.TodoStatusPending, model.TodoStatusProcessing, s.currentTime()},
+	}}
+	if params.SortBy == "due_at" && (params.SortOrder == "asc" || params.SortOrder == "desc") {
+		order = clause.OrderBy{Expression: clause.Expr{SQL: "CASE WHEN due_at IS NULL THEN 1 ELSE 0 END ASC, due_at " + strings.ToUpper(params.SortOrder) + ", id DESC"}}
+	}
 	if err := query.
-		Clauses(clause.OrderBy{Expression: clause.Expr{
-			SQL:  "CASE WHEN status IN (?, ?) THEN 0 ELSE 1 END ASC, CASE WHEN status IN (?, ?) AND due_at IS NOT NULL AND due_at < ? THEN 0 ELSE 1 END ASC, CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END ASC, CASE WHEN due_at IS NULL THEN 1 ELSE 0 END ASC, due_at ASC, created_at DESC, id DESC",
-			Vars: []any{model.TodoStatusPending, model.TodoStatusProcessing, model.TodoStatusPending, model.TodoStatusProcessing, s.currentTime()},
-		}}).
+		Clauses(order).
 		Offset((page - 1) * perPage).Limit(perPage).Find(&items).Error; err != nil {
 		return nil, err
 	}
@@ -147,6 +154,10 @@ func applyDueScope(db *gorm.DB, scope string, now time.Time) *gorm.DB {
 }
 
 func (s *Service) Summary(ctx context.Context, assigneeID uint) (*resources.UserTodoSummaryResources, error) {
+	return s.SummaryInGroup(ctx, assigneeID, nil)
+}
+
+func (s *Service) SummaryInGroup(ctx context.Context, assigneeID uint, groupID *uint) (*resources.UserTodoSummaryResources, error) {
 	if assigneeID == 0 {
 		return nil, e.NewBusinessError(e.NotLogin)
 	}
@@ -158,25 +169,36 @@ func (s *Service) Summary(ctx context.Context, assigneeID uint) (*resources.User
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	next := start.AddDate(0, 0, 1)
 	var row struct {
+		Total      int64
 		Pending    int64
 		Processing int64
+		Completed  int64
+		Canceled   int64
 		Overdue    int64
 		DueToday   int64
 	}
-	err = db.Model(&model.UserTodo{}).
-		Select(`COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS pending,
+	query := db.Model(&model.UserTodo{}).Where("assignee_id = ?", assigneeID)
+	if groupID != nil {
+		query = query.Where("group_id = ?", *groupID)
+	}
+	err = query.
+		Select(`COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS pending,
 			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS processing,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS completed,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS canceled,
 			COALESCE(SUM(CASE WHEN status IN ? AND due_at IS NOT NULL AND due_at < ? THEN 1 ELSE 0 END), 0) AS overdue,
 			COALESCE(SUM(CASE WHEN status IN ? AND due_at >= ? AND due_at < ? THEN 1 ELSE 0 END), 0) AS due_today`,
-			model.TodoStatusPending, model.TodoStatusProcessing,
+			model.TodoStatusPending, model.TodoStatusProcessing, model.TodoStatusCompleted, model.TodoStatusCanceled,
 			[]string{model.TodoStatusPending, model.TodoStatusProcessing}, now,
 			[]string{model.TodoStatusPending, model.TodoStatusProcessing}, start, next).
-		Where("assignee_id = ?", assigneeID).Scan(&row).Error
+		Scan(&row).Error
 	if err != nil {
 		return nil, err
 	}
 	return &resources.UserTodoSummaryResources{
-		Pending: row.Pending, Processing: row.Processing, Overdue: row.Overdue, DueToday: row.DueToday,
+		Total: row.Total, Pending: row.Pending, Processing: row.Processing,
+		Completed: row.Completed, Canceled: row.Canceled, Overdue: row.Overdue, DueToday: row.DueToday,
 	}, nil
 }
 
@@ -202,6 +224,7 @@ func (s *Service) CreateManual(ctx context.Context, assigneeID uint, params *for
 	item := model.NewUserTodo()
 	item.AssigneeID = assigneeID
 	item.CreatorID = assigneeID
+	item.GroupID = params.GroupID
 	item.SourceType = model.TodoSourceManual
 	item.SourceKey = sourceKey
 	item.Title = strings.TrimSpace(params.Title)
@@ -214,7 +237,12 @@ func (s *Service) CreateManual(ctx context.Context, assigneeID uint, params *for
 	if err != nil {
 		return nil, err
 	}
-	if err := db.Create(item).Error; err != nil {
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := validateOwnedTodoGroup(tx, assigneeID, params.GroupID); err != nil {
+			return err
+		}
+		return tx.Create(item).Error
+	}); err != nil {
 		if isTodoDuplicate(err) {
 			return nil, e.NewBusinessError(e.InvalidParameter, "待办标识已存在")
 		}
@@ -261,6 +289,9 @@ func (s *Service) UpdateManual(ctx context.Context, assigneeID uint, params *for
 		}
 		updates["due_at"] = dueAt
 	}
+	if params.GroupID != nil {
+		updates["group_id"] = *params.GroupID
+	}
 	if len(updates) == 0 {
 		return nil, e.NewBusinessError(e.InvalidParameter, "没有可更新的待办字段")
 	}
@@ -270,6 +301,11 @@ func (s *Service) UpdateManual(ctx context.Context, assigneeID uint, params *for
 		return nil, err
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
+		if params.GroupID != nil {
+			if err := validateOwnedTodoGroup(tx, assigneeID, *params.GroupID); err != nil {
+				return err
+			}
+		}
 		item, err := loadOwnedTodoForUpdate(tx, assigneeID, params.ID)
 		if err != nil {
 			return err

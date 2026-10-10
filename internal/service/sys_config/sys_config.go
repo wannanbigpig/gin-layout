@@ -53,7 +53,7 @@ func (s *SysConfigService) List(params *form.SysConfigList, locale string) (*res
 	condition, args := query.Build()
 	configModel := model.NewSysConfig()
 	total, collection, err := model.ListPageE(configModel, params.Page, params.PerPage, condition, args, model.ListOptionalParams{
-		OrderBy: "sort desc, id desc",
+		OrderBy: query_builder.ResolveListOrder(params.SortBy, params.SortOrder, "sort desc, id desc", "id", "config_key", "group_code", "sort", "updated_at"),
 	})
 	if err != nil {
 		return nil, err

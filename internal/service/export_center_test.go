@@ -62,6 +62,115 @@ func TestMyExportRecordsAreOwnerScopedAndHideDiagnostics(t *testing.T) {
 	}
 }
 
+func TestMyExportSummaryCountsAllStatusesForOwner(t *testing.T) {
+	db := newExportCenterTestDB(t)
+	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
+	statuses := []string{
+		model.TaskRunStatusPending, model.TaskRunStatusRunning, model.TaskRunStatusRetrying,
+		model.TaskRunStatusSuccess, model.TaskRunStatusFailed, model.TaskRunStatusCanceled,
+	}
+	for index, status := range statuses {
+		record, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{
+			Scene: model.ExportSceneRequestLog, TaskRunID: uint(index + 1), TriggerUserID: 9, Queue: "export", Format: "csv",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&model.SysExportRecord{}).Where("id = ?", record.ID).Update("status", status).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{
+		Scene: model.ExportSceneFileList, TaskRunID: 100, TriggerUserID: 10, Queue: "export", Format: "csv",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := svc.MySummary(context.Background(), 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Total != 6 || summary.Pending != 1 || summary.Running != 1 || summary.Retrying != 1 || summary.Success != 1 || summary.Failed != 1 || summary.Canceled != 1 {
+		t.Fatalf("unexpected owner summary: %#v", summary)
+	}
+	empty, err := svc.MySummary(context.Background(), 11)
+	if err != nil || empty.Total != 0 || empty.Pending != 0 {
+		t.Fatalf("unexpected empty summary: %#v, %v", empty, err)
+	}
+}
+
+func TestMyExportListSortsAcrossPagesAndKeepsOwnerScope(t *testing.T) {
+	db := newExportCenterTestDB(t)
+	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
+	ctx := context.Background()
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	type entry struct {
+		id       string
+		created  time.Time
+		finished *time.Time
+		size     uint64
+		owner    uint
+	}
+	finishedA, finishedC := base.Add(72*time.Hour), base.Add(48*time.Hour)
+	entries := []entry{
+		{id: "a", created: base, finished: &finishedA, size: 100, owner: 9},
+		{id: "b", created: base.Add(24 * time.Hour), owner: 9},
+		{id: "c", created: base.Add(48 * time.Hour), finished: &finishedC, size: 200, owner: 9},
+		{id: "other", created: base.Add(96 * time.Hour), size: 999, owner: 10},
+	}
+	publicIDs := make(map[string]string, len(entries))
+	for index, item := range entries {
+		record, err := svc.CreateRecord(ctx, ExportRecordCreateInput{
+			Scene: model.ExportSceneRequestLog, TaskRunID: uint(index + 1), TriggerUserID: item.owner, Queue: "export", Format: "csv",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		publicIDs[item.id] = record.PublicID
+		fileName := item.id + ".csv"
+		if item.id == "b" {
+			fileName = ""
+		}
+		if err := db.Model(&model.SysExportRecord{}).Where("id = ?", record.ID).Updates(map[string]any{
+			"created_at": item.created, "finished_at": item.finished, "file_size": item.size, "file_name": fileName,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	checks := []struct {
+		name, sortBy, sortOrder string
+		page                    int
+		want                    []string
+	}{
+		{name: "default", page: 1, want: []string{"c", "b"}},
+		{name: "created ascending", sortBy: "created_at", sortOrder: "asc", page: 1, want: []string{"a", "b"}},
+		{name: "finished ascending keeps empty last", sortBy: "finished_at", sortOrder: "asc", page: 1, want: []string{"c", "a"}},
+		{name: "finished descending", sortBy: "finished_at", sortOrder: "desc", page: 1, want: []string{"a", "c"}},
+		{name: "size ascending keeps missing file last", sortBy: "file_size", sortOrder: "asc", page: 1, want: []string{"a", "c"}},
+		{name: "size descending", sortBy: "file_size", sortOrder: "desc", page: 1, want: []string{"c", "a"}},
+		{name: "size second page", sortBy: "file_size", sortOrder: "asc", page: 2, want: []string{"b"}},
+		{name: "unsupported field falls back", sortBy: "file_size; DROP TABLE sys_export_records", sortOrder: "asc", page: 1, want: []string{"a", "b"}},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			list, err := svc.MyList(ctx, 9, &form.ExportRecordList{
+				Paginate: form.Paginate{Page: check.page, PerPage: 2}, SortBy: check.sortBy, SortOrder: check.sortOrder,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if list.Total != 3 || len(list.Data) != len(check.want) {
+				t.Fatalf("total=%d rows=%d want=%d", list.Total, len(list.Data), len(check.want))
+			}
+			for i, name := range check.want {
+				item := list.Data[i].(*resources.MyExportRecordResources)
+				if item.PublicID != publicIDs[name] {
+					t.Fatalf("row %d id=%s want=%s", i, item.PublicID, publicIDs[name])
+				}
+			}
+		})
+	}
+}
+
 func TestExportCenterServiceCreateListDetailAndSuccess(t *testing.T) {
 	db := newExportCenterTestDB(t)
 	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
@@ -432,13 +541,14 @@ func TestExportCenterServiceListExposesQueuedStageAndTaskCode(t *testing.T) {
 	db := newExportCenterTestDB(t)
 	svc := NewExportCenterServiceWithDeps(ExportCenterServiceDeps{DB: db})
 
-	if _, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{
+	record, err := svc.CreateRecord(context.Background(), ExportRecordCreateInput{
 		Scene:         model.ExportSceneFileList,
 		TaskRunID:     404,
 		TriggerUserID: 3,
 		Queue:         "export",
 		Format:        "csv",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("create record failed: %v", err)
 	}
 
@@ -454,27 +564,51 @@ func TestExportCenterServiceListExposesQueuedStageAndTaskCode(t *testing.T) {
 		t.Fatalf("unexpected list result: %#v", list)
 	}
 
-	item, ok := list.Data[0].(*resources.ExportRecordListResources)
+	item, ok := list.Data[0].(*resources.MyExportRecordResources)
 	if !ok {
 		t.Fatalf("unexpected list item type: %T", list.Data[0])
 	}
-	if item.ExportName != "文件资源" || item.SceneName != "文件资源" {
+	if item.PublicID == "" || item.PublicID != record.PublicID {
+		t.Fatalf("queued list must expose the stable public identifier: %#v", item)
+	}
+	if item.ExportName != "文件资源" || item.Scene != model.ExportSceneFileList {
 		t.Fatalf("unexpected export naming: %#v", item)
 	}
-	if item.TaskCode != exportTaskCodeFileList {
-		t.Fatalf("unexpected task code: got=%s want=%s", item.TaskCode, exportTaskCodeFileList)
-	}
-	if item.Status != model.TaskRunStatusPending || item.StatusName != "等待执行" {
+	if item.Status != model.TaskRunStatusPending {
 		t.Fatalf("unexpected queued status: %#v", item)
 	}
-	if item.Stage != "queued" || item.StageName != "排队中" {
+	if item.Stage != "queued" {
 		t.Fatalf("unexpected queued stage: %#v", item)
 	}
 	if item.TotalCount != 0 || item.ProcessedCount != 0 {
 		t.Fatalf("expected queued counts to be zero: %#v", item)
 	}
-	if item.HasFile || item.DownloadReady || item.DownloadURL != "" || item.FileURL != "" {
+	if item.DownloadReady || item.FileUUID != "" || item.FileName != "" {
 		t.Fatalf("queued record should not expose download fields: %#v", item)
+	}
+	encoded, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"id", "task_code", "task_run_id", "trigger_user_id", "queue", "error_message", "file_id", "download_url", "file_url"} {
+		if _, exposed := payload[field]; exposed {
+			t.Errorf("personal queued record exposes internal field %s: %s", field, encoded)
+		}
+	}
+	// 内部任务标识与完整展示文案仍由内部资源保留，不属于个人列表契约。
+	internal := resources.NewExportRecordTransformer().ToStruct(record)
+	if internal.TaskCode != exportTaskCodeFileList || internal.SceneName != "文件资源" {
+		t.Fatalf("unexpected internal task metadata: %#v", internal)
+	}
+	if internal.StatusName != "等待执行" || internal.StageName != "排队中" {
+		t.Fatalf("unexpected internal queued semantics: %#v", internal)
+	}
+	if internal.HasFile || internal.DownloadReady || internal.DownloadURL != "" || internal.FileURL != "" {
+		t.Fatalf("internal queued record should not be downloadable: %#v", internal)
 	}
 }
 
@@ -493,6 +627,12 @@ func TestExportCenterServiceReassignTaskRunKeepsSameRecord(t *testing.T) {
 		t.Fatalf("create record failed: %v", err)
 	}
 	// 模拟首次 run 失败，写入失败态。
+	if err := svc.MarkRunningWithTotal(context.Background(), 101, 4); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	if err := svc.UpdateProgress(context.Background(), 101, 2, 4); err != nil {
+		t.Fatalf("update progress: %v", err)
+	}
 	if err := svc.MarkFailed(context.Background(), 101, errors.New("boom")); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
@@ -505,33 +645,22 @@ func TestExportCenterServiceReassignTaskRunKeepsSameRecord(t *testing.T) {
 		t.Fatal("expected retry export task to reassign existing export record")
 	}
 
-	oldID := uint(101)
-	listOld, err := svc.MyList(context.Background(), record.TriggerUserID, &form.ExportRecordList{
-		Paginate:  form.Paginate{Page: 1, PerPage: 10},
-		TaskRunID: &oldID,
-	})
-	if err != nil {
-		t.Fatalf("list old task failed: %v", err)
+	var oldCount int64
+	if err := db.Model(&model.SysExportRecord{}).Where("task_run_id = ?", 101).Count(&oldCount).Error; err != nil {
+		t.Fatalf("query old task failed: %v", err)
 	}
-	if listOld.Total != 0 || len(listOld.Data) != 0 {
-		t.Fatalf("expected old task_run_id 101 to have no export record after reassign, got %#v", listOld)
+	if oldCount != 0 {
+		t.Fatalf("expected old task_run_id 101 to have no export record after reassign, got %d", oldCount)
 	}
 
-	newID := uint(202)
-	listNew, err := svc.MyList(context.Background(), record.TriggerUserID, &form.ExportRecordList{
-		Paginate:  form.Paginate{Page: 1, PerPage: 10},
-		TaskRunID: &newID,
-	})
-	if err != nil {
-		t.Fatalf("list new task failed: %v", err)
+	var rows []model.SysExportRecord
+	if err := db.Where("task_run_id = ?", 202).Find(&rows).Error; err != nil {
+		t.Fatalf("query reassigned task failed: %v", err)
 	}
-	if listNew.Total != 1 || len(listNew.Data) != 1 {
-		t.Fatalf("expected one record on new task_run_id 202, got %#v", listNew)
+	if len(rows) != 1 {
+		t.Fatalf("expected one record on new task_run_id 202, got %#v", rows)
 	}
-	item, ok := listNew.Data[0].(*resources.ExportRecordListResources)
-	if !ok {
-		t.Fatalf("unexpected list item type: %T", listNew.Data[0])
-	}
+	item := &rows[0]
 	if item.ID != record.ID {
 		t.Fatalf("expected retry to keep same record id %d, got %d", record.ID, item.ID)
 	}
@@ -546,6 +675,26 @@ func TestExportCenterServiceReassignTaskRunKeepsSameRecord(t *testing.T) {
 	}
 	if item.Queue != "export-retry" {
 		t.Fatalf("expected queue updated to export-retry, got %s", item.Queue)
+	}
+	if item.PublicID != record.PublicID || item.ErrorMessage != "" || item.StartedAt != nil || item.FinishedAt != nil {
+		t.Fatalf("retry should retain public identity and reset prior attempt diagnostics: %#v", item)
+	}
+	listNew, err := svc.MyList(context.Background(), record.TriggerUserID, &form.ExportRecordList{
+		Paginate: form.Paginate{Page: 1, PerPage: 10},
+		PublicID: record.PublicID,
+	})
+	if err != nil {
+		t.Fatalf("list retried public record failed: %v", err)
+	}
+	if listNew.Total != 1 || len(listNew.Data) != 1 {
+		t.Fatalf("expected one stable public record, got %#v", listNew)
+	}
+	personal, ok := listNew.Data[0].(*resources.MyExportRecordResources)
+	if !ok {
+		t.Fatalf("unexpected personal list item type: %T", listNew.Data[0])
+	}
+	if personal.PublicID != record.PublicID || personal.Status != model.TaskRunStatusPending || personal.Stage != "queued" || personal.Progress != exportProgressPending || personal.TotalCount != 0 || personal.ProcessedCount != 0 {
+		t.Fatalf("unexpected personal retry state: %#v", personal)
 	}
 }
 

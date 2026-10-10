@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/wannanbigpig/gin-layout/internal/model"
+	"github.com/wannanbigpig/gin-layout/internal/pkg/redisutil"
 )
 
 func TestDataScopeConstants(t *testing.T) {
@@ -144,6 +145,7 @@ func TestDataScopeFilterBuild_NonSuperAdminNoCache(t *testing.T) {
 }
 
 func TestDataScopeFilterBuildSingleflightSharedAcrossInstances(t *testing.T) {
+	useDataScopeTestVersion(t, 1)
 	previousCompute := computeScopeForSingleflight
 	defer func() {
 		computeScopeForSingleflight = previousCompute
@@ -197,6 +199,7 @@ func TestDataScopeFilterBuildSingleflightSharedAcrossInstances(t *testing.T) {
 }
 
 func TestDataScopeFilterResolveDepartmentScopeUsesMergedScope(t *testing.T) {
+	useDataScopeTestVersion(t, 1)
 	previousCompute := computeScopeForSingleflight
 	defer func() {
 		computeScopeForSingleflight = previousCompute
@@ -233,37 +236,18 @@ func TestDataScopeFilterCacheKey(t *testing.T) {
 	if k1 == k2 {
 		t.Fatalf("different UIDs should produce different cache keys")
 	}
-	expected := "data_scope:1"
+	expected := redisutil.Channel("data_scope:1")
 	if k1 != expected {
 		t.Fatalf("expected %q, got %q", expected, k1)
 	}
 }
 
 func TestDataScopeCacheInvalidationMakesCapturedVersionStale(t *testing.T) {
-	uid := uint(900001)
-	version := currentDataScopeCacheVersion(uid)
-	if !version.isCurrent(uid) {
-		t.Fatal("freshly captured data scope cache version should be current")
-	}
-
-	NewDataScopeFilter().InvalidateCache(context.Background(), uid)
-
-	if version.isCurrent(uid) {
-		t.Fatal("user cache invalidation must reject an in-flight stale cache write")
-	}
+	testDataScopeMutationDuringCompute(t, false)
 }
 
 func TestDataScopeGlobalInvalidationMakesAllCapturedVersionsStale(t *testing.T) {
-	firstUID := uint(900002)
-	secondUID := uint(900003)
-	first := currentDataScopeCacheVersion(firstUID)
-	second := currentDataScopeCacheVersion(secondUID)
-
-	NewDataScopeFilter().InvalidateAllCache(context.Background())
-
-	if first.isCurrent(firstUID) || second.isCurrent(secondUID) {
-		t.Fatal("global cache invalidation must reject all in-flight stale cache writes")
-	}
+	testDataScopeMutationDuringCompute(t, true)
 }
 
 func TestDataScopeInputFields(t *testing.T) {
