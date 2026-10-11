@@ -18,7 +18,7 @@ const (
 )
 
 // Version 是默认版本号；Release 构建可通过 -ldflags 注入 Git Tag。
-var Version = "0.10.1"
+var Version = "0.10.2"
 
 // Build identity is injected by local and release builds; source runs remain identifiable as unknown.
 var BuildCommit = "unknown"

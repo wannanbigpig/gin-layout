@@ -76,7 +76,7 @@ jobs:
           cat > config.test.yaml <<'YAML'
           app:
             app_env: local
-            debug: false
+            debug: true
             language: zh_CN
             rate_limit_enabled: false
             login_rate_limit_enabled: false
