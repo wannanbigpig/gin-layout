@@ -33,6 +33,10 @@ var newFileAuditMutationService = func() fileAuditMutationService {
 	return service.NewFileResourceService()
 }
 
+var newFileMultipartInitService = func() *service.FileResourceService {
+	return service.NewFileResourceService()
+}
+
 // FolderStats 查询目录统计信息（文件数和子目录数）。
 func (api FileResourceController) FolderStats(c *gin.Context) {
 	query := form.NewFileFolderStatsForm()
@@ -498,7 +502,7 @@ func (api FileResourceController) MultipartInit(c *gin.Context) {
 	if err := validator.CheckPostParams(c, &params); err != nil {
 		return
 	}
-	result, err := service.NewFileResourceService().MultipartInit(params, api.GetCurrentUserID(c))
+	result, err := newFileMultipartInitService().MultipartInit(params, api.GetCurrentUserID(c))
 	if err != nil {
 		api.Err(c, err)
 		return

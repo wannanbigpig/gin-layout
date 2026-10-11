@@ -2,6 +2,7 @@ package admin_v1
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +10,24 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/wannanbigpig/gin-layout/internal/filestorage"
 	"github.com/wannanbigpig/gin-layout/internal/global"
 	pkgErrors "github.com/wannanbigpig/gin-layout/internal/pkg/errors"
+	"github.com/wannanbigpig/gin-layout/internal/service"
 )
 
 func TestFileResourceController_MultipartInitLocalDriverUnsupported(t *testing.T) {
 	initControllerAuthTest(t)
+	previous := newFileMultipartInitService
+	newFileMultipartInitService = func() *service.FileResourceService {
+		return service.NewFileResourceServiceWithDeps(service.FileResourceServiceDeps{
+			ActiveStorageResolver: func(context.Context) (filestorage.Driver, filestorage.Config, string, error) {
+				cfg := filestorage.DefaultConfig()
+				return filestorage.NewLocalDriver(cfg.Local, t.TempDir(), t.TempDir()), cfg, "local", nil
+			},
+		})
+	}
+	t.Cleanup(func() { newFileMultipartInitService = previous })
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

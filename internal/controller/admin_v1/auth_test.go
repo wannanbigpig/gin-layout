@@ -3,9 +3,6 @@ package admin_v1
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -158,26 +155,16 @@ func TestLogoutClearsCookieWhenAccessTokenInvalid(t *testing.T) {
 func initControllerAuthTest(t *testing.T) {
 	t.Helper()
 
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("failed to resolve test file path")
-	}
-	projectRoot := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file))))
-	configPath := filepath.Join(projectRoot, "config.yaml")
-	if _, err := os.Stat(configPath); err != nil {
-		examplePath := filepath.Join(projectRoot, "config", "config.yaml.example")
-		content, readErr := os.ReadFile(examplePath)
-		if readErr != nil {
-			t.Fatalf("read example config failed: %v", readErr)
-		}
-		configPath = filepath.Join(t.TempDir(), "config.yaml")
-		if writeErr := os.WriteFile(configPath, content, 0o600); writeErr != nil {
-			t.Fatalf("write temp config failed: %v", writeErr)
-		}
-	}
-	if err := config.InitConfig(configPath); err != nil {
-		t.Fatalf("init config failed: %v", err)
-	}
+	cfg := config.CloneConf(config.GetConfig())
+	cfg.BasePath = t.TempDir()
+	cfg.AppEnv = "local"
+	cfg.Jwt.SecretKey = "controller-test-jwt-key"
+	cfg.Security.CredentialEncryptionKey = "controller-test-credential-key"
+	cfg.Mysql = autoload.MysqlConfig{Enable: false}
+	cfg.Redis = autoload.RedisConfig{Enable: false}
+	cfg.Queue = autoload.QueueConfig{Enable: false}
+	cfg.Logger.Output = "stderr"
+	t.Cleanup(config.ReplaceConfigForTesting(cfg))
 	if err := logger.InitLogger(); err != nil {
 		t.Fatalf("init logger failed: %v", err)
 	}
