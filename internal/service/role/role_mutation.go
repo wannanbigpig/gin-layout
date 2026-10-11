@@ -86,7 +86,7 @@ func (s *RoleService) applyRoleMutation(params *roleMutation) error {
 	var affectedUserIDs []uint
 	if err := coordinator.RunAfterCommitWithCode(db, e.FAILURE, func(tx *gorm.DB) error {
 		var err error
-		effectiveDataScope := role.DataScope
+		var effectiveDataScope uint8
 		if params.Id == 0 {
 			role.SetDB(tx)
 			err = service.CreateWithExplicitFields(tx, role, map[string]any{"status": role.Status})

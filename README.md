@@ -24,7 +24,7 @@
   <img src="https://github.com/wannanbigpig/gin-layout/actions/workflows/codeql.yml/badge.svg" alt="codeql" />
   <img src="https://goreportcard.com/badge/github.com/wannanbigpig/gin-layout" alt="go report card" />
   <img src="https://img.shields.io/github/license/wannanbigpig/gin-layout" alt="license" />
-  <img src="https://img.shields.io/badge/Go-%3E%3D1.27-blue.svg" alt="go version" />
+  <img src="https://img.shields.io/badge/Go-%3E%3D1.27.2-blue.svg" alt="go version" />
 </div>
 
 <br />
@@ -70,7 +70,7 @@
 
 ### 1. 环境要求
 
-- `Go >= 1.27`
+- `Go >= 1.27.2`
 - `MySQL >= 8.0`
 - `Redis >= 6.2`（可选；启用 WebSocket ticket、缓存、队列或分布式锁时需要）
 

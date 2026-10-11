@@ -106,7 +106,8 @@ jobs:
 
       - name: Staticcheck targeted packages
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
+          # 固定包含 Go 1.27.2 export data v5 支持的上游提交，正式版 v0.8.1 尚不支持。
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0-0.dev.0.20261009230814-452d5bb86b45
           staticcheck ./internal/service/role ./internal/service/sys_dict ./internal/validator/form ./tests/...
 
       - name: Prepare MySQL integration config

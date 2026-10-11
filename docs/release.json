@@ -1,7 +1,7 @@
 {
-  "previousTag": "v0.10.1",
+  "previousTag": "v0.10.2",
   "changeType": "patch",
   "compatibleFrontend": { "min": "0.10.0", "maxExclusive": "0.11.0" },
-  "upgradeGuide": "docs/upgrades/0.10.2.md",
+  "upgradeGuide": "docs/upgrades/0.10.3.md",
   "apiChanges": []
 }

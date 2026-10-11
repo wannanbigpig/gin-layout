@@ -55,6 +55,11 @@ jobs:
           } >> release-notes.md
           guide="docs/upgrades/${tag_version}.md"
           cat "$guide" >> release-notes.md
+      - name: Dependency integrity and reachable vulnerabilities
+        run: |
+          go mod verify
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck ./...
       - name: Verify
         shell: bash
         env:
